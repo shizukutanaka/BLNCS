@@ -118,7 +118,7 @@ pip install blrcs
 
 ```bash
 # Pull and run
-docker run -d -p 8000:8000 --name blrcs ghcr.io/shizukutanaka/blrcs:latest
+docker run -d -p 8000:8000 --name blrcs blrcs:latest
 
 # Access dashboard
 open http://localhost:8000
@@ -128,7 +128,7 @@ open http://localhost:8000
 
 ```bash
 # Add BLRCS helm repository
-helm repo add blrcs https://github.com/shizukutanaka/BLRCS/releases/download/charts
+helm install blrcs ./charts/blrcs
 helm repo update
 
 # Install with default values
@@ -217,7 +217,7 @@ monitor = SecurityMonitor()
 monitor.alert_on(
     events=['failed_login', 'data_exfiltration'],
     severity='critical',
-    notify=['security-team@company.com']
+    notify=['security-team@localhost']
 )
 
 # Get security insights
