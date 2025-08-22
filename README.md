@@ -1,6 +1,6 @@
 # BLRCS
 
-[![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)](https://github.com/blrcs/blrcs)
+[![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)](https://github.com/shizukutanaka/BLRCS)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org)
 
@@ -35,7 +35,7 @@ BLRCS is a comprehensive system that provides enterprise-grade security, perform
 
 ```bash
 # Clone the repository
-git clone https://github.com/blrcs/blrcs.git
+git clone https://github.com/shizukutanaka/BLRCS.git
 cd blrcs
 
 # Create virtual environment
@@ -166,7 +166,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ## Security
 
-Security is our top priority. If you discover a security vulnerability, please email security@blrcs.org.
+Security is our top priority. If you discover a security vulnerability, please report it via GitHub Issues.
 
 ### Security Features
 - TLS/SSL encryption for all connections
@@ -189,15 +189,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- 📧 Email: support@blrcs.org
-- 💬 Discord: [Join our server](https://discord.gg/blrcs)
-- 📚 Documentation: [docs.blrcs.org](https://docs.blrcs.org)
+- 💬 Issues: [GitHub Issues](https://github.com/shizukutanaka/BLRCS/issues)
+- 📖 Source: [GitHub Repository](https://github.com/shizukutanaka/BLRCS)
 
 ## Acknowledgments
 
-- Bitcoin Core developers
-- Lightning Network community
 - Open source contributors
+- Security research community
+- Enterprise software developers
 
 ---
 

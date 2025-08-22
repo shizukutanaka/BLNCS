@@ -19,8 +19,8 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 1. **Fork the Repository**
    ```bash
-   git clone https://github.com/blrcs/blrcs.git
-   cd blrcs
+   git clone https://github.com/shizukutanaka/BLRCS.git
+   cd BLRCS
    ```
 
 2. **Create a Branch**
@@ -145,8 +145,7 @@ blrcs/
 ## Getting Help
 
 - Check the [documentation](docs/)
-- Join our [Discord server](https://discord.gg/blrcs)
-- Email: dev@blrcs.org
+- Submit issues on [GitHub](https://github.com/shizukutanaka/BLRCS/issues)
 
 ## License
 
