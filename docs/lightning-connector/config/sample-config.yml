@@ -1,0 +1,41 @@
+# Lightning Connector sample configuration (Windows)
+# Copy to lightning-connector.yml and adjust paths/settings.
+
+app:
+  locale: "ja"            # default UI language (ja|en)
+  autostart: true          # auto-start LND with the app
+  log_level: "INFO"
+
+lnd:
+  exe_path: "C:/path/to/lnd.exe"               # absolute path to lnd.exe
+  data_dir: "C:/Users/you/AppData/Local/Lnd"  # directory for LND data
+  tls_cert: null          # optional custom TLS cert path
+  admin_macaroon: null    # optional admin macaroon path
+  rpc_port: 10009
+  rest_port: 8080
+
+backend:
+  type: "neutrino"        # neutrino | bitcoincore
+
+  neutrino:
+    network: "mainnet"    # mainnet | testnet | signet | regtest
+    peers:
+      - "btcd0.lopp.net:8333"
+      - "neutrino.suredbits.com:8333"
+
+  bitcoincore:
+    rpc_host: "127.0.0.1"
+    rpc_port: 8332
+    rpc_user: "bitcoin"
+    rpc_pass: "change-me"
+    zmq_block: "tcp://127.0.0.1:28332"
+    zmq_tx: "tcp://127.0.0.1:28333"
+    prune: true           # allow pruned node
+
+payments:
+  fee_limit_sat: 5000     # max routing fee in satoshis
+  timeout_seconds: 60
+
+channels:
+  autopilot: false        # enable automatic channel management
+  target_outbound_pct: 60 # desired outbound liquidity percentage

@@ -1,0 +1,78 @@
+# BLRCS v0.0.1 .gitignore
+
+# Environment
+.env
+.env.local
+.env.production
+.venv/
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data
+data/
+*.db
+*.sqlite
+*.sqlite3
+logs/
+*.log
+backups/
+cache/
+temp/
+temp_benchmark/
+
+# Build
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Lightning Network
+*.macaroon
+tls.cert
+tls.key
+
+# Analysis Reports
+BLRCS_*.json
+*_REPORT.json
+*_ANALYSIS.json
+SIMPLE_BENCHMARK_RESULTS.json
+
+# Documentation
+docs/_build/
+docs/api/openapi.json
+docs/api/index.html
+
+# Project specific
+backup/
+node_modules/

@@ -1,0 +1,7 @@
+# Development requirements (pinned)
+pre-commit==3.7.1
+ruff==0.5.4
+black==24.8.0
+mypy==1.10.0
+bandit==1.7.9
+pip-audit==2.7.3
