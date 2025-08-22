@@ -1,4 +1,4 @@
-# BLRCS - Bitcoin Lightning Risk Control System
+# BLRCS
 
 [![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)](https://github.com/blrcs/blrcs)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -6,24 +6,23 @@
 
 ## Overview
 
-BLRCS (Bitcoin Lightning Risk Control System) is a comprehensive risk management and control system for the Bitcoin Lightning Network. It provides enterprise-grade security, performance monitoring, and operational tools for Lightning Network nodes.
+BLRCS is a comprehensive system that provides enterprise-grade security, performance monitoring, and operational tools.
 
 ## Features
 
 ### Core Capabilities
 - 🔒 **Advanced Security**: Multi-layer security framework with real-time threat detection
-- ⚡ **Lightning Network Integration**: Full support for LND and CLN implementations
 - 📊 **Performance Monitoring**: Real-time metrics and predictive analytics
-- 🔄 **Automated Risk Management**: Dynamic risk assessment and mitigation
+- 🔄 **Automated Management**: Dynamic assessment and mitigation strategies
 - 🌐 **API Gateway**: RESTful API with comprehensive documentation
 - 💾 **Database Optimization**: Advanced query optimization and caching strategies
 
 ### Key Components
 - **Security Module**: CSRF protection, input validation, encryption services
-- **Lightning Connector**: Secure channel management and payment routing
 - **Monitoring Dashboard**: WebSocket-based real-time monitoring
 - **Testing Framework**: Comprehensive test suites with async support
 - **API Documentation**: Auto-generated OpenAPI 3.0 specifications
+- **Performance Tools**: Profiling and optimization utilities
 
 ## Installation
 
@@ -55,12 +54,6 @@ python -m blrcs
 Create a `.env` file in the project root:
 
 ```env
-# Lightning Network
-LND_HOST=localhost
-LND_PORT=10009
-LND_MACAROON_PATH=/path/to/admin.macaroon
-LND_TLS_CERT_PATH=/path/to/tls.cert
-
 # Database
 DATABASE_URL=sqlite:///blrcs.db
 
@@ -99,17 +92,17 @@ from blrcs import BLRCS
 # Initialize the system
 system = BLRCS()
 
-# Connect to Lightning Network
+# Connect to system
 await system.connect()
 
-# Monitor channels
-channels = await system.get_channels()
-for channel in channels:
-    print(f"Channel: {channel.channel_id}, Balance: {channel.local_balance}")
+# Monitor metrics
+metrics = await system.get_metrics()
+for metric in metrics:
+    print(f"Metric: {metric.name}, Value: {metric.value}")
 
-# Analyze risks
-risk_report = await system.analyze_risks()
-print(f"Risk Level: {risk_report.level}")
+# Analyze system
+report = await system.analyze()
+print(f"Status: {report.status}")
 ```
 
 ## Architecture
@@ -118,7 +111,6 @@ print(f"Risk Level: {risk_report.level}")
 blrcs/
 ├── core/               # Core system components
 ├── security/           # Security modules
-├── lightning/          # Lightning Network integration
 ├── monitoring/         # Monitoring and analytics
 ├── api/               # REST API endpoints
 ├── database/          # Database layer

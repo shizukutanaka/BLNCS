@@ -400,7 +400,7 @@ class DashboardServer:
 <body>
     <div class="header">
         <h1>🔍 BLRCS Real-time Monitoring Dashboard</h1>
-        <p>Bitcoin Lightning Risk Control System - Live Metrics</p>
+        <p>Enterprise Security and Monitoring System - Live Metrics</p>
     </div>
     
     <div class="dashboard">

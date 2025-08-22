@@ -14,7 +14,7 @@ setup(
     version="0.0.1",
     author="BLRCS Development Team",
     author_email="dev@blrcs.org",
-    description="Bitcoin Lightning Risk Control System - Enterprise-grade risk management for Lightning Network",
+    description="BLRCS - Enterprise-grade security and monitoring system",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/blrcs/blrcs",
@@ -83,11 +83,6 @@ setup(
             "asyncpg>=0.28.0",
             "pymongo>=4.4.0",
         ],
-        "lightning": [
-            "grpcio>=1.56.0",
-            "grpcio-tools>=1.56.0",
-            "protobuf>=4.23.0",
-        ],
     },
     entry_points={
         "console_scripts": [
@@ -106,15 +101,13 @@ setup(
     },
     zip_safe=False,
     keywords=[
-        "bitcoin",
-        "lightning",
-        "network",
-        "risk",
-        "management",
-        "control",
         "security",
         "monitoring",
-        "cryptocurrency",
-        "blockchain",
+        "management",
+        "control",
+        "api",
+        "framework",
+        "enterprise",
+        "system",
     ],
 )

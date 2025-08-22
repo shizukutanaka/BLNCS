@@ -59,8 +59,8 @@ class APIDocumentationExtractor:
         self.schemas: Dict[str, Dict[str, Any]] = {}
         self.base_info = {
             "title": "BLRCS API",
-            "version": "3.0.0",
-            "description": "Bitcoin Lightning Risk Control System API",
+            "version": "0.0.1",
+            "description": "Enterprise Security and Monitoring System API",
             "contact": {"name": "BLRCS Team"},
             "license": {"name": "MIT"}
         }

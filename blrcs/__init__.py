@@ -2,8 +2,7 @@
 # Ensures proper module loading and dependency resolution
 
 """
-Bitcoin Lightning Risk Control System (BLRCS)
-A comprehensive system for Bitcoin Lightning Network risk management and control.
+BLRCS - Enterprise-grade security and monitoring system
 
 Initial Release v0.0.1
 """
