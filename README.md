@@ -11,7 +11,7 @@
 
 ```bash
 # One-line installation
-curl -sSL https://get.blrcs.io | sudo bash
+pip install blrcs
 
 # System is now running with optimal security
 # Access dashboard: http://localhost:8000
@@ -108,7 +108,7 @@ BLRCS is a **military-grade security platform** that protects your critical infr
 
 ```bash
 # Download and run installer
-curl -sSL https://get.blrcs.io | sudo bash
+pip install blrcs
 
 # Follow the interactive setup
 # System will be optimized for your environment
@@ -118,7 +118,7 @@ curl -sSL https://get.blrcs.io | sudo bash
 
 ```bash
 # Pull and run
-docker run -d -p 8000:8000 --name blrcs blrcs/enterprise:latest
+docker run -d -p 8000:8000 --name blrcs ghcr.io/shizukutanaka/blrcs:latest
 
 # Access dashboard
 open http://localhost:8000
@@ -128,7 +128,7 @@ open http://localhost:8000
 
 ```bash
 # Add BLRCS helm repository
-helm repo add blrcs https://charts.blrcs.io
+helm repo add blrcs https://github.com/shizukutanaka/BLRCS/releases/download/charts
 helm repo update
 
 # Install with default values
@@ -324,15 +324,15 @@ blrcs report performance --period 7d --format json
 ## Support
 
 ### Documentation
-- [User Guide](https://docs.blrcs.io/user-guide)
-- [API Reference](https://docs.blrcs.io/api)
-- [Security Best Practices](https://docs.blrcs.io/security)
-- [Troubleshooting](https://docs.blrcs.io/troubleshooting)
+- [User Guide](docs/user-guide.md)
+- [API Reference](docs/api-reference.md)
+- [Security Best Practices](docs/security.md)
+- [Troubleshooting](docs/troubleshooting.md)
 
 ### Community
 - GitHub: [github.com/shizukutanaka/BLRCS](https://github.com/shizukutanaka/BLRCS)
-- Forum: [forum.blrcs.io](https://forum.blrcs.io)
-- Discord: [discord.blrcs.io](https://discord.blrcs.io)
+- Discussions: [GitHub Discussions](https://github.com/shizukutanaka/BLRCS/discussions)
+- Issues: [GitHub Issues](https://github.com/shizukutanaka/BLRCS/issues)
 
 ### Enterprise Support
 - 24/7 support hotline
@@ -404,10 +404,10 @@ Don't wait for a breach to happen. Protect your organization with BLRCS.
 
 ```bash
 # Install now
-curl -sSL https://get.blrcs.io | sudo bash
+pip install blrcs
 ```
 
-**Questions?** Contact us at support@blrcs.io or call 1-800-SECURE-1
+**Questions?** Visit our [GitHub repository](https://github.com/shizukutanaka/BLRCS)
 
 ---
 
