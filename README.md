@@ -1,4 +1,4 @@
-# BLNCS - Bitcoin Lightning Network Control System
+# BLNCS - Bitcoin Lightning Network Connect System
 
 **Lightning Network Node Management Tool**
 
