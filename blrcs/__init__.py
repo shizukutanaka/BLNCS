@@ -12,27 +12,23 @@ import logging
 
 # Lightning-specific imports
 try:
-    from .utils.lightning import LightningClient
-    from .utils.lnd_connector import LNDConnector
-    from .utils.channel_manager import ChannelManager
-    from .utils.payment_router import PaymentRouter
-except ImportError as e:
-    logging.warning(f"Lightning module import failed: {e}")
-    LightningClient = LNDConnector = ChannelManager = PaymentRouter = None
-
-try:
-    from .interfaces import (
-        ApiSystem, CLI, WebApp, WebSocket
+    from .lightning import (
+        LightningClient,
+        LNDConnector,
+        ChannelManager,
+        PaymentRouter,
+        OneClickLightningRouter
     )
 except ImportError as e:
-    logging.warning(f"Interfaces module import failed: {e}")
-    ApiSystem = CLI = WebApp = WebSocket = None
+    logging.warning(f"Lightning module import failed: {e}")
+    LightningClient = LNDConnector = ChannelManager = PaymentRouter = OneClickLightningRouter = None
 
 try:
-    from .core import BlrcsCore
+    from .api import APIServer
+    from .cli import cli_main
 except ImportError as e:
-    logging.warning(f"Core module import failed: {e}")
-    BlrcsCore = None
+    logging.warning(f"Interface module import failed: {e}")
+    APIServer = cli_main = None
 
 # Main Lightning Router class
 class LightningRouter:
@@ -89,8 +85,9 @@ AVAILABLE_MODULES = {
     'lnd_connector': LNDConnector is not None,
     'channel_manager': ChannelManager is not None,
     'payment_router': PaymentRouter is not None,
-    'api': ApiSystem is not None,
-    'cli': CLI is not None,
+    'one_click_router': OneClickLightningRouter is not None,
+    'api': APIServer is not None,
+    'cli': cli_main is not None,
 }
 
 def get_module_status():
@@ -104,6 +101,9 @@ __all__ = [
     "LNDConnector", 
     "ChannelManager",
     "PaymentRouter",
+    "OneClickLightningRouter",
+    "APIServer",
+    "cli_main",
     "get_module_status",
     "AVAILABLE_MODULES"
 ]
