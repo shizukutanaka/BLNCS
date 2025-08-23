@@ -13,14 +13,14 @@ setup(
     name="blncs",
     version="0.0.1",
     author="BLNCS Team",
-    author_email="support@blncs.io",
+    author_email="",
     description="Bitcoin Lightning Routing Control System - One-click routing optimization",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/user/BLNCS",
+    url="https://github.com/shizukutanaka/BLNCS",
     project_urls={
-        "Source": "https://github.com/user/BLNCS",
-        "Tracker": "https://github.com/user/BLNCS/issues",
+        "Source": "https://github.com/shizukutanaka/BLNCS",
+        "Tracker": "https://github.com/shizukutanaka/BLNCS/issues",
     },
     packages=find_packages(exclude=["tests", "tests.*", "docs", "docs.*"]),
     classifiers=[

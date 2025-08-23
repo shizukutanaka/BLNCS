@@ -573,7 +573,7 @@ class ChannelManager:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"🔍 チャネル監視中にエラーが発生しました: {e}")
+                print(f"Error during channel monitoring: {e}")
                 await asyncio.sleep(self.monitor_interval)
     
     async def _analyze_channels(self):

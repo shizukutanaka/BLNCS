@@ -144,7 +144,7 @@ Examples:
             try:
                 return handler(parsed)
             except Exception as e:
-                print(f"⚠️  エラーが発生しました: {e}\n💡 詳細なヘルプは '--help' をご利用ください", file=sys.stderr)
+                print(f"Error occurred: {e}\nUse '--help' for detailed help", file=sys.stderr)
                 return 1
         
         return 0
@@ -302,6 +302,7 @@ Examples:
             while True:
                 stats = monitor.get_current_stats()
                 
+                from datetime import datetime
                 print(f"\r[{datetime.now().strftime('%H:%M:%S')}] "
                       f"CPU: {stats.cpu_percent:5.1f}% | "
                       f"Memory: {stats.memory_mb:7.1f}MB | "
