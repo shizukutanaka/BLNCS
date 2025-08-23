@@ -77,30 +77,32 @@ Support utilities:
 - **file operations**: Upload, watching, and validation
 - **recovery.py**: System recovery procedures
 
-## Key Features
+## Key Features (Planned)
 
-1. **One-Click Operation**: Simple `blrcs start` to begin routing optimization
-2. **Automatic Rebalancing**: Maintains optimal channel balance
-3. **Fee Optimization**: Dynamic fee adjustment based on network conditions
-4. **Real-time Monitoring**: WebSocket updates for live status
-5. **REST API**: Full programmatic control via HTTP API
-6. **CLI Interface**: Command-line tools for management
-7. **Plugin System**: Extensible architecture for custom functionality
+1. **LND Integration**: Connect to LND nodes
+2. **Channel Management**: Basic channel operations
+3. **Payment Routing**: Route payments through Lightning Network
+4. **Monitoring**: Track channel states and metrics
+5. **REST API**: HTTP API for integration
+6. **CLI Interface**: Command-line management tools
+7. **Plugin System**: Extensible architecture
 
 ## Usage
 
-### Quick Start
+### Quick Start (Development)
 ```bash
-pip install blrcs
-blrcs start --lnd-dir ~/.lnd
+git clone https://github.com/shizukutanaka/BLNCS.git
+cd BLNCS
+pip install -e .
+blncs start --lnd-dir ~/.lnd
 ```
 
-### Python API
+### Python API (Example)
 ```python
-from blncs.lightning import OneClickLightningRouter
+from blncs.lightning import LNDConnector
 
-router = OneClickLightningRouter()
-await router.start()
+connector = LNDConnector()
+await connector.connect()
 ```
 
 ### REST API
@@ -108,11 +110,11 @@ await router.start()
 curl http://localhost:8080/api/status
 ```
 
-### CLI Commands
+### CLI Commands (Planned)
 ```bash
-blrcs status       # Check routing status
-blrcs channels     # List channels
-blrcs rebalance    # Manual rebalance
+blncs status       # Check node status
+blncs channels     # List channels
+blncs monitor      # Monitor resources
 ```
 
 ## Development

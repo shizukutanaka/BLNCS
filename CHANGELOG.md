@@ -5,23 +5,18 @@ All notable changes to BLNCS will be documented in this file.
 ## [0.0.1] - 2024-01-23
 
 ### Added
-- Initial release of Bitcoin Lightning Routing Control System
-- One-click Lightning Network routing optimization
-- Automatic channel rebalancing
-- Fee optimization system
-- Real-time monitoring dashboard
-- LND node auto-connection
-- REST API interface
-- WebSocket support for real-time updates
-- Basic routing algorithms (Dijkstra)
-- Channel health monitoring
-- Payment success rate tracking
+- Initial alpha release of Bitcoin Lightning Network Control System
+- Basic LND node connection support
+- Simple channel management interface
+- REST API framework
+- WebSocket support structure
+- Command-line interface
+- Plugin system foundation
 
 ### Features
-- Lightning-specific routing optimization
-- Automated channel management
-- Simple one-click operation
-- Japanese language support in documentation
+- LND integration support
+- Basic channel operations
+- Multi-language support (English/Japanese)
 
 ### Technical
 - Python 3.8+ support
@@ -33,9 +28,9 @@ All notable changes to BLNCS will be documented in this file.
   - Infrastructure: Monitoring and health checks
 
 ### Documentation
-- Complete README in Japanese and English
-- 500 improvement items roadmap for Lightning Network features
-- Installation and configuration guides
+- README with installation instructions
+- Basic API documentation
+- Configuration examples
 
 ### Known Issues
 - Alpha release - not recommended for production use
@@ -44,4 +39,4 @@ All notable changes to BLNCS will be documented in this file.
 
 ---
 
-For detailed improvement plans, see [LIGHTNING_IMPROVEMENTS_500.md](LIGHTNING_IMPROVEMENTS_500.md)
+This is an early development release. APIs and features are subject to change.

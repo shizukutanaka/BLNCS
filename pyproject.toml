@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "blncs"
 version = "0.0.1"
-description = "BLNCS - Bitcoin Lightning Routing Control System"
+description = "BLNCS - Bitcoin Lightning Network Control System"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "BLNCS Development Team", email = "dev@example.com"}
+    {name = "BLNCS Development Team"}
 ]
 
 [tool.black]

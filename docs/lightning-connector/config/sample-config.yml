@@ -20,8 +20,8 @@ backend:
   neutrino:
     network: "mainnet"    # mainnet | testnet | signet | regtest
     peers:
-      - "btcd0.lopp.net:8333"
-      - "neutrino.suredbits.com:8333"
+      # Add your neutrino peers here
+      # Example: "node.example.com:8333"
 
   bitcoincore:
     rpc_host: "127.0.0.1"

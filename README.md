@@ -1,30 +1,29 @@
-# BLNCS - Bitcoin Lightning Routing Control System
+# BLNCS - Bitcoin Lightning Network Control System
 
-**ワンクリックで Lightning Network ルーティングを最適化**
+**Lightning Network Node Management Tool**
 
 ```bash
-pip install blrcs
-blrcs start
-# Lightning ルーティングが自動的に最適化されます
+# Clone and install from source
+git clone https://github.com/shizukutanaka/BLNCS.git
+cd BLNCS
+pip install -e .
 ```
 
-## 主な機能
+## Features (In Development)
 
-### Lightning Network 最適化
-- **ワンクリックルーティング** - 複雑な設定不要
-- **自動チャネル管理** - チャネルバランスを自動調整
-- **手数料最適化** - 最適な手数料を自動計算
-- **ルート探索** - 最短・最安ルートを瞬時に発見
+### Lightning Network Integration
+- LND node connection support
+- Basic channel management
+- Payment routing functionality
 
-### リアルタイム監視
-- **チャネル状態モニタリング** - 全チャネルの健全性を監視
-- **支払い成功率追跡** - ルーティング成功率を表示
-- **収益分析** - ルーティング手数料収益をリアルタイム表示
+### Monitoring
+- Channel state monitoring
+- Basic metrics collection
+- Simple dashboard interface
 
-### 簡単設定
-- **LND自動接続** - LNDノードに自動接続
-- **REST API対応** - 既存システムとの統合が簡単
-- **WebSocket通信** - リアルタイム更新
+### API
+- REST API endpoints
+- WebSocket support for real-time updates
 
 ## インストール
 
@@ -33,28 +32,28 @@ blrcs start
 - LNDノード (v0.15.0+)
 - 2GB以上のRAM
 
-### クイックスタート
+### Installation from Source
 
 ```bash
-# インストール
-pip install blrcs
+# Clone repository
+git clone https://github.com/shizukutanaka/BLNCS.git
+cd BLNCS
 
-# LND設定ファイルを指定して起動
-blrcs start --lnd-dir ~/.lnd
+# Install dependencies
+pip install -r requirements.txt
 
-# または環境変数で設定
-export LND_DIR=~/.lnd
-blrcs start
+# Run development server
+python -m blncs.cli.main start
 ```
 
 ## Version
 
 Current version: v0.0.1 (Alpha Release)
 
-## ライセンス
+## License
 
-MIT License - 詳細は[LICENSE](LICENSE)ファイルを参照
+MIT License - See [LICENSE](LICENSE) file for details
 
----
+## Status
 
-*BLNCS - Bitcoin Lightning Network のルーティングを簡単に*
+This project is in early development stage. Features are being actively developed and APIs may change.
