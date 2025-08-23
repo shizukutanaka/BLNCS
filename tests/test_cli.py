@@ -4,7 +4,7 @@ Tests for CLI commands
 
 import pytest
 from click.testing import CliRunner
-from blrcs.cli.main import cli
+from blncs.cli.main import cli
 
 
 def test_cli_help():
@@ -12,7 +12,7 @@ def test_cli_help():
     runner = CliRunner()
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
-    assert "BLRCS Lightning CLI" in result.output
+    assert "BLNCS Lightning CLI" in result.output
 
 
 def test_start_command():

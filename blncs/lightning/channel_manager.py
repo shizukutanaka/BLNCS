@@ -1,4 +1,4 @@
-# BLRCS Channel Manager
+# BLNCS Channel Manager
 # Advanced Lightning channel management and optimization system
 import asyncio
 import time

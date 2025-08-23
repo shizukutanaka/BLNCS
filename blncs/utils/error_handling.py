@@ -1,4 +1,4 @@
-# BLRCS Advanced Error Handling System
+# BLNCS Advanced Error Handling System
 # Comprehensive error management and recovery
 
 import sys

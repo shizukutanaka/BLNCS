@@ -1,4 +1,4 @@
-# BLRCS Test Suite
+# BLNCS Test Suite
 
 ## Overview
 Test suite for Bitcoin Lightning Routing Control System focusing on Lightning Network functionality.

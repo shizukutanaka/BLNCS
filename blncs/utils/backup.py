@@ -1,4 +1,4 @@
-# BLRCS Backup Module
+# BLNCS Backup Module
 # Automatic backup and restore functionality
 import os
 import json

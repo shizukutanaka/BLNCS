@@ -1,11 +1,11 @@
 """
-BLRCS - Bitcoin Lightning Routing Control System
+BLNCS - Bitcoin Lightning Routing Control System
 
 One-click Lightning Network routing optimization
 """
 
 __version__ = "0.0.1"
-__author__ = "BLRCS Team"
+__author__ = "BLNCS Team"
 __license__ = "MIT"
 
 import logging

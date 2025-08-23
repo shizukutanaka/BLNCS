@@ -1,4 +1,4 @@
-# BLRCS LND Connector
+# BLNCS LND Connector
 # High-performance Lightning Network Daemon integration
 import asyncio
 import grpc
@@ -719,7 +719,7 @@ class LNDConnector:
         # Mock node info
         return NodeInfo(
             pub_key="03" + "a" * 64,  # Mock pubkey
-            alias="BLRCS Node",
+            alias="BLNCS Node",
             color="#3399ff",
             num_channels=len(self.channels),
             total_capacity=sum(c.capacity for c in self.channels.values())

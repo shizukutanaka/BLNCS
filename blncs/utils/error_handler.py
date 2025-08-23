@@ -254,7 +254,7 @@ class ErrorHandler:
         
         # 開発環境では詳細情報を含める
         import os
-        if os.getenv("BLRCS_ENV") == "development":
+        if os.getenv("BLNCS_ENV") == "development":
             response["details"] = context.details
             response["category"] = context.category.value
             response["severity"] = context.severity.value

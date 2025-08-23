@@ -5,9 +5,9 @@ Integration tests for Lightning routing system
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch
-from blrcs.lightning import OneClickLightningRouter
-from blrcs.lightning.lnd_connector import LNDConnector
-from blrcs.lightning.payment_router import PaymentRouter, ChannelEdge
+from blncs.lightning import OneClickLightningRouter
+from blncs.lightning.lnd_connector import LNDConnector
+from blncs.lightning.payment_router import PaymentRouter, ChannelEdge
 from datetime import datetime
 
 
@@ -79,7 +79,7 @@ def sample_channels():
 @pytest.mark.asyncio
 async def test_one_click_router_integration(mock_lnd_connector):
     """Test one-click router with mock LND"""
-    with patch("blrcs.lightning.one_click_routing.Path.exists", return_value=True):
+    with patch("blncs.lightning.one_click_routing.Path.exists", return_value=True):
         router = OneClickLightningRouter()
         router.lnd_connector = mock_lnd_connector
         
@@ -150,7 +150,7 @@ async def test_channel_rebalancing():
 @pytest.mark.asyncio
 async def test_route_finding(sample_channels):
     """Test route finding algorithm"""
-    from blrcs.lightning.payment_router import PaymentPathfinder
+    from blncs.lightning.payment_router import PaymentPathfinder
     
     pathfinder = PaymentPathfinder(max_routes=3)
     pathfinder.update_graph(sample_channels)

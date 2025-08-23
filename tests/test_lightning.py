@@ -3,14 +3,14 @@ Tests for Lightning Network functionality
 """
 
 import pytest
-from blrcs.lightning import (
+from blncs.lightning import (
     LightningClient,
     ChannelManager,
     LNDConnector,
     PaymentRouter,
     OneClickLightningRouter
 )
-from blrcs.lightning.payment_router import (
+from blncs.lightning.payment_router import (
     PaymentPathfinder,
     PaymentOptimizer,
     RouteMetric

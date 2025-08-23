@@ -1,4 +1,4 @@
-# BLRCS Command Line Interface
+# BLNCS Command Line Interface
 # Clean and efficient CLI following Pike's simplicity
 import sys
 import argparse
@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import asyncio
 
-class BLRCSCli:
+class BLNCSCli:
     """
-    Command line interface for BLRCS.
+    Command line interface for BLNCS.
     Simple, powerful, and user-friendly.
     """
     
@@ -21,23 +21,23 @@ class BLRCSCli:
     def _create_parser(self) -> argparse.ArgumentParser:
         """Create argument parser"""
         parser = argparse.ArgumentParser(
-            prog='blrcs',
-            description='BLRCS - Lightweight Application Framework',
+            prog='blncs',
+            description='BLNCS - Lightweight Application Framework',
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 Examples:
-  blrcs start              Start BLRCS server
-  blrcs backup create      Create backup
-  blrcs config show        Show configuration
-  blrcs monitor            Monitor resources
-  blrcs plugin list        List plugins
+  blncs start              Start BLNCS server
+  blncs backup create      Create backup
+  blncs config show        Show configuration
+  blncs monitor            Monitor resources
+  blncs plugin list        List plugins
             """
         )
         
         parser.add_argument(
             '--version',
             action='version',
-            version='BLRCS 0.0.1'
+            version='BLNCS 0.0.1'
         )
         
         parser.add_argument(
@@ -59,13 +59,13 @@ Examples:
         )
         
         # Start command
-        start_parser = subparsers.add_parser('start', help='Start BLRCS')
+        start_parser = subparsers.add_parser('start', help='Start BLNCS')
         start_parser.add_argument('--mode', choices=['gui', 'server', 'cli'], default='auto')
         start_parser.add_argument('--port', type=int, default=8080)
         start_parser.add_argument('--host', default='127.0.0.1')
         
         # Stop command
-        subparsers.add_parser('stop', help='Stop BLRCS')
+        subparsers.add_parser('stop', help='Stop BLNCS')
         
         # Status command
         subparsers.add_parser('status', help='Show status')
@@ -150,11 +150,11 @@ Examples:
         return 0
     
     def cmd_start(self, args) -> int:
-        """Start BLRCS"""
-        print(f"Starting BLRCS in {args.mode} mode...")
+        """Start BLNCS"""
+        print(f"Starting BLNCS in {args.mode} mode...")
         
-        from blrcs.app import BLRCS
-        app = BLRCS(mode=args.mode)
+        from blncs.app import BLNCS
+        app = BLNCS(mode=args.mode)
         app.config.host = args.host
         app.config.port = args.port
         
@@ -166,21 +166,21 @@ Examples:
             return 0
     
     def cmd_stop(self, args) -> int:
-        """Stop BLRCS"""
-        print("Stopping BLRCS...")
+        """Stop BLNCS"""
+        print("Stopping BLNCS...")
         # Implementation would send stop signal to running instance
         return 0
     
     def cmd_status(self, args) -> int:
         """Show status"""
-        from blrcs.config import get_config
-        from blrcs.resource_monitor import get_resource_monitor
+        from blncs.config import get_config
+        from blncs.resource_monitor import get_resource_monitor
         
         config = get_config()
         monitor = get_resource_monitor()
         stats = monitor.get_current_stats()
         
-        print("BLRCS Status")
+        print("BLNCS Status")
         print("-" * 40)
         print(f"Mode: {config.mode}")
         print(f"Host: {config.host}:{config.port}")
@@ -193,7 +193,7 @@ Examples:
     
     def cmd_config(self, args) -> int:
         """Configuration management"""
-        from blrcs.config import get_config
+        from blncs.config import get_config
         
         config = get_config()
         
@@ -210,7 +210,7 @@ Examples:
         
         elif args.config_action == 'reset':
             # Reset configuration
-            from blrcs.config import reset_config
+            from blncs.config import reset_config
             reset_config()
             print("Configuration reset to defaults")
         
@@ -218,7 +218,7 @@ Examples:
     
     def cmd_backup(self, args) -> int:
         """Backup management"""
-        from blrcs.backup import get_auto_backup
+        from blncs.backup import get_auto_backup
         
         backup = get_auto_backup()
         
@@ -256,7 +256,7 @@ Examples:
     
     def cmd_plugin(self, args) -> int:
         """Plugin management"""
-        from blrcs.plugins import get_plugin_manager
+        from blncs.plugins import get_plugin_manager
         
         manager = get_plugin_manager()
         
@@ -288,7 +288,7 @@ Examples:
     
     def cmd_monitor(self, args) -> int:
         """Monitor resources"""
-        from blrcs.resource_monitor import get_resource_monitor
+        from blncs.resource_monitor import get_resource_monitor
         import time
         
         monitor = get_resource_monitor()
@@ -323,9 +323,9 @@ Examples:
     
     def cmd_log(self, args) -> int:
         """View logs"""
-        from blrcs.logger import get_logger
+        from blncs.logger import get_logger
         
-        log_file = Path("logs/blrcs.log")
+        log_file = Path("logs/blncs.log")
         
         if not log_file.exists():
             print("No log file found")
@@ -363,14 +363,14 @@ Examples:
     
     def cmd_database(self, args) -> int:
         """Database operations"""
-        from blrcs.database import Database
+        from blncs.database import Database
         
         if args.db_action == 'info':
             # Show database info
             print("Database Information")
             print("-" * 40)
             
-            from blrcs.config import get_config
+            from blncs.config import get_config
             config = get_config()
             
             db_path = config.db_path
@@ -409,7 +409,7 @@ Examples:
 
 def main():
     """Main CLI entry point"""
-    cli = BLRCSCli()
+    cli = BLNCSCli()
     sys.exit(cli.run())
 
 if __name__ == "__main__":

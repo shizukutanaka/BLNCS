@@ -1,4 +1,4 @@
-# BLRCS Recovery Module
+# BLNCS Recovery Module
 # Lightweight error recovery following Carmack's fail-fast principle
 import asyncio
 import time
@@ -181,13 +181,13 @@ def get_recovery_manager() -> RecoveryManager:
 # Common recovery handlers
 async def restart_database_connection():
     """Recovery handler for database"""
-    from blrcs.database import Database
+    from blncs.database import Database
     # Reconnect logic here
     pass
 
 async def clear_cache():
     """Recovery handler for cache"""
-    from blrcs.cache import Cache
+    from blncs.cache import Cache
     # Clear cache logic here
     pass
 

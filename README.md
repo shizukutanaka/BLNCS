@@ -1,4 +1,4 @@
-# BLRCS - Bitcoin Lightning Routing Control System
+# BLNCS - Bitcoin Lightning Routing Control System
 
 **ワンクリックで Lightning Network ルーティングを最適化**
 
@@ -57,4 +57,4 @@ MIT License - 詳細は[LICENSE](LICENSE)ファイルを参照
 
 ---
 
-*BLRCS - Bitcoin Lightning Network のルーティングを簡単に*
+*BLNCS - Bitcoin Lightning Network のルーティングを簡単に*

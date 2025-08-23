@@ -1,4 +1,4 @@
-# BLRCS Utilities Module
+# BLNCS Utilities Module
 # Practical utility functions and helpers
 import os
 import re

@@ -1,4 +1,4 @@
-# BLRCS Secure File Upload Module
+# BLNCS Secure File Upload Module
 # Enhanced file upload security with comprehensive validation
 import os
 import hashlib

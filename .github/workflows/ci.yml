@@ -29,9 +29,9 @@ jobs:
       - name: Black check
         run: black --check .
       - name: Mypy type-check
-        run: mypy blrcs
+        run: mypy blncs
       - name: Bandit security scan
-        run: bandit -r blrcs -q
+        run: bandit -r blncs -q
       - name: Run tests
         run: pytest -q
       - name: pip-audit

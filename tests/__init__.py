@@ -1,1 +1,1 @@
-# BLRCS Test Suite
+# BLNCS Test Suite

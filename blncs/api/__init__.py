@@ -1,5 +1,5 @@
 """
-BLRCS API Module
+BLNCS API Module
 
 REST API and WebSocket interfaces for Lightning routing
 """

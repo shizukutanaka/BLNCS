@@ -80,7 +80,7 @@ class LightningClient:
         retry_on_status: tuple[int, ...] = (500, 502, 503, 504),
         pinned_cert_sha256: Optional[str] = None,
     ) -> Dict[str, Any]:
-        headers = {"Content-Type": "application/json", "User-Agent": "BLRCS/1"}
+        headers = {"Content-Type": "application/json", "User-Agent": "BLNCS/1"}
         macaroon_hex = self._load_macaroon(macaroon_path)
         if macaroon_hex:
             headers["Grpc-Metadata-macaroon"] = macaroon_hex

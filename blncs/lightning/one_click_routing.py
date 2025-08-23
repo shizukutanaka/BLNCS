@@ -1,5 +1,5 @@
 """
-BLRCS One-Click Lightning Routing
+BLNCS One-Click Lightning Routing
 ワンクリックで Lightning Network ルーティングを最適化
 """
 
@@ -310,7 +310,7 @@ class OneClickLightningRouter:
 
 async def main():
     """Main entry point for one-click routing"""
-    print("BLRCS - Bitcoin Lightning Routing Control System")
+    print("BLNCS - Bitcoin Lightning Routing Control System")
     print("=" * 50)
     
     # Load config from environment or use defaults

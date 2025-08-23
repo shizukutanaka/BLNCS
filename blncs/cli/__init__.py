@@ -1,5 +1,5 @@
 """
-BLRCS CLI Module
+BLNCS CLI Module
 
 Command-line interface for Lightning routing control
 """

@@ -1,5 +1,5 @@
 """
-BLRCS Lightning Network Module
+BLNCS Lightning Network Module
 
 Core Lightning Network functionality for routing optimization
 """

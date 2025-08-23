@@ -1,9 +1,9 @@
-# BLRCS Project Structure
+# BLNCS Project Structure
 
 ## Directory Layout
 
 ```
-BLRCS/
+BLNCS/
 ├── blrcs/                    # Main package directory
 │   ├── __init__.py          # Package initialization, version 0.0.1
 │   ├── lightning/           # Lightning Network core functionality
@@ -97,7 +97,7 @@ blrcs start --lnd-dir ~/.lnd
 
 ### Python API
 ```python
-from blrcs.lightning import OneClickLightningRouter
+from blncs.lightning import OneClickLightningRouter
 
 router = OneClickLightningRouter()
 await router.start()

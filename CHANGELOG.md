@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to BLRCS will be documented in this file.
+All notable changes to BLNCS will be documented in this file.
 
 ## [0.0.1] - 2024-01-23
 

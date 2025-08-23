@@ -1,5 +1,5 @@
 """
-BLRCS Setup Configuration
+BLNCS Setup Configuration
 """
 
 from setuptools import setup, find_packages
@@ -10,17 +10,17 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
-    name="blrcs",
+    name="blncs",
     version="0.0.1",
-    author="BLRCS Team",
-    author_email="support@blrcs.io",
+    author="BLNCS Team",
+    author_email="support@blncs.io",
     description="Bitcoin Lightning Routing Control System - One-click routing optimization",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/user/BLRCS",
+    url="https://github.com/user/BLNCS",
     project_urls={
-        "Source": "https://github.com/user/BLRCS",
-        "Tracker": "https://github.com/user/BLRCS/issues",
+        "Source": "https://github.com/user/BLNCS",
+        "Tracker": "https://github.com/user/BLNCS/issues",
     },
     packages=find_packages(exclude=["tests", "tests.*", "docs", "docs.*"]),
     classifiers=[
@@ -85,12 +85,12 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "blrcs=blrcs.cli:main",
+            "blncs=blncs.cli:main",
         ],
     },
     include_package_data=True,
     package_data={
-        "blrcs": [
+        "blncs": [
             "templates/*.html",
             "static/css/*.css",
             "static/js/*.js",

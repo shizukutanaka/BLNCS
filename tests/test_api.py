@@ -4,7 +4,7 @@ Tests for Lightning API endpoints
 
 import pytest
 from fastapi.testclient import TestClient
-from blrcs.api.main import app
+from blncs.api.main import app
 
 
 client = TestClient(app)

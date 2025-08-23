@@ -1,4 +1,4 @@
-# BLRCS WebSocket Module
+# BLNCS WebSocket Module
 # Real-time bidirectional communication
 import asyncio
 import json

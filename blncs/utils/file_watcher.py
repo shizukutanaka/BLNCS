@@ -1,4 +1,4 @@
-# BLRCS File Watcher Module  
+# BLNCS File Watcher Module  
 # Lightweight file monitoring following Carmack's efficiency principles
 import os
 import time
@@ -214,7 +214,7 @@ def watch_config_files(callback: Callable):
         Path('.env'),
         Path('config.json'),
         Path('settings.json'),
-        Path('blrcs.conf')
+        Path('blncs.conf')
     ]
     
     for config_file in config_files:

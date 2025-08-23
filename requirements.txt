@@ -1,4 +1,4 @@
-# BLRCS Requirements - Bitcoin Lightning Routing Control System
+# BLNCS Requirements - Bitcoin Lightning Routing Control System
 
 # Core Framework
 fastapi==0.112.0
