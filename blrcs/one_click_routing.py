@@ -48,7 +48,7 @@ class OneClickLightningRouter:
         ワンクリックで起動
         全ての最適化を自動実行
         """
-        logger.info("🚀 Starting One-Click Lightning Routing...")
+        logger.info("Starting One-Click Lightning Routing...")
         
         try:
             # Step 1: LND接続
@@ -61,14 +61,14 @@ class OneClickLightningRouter:
             if self.config.auto_optimize:
                 await self._start_auto_optimization()
             
-            logger.info("✅ Lightning Routing Started Successfully!")
-            logger.info(f"📊 Active channels: {len(self.channels)}")
-            logger.info(f"⚡ Auto-optimization: {'Enabled' if self.config.auto_optimize else 'Disabled'}")
+            logger.info("Lightning Routing Started Successfully!")
+            logger.info(f"Active channels: {len(self.channels)}")
+            logger.info(f"Auto-optimization: {'Enabled' if self.config.auto_optimize else 'Disabled'}")
             
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to start: {e}")
+            logger.error(f"Failed to start: {e}")
             return False
     
     async def _connect_to_lnd(self):
@@ -94,7 +94,7 @@ class OneClickLightningRouter:
                 raise Exception(f"Admin macaroon not found")
         
         self.lnd_connected = True
-        logger.info("✅ Connected to LND successfully")
+        logger.info("Connected to LND successfully")
     
     async def _load_channels(self):
         """Load channel information"""
@@ -121,7 +121,7 @@ class OneClickLightningRouter:
         ]
         
         self.routing_stats["active_channels"] = len([c for c in self.channels if c["active"]])
-        logger.info(f"✅ Loaded {len(self.channels)} channels")
+        logger.info(f"Loaded {len(self.channels)} channels")
     
     async def _start_auto_optimization(self):
         """Start automatic optimization tasks"""
@@ -134,7 +134,7 @@ class OneClickLightningRouter:
             asyncio.create_task(self._route_discovery_loop())
         ]
         
-        logger.info("✅ Auto-optimization started")
+        logger.info("Auto-optimization started")
         logger.info("   - Channel rebalancing: Active")
         logger.info("   - Fee optimization: Active")
         logger.info("   - Route discovery: Active")
@@ -181,11 +181,11 @@ class OneClickLightningRouter:
             
             # Check if rebalancing needed
             if local_ratio < self.config.rebalance_threshold:
-                logger.info(f"📊 Rebalancing channel {channel['channel_id']}: {local_ratio:.1%} local")
+                logger.info(f"Rebalancing channel {channel['channel_id']}: {local_ratio:.1%} local")
                 # Actual rebalancing logic would go here
                 await self._execute_rebalance(channel)
             elif local_ratio > (1 - self.config.rebalance_threshold):
-                logger.info(f"📊 Rebalancing channel {channel['channel_id']}: {local_ratio:.1%} local")
+                logger.info(f"Rebalancing channel {channel['channel_id']}: {local_ratio:.1%} local")
                 # Actual rebalancing logic would go here
                 await self._execute_rebalance(channel)
     
@@ -272,11 +272,11 @@ class OneClickLightningRouter:
         # Return simple route (direct if possible)
         for channel in self.channels:
             if channel["peer"] == destination and channel["local_balance"] >= amount_sat:
-                logger.info(f"✅ Found direct route via channel {channel['channel_id']}")
+                logger.info(f"Found direct route via channel {channel['channel_id']}")
                 return [destination]
         
         # Multi-hop route finding would go here
-        logger.info(f"✅ Found multi-hop route to {destination}")
+        logger.info(f"Found multi-hop route to {destination}")
         return ["intermediate_node", destination]
     
     def get_dashboard_data(self) -> Dict[str, Any]:
@@ -306,11 +306,11 @@ class OneClickLightningRouter:
         """Stop the router gracefully"""
         logger.info("Stopping Lightning Router...")
         self.lnd_connected = False
-        logger.info("✅ Lightning Router stopped")
+        logger.info("Lightning Router stopped")
 
 async def main():
     """Main entry point for one-click routing"""
-    print("⚡ BLRCS - Bitcoin Lightning Routing Control System")
+    print("BLRCS - Bitcoin Lightning Routing Control System")
     print("=" * 50)
     
     # Load config from environment or use defaults
@@ -327,9 +327,9 @@ async def main():
     success = await router.start()
     
     if success:
-        print("\n✅ Lightning routing is now optimized!")
-        print("\n📊 Dashboard: http://localhost:8080")
-        print("📖 API Docs: http://localhost:8080/docs")
+        print("\nLightning routing is now optimized!")
+        print("\nDashboard: http://localhost:8080")
+        print("API Docs: http://localhost:8080/docs")
         print("\nPress Ctrl+C to stop...")
         
         # Keep running
@@ -338,14 +338,14 @@ async def main():
                 await asyncio.sleep(10)
                 # Print periodic status
                 stats = router.get_dashboard_data()
-                print(f"\r⚡ Channels: {stats['channels']['active']}/{stats['channels']['total']} | "
+                print(f"\rChannels: {stats['channels']['active']}/{stats['channels']['total']} | "
                       f"Success: {stats['routing']['success_rate']:.1%} | "
                       f"Fees: {stats['routing']['fees_earned']} sat", end="")
         except KeyboardInterrupt:
             print("\n\nShutting down...")
             await router.stop()
     else:
-        print("\n❌ Failed to start Lightning routing")
+        print("\nFailed to start Lightning routing")
         print("Please check your LND configuration and try again.")
 
 if __name__ == "__main__":
