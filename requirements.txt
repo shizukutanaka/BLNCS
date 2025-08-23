@@ -1,127 +1,65 @@
-# BLRCS Requirements - National-Level High Security System
+# BLRCS Requirements - Bitcoin Lightning Routing Control System
 
 # Core Framework
 fastapi==0.112.0
 uvicorn[standard]==0.30.5
-aiosqlite==0.20.0
-psutil==5.9.8
 aiofiles==23.2.1
+httpx==0.24.1
+
+# Lightning Network
+grpcio==1.60.0
+grpcio-tools==1.60.0
+protobuf==4.25.1
+macaroons==0.13.0
+pyln-client==23.8
+lnd-grpc-client==0.5.4
+
+# Async Support
+asyncio==3.4.3
+aiohttp==3.9.1
+websockets==12.0
 
 # Configuration
 python-dotenv==1.0.1
 pydantic==2.8.2
+pyyaml==6.0.1
+toml==0.10.2
 
-# Cryptography & Security
+# Cryptography
 cryptography==41.0.7
-pycryptodome==3.19.0
-pyotp==2.9.0
-bcrypt==4.1.2
-jose[cryptography]==1.0.0
-passlib[bcrypt]==1.7.4
 
-# Quantum-Resistant Cryptography
-# Note: These are placeholders for actual post-quantum libraries
-# In production, integrate with NIST PQC standardized libraries
-pqcrypto==0.1.0  # Placeholder
-kyber==1.0.0     # Placeholder
-dilithium==1.0.0 # Placeholder
-
-# Network Security
-requests==2.31.0
-urllib3==2.1.0
-certifi==2023.11.17
-dnspython==2.4.2
-
-# Database & Storage
+# Database
 sqlalchemy==2.0.23
-alembic==1.13.1
+aiosqlite==0.20.0
 redis==5.0.1
 
 # Monitoring & Logging
 prometheus-client==0.19.0
 structlog==23.2.0
-colorama==0.4.6
 
-# Performance Optimization
+# Routing Algorithms
+networkx==3.2.1
 numpy==1.25.2
-pandas==2.1.4
-cachetools==5.3.2
-lru-dict==1.3.0
+scipy==1.11.4
 
-# High Availability
-watchdog==3.0.0
-schedule==1.2.1
-
-# Threat Intelligence
-feedparser==6.0.10
-yara-python==4.3.1
-
-# Compliance & Audit
-jsonschema==4.20.0
-xmltodict==0.13.0
-
-# Web Security
-flask-talisman==1.1.0
-flask-limiter==3.5.0
-werkzeug==3.0.1
-
-# System Integration
-pywin32==306; sys_platform == "win32"
-pyobjc==10.1; sys_platform == "darwin"
+# CLI
+click==8.1.7
+rich==13.7.0
 
 # API Documentation
-openapi-spec-validator==0.7.1
+python-multipart==0.0.6
 
-# Development Tools
-black==23.12.0
-flake8==6.1.0
-mypy==1.7.1
-isort==5.13.2
-
-# Testing & Quality Assurance
+# Testing
 pytest==8.3.2
 pytest-asyncio==0.23.8
 pytest-cov==4.1.0
 pytest-mock==3.12.0
-pytest-benchmark==4.0.0
-coverage==7.3.2
 
-# Security Testing
-bandit==1.7.5
-safety==2.3.5
-semgrep==1.52.0
-
-# Vulnerability Management
-python-nmap==0.7.1
-shodan==1.30.1
-
-# DevOps & Deployment
-docker==6.1.3
-kubernetes==28.1.0
-
-# Data Serialization
-msgpack==1.0.7
-cbor2==5.5.0
+# Development
+black==23.12.0
+ruff==0.1.9
+mypy==1.7.1
 
 # Utilities
-click==8.1.7
-rich==13.7.0
-tqdm==4.66.1
 python-dateutil==2.8.2
 pytz==2023.3
-
-# Optional: Machine Learning for Threat Detection
-scikit-learn==1.3.2
-tensorflow==2.15.0
-torch==2.1.2
-
-# Optional: Advanced Analytics
-matplotlib==3.8.2
-seaborn==0.13.0
-
-# Optional: Enterprise Integration
-ldap3==2.9.1
-kubernetes==28.1.0
-boto3==1.34.10  # AWS integration
-azure-identity==1.15.0  # Azure integration
-google-cloud-core==2.4.1  # GCP integration
