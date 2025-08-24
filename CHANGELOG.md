@@ -2,7 +2,7 @@
 
 All notable changes to BLNCS will be documented in this file.
 
-## [0.0.1] - 2024-01-23
+## [0.0.1] - 2025-08-23
 
 ### Added
 - Initial alpha release of Bitcoin Lightning Network Control System
