@@ -6,46 +6,51 @@ Simple, practical Lightning Network management tool.
 
 import sys
 import click
-import yaml
-from pathlib import Path
 from typing import Optional, Dict, Any
-from datetime import datetime
 
-from blncs.lightning.client import LightningClient
-from blncs.core.exceptions import (
-BLNCSError, ConnectionError, LightningError, ConfigError, 
-ValidationError, PaymentError, ChannelError, SecurityError,
-format_error_for_cli, handle_error
-)
-from blncs.core.setup import run_full_setup, validate_setup, create_default_config
-from blncs.core.history import get_history
-from blncs.core.health import get_health_checker
-from blncs.core.shutdown import get_shutdown_handler, register_cleanup
-from blncs.core.cache import get_cache
-from blncs.core.logger import optimize_logging_memory, cleanup_old_logs
-from blncs.core.simple_backup import get_backup_manager
-from blncs.core.performance import get_wallet_monitor, get_unified_monitor
-from blncs.core.validation import get_validator
-from blncs.core.security import get_security_manager
-from blncs.core.fee_optimizer import get_fee_optimizer
-from blncs.core.channel_manager import get_channel_manager
-from blncs.core.connection_pool import ConnectionPool
-from blncs.core.recovery import get_error_recovery
-from blncs.utils.qr_generator import generate_invoice_qr
+# Lazy imports for faster CLI startup
+def get_lightning_client(config: Dict[str, Any]):
+    """Lazy import and create Lightning client"""
+    from blncs.lightning.client import LightningClient
+    return LightningClient(config)
 
-# Import command modules
-from .commands import (
-    info, balance, channels, network_test, lightning_ping, system_info,
-    analyze_channels, connectivity_check, fee_estimate, payment_debug, channel_summary,
-    config_management, config_get, config_set, config_list, env_template, liquidity
-)
+def get_exceptions():
+    """Lazy import exceptions"""
+    from blncs.core.exceptions import (
+        BLNCSError, ConnectionError, LightningError, ConfigError, 
+        ValidationError, PaymentError, ChannelError, SecurityError,
+        format_error_for_cli, handle_error
+    )
+    return {
+        'BLNCSError': BLNCSError,
+        'ConnectionError': ConnectionError,
+        'LightningError': LightningError,
+        'format_error_for_cli': format_error_for_cli
+    }
+
+def get_command_modules():
+    """Lazy import command modules"""
+    from .commands import (
+        info, balance, channels, network_test, lightning_ping, system_info,
+        analyze_channels, connectivity_check, fee_estimate, payment_debug, channel_summary,
+        config_management, config_get, config_set, config_list, env_template, liquidity
+    )
+    return {
+        'info': info, 'balance': balance, 'channels': channels, 
+        'network_test': network_test, 'lightning_ping': lightning_ping,
+        'system_info': system_info, 'analyze_channels': analyze_channels,
+        'connectivity_check': connectivity_check, 'fee_estimate': fee_estimate,
+        'payment_debug': payment_debug, 'channel_summary': channel_summary,
+        'config_management': config_management, 'config_get': config_get,
+        'config_set': config_set, 'config_list': config_list,
+        'env_template': env_template, 'liquidity': liquidity
+    }
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load configuration using unified config system"""
-    from blncs.core.config import get_config
-    config = get_config(config_path)
-    return config.data
+    config_manager = get_config_manager()
+    return config_manager.get_all()
 
 
 @click.group()
@@ -61,18 +66,29 @@ def cli(ctx: click.Context, config: str, verbose: bool, quiet: bool) -> None:
 
     Common commands:
         python -m blncs.cli.main status # System status check
-    python -m blncs.cli.main info # Node information
-    python -m blncs.cli.main balance # Balance check
-    python -m blncs.cli.main health --quick # Quick diagnosis
+        python -m blncs.cli.main info # Node information
+        python -m blncs.cli.main balance # Balance check
+        python -m blncs.cli.main health --quick # Quick diagnosis
 
     First time usage:
         python -m blncs.cli.main setup # Initial setup
     """
     ctx.ensure_object(dict)
-    ctx.obj['config'] = load_config(config)
-    ctx.obj['client'] = LightningClient(ctx.obj['config'])
+    
+    # Lazy configuration loading
+    config_data = load_config(config)
+    ctx.obj['config'] = config_data
     ctx.obj['verbose'] = verbose
     ctx.obj['quiet'] = quiet
+    
+    # Lightning client created on demand
+    ctx.obj['_client'] = None
+
+def get_client(ctx):
+    """Get or create Lightning client on demand"""
+    if ctx.obj['_client'] is None:
+        ctx.obj['_client'] = get_lightning_client(ctx.obj['config'])
+    return ctx.obj['_client']
 
 
 # info command moved to commands/info_commands.py
@@ -83,30 +99,37 @@ def cli(ctx: click.Context, config: str, verbose: bool, quiet: bool) -> None:
 
 # channels command moved to commands/channel_commands.py
 
-# Add imported commands to CLI
-cli.add_command(info)
-cli.add_command(balance) 
-cli.add_command(channels)
-cli.add_command(network_test)
-cli.add_command(lightning_ping)
-cli.add_command(system_info)
-
-# Add new management commands
-cli.add_command(analyze_channels)
-cli.add_command(connectivity_check)
-cli.add_command(fee_estimate)
-cli.add_command(payment_debug)
-cli.add_command(channel_summary)
-
-# Add configuration commands
-cli.add_command(config_management)
-cli.add_command(config_get)
-cli.add_command(config_set)
-cli.add_command(config_list)
-cli.add_command(env_template)
-
-# Liquidity management commands
-cli.add_command(liquidity)
+# Dynamic command registration for faster startup
+def register_commands():
+    """Register CLI commands dynamically"""
+    commands = get_command_modules()
+    
+    # Core commands
+    cli.add_command(commands['info'])
+    cli.add_command(commands['balance'])
+    cli.add_command(commands['channels'])
+    
+    # Network commands
+    cli.add_command(commands['network_test'])
+    cli.add_command(commands['lightning_ping'])
+    cli.add_command(commands['system_info'])
+    
+    # Management commands
+    cli.add_command(commands['analyze_channels'])
+    cli.add_command(commands['connectivity_check'])
+    cli.add_command(commands['fee_estimate'])
+    cli.add_command(commands['payment_debug'])
+    cli.add_command(commands['channel_summary'])
+    
+    # Configuration commands
+    cli.add_command(commands['config_management'])
+    cli.add_command(commands['config_get'])
+    cli.add_command(commands['config_set'])
+    cli.add_command(commands['config_list'])
+    cli.add_command(commands['env_template'])
+    
+    # Liquidity commands
+    cli.add_command(commands['liquidity'])
 
 
 @cli.command()
@@ -115,13 +138,14 @@ cli.add_command(liquidity)
 @click.pass_context
 def open_channel(ctx: click.Context, node_pubkey: str, amount: int) -> None:
     """Open a new channel"""
-    client = ctx.obj['client']
+    exceptions = get_exceptions()
+    client = get_client(ctx)
     try:
         client.connect()
         channel_id = client.open_channel(node_pubkey, amount)
         click.echo(f"Channel opened: {channel_id}")
-    except (ConnectionError, BLNCSError, LightningError) as e:
-        click.echo(format_error_for_cli(e), err=True)
+    except (exceptions['ConnectionError'], exceptions['BLNCSError'], exceptions['LightningError']) as e:
+        click.echo(exceptions['format_error_for_cli'](e), err=True)
         sys.exit(1)
     except Exception as e:
         click.echo(f"[ERROR] Unexpected error: {str(e)}", err=True)
@@ -564,7 +588,7 @@ def recovery(ctx, status, reset):
 def monitor(ctx, start, stop, status):
     """Monitor wallet balance, channels, and system performance"""
     try:
-        monitor = get_unified_monitor()
+        monitor = get_monitor()
         client = ctx.obj['client']
 
         if start:
@@ -621,7 +645,7 @@ def monitor(ctx, start, stop, status):
 def config(validate, repair, env_template, show, section):
     """Configuration management and validation"""
     try:
-        from blncs.core.config import get_config
+        from blncs.core.config_manager import get_config_manager
         validator = get_validator()
         config_manager = get_config()
 
@@ -949,8 +973,7 @@ def dashboard(ctx):
         # 監視状態
         click.echo("\n 監視状態:")
         try:
-            from blncs.core.performance import get_unified_monitor
-            monitor = get_unified_monitor()
+            monitor = get_monitor()
             if hasattr(monitor, 'monitor_thread') and monitor.monitor_thread and monitor.monitor_thread.is_alive():
                 click.echo(" [OK] 統合監視: 実行中")
             else:
@@ -966,8 +989,12 @@ def dashboard(ctx):
 
 
 def main():
-    """Main entry point with graceful shutdown"""
+    """Main entry point with graceful shutdown and dynamic command registration"""
+    # Register commands dynamically when CLI starts
+    register_commands()
+    
     # Initialize shutdown handler
+    from blncs.core.shutdown import get_shutdown_handler, register_cleanup
     shutdown_handler = get_shutdown_handler()
 
     # Register cleanup for CLI-specific resources
@@ -982,7 +1009,11 @@ def main():
         click.echo("\n\n中断されました。クリーンアップ中...")
         shutdown_handler.shutdown(0)
     except Exception as e:
-        click.echo(f"予期しないエラー: {str(e)}", err=True)
+        exceptions = get_exceptions()
+        if 'BLNCSError' in exceptions and isinstance(e, exceptions['BLNCSError']):
+            click.echo(exceptions['format_error_for_cli'](e), err=True)
+        else:
+            click.echo(f"予期しないエラー: {str(e)}", err=True)
         shutdown_handler.emergency_shutdown()
 
 

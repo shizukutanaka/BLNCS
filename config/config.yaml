@@ -1,55 +1,107 @@
 # BLNCS Configuration
-# Lightweight Bitcoin Lightning Network Control System
+# Bitcoin Lightning Network Control System - Unified Configuration
 
+# System Settings
 system:
   name: "BLNCS"
-  environment: "development"
-  log_level: "info"
+  environment: "development"  # development, production
   data_dir: "./data"
   backup_dir: "./backups"
+  log_dir: "./logs"
 
+# Lightning Network Settings
 lightning:
   host: "localhost"
   port: 8080
   grpc_port: 10009
-  network: "testnet"
+  network: "testnet"  # mainnet, testnet, regtest
   cert_path: "~/.lnd/tls.cert"
   macaroon_path: "~/.lnd/data/chain/bitcoin/testnet/readonly.macaroon"
+  
+  # Connection settings
   timeout: 10
   connect_timeout: 5
   max_retries: 3
+  retry_interval: 10
+  auto_retry: true
 
-features:
-  enable_cache: true
-  cache_ttl: 300
-  enable_history: true
-  max_history_entries: 1000
-  enable_monitoring: true
-  monitoring_interval: 60
-
-security:
-  enable_api_auth: false
-  enable_rate_limiting: true
-  rate_limit: 100
-
+# Performance Settings
 performance:
+  # Connection pooling
   max_connections: 10
   connection_timeout: 5
-  enable_request_cache: true
-  request_cache_size: 1000
+  
+  # Caching
+  cache_enabled: true
+  cache_ttl: 300  # 5 minutes
+  cache_max_size: 1000
+  
+  # Monitoring
+  monitoring_enabled: true
+  collection_interval: 30
+  max_history: 1000
+  auto_tune: false  # Disable for development
 
+# Monitoring Settings
+monitor:
+  enabled: true
+  interval: 60  # Check every minute
+  
+  # Lightning-specific monitoring
+  lightning_enabled: true
+  channel_balance_min: 20  # Alert if channel balance < 20%
+  channel_balance_max: 80  # Alert if channel balance > 80%
+  node_uptime_min: 95      # Alert if uptime < 95%
+  channel_inactive_hours: 24
+
+# Security Settings
+security:
+  enable_api_auth: false  # Set to true in production
+  enable_rate_limiting: true
+  rate_limit: 100  # Requests per minute
+  verify_ssl: false  # Set to true with valid certificates
+
+# Logging Settings
 logging:
-  file_logging: true
-  log_file: "logs/blncs.log"
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s|%(levelname)s|%(name)s|%(message)s"
+  
+  # File logging
+  file_enabled: true
+  file_path: "./logs/blncs.log"
   max_log_size: "10MB"
   backup_count: 3
-  components:
-    lightning: "info"
-    core: "info"
-    api: "info"
-    cli: "info"
+  
+  # Console logging
+  console_enabled: true
+  console_level: "INFO"
 
+# Backup Settings
+backup:
+  enabled: true
+  interval: 86400  # Daily backups (24 hours)
+  max_backups: 7   # Keep 7 days of backups
+  retention_days: 7
+  compress: true
+
+# Development Settings
 development:
   debug_mode: true
-  mock_lightning_node: true
-  enable_test_endpoints: true
+  mock_lightning_node: false  # Use real Lightning client
+  verbose_errors: true
+
+# Production overrides (uncomment for production)
+# system:
+#   environment: "production"
+# lightning:
+#   network: "mainnet"
+#   macaroon_path: "~/.lnd/data/chain/bitcoin/mainnet/readonly.macaroon"
+# security:
+#   enable_api_auth: true
+#   verify_ssl: true
+# logging:
+#   level: "WARNING"
+#   console_level: "ERROR"
+# development:
+#   debug_mode: false
+#   verbose_errors: false

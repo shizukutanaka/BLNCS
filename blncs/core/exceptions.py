@@ -4,8 +4,12 @@ Simple, clear error handling without unnecessary complexity.
 """
 
 import traceback
+import logging
+import sys
+import time
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable, List
+from functools import wraps
 
 
 class BLNCSError(Exception):
@@ -209,3 +213,200 @@ def format_error_for_cli(error: Exception, show_details: bool = False) -> str:
         return message
     else:
         return f"❌ エラー: {str(error)}"
+
+
+class CircuitBreakerError(BLNCSError):
+    """Circuit breaker has opened due to repeated failures"""
+    def __init__(self, message: str, failure_count: int = 0, **details):
+        super().__init__(message, recoverable=False, **details)
+        self.failure_count = failure_count
+        self._recovery_suggestions = [
+            "システムが安定するまで待機してください",
+            "根本的な問題を解決してからリセットしてください"
+        ]
+
+
+class RateLimitError(BLNCSError):
+    """Rate limit exceeded error"""
+    def __init__(self, message: str, retry_after: Optional[int] = None, **details):
+        super().__init__(message, recoverable=True, **details)
+        self.retry_after = retry_after
+        self._recovery_suggestions = [
+            f"リクエスト頻度を下げてください",
+            f"{retry_after}秒後に再試行してください" if retry_after else "しばらく待ってから再試行してください"
+        ]
+
+
+# Enhanced error handling decorators and utilities
+def handle_exceptions(logger: Optional[logging.Logger] = None,
+                     default_return: Any = None,
+                     reraise: bool = True,
+                     log_level: int = logging.ERROR):
+    """Decorator for standardized exception handling"""
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except BLNCSError:
+                # Re-raise BLNCS errors without modification
+                raise
+            except Exception as e:
+                if logger:
+                    logger.log(log_level, f"Error in {func.__name__}: {str(e)}")
+                
+                if reraise:
+                    # Wrap in BLNCS error for consistency
+                    raise BLNCSError(
+                        f"Unexpected error in {func.__name__}: {str(e)}",
+                        recoverable=True,
+                        original_error=str(e),
+                        function=func.__name__
+                    ) from e
+                
+                return default_return
+        return wrapper
+    return decorator
+
+
+def retry_on_exception(max_attempts: int = 3,
+                      delay: float = 1.0,
+                      backoff: float = 2.0,
+                      exceptions: tuple = (Exception,),
+                      logger: Optional[logging.Logger] = None):
+    """Decorator for automatic retry on specified exceptions"""
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            current_delay = delay
+            
+            for attempt in range(max_attempts):
+                try:
+                    result = func(*args, **kwargs)
+                    if attempt > 0 and logger:
+                        logger.info(f"{func.__name__} succeeded after {attempt + 1} attempts")
+                    return result
+                except exceptions as e:
+                    last_exception = e
+                    if attempt < max_attempts - 1:
+                        if logger:
+                            logger.warning(f"{func.__name__} failed (attempt {attempt + 1}/{max_attempts}): {str(e)}")
+                        time.sleep(current_delay)
+                        current_delay *= backoff
+                    else:
+                        # Convert to BLNCS error on final failure
+                        raise BLNCSError(
+                            f"Failed after {max_attempts} attempts: {str(e)}",
+                            recoverable=True,
+                            attempts=max_attempts,
+                            last_error=str(e)
+                        ) from e
+            
+            raise last_exception
+        return wrapper
+    return decorator
+
+
+class ErrorAggregator:
+    """Collects and aggregates errors for batch reporting"""
+    
+    def __init__(self):
+        self.errors: List[Dict[str, Any]] = []
+        self.error_counts: Dict[str, int] = {}
+    
+    def add_error(self, error: Exception, context: str = ""):
+        """Add an error to the aggregator"""
+        error_info = handle_error(error, context=context)
+        self.errors.append(error_info)
+        
+        # Count error types
+        error_type = error_info.get('error', 'Unknown')
+        self.error_counts[error_type] = self.error_counts.get(error_type, 0) + 1
+    
+    def has_errors(self) -> bool:
+        """Check if any errors have been collected"""
+        return len(self.errors) > 0
+    
+    def get_summary(self) -> Dict[str, Any]:
+        """Get error summary"""
+        if not self.errors:
+            return {"total_errors": 0}
+        
+        return {
+            "total_errors": len(self.errors),
+            "error_counts": self.error_counts,
+            "first_error": self.errors[0],
+            "last_error": self.errors[-1],
+            "unique_error_types": len(self.error_counts)
+        }
+    
+    def clear(self):
+        """Clear all collected errors"""
+        self.errors.clear()
+        self.error_counts.clear()
+
+
+# Circuit Breaker implementation
+class CircuitBreaker:
+    """Circuit breaker pattern for handling cascading failures"""
+    
+    def __init__(self, failure_threshold: int = 5, timeout: int = 60):
+        self.failure_threshold = failure_threshold
+        self.timeout = timeout
+        self.failure_count = 0
+        self.last_failure_time = None
+        self.state = 'CLOSED'  # CLOSED, OPEN, HALF_OPEN
+    
+    def call(self, func: Callable, *args, **kwargs):
+        """Execute function through circuit breaker"""
+        if self.state == 'OPEN':
+            if self._should_attempt_reset():
+                self.state = 'HALF_OPEN'
+            else:
+                raise CircuitBreakerError(
+                    "Circuit breaker is OPEN - too many recent failures",
+                    failure_count=self.failure_count
+                )
+        
+        try:
+            result = func(*args, **kwargs)
+            self._on_success()
+            return result
+        except Exception as e:
+            self._on_failure()
+            raise
+    
+    def _should_attempt_reset(self) -> bool:
+        """Check if enough time has passed to attempt reset"""
+        if self.last_failure_time is None:
+            return True
+        return (datetime.now() - self.last_failure_time).total_seconds() > self.timeout
+    
+    def _on_success(self):
+        """Handle successful call"""
+        self.failure_count = 0
+        self.state = 'CLOSED'
+    
+    def _on_failure(self):
+        """Handle failed call"""
+        self.failure_count += 1
+        self.last_failure_time = datetime.now()
+        
+        if self.failure_count >= self.failure_threshold:
+            self.state = 'OPEN'
+    
+    def reset(self):
+        """Manually reset the circuit breaker"""
+        self.failure_count = 0
+        self.last_failure_time = None
+        self.state = 'CLOSED'
+
+
+def create_error_context(operation: str, **context_data) -> Dict[str, Any]:
+    """Create standardized error context"""
+    return {
+        'operation': operation,
+        'timestamp': datetime.now().isoformat(),
+        'context_data': context_data
+    }

@@ -20,10 +20,10 @@ class TestCodeQuality(unittest.TestCase):
         """Test that all core modules can be imported without errors"""
         try:
             from blncs.core.exceptions import BLNCSError
-            from blncs.core.config import get_config
+            from blncs.core.config_manager import get_config_manager
             from blncs.core.logger import get_logger
             from blncs.core.health import get_health_checker
-            from blncs.core.cache import get_cache
+            from blncs.core.fast_cache import get_cache
         except ImportError as e:
             self.fail(f"Core module import failed: {e}")
     
@@ -60,9 +60,9 @@ class TestCodeQuality(unittest.TestCase):
     
     def test_config_basic_functionality(self) -> None:
         """Test basic configuration functionality"""
-        from blncs.core.config import get_config
+        from blncs.core.config_manager import get_config_manager
         
-        config = get_config()
+        config = get_config_manager()
         
         # Test basic structure
         self.assertIsInstance(config.data, dict)

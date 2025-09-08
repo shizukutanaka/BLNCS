@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Any
 
 from .logger import get_logger
 from .config import get_config
-from .cache import get_cache
+from .fast_cache import get_cache
 
 
 class TransactionHistory:

@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from blncs.core.exceptions import BLNCSError, LightningError, ConnectionError
-from blncs.core.config import get_config
+from blncs.core.config_manager import get_config_manager
 from blncs.core.logger import setup_logger
 from blncs.core.setup import validate_setup, create_default_config
 from blncs.core.history import TransactionHistory, record_transaction
@@ -51,7 +51,7 @@ class TestConfig(unittest.TestCase):
     
     def test_default_config(self):
         """Test default configuration"""
-        config = get_config()
+        config = get_config_manager()
         self.assertIsNotNone(config.data)
         
         # Check default values
@@ -65,7 +65,7 @@ class TestConfig(unittest.TestCase):
     
     def test_config_get(self):
         """Test config value retrieval"""
-        config = get_config()
+        config = get_config_manager()
         
         # Test nested key access
         host = config.get('lightning.host')
@@ -77,7 +77,7 @@ class TestConfig(unittest.TestCase):
     
     def test_config_set(self):
         """Test config value setting"""
-        config = get_config()
+        config = get_config_manager()
         config.set('test.key', 'test_value')
         
         value = config.get('test.key')

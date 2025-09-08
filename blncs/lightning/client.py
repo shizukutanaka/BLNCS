@@ -12,21 +12,25 @@ from typing import Dict, Optional, List, Any
 from pathlib import Path
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import asyncio
+from functools import lru_cache
 
 from ..core.exceptions import LightningError, ConnectionError
-from ..core.config import get_config
+from ..core.config_manager import get_config_manager
 from ..core.logger import get_logger
 from ..core.history import record_transaction
-from ..core.cache import get_cache, cached
+from ..core.fast_cache import get_cache, cached
 from ..core.recovery import auto_recover
 from ..core.connection_pool import get_connection_pool, get_request_cache
+from ..core.fast_cache import get_fast_cache, fast_cache
 
 
 class LightningClient:
     """Simple Lightning Network client using REST API"""
     
     def __init__(self, config: Optional[Dict] = None):
-        self.config = config or get_config().data
+        self.config = config or get_config_manager().get_all()
         self.lightning_config = self.config.get('lightning', {})
         self.logger = get_logger(__name__)
         
@@ -40,7 +44,9 @@ class LightningClient:
         
         # Setup session with connection pooling and retries
         self.session = requests.Session()
-        self.session.verify = False
+        # SSL verification - should be True in production
+        # Can be overridden via config for development
+        self.session.verify = self.lightning_config.get('verify_ssl', True)
         
         # Connection pooling configuration with improved reliability
         retry_strategy = Retry(
@@ -57,9 +63,9 @@ class LightningClient:
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
         
-        # Connection timeout configuration - reduced for testing
-        self.timeout = self.lightning_config.get('timeout', 2)  # Reduced from 30
-        self.connect_timeout = self.lightning_config.get('connect_timeout', 1)  # Reduced from 10
+        # Connection timeout configuration - optimized for production
+        self.timeout = self.lightning_config.get('timeout', 15)  # Balanced timeout
+        self.connect_timeout = self.lightning_config.get('connect_timeout', 5)  # Balanced connection timeout
         
         # Cache instance and connection pooling
         self.cache = get_cache()
@@ -75,6 +81,12 @@ class LightningClient:
         self.heartbeat_interval = 60  # 1 minute
         self.connection_failures = 0
         self.max_failures = 5
+        
+        # Performance optimizations
+        self._thread_pool = ThreadPoolExecutor(max_workers=3)
+        self._request_stats = {'total': 0, 'cached': 0, 'failed': 0}
+        self._batch_size = self.lightning_config.get('batch_size', 10)
+        self._fast_cache = get_fast_cache()
     
     def _setup_authentication(self) -> None:
         """Setup authentication with macaroon"""
@@ -132,6 +144,9 @@ class LightningClient:
             self.cache.cleanup_expired()
         except Exception:
             pass
+        # Shutdown thread pool
+        if hasattr(self, '_thread_pool'):
+            self._thread_pool.shutdown(wait=False)
         if hasattr(self.session, 'close'):
             self.session.close()
     
@@ -165,7 +180,7 @@ class LightningClient:
         
         return False
     
-    def _make_request(self, endpoint: str, method: str = 'GET', data: Optional[Dict[str, Any]] = None, max_retries: int = 1, use_cache: bool = True) -> Dict[str, Any]:
+    def _make_request(self, endpoint: str, method: str = 'GET', data: Optional[Dict[str, Any]] = None, max_retries: int = 3, use_cache: bool = True) -> Dict[str, Any]:
         """Make HTTP request to Lightning node with retry logic and caching"""
         # キャッシュチェック（GETリクエストのみ）
         if method == 'GET' and use_cache:
@@ -231,19 +246,19 @@ class LightningClient:
     
     def _get_cache_ttl(self, endpoint: str) -> int:
         """Determine cache TTL based on endpoint"""
-        # Static information cached for longer
-        if endpoint in ['v1/getinfo']:
-            return 300  # 5 minutes
-        # Dynamic information like balance cached for shorter time
-        elif endpoint in ['v1/balance/blockchain', 'v1/balance/channels']:
-            return 30   # 30 seconds
-        # Channel information cached for medium time
-        elif endpoint in ['v1/channels']:
-            return 60   # 1 minute
-        # Others
-        else:
-            return 120  # 2 minutes
+        # Optimized TTL based on data volatility
+        ttl_map = {
+            'v1/getinfo': 300,          # Node info changes rarely
+            'v1/balance/blockchain': 15, # Balance changes frequently
+            'v1/balance/channels': 30,   # Channel balance medium frequency
+            'v1/channels': 120,          # Channel list changes less often
+            'v1/peers': 180,             # Peer list relatively stable
+            'v1/graph': 600,             # Network graph changes slowly
+            'v1/network/feeestimates': 300, # Fee estimates update periodically
+        }
+        return ttl_map.get(endpoint, 60)  # Default 1 minute
     
+    @fast_cache(ttl=60, max_size=16)  # Cache for 1 minute
     def get_info(self) -> Dict[str, Any]:
         """Get node information (with caching)"""
         cache_key = f"node_info:{self.host}:{self.port}"
@@ -286,8 +301,35 @@ class LightningClient:
             self.cache.set(cache_key, fallback, 5)
             return fallback
     
+    def get_batch_data(self) -> Dict[str, Any]:
+        """Get multiple data points in parallel for better performance"""
+        try:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    'info': executor.submit(self.get_info),
+                    'balance': executor.submit(self._get_balance_internal),
+                    'channels': executor.submit(self._list_channels_internal),
+                    'network_info': executor.submit(self.get_network_info)
+                }
+                
+                result = {}
+                for key, future in futures.items():
+                    try:
+                        result[key] = future.result(timeout=10)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get {key}: {e}")
+                        result[key] = None
+                
+                return result
+        except Exception as e:
+            self.logger.error(f"Batch data collection failed: {e}")
+            return {}
+    
     def get_balance(self) -> Dict[str, int]:
         """Get wallet balance"""
+        return self._get_balance_internal()
+    
+    def _get_balance_internal(self) -> Dict[str, int]:
         try:
             wallet_balance = self._make_request("v1/balance/blockchain")
             channel_balance = self._make_request("v1/balance/channels")
@@ -311,6 +353,9 @@ class LightningClient:
     
     def list_channels(self) -> List[Dict[str, Any]]:
         """List all channels"""
+        return self._list_channels_internal()
+    
+    def _list_channels_internal(self) -> List[Dict[str, Any]]:
         try:
             channels = self._make_request("v1/channels")
             result = []

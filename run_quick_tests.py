@@ -19,7 +19,7 @@ def test_imports():
         from blncs.core.config import get_config
         from blncs.core.logger import get_logger
         from blncs.core.validation import get_validator
-        from blncs.core.performance import get_unified_monitor
+        from blncs.core.monitor import get_monitor
         from blncs.core.security import get_security_manager
         from blncs.core.fee_optimizer import get_fee_optimizer
         from blncs.core.channel_manager import get_channel_manager
@@ -98,8 +98,8 @@ def test_monitors():
     print("Testing monitoring systems...")
     
     try:
-        from blncs.core.performance import get_unified_monitor
-        monitor = get_unified_monitor()
+        from blncs.core.monitor import get_monitor
+        monitor = get_monitor()
         
         # Test monitor creation and basic operations
         assert monitor is not None, "Monitor should be created"

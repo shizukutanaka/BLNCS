@@ -75,7 +75,7 @@ def get_cache_manager() -> Any:
     """Get cache manager instance (lazy loaded)."""
     global _cache_manager
     if _cache_manager is None:
-        from .core.cache import get_cache_manager as _get_cache_manager
+        from .core.fast_cache import get_cache_manager as _get_cache_manager
         _cache_manager = _get_cache_manager()
     return _cache_manager
 

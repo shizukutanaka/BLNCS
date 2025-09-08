@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from .logger import get_logger
-from .config import get_config
-from .cache import get_cache
+from .config_manager import get_config_manager
+from .fast_cache import get_cache
 
 
 @dataclass
@@ -24,6 +24,9 @@ class ConnectionInfo:
     last_used: datetime
     active: bool = True
     failures: int = 0
+    successful_requests: int = 0
+    total_latency: float = 0.0
+    last_health_check: Optional[datetime] = None
 
 
 class ConnectionPool:
@@ -31,16 +34,17 @@ class ConnectionPool:
     
     def __init__(self, max_connections: int = 10):
         self.logger = get_logger(__name__)
-        self.config = get_config()
+        self.config_manager = get_config_manager()
+        self.config_data = self.config_manager.get_all()
         
         self.max_connections = max_connections
         self.connections: Dict[str, ConnectionInfo] = {}
         self.pool_lock = threading.RLock()
         
         # 接続プールの設定
-        self.connection_timeout = self.config.get('performance.connection_timeout', 5)
-        self.max_idle_time = self.config.get('performance.max_idle_time', 300)  # 5分
-        self.cleanup_interval = self.config.get('performance.cleanup_interval', 60)   # 1分
+        self.connection_timeout = self.config_manager.get('performance.connection_timeout', 5)
+        self.max_idle_time = self.config_manager.get('performance.max_idle_time', 300)  # 5 minutes
+        self.cleanup_interval = self.config_manager.get('performance.cleanup_interval', 60)   # 1 minute
         
         # クリーンアップスレッド
         self.cleanup_thread = None
@@ -82,8 +86,15 @@ class ConnectionPool:
             conn = self.connections.get(key)
             
             if conn and conn.active:
-                conn.last_used = datetime.now()
-                return conn
+                # ヘルスチェックが必要か確認
+                if self._needs_health_check(conn):
+                    if not self._check_connection_health(conn):
+                        conn.active = False
+                        conn = None
+                
+                if conn:
+                    conn.last_used = datetime.now()
+                    return conn
             
             # 新しい接続を作成
             if len(self.connections) >= self.max_connections:
@@ -95,14 +106,43 @@ class ConnectionPool:
                 port=port,
                 created_at=datetime.now(),
                 last_used=datetime.now(),
-                active=True
+                active=True,
+                last_health_check=datetime.now()
             )
             
             self.connections[key] = conn
             self.logger.debug(f"新しい接続作成: {key}")
             return conn
     
-    def release_connection(self, host: str, port: int, failed: bool = False) -> None:
+    def _needs_health_check(self, conn: ConnectionInfo) -> bool:
+        """ヘルスチェックが必要か判定"""
+        if not conn.last_health_check:
+            return True
+        
+        # 最後のヘルスチェックから60秒以上経過した場合
+        elapsed = (datetime.now() - conn.last_health_check).total_seconds()
+        return elapsed > 60
+    
+    def _check_connection_health(self, conn: ConnectionInfo) -> bool:
+        """接続の健全性を確認"""
+        # 簡易的な健全性チェック（実際の実装では ping や軽量リクエストを送信）
+        try:
+            # ここでは失敗率に基づいて判定
+            if conn.failures > 5:
+                return False
+            
+            # 成功率が低い場合
+            if conn.successful_requests > 0:
+                failure_rate = conn.failures / (conn.successful_requests + conn.failures)
+                if failure_rate > 0.5:
+                    return False
+            
+            conn.last_health_check = datetime.now()
+            return True
+        except Exception:
+            return False
+    
+    def release_connection(self, host: str, port: int, failed: bool = False, latency: float = 0.0) -> None:
         """接続を解放"""
         key = self.get_connection_key(host, port)
         
@@ -115,7 +155,11 @@ class ConnectionPool:
                         conn.active = False
                         self.logger.warning(f"接続を無効化 (失敗多数): {key}")
                 else:
-                    conn.failures = 0  # 成功時はリセット
+                    conn.successful_requests += 1
+                    conn.total_latency += latency
+                    # 連続成功で失敗カウントを減らす
+                    if conn.failures > 0 and conn.successful_requests % 10 == 0:
+                        conn.failures = max(0, conn.failures - 1)
                 
                 conn.last_used = datetime.now()
     
@@ -151,12 +195,25 @@ class ConnectionPool:
             active_connections = sum(1 for c in self.connections.values() if c.active)
             failed_connections = sum(1 for c in self.connections.values() if c.failures > 0)
             
+            # 平均レイテンシー計算
+            total_latency = sum(c.total_latency for c in self.connections.values())
+            total_requests = sum(c.successful_requests for c in self.connections.values())
+            avg_latency = total_latency / total_requests if total_requests > 0 else 0
+            
+            # 成功率計算
+            total_failures = sum(c.failures for c in self.connections.values())
+            success_rate = total_requests / (total_requests + total_failures) if (total_requests + total_failures) > 0 else 1.0
+            
             return {
                 'total_connections': len(self.connections),
                 'active_connections': active_connections,
                 'failed_connections': failed_connections,
                 'max_connections': self.max_connections,
-                'pool_utilization': len(self.connections) / self.max_connections if self.max_connections > 0 else 0
+                'pool_utilization': len(self.connections) / self.max_connections if self.max_connections > 0 else 0,
+                'total_requests': total_requests,
+                'total_failures': total_failures,
+                'success_rate': success_rate,
+                'avg_latency_ms': round(avg_latency * 1000, 2)
             }
 
 
@@ -238,8 +295,8 @@ def get_connection_pool() -> ConnectionPool:
     """グローバル接続プール取得"""
     global _connection_pool
     if _connection_pool is None:
-        config = get_config()
-        max_conn = config.get('performance.max_connections', 10)
+        config_manager = get_config_manager()
+        max_conn = config_manager.get('performance.max_connections', 10)
         _connection_pool = ConnectionPool(max_conn)
     return _connection_pool
 
@@ -247,7 +304,7 @@ def get_request_cache() -> RequestCache:
     """グローバルリクエストキャッシュ取得"""
     global _request_cache
     if _request_cache is None:
-        config = get_config()
-        max_size = config.get('performance.request_cache_size', 1000)
+        config_manager = get_config_manager()
+        max_size = config_manager.get('performance.request_cache_size', 1000)
         _request_cache = RequestCache(max_size)
     return _request_cache

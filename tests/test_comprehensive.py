@@ -18,7 +18,7 @@ from blncs.core.exceptions import BLNCSError, LightningError, ConnectionError
 from blncs.core.config import Config, get_config
 from blncs.core.logger import setup_logger, get_logger
 from blncs.core.health import HealthChecker
-from blncs.core.cache import SimpleCache
+from blncs.core.fast_cache import SimpleCache
 from blncs.lightning.client import LightningClient
 
 

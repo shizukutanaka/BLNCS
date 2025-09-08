@@ -13,9 +13,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from blncs.lightning.client import LightningClient
-from blncs.core.config import get_config
+from blncs.core.config_manager import get_config_manager
 from blncs.core.health import get_health_checker
-from blncs.core.performance import get_unified_monitor
+from blncs.core.monitor import get_monitor
 
 
 class TestSystemIntegration(unittest.TestCase):
@@ -24,9 +24,9 @@ class TestSystemIntegration(unittest.TestCase):
     def setUp(self):
         """Set up test environment"""
         self.client = LightningClient()
-        self.config = get_config()
+        self.config = get_config_manager()
         self.health_checker = get_health_checker()
-        self.monitor = get_unified_monitor()
+        self.monitor = get_monitor()
     
     def test_client_config_integration(self):
         """Test Lightning client uses configuration properly"""
@@ -88,7 +88,7 @@ class TestConfigurationIntegration(unittest.TestCase):
     
     def test_config_persistence(self):
         """Test configuration changes persist"""
-        config = get_config()
+        config = get_config_manager()
         
         # Set a test value
         original_value = config.get('test.integration', 'default')
@@ -98,7 +98,7 @@ class TestConfigurationIntegration(unittest.TestCase):
         self.assertEqual(config.get('test.integration'), 'test_value')
         
         # Get a new config instance
-        new_config = get_config()
+        new_config = get_config_manager()
         self.assertEqual(new_config.get('test.integration'), 'test_value')
         
         # Clean up

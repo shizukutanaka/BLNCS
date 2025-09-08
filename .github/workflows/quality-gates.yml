@@ -231,7 +231,7 @@ jobs:
         
         # メモリ使用量テスト
         from blncs.core.config import get_config
-        from blncs.core.cache import get_cache
+        from blncs.core.fast_cache import get_cache
         
         final_memory = process.memory_info().rss / 1024 / 1024  # MB
         memory_usage = final_memory - initial_memory
@@ -368,7 +368,7 @@ jobs:
         # 基本システム統合テスト
         try:
             from blncs.core.config import get_config
-            from blncs.core.cache import get_cache
+            from blncs.core.fast_cache import get_cache
             
             config = get_config()
             cache = get_cache()

@@ -18,8 +18,8 @@ from collections import deque
 from dataclasses import dataclass
 
 from .logger import get_logger
-from .config import get_config
-from .cache import get_cache
+from .config_manager import get_config_manager
+from .fast_cache import get_cache
 
 
 @dataclass
@@ -39,11 +39,11 @@ class PerformanceOptimizer:
     
     def __init__(self):
         self.logger = get_logger(__name__)
-        self.config = get_config()
+        self.config_manager = get_config_manager()
         self.cache = get_cache()
         
         # Optimization settings
-        self.enabled = self.config.get('performance.auto_tune', True)
+        self.enabled = self.config_manager.get('performance.auto_tune', True)
         self.check_interval = 60  # Check every minute
         self.optimization_threshold = 0.8  # Optimize when resource usage > 80%
         
@@ -212,51 +212,51 @@ class PerformanceOptimizer:
     def _optimize_cache(self) -> None:
         """Optimize cache settings"""
         # Increase cache TTL for better hit rate
-        current_ttl = self.config.get('performance.cache_ttl', 300)
+        current_ttl = self.config_manager.get('performance.cache_ttl', 300)
         new_ttl = min(current_ttl * 1.5, 1800)  # Max 30 minutes
-        self.config.set('performance.cache_ttl', new_ttl)
+        self.config_manager.set('performance.cache_ttl', new_ttl)
         
         # Increase cache size
-        current_size = self.config.get('performance.cache_max_size', 1000)
+        current_size = self.config_manager.get('performance.cache_max_size', 1000)
         new_size = min(current_size * 1.2, 10000)
-        self.config.set('performance.cache_max_size', int(new_size))
+        self.config_manager.set('performance.cache_max_size', int(new_size))
         
         self.logger.info(f"Optimized cache: TTL={new_ttl}s, Size={new_size}")
     
     def _optimize_connections(self) -> None:
         """Optimize connection pool settings"""
         # Increase connection pool size
-        current_pool = self.config.get('performance.pool_connections', 10)
+        current_pool = self.config_manager.get('performance.pool_connections', 10)
         new_pool = min(current_pool + 5, 50)
-        self.config.set('performance.pool_connections', new_pool)
+        self.config_manager.set('performance.pool_connections', new_pool)
         
         # Reduce connection timeout for faster failure
-        current_timeout = self.config.get('performance.connection_timeout', 5)
+        current_timeout = self.config_manager.get('performance.connection_timeout', 5)
         new_timeout = max(current_timeout * 0.8, 1)
-        self.config.set('performance.connection_timeout', new_timeout)
+        self.config_manager.set('performance.connection_timeout', new_timeout)
         
         self.logger.info(f"Optimized connections: Pool={new_pool}, Timeout={new_timeout}s")
     
     def _optimize_cpu_usage(self) -> None:
         """Optimize CPU usage"""
         # Reduce monitoring frequency
-        current_interval = self.config.get('performance.collection_interval', 30)
+        current_interval = self.config_manager.get('performance.collection_interval', 30)
         new_interval = min(current_interval * 1.5, 300)
-        self.config.set('performance.collection_interval', new_interval)
+        self.config_manager.set('performance.collection_interval', new_interval)
         
         # Reduce parallel requests
-        current_parallel = self.config.get('performance.parallel_requests', 10)
+        current_parallel = self.config_manager.get('performance.parallel_requests', 10)
         new_parallel = max(current_parallel - 2, 2)
-        self.config.set('performance.parallel_requests', new_parallel)
+        self.config_manager.set('performance.parallel_requests', new_parallel)
         
         self.logger.info(f"Optimized CPU: Interval={new_interval}s, Parallel={new_parallel}")
     
     def _optimize_memory_usage(self) -> None:
         """Optimize memory usage"""
         # Reduce history size
-        current_history = self.config.get('performance.max_history', 10000)
+        current_history = self.config_manager.get('performance.max_history', 10000)
         new_history = max(current_history * 0.5, 100)
-        self.config.set('performance.max_history', int(new_history))
+        self.config_manager.set('performance.max_history', int(new_history))
         
         # Clear old cache entries
         self.cache.cleanup()
@@ -270,28 +270,28 @@ class PerformanceOptimizer:
     def _optimize_error_handling(self) -> None:
         """Optimize error handling"""
         # Increase retry attempts
-        current_retries = self.config.get('recovery.max_retries', 3)
+        current_retries = self.config_manager.get('recovery.max_retries', 3)
         new_retries = min(current_retries + 1, 10)
-        self.config.set('recovery.max_retries', new_retries)
+        self.config_manager.set('recovery.max_retries', new_retries)
         
         # Increase retry delay
-        current_delay = self.config.get('recovery.retry_delay', 1.0)
+        current_delay = self.config_manager.get('recovery.retry_delay', 1.0)
         new_delay = min(current_delay * 1.2, 10)
-        self.config.set('recovery.retry_delay', new_delay)
+        self.config_manager.set('recovery.retry_delay', new_delay)
         
         self.logger.info(f"Optimized errors: Retries={new_retries}, Delay={new_delay}s")
     
     def _get_current_settings(self) -> Dict[str, Any]:
         """Get current optimization settings"""
         return {
-            "cache_ttl": self.config.get('performance.cache_ttl', 300),
-            "cache_size": self.config.get('performance.cache_max_size', 1000),
-            "pool_connections": self.config.get('performance.pool_connections', 10),
-            "connection_timeout": self.config.get('performance.connection_timeout', 5),
-            "parallel_requests": self.config.get('performance.parallel_requests', 10),
-            "max_history": self.config.get('performance.max_history', 10000),
-            "max_retries": self.config.get('recovery.max_retries', 3),
-            "retry_delay": self.config.get('recovery.retry_delay', 1.0)
+            "cache_ttl": self.config_manager.get('performance.cache_ttl', 300),
+            "cache_size": self.config_manager.get('performance.cache_max_size', 1000),
+            "pool_connections": self.config_manager.get('performance.pool_connections', 10),
+            "connection_timeout": self.config_manager.get('performance.connection_timeout', 5),
+            "parallel_requests": self.config_manager.get('performance.parallel_requests', 10),
+            "max_history": self.config_manager.get('performance.max_history', 10000),
+            "max_retries": self.config_manager.get('recovery.max_retries', 3),
+            "retry_delay": self.config_manager.get('recovery.retry_delay', 1.0)
         }
     
     def record_request(self, response_time_ms: float, error: bool = False) -> None:

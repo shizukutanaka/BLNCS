@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 from .logger import get_logger
-from .config import get_config
+from .config_manager import get_config_manager
 
 
 class SecurityManager:
@@ -21,12 +21,12 @@ class SecurityManager:
     
     def __init__(self):
         self.logger = get_logger(__name__)
-        self.config = get_config()
+        self.config_manager = get_config_manager()
         
         # セキュリティ設定
-        self.enable_auth = self.config.get('security.enable_api_auth', False)
-        self.session_timeout = self.config.get('security.session_timeout', 3600)  # 1時間
-        self.max_failed_attempts = self.config.get('security.max_failed_attempts', 5)
+        self.enable_auth = self.config_manager.get('security.enable_api_auth', False)
+        self.session_timeout = self.config_manager.get('security.session_timeout', 3600)  # 1 hour
+        self.max_failed_attempts = self.config_manager.get('security.max_failed_attempts', 5)
         
         # セッション管理
         self.active_sessions = {}
@@ -161,14 +161,14 @@ class SecurityManager:
     
     def get_security_status(self) -> Dict[str, Any]:
         """セキュリティ状況取得"""
-        config = get_config()
+        config = self.config_manager
         
         try:
             # Macaroon確認
             macaroon_path = config.get('lightning.macaroon_path', '')
             macaroon_status = self.verify_macaroon_security(macaroon_path) if macaroon_path else None
             
-            # TLS証明書確認  
+            # TLS certificate check
             cert_path = config.get('lightning.cert_path', '')
             tls_status = self.verify_tls_security(cert_path) if cert_path else None
             
