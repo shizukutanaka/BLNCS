@@ -1,1 +1,1 @@
-# BLNCS Test Suite
+# Tests package

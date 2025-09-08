@@ -1,0 +1,55 @@
+# BLNCS Configuration
+# Lightweight Bitcoin Lightning Network Control System
+
+system:
+  name: "BLNCS"
+  environment: "development"
+  log_level: "info"
+  data_dir: "./data"
+  backup_dir: "./backups"
+
+lightning:
+  host: "localhost"
+  port: 8080
+  grpc_port: 10009
+  network: "testnet"
+  cert_path: "~/.lnd/tls.cert"
+  macaroon_path: "~/.lnd/data/chain/bitcoin/testnet/readonly.macaroon"
+  timeout: 10
+  connect_timeout: 5
+  max_retries: 3
+
+features:
+  enable_cache: true
+  cache_ttl: 300
+  enable_history: true
+  max_history_entries: 1000
+  enable_monitoring: true
+  monitoring_interval: 60
+
+security:
+  enable_api_auth: false
+  enable_rate_limiting: true
+  rate_limit: 100
+
+performance:
+  max_connections: 10
+  connection_timeout: 5
+  enable_request_cache: true
+  request_cache_size: 1000
+
+logging:
+  file_logging: true
+  log_file: "logs/blncs.log"
+  max_log_size: "10MB"
+  backup_count: 3
+  components:
+    lightning: "info"
+    core: "info"
+    api: "info"
+    cli: "info"
+
+development:
+  debug_mode: true
+  mock_lightning_node: true
+  enable_test_endpoints: true

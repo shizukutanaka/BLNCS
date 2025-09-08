@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  blncs-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: blncs-dev
+    environment:
+      - BLNCS_ENVIRONMENT=development
+      - BLNCS_LOG_LEVEL=DEBUG
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - .:/app:rw  # Mount source code for development
+      - blncs_dev_data:/home/blncs/.blncs/data
+      - blncs_dev_logs:/home/blncs/.blncs/logs
+    ports:
+      - "8080:8080"
+    networks:
+      - blncs-dev-network
+    command: >
+      sh -c "
+        python run_quick_tests.py &&
+        python -m blncs.cli.main status &&
+        python -m blncs.cli.main dashboard
+      "
+    stdin_open: true
+    tty: true
+
+  # Development database (if needed in future)
+  redis-dev:
+    image: redis:7-alpine
+    container_name: blncs-redis-dev
+    ports:
+      - "6379:6379"
+    networks:
+      - blncs-dev-network
+    profiles:
+      - with-redis
+
+volumes:
+  blncs_dev_data:
+    driver: local
+  blncs_dev_logs:
+    driver: local
+
+networks:
+  blncs-dev-network:
+    driver: bridge

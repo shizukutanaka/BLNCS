@@ -1,4 +1,4 @@
-# BLRCS v0.0.1 .gitignore
+# BLNCS v0.0.1 .gitignore
 
 # Environment
 .env
@@ -63,7 +63,7 @@ tls.cert
 tls.key
 
 # Analysis Reports
-BLRCS_*.json
+BLNCS_*.json
 *_REPORT.json
 *_ANALYSIS.json
 SIMPLE_BENCHMARK_RESULTS.json

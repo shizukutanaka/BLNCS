@@ -1,145 +1,142 @@
 # BLNCS Project Structure
 
-## Directory Layout
+## Overview
+BLNCS (Bitcoin Lightning Network Control System) - A lightweight Lightning Network management tool.
+
+## Directory Structure
 
 ```
 BLNCS/
-├── blrcs/                    # Main package directory
-│   ├── __init__.py          # Package initialization, version 0.0.1
-│   ├── lightning/           # Lightning Network core functionality
-│   │   ├── __init__.py     
-│   │   ├── lightning.py     # LND REST client for connectivity
-│   │   ├── lnd_connector.py # LND node connection manager
-│   │   ├── channel_manager.py # Channel management and rebalancing
-│   │   ├── payment_router.py  # Payment routing algorithms
-│   │   └── one_click_routing.py # One-click routing automation
-│   ├── api/                 # REST API and WebSocket
-│   │   ├── __init__.py
-│   │   ├── server.py        # FastAPI server implementation
-│   │   └── websocket.py     # WebSocket real-time updates
-│   ├── cli/                 # Command-line interface
-│   │   ├── __init__.py
-│   │   └── main.py          # CLI entry point and commands
-│   ├── utils/               # Utility functions
-│   │   ├── __init__.py
-│   │   ├── backup.py        # Backup utilities
-│   │   ├── error_handler.py # Error handling
-│   │   ├── file_upload.py   # File operations
-│   │   ├── file_watcher.py  # File monitoring
-│   │   ├── input_validator.py # Input validation
-│   │   ├── recovery.py      # Recovery utilities
-│   │   └── utilities.py     # General utilities
-│   └── translations/        # Internationalization
-│       ├── en.json          # English translations
-│       └── ja.json          # Japanese translations
-├── docs/                    # Documentation
-│   └── api/                # API documentation
-├── plugins/                 # Plugin system
-│   └── builtin/            # Built-in plugins
-├── .github/                # GitHub configuration
-├── CHANGELOG.md            # Version history
-├── LICENSE                 # MIT License
-├── README.md              # Project documentation
-├── setup.py               # Package configuration
-├── pyproject.toml         # Python project metadata
-├── requirements.txt       # Production dependencies
-├── requirements-dev.txt   # Development dependencies
-├── mypy.ini              # Type checking configuration
-├── .gitignore            # Git ignore rules
-├── .env.sample           # Environment variables template
-└── .pre-commit-config.yaml # Pre-commit hooks
+├── blncs/                      # Main package
+│   ├── __init__.py            # Package initialization with lazy loading
+│   ├── core/                  # Core functionality
+│   │   ├── config.py          # Configuration management
+│   │   ├── exceptions.py      # Exception definitions
+│   │   ├── logger.py          # Logging system
+│   │   ├── health.py          # Health monitoring
+│   │   ├── cache.py           # Caching system
+│   │   ├── channel_manager.py # Channel management
+│   │   ├── connection_pool.py # Connection pooling
+│   │   ├── fee_optimizer.py   # Fee optimization
+│   │   ├── history.py         # Transaction history
+│   │   ├── liquidity_manager.py # Liquidity management
+│   │   ├── recovery.py        # Recovery mechanisms
+│   │   ├── security.py        # Security features
+│   │   ├── setup.py           # Setup utilities
+│   │   ├── shutdown.py        # Graceful shutdown
+│   │   ├── simple_backup.py   # Backup system
+│   │   ├── performance/       # Performance monitoring
+│   │   │   ├── auto_tuner.py
+│   │   │   ├── metrics_collector.py
+│   │   │   ├── monitoring_thread.py
+│   │   │   ├── unified_monitor.py
+│   │   │   └── wallet_monitor.py
+│   │   └── validation/        # Configuration validation
+│   │       ├── config_validator.py
+│   │       ├── field_validators.py
+│   │       └── validation_rules.py
+│   ├── lightning/             # Lightning Network integration
+│   │   ├── __init__.py       
+│   │   └── client.py          # LN node client
+│   ├── cli/                   # Command-line interface
+│   │   ├── main.py            # CLI entry point
+│   │   └── commands/          # CLI commands
+│   │       ├── channel_commands.py
+│   │       ├── config_commands.py
+│   │       ├── info_commands.py
+│   │       ├── liquidity_commands.py
+│   │       ├── management_commands.py
+│   │       └── network_commands.py
+│   └── utils/                 # Utility functions
+│       ├── __init__.py
+│       ├── lightning_helpers.py
+│       ├── network_test.py
+│       ├── qr_generator.py
+│       ├── setup_helper.py
+│       └── system_info.py
+├── tests/                      # Test suite
+│   ├── test_basic.py          # Basic functionality tests
+│   ├── test_comprehensive.py  # Comprehensive tests
+│   ├── test_integration.py    # Integration tests
+│   └── test_quality.py        # Quality tests
+├── docs/                       # Documentation
+│   └── API.md                 # API documentation
+├── config/                     # Configuration files
+│   └── config.yaml            # Default configuration
+├── pyproject.toml             # Project metadata and dependencies
+├── requirements.txt           # Python dependencies
+├── run_quick_tests.py         # Quick test runner
+├── README.md                  # Project documentation
+├── Makefile                   # Build automation
+├── Dockerfile                 # Docker configuration
+├── docker-compose.yml         # Docker Compose setup
+└── docker-compose.dev.yml     # Development Docker setup
 
 ```
 
-## Module Descriptions
+## Key Components
 
-### `/blrcs/lightning/`
-Core Lightning Network functionality:
-- **lightning.py**: Minimal LND REST client for health checks and connectivity
-- **lnd_connector.py**: Manages connection to LND node, handles macaroons and TLS
-- **channel_manager.py**: Channel rebalancing, fee optimization, channel health monitoring
-- **payment_router.py**: Route finding algorithms, payment path optimization
-- **one_click_routing.py**: Automated routing with one-click operation
+### Core System
+- **config.py**: Configuration management with YAML support
+- **exceptions.py**: Custom exception hierarchy  
+- **logger.py**: Centralized logging system
+- **health.py**: System health monitoring
+- **performance/**: Performance monitoring and optimization
+- **backup/**: Backup and restore functionality
+- **validation/**: Configuration validation
 
-### `/blrcs/api/`
-REST API and real-time communication:
-- **server.py**: FastAPI server with endpoints for routing, channels, and monitoring
-- **websocket.py**: WebSocket handler for real-time updates and notifications
+### Lightning Integration
+- **client.py**: Lightning node client with automatic fallback
 
-### `/blrcs/cli/`
-Command-line interface:
-- **main.py**: CLI commands for starting, stopping, status checks, and manual operations
+### CLI Interface
+- **main.py**: CLI entry point with 20+ commands
+- **commands/**: Individual CLI command implementations
 
-### `/blrcs/utils/`
-Support utilities:
-- **backup.py**: Channel backup and recovery
-- **error_handler.py**: Centralized error handling and logging
-- **file operations**: Upload, watching, and validation
-- **recovery.py**: System recovery procedures
+### Additional Components
+- **api/**: Basic API functionality
+- **monitoring/**: System monitoring and metrics
+- **reporting/**: Report generation
+- **ui/**: User interface enhancements
+- **utils/**: Utility functions including QR generation
 
-## Key Features (Planned)
+### Testing
+- **test_basic.py**: Core functionality tests
+- **run_quick_tests.py**: Fast test runner for development
 
-1. **LND Integration**: Connect to LND nodes
-2. **Channel Management**: Basic channel operations
-3. **Payment Routing**: Route payments through Lightning Network
-4. **Monitoring**: Track channel states and metrics
-5. **REST API**: HTTP API for integration
-6. **CLI Interface**: Command-line management tools
-7. **Plugin System**: Extensible architecture
+## Installation
+
+```bash
+# Clone repository
+git clone https://github.com/yourusername/blncs.git
+cd blncs
+
+# Install dependencies
+pip install -r requirements.txt
+pip install -e .
+```
 
 ## Usage
 
-### Quick Start (Development)
 ```bash
-git clone https://github.com/shizukutanaka/BLNCS.git
-cd BLNCS
-pip install -e .
-blncs start --lnd-dir ~/.lnd
-```
+# Setup configuration
+python -m blncs.cli.main setup
 
-### Python API (Example)
-```python
-from blncs.lightning import LNDConnector
+# Check status
+python -m blncs.cli.main status
 
-connector = LNDConnector()
-await connector.connect()
-```
+# View all commands
+python -m blncs.cli.main --help
 
-### REST API
-```bash
-curl http://localhost:8080/api/status
-```
-
-### CLI Commands (Planned)
-```bash
-blncs status       # Check node status
-blncs channels     # List channels
-blncs monitor      # Monitor resources
+# Run tests
+python run_quick_tests.py
 ```
 
 ## Development
 
-### Setup Development Environment
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .[dev]
-```
-
-### Run Tests
-```bash
-pytest tests/
-```
-
-### Type Checking
-```bash
-mypy blrcs/
-```
-
-## Version
-
-Current: v0.0.1 (Alpha)
-
-## License
-
-MIT License - See LICENSE file for details
+The project follows Python best practices with:
+- Type hints and proper documentation
+- Comprehensive error handling
+- Modular architecture with lazy loading
+- Clear separation of concerns
+- Minimal dependencies for portability
+- Focus on practical Lightning Network functionality

@@ -1,9 +1,4 @@
 """
-BLNCS CLI Module
-
-Command-line interface for Lightning routing control
+BLNCS CLI Package
+Command Line Interface for Bitcoin Lightning Network Control System
 """
-
-from .main import cli_main
-
-__all__ = ['cli_main']

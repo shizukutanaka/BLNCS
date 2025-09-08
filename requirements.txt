@@ -1,65 +1,19 @@
-# BLNCS Requirements - Bitcoin Lightning Routing Control System
+# BLNCS - Bitcoin Lightning Network Control System
+# Core dependencies
 
-# Core Framework
-fastapi==0.112.0
-uvicorn[standard]==0.30.5
-aiofiles==23.2.1
-httpx==0.24.1
+# Essential libraries
+pyyaml>=6.0.0
+requests>=2.31.0
+click>=8.1.0
+psutil>=5.9.0
 
-# Lightning Network
-grpcio==1.60.0
-grpcio-tools==1.60.0
-protobuf==4.25.1
-macaroons==0.13.0
-pyln-client==23.8
-lnd-grpc-client==0.5.4
+# Lightning Network gRPC
+grpcio>=1.59.0
+grpcio-tools>=1.59.0
+protobuf>=4.24.0
+googleapis-common-protos>=1.60.0
 
-# Async Support
-asyncio==3.4.3
-aiohttp==3.9.1
-websockets==12.0
-
-# Configuration
-python-dotenv==1.0.1
-pydantic==2.8.2
-pyyaml==6.0.1
-toml==0.10.2
-
-# Cryptography
-cryptography==41.0.7
-
-# Database
-sqlalchemy==2.0.23
-aiosqlite==0.20.0
-redis==5.0.1
-
-# Monitoring & Logging
-prometheus-client==0.19.0
-structlog==23.2.0
-
-# Routing Algorithms
-networkx==3.2.1
-numpy==1.25.2
-scipy==1.11.4
-
-# CLI
-click==8.1.7
-rich==13.7.0
-
-# API Documentation
-python-multipart==0.0.6
-
-# Testing
-pytest==8.3.2
-pytest-asyncio==0.23.8
-pytest-cov==4.1.0
-pytest-mock==3.12.0
-
-# Development
-black==23.12.0
-ruff==0.1.9
-mypy==1.7.1
-
-# Utilities
-python-dateutil==2.8.2
-pytz==2023.3
+# Development tools (optional)
+# pytest>=7.4.0
+# black>=23.0.0
+# flake8>=6.0.0

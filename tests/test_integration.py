@@ -1,201 +1,200 @@
+#!/usr/bin/env python3
 """
-Integration tests for Lightning routing system
+Integration Tests for BLNCS
+Tests that verify component integration and end-to-end workflows.
 """
 
-import pytest
-import asyncio
-from unittest.mock import Mock, AsyncMock, patch
-from blncs.lightning import OneClickLightningRouter
-from blncs.lightning.lnd_connector import LNDConnector
-from blncs.lightning.payment_router import PaymentRouter, ChannelEdge
-from datetime import datetime
+import unittest
+import sys
+import tempfile
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from blncs.lightning.client import LightningClient
+from blncs.core.config import get_config
+from blncs.core.health import get_health_checker
+from blncs.core.performance import get_unified_monitor
 
 
-@pytest.fixture
-def mock_lnd_connector():
-    """Create mock LND connector"""
-    connector = Mock(spec=LNDConnector)
-    connector.connect = AsyncMock(return_value=True)
-    connector.get_info = AsyncMock(return_value={
-        "identity_pubkey": "test_node_123",
-        "alias": "TestNode",
-        "num_active_channels": 5,
-        "num_peers": 3
-    })
-    connector.list_channels = AsyncMock(return_value=[
-        {
-            "channel_id": "123456789",
-            "remote_pubkey": "peer_node_1",
-            "capacity": "1000000",
-            "local_balance": "600000",
-            "remote_balance": "400000",
-            "active": True
-        }
-    ])
-    return connector
-
-
-@pytest.fixture
-def sample_channels():
-    """Create sample channel edges for testing"""
-    return [
-        ChannelEdge(
-            channel_id="channel_1",
-            node1="node_a",
-            node2="node_b",
-            capacity=1000000,
-            fee_base_msat=1000,
-            fee_rate_millimsat=1,
-            time_lock_delta=40,
-            min_htlc=1000,
-            max_htlc_msat=900000000,
-            last_update=datetime.now(),
-            active=True,
-            disabled=False,
-            success_rate=0.95,
-            avg_response_time=100.0,
-            liquidity_estimate=0.6
-        ),
-        ChannelEdge(
-            channel_id="channel_2",
-            node1="node_b",
-            node2="node_c",
-            capacity=2000000,
-            fee_base_msat=500,
-            fee_rate_millimsat=2,
-            time_lock_delta=30,
-            min_htlc=1000,
-            max_htlc_msat=1800000000,
-            last_update=datetime.now(),
-            active=True,
-            disabled=False,
-            success_rate=0.98,
-            avg_response_time=80.0,
-            liquidity_estimate=0.7
-        )
-    ]
-
-
-@pytest.mark.asyncio
-async def test_one_click_router_integration(mock_lnd_connector):
-    """Test one-click router with mock LND"""
-    with patch("blncs.lightning.one_click_routing.Path.exists", return_value=True):
-        router = OneClickLightningRouter()
-        router.lnd_connector = mock_lnd_connector
+class TestSystemIntegration(unittest.TestCase):
+    """Test system-wide integration"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.client = LightningClient()
+        self.config = get_config()
+        self.health_checker = get_health_checker()
+        self.monitor = get_unified_monitor()
+    
+    def test_client_config_integration(self):
+        """Test Lightning client uses configuration properly"""
+        # Test default configuration
+        self.assertEqual(self.client.host, 'localhost')
+        self.assertEqual(self.client.port, 8080)
+        self.assertEqual(self.client.network, 'testnet')
         
-        # Mock file system checks
-        with patch("pathlib.Path.exists", return_value=True):
-            success = await router.start()
-            assert success == True
-            
-            # Check dashboard data
-            dashboard = router.get_dashboard_data()
-            assert dashboard["status"] == "connected"
-            assert dashboard["channels"]["total"] == 2
-            assert dashboard["config"]["auto_optimize"] == True
-
-
-@pytest.mark.asyncio
-async def test_payment_router_integration(mock_lnd_connector, sample_channels):
-    """Test payment router with sample data"""
-    router = PaymentRouter(mock_lnd_connector)
-    
-    # Update pathfinder with sample channels
-    router.pathfinder.update_graph(sample_channels)
-    
-    # Test routing
-    result = await router.route_payment(
-        target="node_c",
-        amount_msat=100000
-    )
-    
-    assert result is not None
-    assert "error" not in result or result.get("type") in ["single", "multipath"]
-
-
-@pytest.mark.asyncio
-async def test_channel_rebalancing():
-    """Test channel rebalancing logic"""
-    router = OneClickLightningRouter()
-    
-    # Setup test channels
-    router.channels = [
-        {
-            "channel_id": "test_1",
-            "peer": "peer_1",
-            "capacity": 1000000,
-            "local_balance": 100000,  # 10% - needs rebalancing
-            "remote_balance": 900000,
-            "active": True
-        },
-        {
-            "channel_id": "test_2",
-            "peer": "peer_2",
-            "capacity": 2000000,
-            "local_balance": 1900000,  # 95% - needs rebalancing
-            "remote_balance": 100000,
-            "active": True
+        # Test custom configuration
+        custom_config = {
+            'lightning': {
+                'host': 'test.example.com',
+                'port': 9999,
+                'network': 'mainnet'
+            }
         }
+        custom_client = LightningClient(custom_config)
+        self.assertEqual(custom_client.host, 'test.example.com')
+        self.assertEqual(custom_client.port, 9999)
+        self.assertEqual(custom_client.network, 'mainnet')
+    
+    def test_health_monitoring_integration(self):
+        """Test health monitoring works with all components"""
+        # Quick status check
+        status = self.health_checker.get_quick_status()
+        self.assertIsInstance(status, dict)
+        self.assertIn('status', status)
+        self.assertIn('timestamp', status)
+        
+        # Status should be valid string
+        self.assertIn(status['status'], ['healthy', 'warning', 'error', 'unknown'])
+    
+    def test_monitoring_system_integration(self):
+        """Test monitoring system integration"""
+        # Monitor should be creatable
+        self.assertIsNotNone(self.monitor)
+        
+        # Should have basic monitoring capabilities
+        # Note: We don't test actual monitoring to avoid side effects
+    
+    def test_client_fallback_behavior(self):
+        """Test client fallback when no real node available"""
+        # When no real Lightning node is available, should return fallback data
+        info = self.client.get_info()
+        self.assertIn('alias', info)
+        self.assertIn('network', info)
+        self.assertEqual(info['network'], 'testnet')
+        
+        balance = self.client.get_balance()
+        self.assertIn('total', balance)
+        self.assertIsInstance(balance['total'], int)
+        
+        channels = self.client.list_channels()
+        self.assertIsInstance(channels, list)
+
+
+class TestConfigurationIntegration(unittest.TestCase):
+    """Test configuration system integration"""
+    
+    def test_config_persistence(self):
+        """Test configuration changes persist"""
+        config = get_config()
+        
+        # Set a test value
+        original_value = config.get('test.integration', 'default')
+        config.set('test.integration', 'test_value')
+        
+        # Verify it's set
+        self.assertEqual(config.get('test.integration'), 'test_value')
+        
+        # Get a new config instance
+        new_config = get_config()
+        self.assertEqual(new_config.get('test.integration'), 'test_value')
+        
+        # Clean up
+        config.set('test.integration', original_value)
+    
+    def test_config_validation_integration(self):
+        """Test config validation works with real config"""
+        from blncs.core.validator import get_validator
+        
+        validator = get_validator()
+        
+        # Should be able to validate default config
+        result = validator.validate_config("config/config.yaml")
+        self.assertIsNotNone(result)
+        self.assertTrue(hasattr(result, 'is_valid'))
+
+
+class TestWorkflowIntegration(unittest.TestCase):
+    """Test common workflow integration"""
+    
+    def test_status_check_workflow(self):
+        """Test complete status check workflow"""
+        # This simulates what happens when user runs 'status' command
+        client = LightningClient()
+        health_checker = get_health_checker()
+        
+        # Get node info (with fallback)
+        node_info = client.get_info()
+        self.assertIsInstance(node_info, dict)
+        
+        # Get balance (with fallback)  
+        balance = client.get_balance()
+        self.assertIsInstance(balance, dict)
+        
+        # Get health status
+        health_status = health_checker.get_quick_status()
+        self.assertIsInstance(health_status, dict)
+        
+        # All should complete without errors
+        self.assertTrue(True)  # If we get here, workflow completed
+    
+    def test_info_display_workflow(self):
+        """Test node info display workflow"""
+        client = LightningClient()
+        
+        info = client.get_info()
+        
+        # Should have all expected fields for display
+        expected_fields = ['alias', 'identity_pubkey', 'network', 'version']
+        for field in expected_fields:
+            self.assertIn(field, info)
+            self.assertIsNotNone(info[field])
+    
+    def test_balance_display_workflow(self):
+        """Test balance display workflow"""
+        client = LightningClient()
+        
+        balance = client.get_balance()
+        
+        # Should have all expected balance fields
+        expected_fields = ['total', 'confirmed', 'channel_local']
+        for field in expected_fields:
+            self.assertIn(field, balance)
+            self.assertIsInstance(balance[field], int)
+
+
+def run_integration_tests():
+    """Run all integration tests"""
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+    
+    # Add test classes
+    test_classes = [
+        TestSystemIntegration,
+        TestConfigurationIntegration,
+        TestWorkflowIntegration
     ]
     
-    # Run rebalancing
-    await router.rebalance_channels()
+    for test_class in test_classes:
+        tests = loader.loadTestsFromTestCase(test_class)
+        suite.addTests(tests)
     
-    # Check if balances were adjusted (in real implementation)
-    for channel in router.channels:
-        local_ratio = channel["local_balance"] / channel["capacity"]
-        assert 0.4 <= local_ratio <= 0.6  # Should be near 50%
+    # Run tests
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    return result.wasSuccessful()
 
 
-@pytest.mark.asyncio
-async def test_route_finding(sample_channels):
-    """Test route finding algorithm"""
-    from blncs.lightning.payment_router import PaymentPathfinder
+if __name__ == '__main__':
+    print("Running BLNCS Integration Tests...")
+    success = run_integration_tests()
     
-    pathfinder = PaymentPathfinder(max_routes=3)
-    pathfinder.update_graph(sample_channels)
-    
-    # Find routes
-    routes = await pathfinder.find_routes(
-        source="node_a",
-        target="node_c",
-        amount_msat=500000
-    )
-    
-    assert len(routes) <= 3
-    if routes:
-        route = routes[0]
-        assert route.hops[0] == "node_a"
-        assert route.hops[-1] == "node_c"
-        assert route.total_fee_msat >= 0
-        assert route.probability > 0
-
-
-@pytest.mark.asyncio
-async def test_fee_optimization():
-    """Test fee optimization logic"""
-    router = OneClickLightningRouter()
-    
-    # Setup test channels with different balances
-    router.channels = [
-        {
-            "channel_id": "low_balance",
-            "capacity": 1000000,
-            "local_balance": 200000,  # 20% - should increase fees
-            "remote_balance": 800000,
-            "active": True
-        },
-        {
-            "channel_id": "high_balance",
-            "capacity": 1000000,
-            "local_balance": 800000,  # 80% - should decrease fees
-            "remote_balance": 200000,
-            "active": True
-        }
-    ]
-    
-    # Run fee optimization
-    await router.optimize_fees()
-    
-    # Fees should be adjusted based on balance
-    # (In real implementation, would check actual fee updates)
+    if success:
+        print("\n✅ All integration tests passed!")
+        sys.exit(0)
+    else:
+        print("\n❌ Some integration tests failed!")
+        sys.exit(1)
