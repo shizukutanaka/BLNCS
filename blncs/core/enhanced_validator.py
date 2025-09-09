@@ -51,6 +51,16 @@ class ValidationResult:
     warnings: List[str] = field(default_factory=list)
     security_issues: List[str] = field(default_factory=list)
     sanitized: bool = False
+    
+    @property
+    def is_valid(self) -> bool:
+        """Backward compatibility property"""
+        return self.valid
+    
+    @property
+    def errors(self) -> List[str]:
+        """Backward compatibility property"""
+        return [self.error_message] if self.error_message else []
 
 
 class EnhancedValidator:
@@ -590,6 +600,103 @@ class EnhancedValidator:
             value = name[:100-len(ext)-1] + ('.' + ext if ext else '')
         
         return value
+    
+    def validate_config(self, config_data: Union[Dict[str, Any], str]) -> ValidationResult:
+        """Validate configuration data structure or file"""
+        try:
+            # If string is provided, treat as file path and load config
+            if isinstance(config_data, str):
+                import yaml
+                from pathlib import Path
+                
+                config_path = Path(config_data)
+                if not config_path.exists():
+                    return ValidationResult(
+                        valid=False,
+                        error_message=f"Configuration file not found: {config_data}"
+                    )
+                
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config_data = yaml.safe_load(f)
+                except Exception as e:
+                    return ValidationResult(
+                        valid=False,
+                        error_message=f"Failed to load configuration file: {str(e)}"
+                    )
+            
+            if not isinstance(config_data, dict):
+                return ValidationResult(
+                    valid=False,
+                    error_message="Configuration must be a dictionary"
+                )
+            
+            errors = []
+            warnings = []
+            
+            # Check for required top-level sections
+            required_sections = ['lightning', 'system']
+            for section in required_sections:
+                if section not in config_data:
+                    errors.append(f"Missing required config section: {section}")
+            
+            # Validate lightning config if present
+            if 'lightning' in config_data:
+                lightning_config = config_data['lightning']
+                
+                # Check required lightning fields
+                required_fields = ['host', 'port']
+                for field in required_fields:
+                    if field not in lightning_config:
+                        errors.append(f"Missing required lightning config field: {field}")
+                
+                # Validate host
+                if 'host' in lightning_config:
+                    host = lightning_config['host']
+                    if not isinstance(host, str) or not host:
+                        errors.append("Lightning host must be a non-empty string")
+                    elif not self.PATTERNS['hostname'].match(host) and host not in ['localhost', '127.0.0.1']:
+                        warnings.append(f"Lightning host format may be invalid: {host}")
+                
+                # Validate port
+                if 'port' in lightning_config:
+                    port = lightning_config['port']
+                    if not isinstance(port, int) or port < 1 or port > 65535:
+                        errors.append("Lightning port must be an integer between 1 and 65535")
+            
+            # Validate system config if present
+            if 'system' in config_data:
+                system_config = config_data['system']
+                
+                # Validate log level
+                if 'log_level' in system_config:
+                    log_level = system_config['log_level']
+                    valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+                    if log_level not in valid_levels:
+                        errors.append(f"Invalid log level: {log_level}. Must be one of: {valid_levels}")
+                
+                # Validate directories exist if specified
+                dir_fields = ['data_dir', 'log_dir', 'backup_dir']
+                for field in dir_fields:
+                    if field in system_config:
+                        dir_path = system_config[field]
+                        if not isinstance(dir_path, str):
+                            errors.append(f"{field} must be a string")
+                        elif not re.match(r'^[a-zA-Z0-9_/.-]+$', dir_path):
+                            warnings.append(f"{field} path contains potentially unsafe characters: {dir_path}")
+            
+            return ValidationResult(
+                valid=len(errors) == 0,
+                value=config_data,
+                error_message="; ".join(errors) if errors else None,
+                warnings=warnings
+            )
+            
+        except Exception as e:
+            return ValidationResult(
+                valid=False,
+                error_message=f"Config validation error: {str(e)}"
+            )
     
     def get_statistics(self) -> Dict[str, Any]:
         """Get validation statistics"""

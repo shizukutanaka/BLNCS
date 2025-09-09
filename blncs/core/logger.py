@@ -85,16 +85,11 @@ def get_logger(name: Optional[str] = None, setup_if_needed: bool = True) -> logg
     
     # Auto-setup if no handlers exist
     if setup_if_needed and not logger.handlers:
-        try:
-            from .config import get_config
-            config = get_config()
-            log_level = config.get('system.log_level', 'INFO')
-            enable_file_logging = config.get('system.enable_file_logging', True)
-            
-            logger = setup_logger(logger_name, log_level, enable_file_logging)
-        except ImportError:
-            # Fallback if config is not available
-            logger = setup_logger(logger_name)
+        # Use environment variables to avoid circular imports
+        log_level = os.getenv('BLNCS_LOG_LEVEL', 'INFO')
+        enable_file_logging = os.getenv('BLNCS_FILE_LOGGING', 'true').lower() == 'true'
+        
+        logger = setup_logger(logger_name, log_level, enable_file_logging)
     
     return logger
 

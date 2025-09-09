@@ -16,9 +16,8 @@ import json
 from .logger import get_logger
 from .config_manager import get_config_manager
 from .fast_cache import get_fast_cache
-from .health import get_health_checker, HealthStatus, HealthCheckResult
+# Lazy imports to avoid circular dependency
 from .metrics import get_metrics_collector, MetricsCollector
-from .recovery_enhanced import get_enhanced_error_recovery
 from .circuit_breaker import CircuitBreaker, CircuitState
 
 
@@ -61,7 +60,7 @@ class MonitoringAlert:
 class SystemSnapshot:
     """Comprehensive system snapshot"""
     timestamp: datetime
-    health_status: HealthCheckResult
+    health_status: Dict[str, Any]  # Health check result
     metrics: Dict[str, Any]
     circuit_breaker_states: Dict[str, CircuitState]
     active_recoveries: Set[str]
@@ -77,9 +76,21 @@ class EnhancedUnifiedMonitoring:
         self.logger = get_logger(__name__)
         self.config = get_config_manager()
         self.cache = get_fast_cache()
-        self.health_checker = get_health_checker()
+        # Lazy import to avoid circular dependency
+        try:
+            from .health import get_health_checker
+            self.health_checker = get_health_checker()
+        except ImportError:
+            self.logger.warning("Health checker unavailable - some monitoring features disabled")
+            self.health_checker = None
         self.metrics = get_metrics_collector()
-        self.recovery_system = get_enhanced_error_recovery()
+        # Lazy import for recovery system
+        try:
+            from .recovery_enhanced import get_enhanced_error_recovery
+            self.recovery_system = get_enhanced_error_recovery()
+        except ImportError:
+            self.logger.warning("Enhanced error recovery unavailable - using basic recovery")
+            self.recovery_system = None
         self.lightning_client = lightning_client
         
         # Configuration
@@ -113,25 +124,31 @@ class EnhancedUnifiedMonitoring:
         self.alert_suppression_rules = {}
         self.last_alert_times = {}
         
+        # Import circuit breaker config class
+        from .circuit_breaker import CircuitBreakerConfig
+        
         # Circuit breakers for monitoring components
         self.circuit_breakers = {
             'health_checks': CircuitBreaker(
-                name='monitoring_health_checks',
-                failure_threshold=3,
-                timeout=30.0,
-                reset_timeout=60.0
+                CircuitBreakerConfig(
+                    name='monitoring_health_checks',
+                    failure_threshold=3,
+                    timeout=30.0
+                )
             ),
             'metrics_collection': CircuitBreaker(
-                name='monitoring_metrics_collection', 
-                failure_threshold=5,
-                timeout=60.0,
-                reset_timeout=120.0
+                CircuitBreakerConfig(
+                    name='monitoring_metrics_collection', 
+                    failure_threshold=5,
+                    timeout=60.0
+                )
             ),
             'lightning_monitoring': CircuitBreaker(
-                name='monitoring_lightning',
-                failure_threshold=3,
-                timeout=45.0,
-                reset_timeout=90.0
+                CircuitBreakerConfig(
+                    name='monitoring_lightning',
+                    failure_threshold=3,
+                    timeout=45.0
+                )
             )
         }
         
@@ -152,19 +169,19 @@ class EnhancedUnifiedMonitoring:
     def _initialize_metrics(self):
         """Initialize monitoring metrics"""
         self.monitoring_collections_counter = self.metrics.counter(
-            'monitoring_collections_total', 'Total monitoring collections'
+            'monitoring_collections_total'
         )
         self.monitoring_errors_counter = self.metrics.counter(
-            'monitoring_errors_total', 'Total monitoring errors'
+            'monitoring_errors_total'
         )
         self.monitoring_duration_histogram = self.metrics.histogram(
-            'monitoring_collection_duration_seconds', 'Monitoring collection duration'
+            'monitoring_collection_duration_seconds'
         )
         self.alerts_generated_counter = self.metrics.counter(
-            'alerts_generated_total', 'Total alerts generated'
+            'alerts_generated_total'
         )
         self.circuit_breaker_trips_counter = self.metrics.counter(
-            'monitoring_circuit_breaker_trips_total', 'Circuit breaker trips in monitoring'
+            'monitoring_circuit_breaker_trips_total'
         )
     
     def start(self) -> bool:
@@ -301,26 +318,34 @@ class EnhancedUnifiedMonitoring:
             lightning_status=lightning_data
         )
     
-    def _collect_health_data(self) -> HealthCheckResult:
+    def _collect_health_data(self) -> Dict[str, Any]:
         """Collect health check data with circuit breaker protection"""
         cb = self.circuit_breakers['health_checks']
         
         try:
             with cb:
-                health_result = self.health_checker.check_system_health()
-                return health_result
+                if self.health_checker:
+                    health_result = self.health_checker.run_full_health_check()
+                    return health_result
+                else:
+                    return {
+                        'status': 'unknown',
+                        'message': "Health checker not available",
+                        'checks': {},
+                        'metadata': {'health_checker_available': False}
+                    }
         except Exception as e:
             self.logger.warning(f"Health data collection failed: {e}")
             if cb.state == CircuitState.OPEN:
                 self.circuit_breaker_trips_counter.inc({'component': 'health_checks'})
             
             # Return fallback health result
-            return HealthCheckResult(
-                status=HealthStatus.UNKNOWN,
-                message="Health check unavailable",
-                checks={},
-                metadata={'error': str(e)}
-            )
+            return {
+                'status': 'unknown',
+                'message': "Health check unavailable",
+                'checks': {},
+                'metadata': {'error': str(e)}
+            }
     
     def _collect_metrics_data(self) -> Dict[str, Any]:
         """Collect metrics data with circuit breaker protection"""
@@ -495,7 +520,8 @@ class EnhancedUnifiedMonitoring:
         alerts = []
         
         # Health status alerts
-        if snapshot.health_status.status == HealthStatus.UNHEALTHY:
+        health_status = snapshot.health_status.get('status', 'unknown') if isinstance(snapshot.health_status, dict) else 'unknown'
+        if health_status == 'unhealthy':
             alerts.append(MonitoringAlert(
                 timestamp=datetime.now(),
                 severity=AlertSeverity.CRITICAL,
@@ -504,7 +530,7 @@ class EnhancedUnifiedMonitoring:
                 message=f"System health check failed: {snapshot.health_status.message}",
                 metadata={'health_result': snapshot.health_status}
             ))
-        elif snapshot.health_status.status == HealthStatus.DEGRADED:
+        elif health_status == 'degraded':
             alerts.append(MonitoringAlert(
                 timestamp=datetime.now(),
                 severity=AlertSeverity.WARNING,
@@ -641,7 +667,7 @@ class EnhancedUnifiedMonitoring:
         else:
             self.logger.info(f"ALERT [{alert.severity.name}] {alert.category}: {alert.message}")
     
-    def _process_health_alerts(self, health_result: HealthCheckResult) -> None:
+    def _process_health_alerts(self, health_result: Dict[str, Any]) -> None:
         """Process health-specific alerts"""
         # This method can contain health-specific alert logic
         pass
@@ -677,13 +703,13 @@ class EnhancedUnifiedMonitoring:
     
     def _update_performance_trends(self, snapshot: SystemSnapshot) -> None:
         """Update performance trend data"""
+        health_status = snapshot.health_status.get('status', 'unknown') if isinstance(snapshot.health_status, dict) else 'unknown'
         trend_data = {
             'timestamp': snapshot.timestamp,
             'cpu_percent': snapshot.performance_summary.get('cpu_percent', 0),
             'memory_percent': snapshot.performance_summary.get('memory_percent', 0),
             'disk_percent': snapshot.performance_summary.get('disk_percent', 0),
-            'health_score': 100 if snapshot.health_status.status == HealthStatus.HEALTHY else 
-                           50 if snapshot.health_status.status == HealthStatus.DEGRADED else 0,
+            'health_score': 100 if health_status == 'healthy' else 50 if health_status == 'degraded' else 0,
             'active_recoveries': len(snapshot.active_recoveries),
             'circuit_breaker_issues': sum(1 for state in snapshot.circuit_breaker_states.values() 
                                          if state == CircuitState.OPEN)
