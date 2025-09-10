@@ -26,6 +26,7 @@ from .checks import (
 from .manager import (
     HealthMonitoringManager,
     get_health_manager,
+    get_health_checker,
     run_health_check,
     run_all_health_checks,
     get_health_summary
@@ -53,6 +54,7 @@ __all__ = [
     # Manager and utilities
     'HealthMonitoringManager',
     'get_health_manager',
+    'get_health_checker',
     'run_health_check',
     'run_all_health_checks',
     'get_health_summary'

@@ -478,9 +478,14 @@ async def get_health_summary() -> HealthSummary:
     return await run_all_health_checks()
 
 
+# Backward compatibility alias
+get_health_checker = get_health_manager
+
+
 __all__ = [
     'HealthMonitoringManager',
     'get_health_manager',
+    'get_health_checker',
     'run_health_check',
     'run_all_health_checks',
     'get_health_summary'

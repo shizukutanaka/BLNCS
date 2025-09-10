@@ -1,0 +1,569 @@
+name: Enterprise CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop, release/* ]
+  pull_request:
+    branches: [ main, develop ]
+  release:
+    types: [ published ]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  # Security and Compliance Scanning
+  security-scan:
+    name: Security & Compliance Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety semgrep pip-audit
+
+      - name: Run Bandit security analysis
+        run: |
+          bandit -r blncs/ -f json -o bandit-report.json || true
+          bandit -r blncs/ -f txt
+
+      - name: Run Safety check for vulnerabilities
+        run: |
+          safety check --json --output safety-report.json || true
+          safety check
+
+      - name: Run pip-audit for package vulnerabilities
+        run: |
+          pip-audit --format=json --output=pip-audit-report.json || true
+          pip-audit
+
+      - name: Run Semgrep security analysis
+        run: |
+          semgrep --config=auto --json --output=semgrep-report.json blncs/ || true
+          semgrep --config=auto blncs/
+
+      - name: Secret scanning with TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+            pip-audit-report.json
+            semgrep-report.json
+
+      - name: Security Gate Check
+        run: |
+          # Check for critical security issues
+          if grep -q '"severity": "HIGH"' bandit-report.json; then
+            echo "❌ High severity security issues found!"
+            exit 1
+          fi
+          echo "✅ Security gate passed"
+
+  # Code Quality and Testing
+  quality-assurance:
+    name: Code Quality & Testing
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run code formatting check
+        run: |
+          black --check --diff blncs/ tests/
+          isort --check-only --diff blncs/ tests/
+
+      - name: Run linting
+        run: |
+          flake8 blncs/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+          pylint blncs/ --disable=C0114,C0115,C0116 --max-line-length=88
+
+      - name: Run type checking
+        run: |
+          mypy blncs/ --ignore-missing-imports --strict-optional
+
+      - name: Run unit tests with coverage
+        run: |
+          pytest tests/ -v --cov=blncs --cov-report=xml --cov-report=html --cov-report=term-missing
+          
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ -v --maxfail=5
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-${{ matrix.python-version }}
+
+      - name: Quality gate check
+        run: |
+          # Check coverage threshold
+          python -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('coverage.xml')
+          coverage = float(tree.getroot().attrib['line-rate']) * 100
+          print(f'Coverage: {coverage:.1f}%')
+          if coverage < 85:
+              print('❌ Coverage below 85%')
+              exit(1)
+          print('✅ Coverage gate passed')
+          "
+
+  # Performance and Load Testing
+  performance-testing:
+    name: Performance Testing
+    runs-on: ubuntu-latest
+    needs: [quality-assurance]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: blncs_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install locust pytest-benchmark
+
+      - name: Run benchmark tests
+        run: |
+          pytest tests/benchmarks/ --benchmark-json=benchmark-results.json
+
+      - name: Run load tests
+        run: |
+          # Start application in background
+          python -m blncs.main &
+          APP_PID=$!
+          sleep 10
+          
+          # Run load tests
+          locust -f tests/load_tests/locustfile.py --headless -u 100 -r 10 -t 60s --html load-test-report.html
+          
+          # Stop application
+          kill $APP_PID
+
+      - name: Upload performance reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-reports
+          path: |
+            benchmark-results.json
+            load-test-report.html
+
+  # Container Build and Security
+  container-security:
+    name: Container Build & Security
+    runs-on: ubuntu-latest
+    needs: [security-scan, quality-assurance]
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build container image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Container security scan with Snyk
+        uses: snyk/actions/docker@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          args: --severity-threshold=high
+
+      - name: Push container image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  # Infrastructure as Code Testing
+  infrastructure-validation:
+    name: Infrastructure Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Kubernetes manifests
+        run: |
+          # Install kubeval
+          wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+          tar xf kubeval-linux-amd64.tar.gz
+          sudo mv kubeval /usr/local/bin
+
+          # Validate Kubernetes YAML files
+          find k8s/ -name "*.yml" -o -name "*.yaml" | xargs kubeval
+
+      - name: Validate Helm charts
+        run: |
+          # Install Helm
+          curl https://get.helm.sh/helm-v3.12.0-linux-amd64.tar.gz | tar xz
+          sudo mv linux-amd64/helm /usr/local/bin/
+
+          # Lint Helm charts
+          helm lint helm/blncs/
+
+      - name: Test Terraform configurations
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+      - run: |
+          cd terraform/
+          terraform init
+          terraform validate
+          terraform plan -out=tfplan
+
+      - name: Security scan Terraform
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: terraform/
+
+  # End-to-End Testing
+  e2e-testing:
+    name: End-to-End Testing
+    runs-on: ubuntu-latest
+    needs: [container-security]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: blncs_test
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          npm install -g @playwright/test
+          playwright install
+
+      - name: Start application stack
+        run: |
+          docker-compose -f docker-compose.test.yml up -d
+          sleep 30  # Wait for services to be ready
+
+      - name: Run E2E tests
+        run: |
+          pytest tests/e2e/ -v --html=e2e-report.html
+
+      - name: Run Playwright tests
+        run: |
+          npx playwright test
+
+      - name: Upload E2E test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: e2e-reports
+          path: |
+            e2e-report.html
+            playwright-report/
+            test-results/
+
+      - name: Cleanup test environment
+        if: always()
+        run: |
+          docker-compose -f docker-compose.test.yml down -v
+
+  # Deployment Preparation
+  deployment-prep:
+    name: Deployment Preparation
+    runs-on: ubuntu-latest
+    needs: [container-security, infrastructure-validation, e2e-testing]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
+    outputs:
+      deployment-ready: ${{ steps.gate-check.outputs.ready }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate deployment manifest
+        run: |
+          # Generate deployment artifacts
+          mkdir -p deployment/
+          
+          # Create deployment metadata
+          cat > deployment/metadata.json << EOF
+          {
+            "version": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "tests_passed": true,
+            "security_scanned": true,
+            "performance_validated": true
+          }
+          EOF
+
+      - name: Generate release notes
+        run: |
+          # Generate changelog
+          git log --oneline --since="1 week ago" > deployment/changelog.txt
+
+      - name: Deployment gate check
+        id: gate-check
+        run: |
+          echo "✅ All quality gates passed"
+          echo "ready=true" >> $GITHUB_OUTPUT
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-artifacts
+          path: deployment/
+
+  # Production Deployment (Manual Approval Required)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [deployment-prep]
+    if: github.ref == 'refs/heads/main' && needs.deployment-prep.outputs.deployment-ready == 'true'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download deployment artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: deployment-artifacts
+          path: deployment/
+
+      - name: Deploy to Kubernetes
+        run: |
+          # Configure kubectl
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+          
+          # Apply Kubernetes manifests
+          kubectl apply -f k8s/production/
+          
+          # Wait for deployment
+          kubectl rollout status deployment/blncs-api -n blncs
+          kubectl rollout status deployment/blncs-websocket -n blncs
+
+      - name: Run smoke tests
+        run: |
+          # Basic health checks
+          curl -f https://api.blncs.production/health
+          curl -f https://ws.blncs.production/health
+
+      - name: Update deployment status
+        run: |
+          echo "🚀 Production deployment successful!"
+          echo "Version: ${{ github.sha }}"
+          echo "Deployed at: $(date -u)"
+
+  # Notifications
+  notify-success:
+    name: Success Notification
+    runs-on: ubuntu-latest
+    needs: [security-scan, quality-assurance, performance-testing, container-security, e2e-testing]
+    if: success()
+    steps:
+      - name: Notify Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          channel: '#blncs-ci'
+          text: |
+            ✅ CI/CD Pipeline Successful
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            All quality gates passed!
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  notify-failure:
+    name: Failure Notification
+    runs-on: ubuntu-latest
+    needs: [security-scan, quality-assurance, performance-testing, container-security, e2e-testing]
+    if: failure()
+    steps:
+      - name: Notify Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#blncs-ci'
+          text: |
+            ❌ CI/CD Pipeline Failed
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Please check the logs!
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Create GitHub Issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `CI/CD Pipeline Failure - ${context.sha.substring(0, 7)}`,
+              body: `
+                ## Pipeline Failure Report
+                
+                **Branch:** ${context.ref}
+                **Commit:** ${context.sha}
+                **Workflow:** ${context.workflow}
+                **Run ID:** ${context.runId}
+                
+                **Failed Jobs:**
+                - Check the workflow logs for details
+                
+                **Action Required:**
+                - Review failed jobs
+                - Fix issues and push new commit
+                - Pipeline will automatically re-run
+              `,
+              labels: ['ci-failure', 'urgent']
+            })

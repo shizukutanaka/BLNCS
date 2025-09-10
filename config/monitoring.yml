@@ -1,0 +1,315 @@
+# BLNCS Monitoring Configuration
+# Enterprise monitoring, alerting, and observability settings
+
+monitoring:
+  enabled: true
+  namespace: "blncs"
+  
+  # Prometheus metrics collection
+  prometheus:
+    enabled: true
+    port: 8000
+    host: "0.0.0.0"
+    collection_interval: 10  # seconds
+    enable_system_metrics: true
+    registry_type: "default"  # default, multiprocess
+    
+    # Custom metrics configuration
+    custom_metrics:
+      retention_days: 30
+      high_cardinality_limit: 10000
+      
+  # System metrics collection
+  system_metrics:
+    enabled: true
+    cpu_interval: 5
+    memory_interval: 10
+    disk_interval: 30
+    network_interval: 10
+    
+  # Lightning Network specific metrics
+  lightning_metrics:
+    enabled: true
+    payment_tracking: true
+    channel_monitoring: true
+    fee_tracking: true
+    routing_analytics: true
+    
+    # Payment buckets for histograms (in satoshis)
+    payment_buckets: [100, 1000, 10000, 100000, 1000000, 10000000]
+    
+    # Duration buckets for timing metrics (in seconds)
+    duration_buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+
+# Alerting configuration
+alerting:
+  enabled: true
+  evaluation_interval: 30  # seconds
+  
+  # Default notification settings
+  notifications:
+    default_channels: ["slack"]
+    rate_limit_duration: 300  # seconds
+    max_alerts_per_minute: 10
+    
+  # Notification channels
+  channels:
+    email:
+      enabled: true
+      smtp_server: "localhost"
+      smtp_port: 587
+      use_tls: true
+      username: ""
+      password: ""
+      from_email: "blncs@localhost"
+      to_emails: []
+      rate_limit: 300  # seconds
+      
+    slack:
+      enabled: false
+      webhook_url: ""
+      channel: "#alerts"
+      username: "BLNCS Alerting"
+      rate_limit: 60  # seconds
+      
+    webhook:
+      enabled: false
+      url: ""
+      headers: {}
+      timeout: 10
+      rate_limit: 30  # seconds
+      
+    pagerduty:
+      enabled: false
+      integration_key: ""
+      rate_limit: 300  # seconds
+      
+    sms:
+      enabled: false
+      provider: "twilio"  # twilio, aws_sns
+      config: {}
+      rate_limit: 600  # seconds
+      
+  # Alert rules configuration
+  rules:
+    # System resource alerts
+    system:
+      high_cpu:
+        enabled: true
+        threshold: 90.0
+        duration: 300  # seconds
+        severity: "high"
+        channels: ["slack", "email"]
+        
+      high_memory:
+        enabled: true
+        threshold: 85.0
+        duration: 300
+        severity: "high"
+        channels: ["slack", "email"]
+        
+      low_disk_space:
+        enabled: true
+        threshold: 10.0  # percent free
+        duration: 300
+        severity: "critical"
+        channels: ["slack", "email", "pagerduty"]
+        
+      high_network_errors:
+        enabled: true
+        threshold: 100.0  # errors per minute
+        duration: 60
+        severity: "medium"
+        channels: ["slack"]
+        
+    # Lightning Network alerts
+    lightning:
+      payment_failures:
+        enabled: true
+        threshold: 0.1  # 10% failure rate
+        duration: 120
+        severity: "critical"
+        channels: ["slack", "email", "pagerduty"]
+        escalation_delay: 900  # 15 minutes
+        
+      low_channel_count:
+        enabled: true
+        threshold: 5
+        duration: 600
+        severity: "medium"
+        channels: ["slack"]
+        
+      channel_balance_low:
+        enabled: true
+        threshold: 100000  # satoshis
+        duration: 300
+        severity: "medium"
+        channels: ["slack"]
+        
+      high_fee_rates:
+        enabled: true
+        threshold: 1000  # ppm
+        duration: 300
+        severity: "low"
+        channels: ["slack"]
+        
+      routing_failures:
+        enabled: true
+        threshold: 0.2  # 20% failure rate
+        duration: 300
+        severity: "high"
+        channels: ["slack", "email"]
+        
+    # Application alerts
+    application:
+      http_errors:
+        enabled: true
+        threshold: 0.05  # 5% error rate
+        duration: 120
+        severity: "high"
+        channels: ["slack", "email"]
+        
+      slow_responses:
+        enabled: true
+        threshold: 2.0  # seconds
+        duration: 300
+        severity: "medium"
+        channels: ["slack"]
+        
+      database_errors:
+        enabled: true
+        threshold: 0
+        duration: 60
+        severity: "high"
+        channels: ["slack", "email"]
+        
+      websocket_disconnections:
+        enabled: true
+        threshold: 10  # disconnections per minute
+        duration: 120
+        severity: "medium"
+        channels: ["slack"]
+
+# Grafana integration
+grafana:
+  enabled: false
+  url: "http://localhost:3000"
+  api_key: ""
+  
+  # Dashboard deployment
+  deploy_dashboards: true
+  dashboard_folder: "BLNCS"
+  
+  # Default dashboards to create
+  dashboards:
+    - name: "lightning-overview"
+      title: "Lightning Network Overview"
+      enabled: true
+      
+    - name: "system-performance"
+      title: "System Performance"
+      enabled: true
+      
+    - name: "application-metrics"
+      title: "Application Metrics"
+      enabled: true
+      
+    - name: "alerts-monitoring"
+      title: "Alerts & Monitoring"
+      enabled: true
+
+# Health checks
+health_checks:
+  enabled: true
+  endpoint: "/health"
+  interval: 30  # seconds
+  timeout: 5  # seconds
+  
+  checks:
+    database:
+      enabled: true
+      timeout: 2
+      
+    lightning_node:
+      enabled: true
+      timeout: 5
+      
+    external_apis:
+      enabled: true
+      timeout: 10
+      
+    disk_space:
+      enabled: true
+      min_free_percent: 10
+      
+    memory_usage:
+      enabled: true
+      max_usage_percent: 95
+
+# Log aggregation (for future ELK integration)
+logging:
+  structured: true
+  level: "INFO"
+  
+  # Metrics from logs
+  log_metrics:
+    enabled: true
+    error_patterns:
+      - "ERROR"
+      - "CRITICAL"
+      - "FATAL"
+    warning_patterns:
+      - "WARNING"
+      - "WARN"
+    
+  # Future: ELK stack configuration
+  elasticsearch:
+    enabled: false
+    url: "http://localhost:9200"
+    index_pattern: "blncs-logs-*"
+    
+  logstash:
+    enabled: false
+    host: "localhost"
+    port: 5044
+
+# Performance monitoring
+performance:
+  enabled: true
+  
+  # Request tracing
+  tracing:
+    enabled: false
+    sample_rate: 0.1  # 10% of requests
+    jaeger_endpoint: "http://localhost:14268/api/traces"
+    
+  # Profiling
+  profiling:
+    enabled: false
+    cpu_profile_duration: 30  # seconds
+    memory_profile_interval: 300  # seconds
+    
+  # SLI/SLO monitoring
+  sli_slo:
+    enabled: true
+    
+    # Service Level Indicators
+    sli:
+      payment_success_rate:
+        target: 0.99  # 99%
+        window: "24h"
+        
+      api_response_time:
+        target: 0.5  # 500ms
+        percentile: 95
+        window: "1h"
+        
+      system_availability:
+        target: 0.999  # 99.9%
+        window: "30d"
+        
+    # Error budgets
+    error_budget:
+      burn_rate_alert: 2.0  # Alert when burning budget 2x faster than sustainable
+      fast_burn_duration: "1h"
+      slow_burn_duration: "24h"

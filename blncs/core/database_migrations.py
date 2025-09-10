@@ -14,8 +14,15 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import traceback
 
-import asyncpg
-from asyncpg import Connection, Pool
+try:
+    import asyncpg
+    from asyncpg import Connection, Pool
+    ASYNCPG_AVAILABLE = True
+except ImportError:
+    ASYNCPG_AVAILABLE = False
+    asyncpg = None
+    Connection = None
+    Pool = None
 
 from .structured_logging import StructuredLogger, LogLevel
 from .telemetry import TracingMixin

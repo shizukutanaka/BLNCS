@@ -1,0 +1,167 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blncs-config
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: config
+data:
+  config.yaml: |
+    # BLNCS Configuration
+    server:
+      host: "0.0.0.0"
+      port: 8080
+      workers: 4
+      debug: false
+      
+    database:
+      host: "postgresql-service"
+      port: 5432
+      database: "blncs"
+      username: "blncs"
+      # password loaded from secret
+      max_connections: 20
+      ssl_mode: "prefer"
+      
+    lightning:
+      implementation: "lnd"  # lnd, cln, eclair
+      default_timeout: 30
+      connection_retry_attempts: 5
+      connection_retry_delay: 10
+      
+    security:
+      jwt_secret_key: ""  # loaded from secret
+      session_timeout: 3600
+      max_login_attempts: 5
+      lockout_duration: 900
+      
+    monitoring:
+      enabled: true
+      metrics_port: 9090
+      health_check_port: 8081
+      log_level: "INFO"
+      
+    observability:
+      jaeger_endpoint: "http://jaeger-collector:14268/api/traces"
+      prometheus_endpoint: "http://prometheus:9090"
+      enable_tracing: true
+      enable_metrics: true
+      
+    features:
+      auto_fee_optimization: true
+      channel_rebalancing: true
+      ml_fee_optimization: true
+      multi_node_support: true
+      circuit_breakers: true
+      
+  logging.yaml: |
+    version: 1
+    disable_existing_loggers: false
+    
+    formatters:
+      json:
+        class: pythonjsonlogger.jsonlogger.JsonFormatter
+        format: '%(asctime)s %(name)s %(levelname)s %(message)s'
+      
+      structured:
+        class: blncs.core.structured_logging.StructuredFormatter
+        format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: structured
+        stream: ext://sys.stdout
+        
+      json_console:
+        class: logging.StreamHandler
+        formatter: json
+        stream: ext://sys.stdout
+        
+    loggers:
+      blncs:
+        level: INFO
+        handlers: [json_console]
+        propagate: false
+        
+      uvicorn:
+        level: INFO
+        handlers: [json_console]
+        propagate: false
+        
+      sqlalchemy:
+        level: WARNING
+        handlers: [json_console]
+        propagate: false
+    
+    root:
+      level: INFO
+      handlers: [json_console]
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blncs-scripts
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: scripts
+data:
+  init-db.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Waiting for PostgreSQL to be ready..."
+    until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; do
+      sleep 2
+    done
+    
+    echo "Running database migrations..."
+    python -m blncs.cli.main migrate up
+    
+    echo "Database initialization complete"
+    
+  health-check.sh: |
+    #!/bin/bash
+    set -e
+    
+    # Check if main service is responding
+    curl -f http://localhost:8080/health || exit 1
+    
+    # Check database connectivity
+    python -c "
+    import asyncio
+    from blncs.core.database import get_database_manager
+    
+    async def check():
+        db = get_database_manager()
+        await db.initialize()
+        await db.close()
+    
+    asyncio.run(check())
+    " || exit 1
+    
+    echo "Health check passed"
+    
+  backup.sh: |
+    #!/bin/bash
+    set -e
+    
+    BACKUP_DIR="/backups"
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    BACKUP_FILE="blncs_backup_${TIMESTAMP}.sql"
+    
+    mkdir -p $BACKUP_DIR
+    
+    echo "Creating database backup..."
+    pg_dump -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME > "$BACKUP_DIR/$BACKUP_FILE"
+    
+    echo "Compressing backup..."
+    gzip "$BACKUP_DIR/$BACKUP_FILE"
+    
+    echo "Cleaning up old backups (keeping last 7 days)..."
+    find $BACKUP_DIR -name "blncs_backup_*.sql.gz" -mtime +7 -delete
+    
+    echo "Backup complete: $BACKUP_FILE.gz"

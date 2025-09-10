@@ -1,0 +1,142 @@
+# Prometheus configuration for BLNCS monitoring
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'blncs-production'
+    replica: 'prometheus-01'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  - "alert_rules.yml"
+  - "recording_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    
+  # BLNCS application metrics
+  - job_name: 'blncs-app'
+    static_configs:
+      - targets: ['blncs-api:8000', 'blncs-websocket:8001']
+    scrape_interval: 10s
+    metrics_path: /metrics
+    honor_labels: true
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - source_labels: [__address__]
+        regex: '([^:]+):(.*)'
+        target_label: service
+        replacement: '${1}'
+    
+  # Node Exporter for system metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    
+  # Lightning Network daemon metrics (if available)
+  - job_name: 'lnd'
+    static_configs:
+      - targets: ['lnd:10009']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/lnd-token
+    
+  # Core Lightning (CLN) metrics
+  - job_name: 'cln'
+    static_configs:
+      - targets: ['cln-exporter:9900']
+    scrape_interval: 30s
+    
+  # Redis metrics (if used for caching)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+    
+  # PostgreSQL metrics (if used)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+    
+  # Nginx/reverse proxy metrics
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+    scrape_interval: 15s
+    
+  # Docker container metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+    
+  # Blackbox exporter for external service monitoring
+  - job_name: 'blackbox'
+    static_configs:
+      - targets:
+        - http://blncs-api:8000/health
+        - https://api.lightning.network
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+        
+  # Bitcoin Core metrics (if running local node)
+  - job_name: 'bitcoin-core'
+    static_configs:
+      - targets: ['bitcoin-exporter:9332']
+    scrape_interval: 60s
+    
+  # Custom application exporters
+  - job_name: 'blncs-custom-metrics'
+    static_configs:
+      - targets: ['blncs-metrics-exporter:8080']
+    scrape_interval: 15s
+    honor_labels: true
+    
+# Storage configuration
+storage:
+  tsdb:
+    path: /prometheus/data
+    retention.time: 30d
+    retention.size: 50GB
+    
+# Remote write configuration (for long-term storage)
+remote_write:
+  - url: "http://thanos-receive:19291/api/v1/receive"
+    queue_config:
+      max_samples_per_send: 1000
+      max_shards: 200
+      capacity: 2500
+      
+# Remote read configuration
+remote_read:
+  - url: "http://thanos-query:19192/api/v1/query"
+    read_recent: true

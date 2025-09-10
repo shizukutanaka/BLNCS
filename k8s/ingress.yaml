@@ -1,0 +1,182 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: blncs-ingress
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/client-max-body-size: "10m"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'";
+    # Enable CORS for API endpoints
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+    nginx.ingress.kubernetes.io/cors-expose-headers: "Content-Length,Content-Range"
+    nginx.ingress.kubernetes.io/cors-max-age: "86400"
+    # Circuit breaker
+    nginx.ingress.kubernetes.io/upstream-fail-timeout: "30s"
+    nginx.ingress.kubernetes.io/upstream-max-fails: "3"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - blncs.example.com
+    - api.blncs.example.com
+    - metrics.blncs.example.com
+    secretName: blncs-tls-secret
+  rules:
+  - host: blncs.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: blncs-api-service
+            port:
+              number: 80
+  - host: api.blncs.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: blncs-api-service
+            port:
+              number: 80
+  - host: metrics.blncs.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: blncs-api-service
+            port:
+              number: 9090
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: blncs-tls-secret
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: tls
+type: kubernetes.io/tls
+data:
+  # Replace with your actual TLS certificate and key
+  tls.crt: "" # Base64 encoded TLS certificate
+  tls.key: "" # Base64 encoded TLS private key
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: blncs-cert
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: certificate
+spec:
+  secretName: blncs-tls-secret
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: blncs.example.com
+  dnsNames:
+  - blncs.example.com
+  - api.blncs.example.com
+  - metrics.blncs.example.com
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: blncs-network-policy
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: security
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: blncs
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: nginx-ingress
+    ports:
+    - protocol: TCP
+      port: 8080
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+    - protocol: TCP
+      port: 8081
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: blncs
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9090
+    - protocol: TCP
+      port: 8081
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgresql
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to: []  # Allow all outbound for Lightning Network connections
+    ports:
+    - protocol: TCP
+      port: 53    # DNS
+    - protocol: UDP
+      port: 53    # DNS
+    - protocol: TCP
+      port: 443   # HTTPS
+    - protocol: TCP
+      port: 80    # HTTP
+    - protocol: TCP
+      port: 9735  # Lightning Network
+    - protocol: TCP
+      port: 10009 # LND gRPC

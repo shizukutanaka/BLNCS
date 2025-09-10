@@ -71,6 +71,14 @@ class AsyncConnectionPool:
         self.logger = get_logger(__name__)
         self.error_handler = get_error_handler()
         
+        # Check if aiosqlite is available
+        if not AIOSQLITE_AVAILABLE:
+            self.logger.warning("aiosqlite not available - async database features disabled")
+            self._disabled = True
+            return
+        else:
+            self._disabled = False
+        
         # Connection pool
         self._connections: asyncio.Queue = asyncio.Queue(maxsize=config.max_connections)
         self._connection_count = 0
@@ -89,6 +97,10 @@ class AsyncConnectionPool:
     
     async def initialize(self):
         """Initialize connection pool"""
+        if self._disabled:
+            self.logger.info("Async database disabled - using fallback mode")
+            return
+            
         try:
             # Create initial connections
             initial_connections = min(5, self.config.max_connections)
@@ -110,8 +122,11 @@ class AsyncConnectionPool:
             )
             raise DatabaseError(f"Failed to initialize connection pool: {e}")
     
-    async def _create_connection(self) -> aiosqlite.Connection:
+    async def _create_connection(self):
         """Create optimized database connection"""
+        if self._disabled or aiosqlite is None:
+            raise DatabaseError("aiosqlite not available")
+            
         try:
             conn = await aiosqlite.connect(
                 self.config.database_path,
@@ -627,13 +642,44 @@ class AsyncDatabaseManager:
 _global_db_manager: Optional[AsyncDatabaseManager] = None
 
 
-async def get_async_db_manager() -> AsyncDatabaseManager:
+async def get_async_db_manager():
     """Get global async database manager instance"""
     global _global_db_manager
+    
+    if not AIOSQLITE_AVAILABLE:
+        # Return a mock for systems without aiosqlite
+        if _global_db_manager is None:
+            _global_db_manager = MockAsyncDatabaseManager()
+        return _global_db_manager
+    
     if _global_db_manager is None:
         _global_db_manager = AsyncDatabaseManager()
         await _global_db_manager.initialize()
     return _global_db_manager
+
+
+class MockAsyncDatabaseManager:
+    """Mock async database manager for systems without aiosqlite"""
+    
+    def __init__(self):
+        from .logger import get_logger
+        self.logger = get_logger(__name__)
+        self.logger.warning("Using mock async database manager - aiosqlite not available")
+    
+    async def initialize(self):
+        pass
+    
+    async def execute(self, query: str, params: tuple = (), **kwargs):
+        return QueryResult(rows=[], rowcount=0, execution_time=0.0)
+    
+    async def fetch_one(self, query: str, params: tuple = ()):
+        return None
+    
+    async def fetch_all(self, query: str, params: tuple = ()):
+        return []
+    
+    async def close(self):
+        pass
 
 
 async def execute_query(query: str, params: tuple = (), **kwargs) -> QueryResult:

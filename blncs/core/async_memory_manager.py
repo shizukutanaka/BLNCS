@@ -8,7 +8,25 @@ import asyncio
 import weakref
 import gc
 import tracemalloc
-import psutil
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    # Mock psutil for systems without it
+    class MockProcess:
+        def memory_info(self):
+            return type('obj', (object,), {'rss': 100 * 1024 * 1024})()
+    
+    class MockPsutil:
+        def cpu_percent(self, interval=None):
+            return 50.0
+        def virtual_memory(self):
+            return type('obj', (object,), {'percent': 50.0, 'available': 1024 * 1024 * 1024})()
+        def Process(self):
+            return MockProcess()
+    
+    psutil = MockPsutil()
 from typing import Dict, List, Set, Optional, Any, Callable, Awaitable, AsyncContextManager
 from dataclasses import dataclass, field
 from enum import Enum

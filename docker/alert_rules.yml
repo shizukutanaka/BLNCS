@@ -1,0 +1,350 @@
+# Prometheus alerting rules for BLNCS
+groups:
+  - name: blncs.system
+    interval: 30s
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: avg by (instance) (100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 90
+        for: 5m
+        labels:
+          severity: high
+          service: system
+          component: cpu
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 90% for more than 5 minutes on instance {{ $labels.instance }}. Current value: {{ $value | humanizePercentage }}"
+          runbook: "Check system load and investigate high CPU processes"
+          
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: high
+          service: system
+          component: memory
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85% for more than 5 minutes on instance {{ $labels.instance }}. Current value: {{ $value | humanizePercentage }}"
+          runbook: "Check memory-intensive processes and available memory"
+          
+      # Low disk space
+      - alert: LowDiskSpace
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          service: system
+          component: disk
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk usage is above 90% on filesystem {{ $labels.mountpoint }} for instance {{ $labels.instance }}. Current value: {{ $value | humanizePercentage }}"
+          runbook: "Free up disk space or increase storage capacity"
+          
+      # High load average
+      - alert: HighLoadAverage
+        expr: node_load15 / on(instance) count by (instance) (node_cpu_seconds_total{mode="idle"}) > 1.5
+        for: 10m
+        labels:
+          severity: medium
+          service: system
+          component: load
+        annotations:
+          summary: "High load average on {{ $labels.instance }}"
+          description: "Load average is above 1.5 per CPU core for more than 10 minutes on instance {{ $labels.instance }}. Current value: {{ $value }}"
+          runbook: "Investigate system load and running processes"
+
+  - name: blncs.lightning
+    interval: 30s
+    rules:
+      # High payment failure rate
+      - alert: HighPaymentFailureRate
+        expr: |
+          (
+            rate(blncs_lightning_payments_total{status="failed"}[5m]) /
+            rate(blncs_lightning_payments_total[5m])
+          ) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          service: lightning
+          component: payments
+        annotations:
+          summary: "High Lightning payment failure rate"
+          description: "Payment failure rate is {{ $value | humanizePercentage }} over the last 5 minutes, above the 10% threshold"
+          runbook: "Check Lightning node connectivity, channel balances, and routing"
+          
+      # Low channel count
+      - alert: LowChannelCount
+        expr: sum(blncs_lightning_channels_total{state="active"}) < 5
+        for: 10m
+        labels:
+          severity: medium
+          service: lightning
+          component: channels
+        annotations:
+          summary: "Low number of active Lightning channels"
+          description: "Number of active Lightning channels is {{ $value }}, below the minimum of 5"
+          runbook: "Consider opening more channels to improve connectivity"
+          
+      # High routing failure rate
+      - alert: HighRoutingFailureRate
+        expr: |
+          (
+            rate(blncs_lightning_routing_failures_total[5m]) /
+            rate(blncs_lightning_routing_attempts_total[5m])
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: high
+          service: lightning
+          component: routing
+        annotations:
+          summary: "High Lightning routing failure rate"
+          description: "Routing failure rate is {{ $value | humanizePercentage }} over the last 5 minutes, above the 20% threshold"
+          runbook: "Check channel balances and network connectivity"
+          
+      # Low channel balance
+      - alert: LowChannelBalance
+        expr: min(blncs_lightning_channel_balance_satoshis{balance_type="local"}) < 100000
+        for: 5m
+        labels:
+          severity: medium
+          service: lightning
+          component: channels
+        annotations:
+          summary: "Low Lightning channel balance"
+          description: "Minimum local channel balance is {{ $value }} satoshis, below the 100,000 threshold"
+          runbook: "Consider rebalancing channels or adding liquidity"
+          
+      # Node connectivity issues
+      - alert: NodeConnectivityIssues
+        expr: blncs_lightning_node_connectivity_score < 0.8
+        for: 5m
+        labels:
+          severity: high
+          service: lightning
+          component: connectivity
+        annotations:
+          summary: "Lightning node connectivity issues"
+          description: "Node connectivity score is {{ $value }}, below the 0.8 threshold"
+          runbook: "Check network connection and peer connectivity"
+          
+      # High fee rates
+      - alert: HighFeeRates
+        expr: avg(blncs_lightning_channel_fee_rate_ppm) > 1000
+        for: 15m
+        labels:
+          severity: low
+          service: lightning
+          component: fees
+        annotations:
+          summary: "High Lightning channel fee rates"
+          description: "Average channel fee rate is {{ $value }} ppm, above the 1000 ppm threshold"
+          runbook: "Review fee strategy and market conditions"
+
+  - name: blncs.application
+    interval: 30s
+    rules:
+      # High HTTP error rate
+      - alert: HighHTTPErrorRate
+        expr: |
+          (
+            sum(rate(blncs_http_requests_total{status=~"5.."}[5m])) /
+            sum(rate(blncs_http_requests_total[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: high
+          service: application
+          component: http
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "HTTP 5xx error rate is {{ $value | humanizePercentage }} over the last 5 minutes, above the 5% threshold"
+          runbook: "Check application logs and investigate server errors"
+          
+      # Slow HTTP responses
+      - alert: SlowHTTPResponses
+        expr: |
+          histogram_quantile(0.95, 
+            rate(blncs_http_request_duration_seconds_bucket[5m])
+          ) > 2.0
+        for: 5m
+        labels:
+          severity: medium
+          service: application
+          component: performance
+        annotations:
+          summary: "Slow HTTP responses"
+          description: "95th percentile response time is {{ $value }}s, above the 2s threshold"
+          runbook: "Investigate slow endpoints and optimize performance"
+          
+      # Database connection errors
+      - alert: DatabaseConnectionErrors
+        expr: increase(blncs_database_connection_errors_total[1m]) > 0
+        for: 1m
+        labels:
+          severity: high
+          service: application
+          component: database
+        annotations:
+          summary: "Database connection errors detected"
+          description: "{{ $value }} database connection errors in the last minute"
+          runbook: "Check database connectivity and connection pool settings"
+          
+      # High WebSocket disconnection rate
+      - alert: HighWebSocketDisconnections
+        expr: rate(blncs_websocket_disconnections_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: medium
+          service: application
+          component: websocket
+        annotations:
+          summary: "High WebSocket disconnection rate"
+          description: "WebSocket disconnection rate is {{ $value }} per second over the last 5 minutes"
+          runbook: "Check WebSocket server stability and network issues"
+          
+      # Application down
+      - alert: ApplicationDown
+        expr: up{job="blncs-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: application
+          component: availability
+        annotations:
+          summary: "BLNCS application is down"
+          description: "BLNCS application on instance {{ $labels.instance }} has been down for more than 1 minute"
+          runbook: "Immediately investigate application status and restart if necessary"
+          
+      # High memory usage by application
+      - alert: ApplicationHighMemoryUsage
+        expr: process_resident_memory_bytes{job="blncs-app"} > 4 * 1024 * 1024 * 1024
+        for: 10m
+        labels:
+          severity: medium
+          service: application
+          component: memory
+        annotations:
+          summary: "High memory usage by BLNCS application"
+          description: "BLNCS application is using {{ $value | humanizeBytes }} of memory, above the 4GB threshold"
+          runbook: "Check for memory leaks and optimize memory usage"
+
+  - name: blncs.infrastructure
+    interval: 30s
+    rules:
+      # Container restart frequency
+      - alert: HighContainerRestartRate
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: medium
+          service: infrastructure
+          component: containers
+        annotations:
+          summary: "High container restart rate"
+          description: "Container {{ $labels.container }} in pod {{ $labels.pod }} is restarting frequently"
+          runbook: "Investigate container health and resource constraints"
+          
+      # Service discovery issues
+      - alert: ServiceDiscoveryDown
+        expr: prometheus_sd_discovered_targets == 0
+        for: 5m
+        labels:
+          severity: high
+          service: infrastructure
+          component: monitoring
+        annotations:
+          summary: "Service discovery not finding targets"
+          description: "Prometheus service discovery is not finding any targets for job {{ $labels.job }}"
+          runbook: "Check service discovery configuration and target availability"
+          
+      # Prometheus storage issues
+      - alert: PrometheusStorageIssues
+        expr: prometheus_tsdb_storage_blocks_loaded == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: infrastructure
+          component: monitoring
+        annotations:
+          summary: "Prometheus storage issues"
+          description: "Prometheus is not loading any storage blocks"
+          runbook: "Check Prometheus storage configuration and disk space"
+
+  - name: blncs.security
+    interval: 30s
+    rules:
+      # High rate limiting triggers
+      - alert: HighRateLimitingTriggers
+        expr: rate(blncs_rate_limit_triggers_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: medium
+          service: security
+          component: rate_limiting
+        annotations:
+          summary: "High rate of rate limiting triggers"
+          description: "Rate limiting is being triggered {{ $value }} times per second over the last 5 minutes"
+          runbook: "Investigate potential abuse or adjust rate limiting thresholds"
+          
+      # Authentication failures
+      - alert: HighAuthenticationFailures
+        expr: rate(blncs_authentication_failures_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: high
+          service: security
+          component: authentication
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Authentication failures occurring at {{ $value }} per second over the last 5 minutes"
+          runbook: "Investigate potential brute force attacks and check authentication logs"
+          
+      # Suspicious IP activity
+      - alert: SuspiciousIPActivity
+        expr: rate(blncs_blocked_ips_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: medium
+          service: security
+          component: ip_blocking
+        annotations:
+          summary: "Suspicious IP activity detected"
+          description: "IPs are being blocked at a rate of {{ $value }} per second"
+          runbook: "Review blocked IP logs and investigate security threats"
+
+  - name: blncs.business_logic
+    interval: 60s
+    rules:
+      # Low payment volume
+      - alert: LowPaymentVolume
+        expr: rate(blncs_lightning_payments_total[1h]) < 0.1
+        for: 30m
+        labels:
+          severity: low
+          service: business
+          component: payments
+        annotations:
+          summary: "Low Lightning payment volume"
+          description: "Payment volume is {{ $value }} payments per second over the last hour, below normal levels"
+          runbook: "Investigate potential issues affecting payment processing"
+          
+      # Unusual fee revenue patterns
+      - alert: UnusualFeeRevenue
+        expr: |
+          abs(
+            rate(blncs_lightning_fee_revenue_satoshis_total[1h]) -
+            rate(blncs_lightning_fee_revenue_satoshis_total[24h] offset 24h)
+          ) / rate(blncs_lightning_fee_revenue_satoshis_total[24h] offset 24h) > 0.5
+        for: 2h
+        labels:
+          severity: info
+          service: business
+          component: fees
+        annotations:
+          summary: "Unusual fee revenue pattern"
+          description: "Fee revenue pattern deviates significantly from the same period yesterday"
+          runbook: "Review fee strategy and market conditions"

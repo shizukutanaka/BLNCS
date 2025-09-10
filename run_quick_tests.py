@@ -104,10 +104,17 @@ def test_monitors():
         # Test monitor creation and basic operations
         assert monitor is not None, "Monitor should be created"
         
+        # Test basic monitoring operations
+        if hasattr(monitor, 'get_system_snapshot'):
+            snapshot = monitor.get_system_snapshot()
+            print(f"  System snapshot type: {type(snapshot)}")
+        
         print("✅ Monitoring systems work")
         return True
     except Exception as e:
+        import traceback
         print(f"❌ Monitoring test failed: {e}")
+        print(f"  Full traceback: {traceback.format_exc()}")
         return False
 
 def main():

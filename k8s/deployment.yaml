@@ -1,0 +1,377 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blncs-api
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: blncs
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: blncs
+        app.kubernetes.io/component: api
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: blncs-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      initContainers:
+      - name: wait-for-db
+        image: postgres:15-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          until pg_isready -h postgresql-service -p 5432 -U blncs; do
+            echo "Waiting for PostgreSQL to be ready..."
+            sleep 2
+          done
+          echo "PostgreSQL is ready"
+        env:
+        - name: PGUSER
+          value: "blncs"
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: blncs-secrets
+              key: DB_PASSWORD
+      - name: run-migrations
+        image: blncs:latest
+        command: ["/app/scripts/init-db.sh"]
+        envFrom:
+        - secretRef:
+            name: blncs-secrets
+        - configMapRef:
+            name: blncs-config
+        volumeMounts:
+        - name: scripts
+          mountPath: /app/scripts
+        - name: config
+          mountPath: /app/config
+      containers:
+      - name: blncs-api
+        image: blncs:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        - containerPort: 9090
+          name: metrics
+          protocol: TCP
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        envFrom:
+        - secretRef:
+            name: blncs-secrets
+        - configMapRef:
+            name: blncs-config
+        env:
+        - name: KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+        - name: lnd-credentials
+          mountPath: /app/lnd
+          readOnly: true
+        - name: logs
+          mountPath: /app/logs
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          successThreshold: 1
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: health
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        resources:
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+          requests:
+            cpu: "200m"
+            memory: "512Mi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+      - name: log-collector
+        image: fluent/fluent-bit:latest
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+          readOnly: true
+        - name: fluent-bit-config
+          mountPath: /fluent-bit/etc
+        resources:
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+      volumes:
+      - name: config
+        configMap:
+          name: blncs-config
+          defaultMode: 0644
+      - name: scripts
+        configMap:
+          name: blncs-scripts
+          defaultMode: 0755
+      - name: lnd-credentials
+        secret:
+          secretName: lnd-credentials
+          defaultMode: 0400
+      - name: logs
+        emptyDir: {}
+      - name: fluent-bit-config
+        configMap:
+          name: fluent-bit-config
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blncs-worker
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: blncs
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: blncs
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: blncs-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: blncs-worker
+        image: blncs:latest
+        imagePullPolicy: Always
+        command: ["python", "-m", "blncs.core.worker"]
+        ports:
+        - containerPort: 9090
+          name: metrics
+          protocol: TCP
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        envFrom:
+        - secretRef:
+            name: blncs-secrets
+        - configMapRef:
+            name: blncs-config
+        env:
+        - name: WORKER_TYPE
+          value: "background"
+        - name: WORKER_CONCURRENCY
+          value: "4"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+        - name: lnd-credentials
+          mountPath: /app/lnd
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: health
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+      volumes:
+      - name: config
+        configMap:
+          name: blncs-config
+      - name: lnd-credentials
+        secret:
+          secretName: lnd-credentials
+          defaultMode: 0400
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blncs-api-service
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  - port: 8081
+    targetPort: 8081
+    protocol: TCP
+    name: health
+  selector:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: api
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blncs-worker-service
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  - port: 8081
+    targetPort: 8081
+    protocol: TCP
+    name: health
+  selector:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: worker
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: blncs-service-account
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: rbac
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: blncs
+  name: blncs-role
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: rbac
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: blncs-role-binding
+  namespace: blncs
+  labels:
+    app.kubernetes.io/name: blncs
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: blncs-service-account
+  namespace: blncs
+roleRef:
+  kind: Role
+  name: blncs-role
+  apiGroup: rbac.authorization.k8s.io

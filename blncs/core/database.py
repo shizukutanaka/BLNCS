@@ -215,15 +215,35 @@ class DatabaseManager:
         self._start_batch_processor()
     
     def _start_batch_processor(self):
-        """Start background batch processor"""
+        """Start background batch processor with proper resource management"""
         if not self._batch_thread or not self._batch_thread.is_alive():
+            from .resource_manager import get_resource_manager, ResourceType
             self._stop_batch.clear()
             self._batch_thread = threading.Thread(
                 target=self._batch_processor,
                 daemon=True,
                 name="DatabaseBatch"
             )
+            
+            # Register with resource manager for proper cleanup
+            resource_manager = get_resource_manager()
+            resource_manager.register_resource(
+                resource_id=f"db_batch_thread_{id(self)}",
+                resource=self._batch_thread,
+                resource_type=ResourceType.THREAD,
+                cleanup_func=self._stop_batch_processor,
+                description="Database batch processor thread"
+            )
+            
             self._batch_thread.start()
+    
+    def _stop_batch_processor(self):
+        """Stop batch processor safely"""
+        self._stop_batch.set()
+        if self._batch_thread and self._batch_thread.is_alive():
+            self._batch_thread.join(timeout=3.0)
+            if self._batch_thread.is_alive():
+                self.logger.warning("Database batch processor did not stop gracefully")
     
     def _batch_processor(self):
         """Process batched database operations"""
