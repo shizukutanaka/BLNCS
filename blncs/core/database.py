@@ -1,666 +1,512 @@
 """
-Optimized database operations for BLNCS
-Provides connection pooling, query caching, and transaction management.
+Unified Database System for BLNCS
+Combines all database functionality into a single, optimized module.
 """
 
 import sqlite3
 import threading
 import time
-from contextlib import contextmanager
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
-from queue import Queue, Empty
 import json
+import asyncio
+import aiosqlite
+from typing import Dict, List, Any, Optional, Union, Tuple, Callable
+from contextlib import contextmanager, asynccontextmanager
+from dataclasses import dataclass, field
+from pathlib import Path
+from datetime import datetime, timedelta
+import hashlib
 
 from .logger import get_logger
 from .config_manager import get_config_manager
-from .fast_cache import get_cache
-from .metrics import get_metrics_collector, increment_counter, set_gauge
 
+logger = get_logger(__name__)
 
-class DatabasePool:
-    """SQLite connection pool with optimizations"""
+@dataclass
+class QueryStats:
+    """Query statistics for optimization."""
+    query_hash: str
+    query: str
+    execution_count: int = 0
+    total_time_ms: float = 0
+    avg_time_ms: float = 0
+    last_executed: datetime = field(default_factory=datetime.now)
+
+class DatabaseManager:
+    """Unified database manager with connection pooling and optimization."""
     
-    def __init__(self, db_path: str, max_connections: int = 20):
-        self.logger = get_logger(__name__)
+    def __init__(self, db_path: str = "blncs.db", pool_size: int = 10):
+        """Initialize database manager."""
         self.db_path = db_path
-        self.max_connections = max_connections
-        self._connections = Queue(maxsize=max_connections)
-        self._lock = threading.Lock()
-        self._created_connections = 0
+        self.pool_size = pool_size
+        self.connections = []
+        self.available_connections = []
+        self.lock = threading.RLock()
+        self.query_stats: Dict[str, QueryStats] = {}
+        self.logger = get_logger(__name__)
         
-        # Ensure database directory exists
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        # Migration tracking
+        self.migrations_table = "schema_migrations"
         
-        # Initialize database schema
-        self._initialize_db()
+        # Initialize connection pool
+        self._init_pool()
+        
+        # Create tables if needed
+        self._init_database()
     
-    def _initialize_db(self):
-        """Initialize database with optimized schema"""
-        conn = self._create_connection()
-        try:
+    def _init_pool(self):
+        """Initialize connection pool."""
+        for _ in range(self.pool_size):
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=10000")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            self.connections.append(conn)
+            self.available_connections.append(conn)
+    
+    def _init_database(self):
+        """Initialize database schema."""
+        with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Enable WAL mode for better concurrency
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.execute("PRAGMA cache_size=10000")
-            cursor.execute("PRAGMA temp_store=MEMORY")
+            # Migrations table
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {self.migrations_table} (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
-            # Create tables with proper indexes
-            cursor.executescript("""
-                -- Metrics table for time-series data
+            # Key-value store
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS kv_store (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Transactions table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    data TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                )
+            """)
+            
+            # Performance metrics
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     metric_name TEXT NOT NULL,
-                    value REAL NOT NULL,
-                    labels TEXT,
-                    timestamp INTEGER NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE INDEX IF NOT EXISTS idx_metrics_name_time 
-                    ON metrics(metric_name, timestamp DESC);
-                CREATE INDEX IF NOT EXISTS idx_metrics_timestamp 
-                    ON metrics(timestamp DESC);
-                
-                -- Events table for system events
-                CREATE TABLE IF NOT EXISTS events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_type TEXT NOT NULL,
-                    severity TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    details TEXT,
-                    timestamp INTEGER NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE INDEX IF NOT EXISTS idx_events_type_time 
-                    ON events(event_type, timestamp DESC);
-                CREATE INDEX IF NOT EXISTS idx_events_severity 
-                    ON events(severity, timestamp DESC);
-                
-                -- Channel states for Lightning channels
-                CREATE TABLE IF NOT EXISTS channel_states (
-                    channel_id TEXT PRIMARY KEY,
-                    peer_id TEXT NOT NULL,
-                    capacity INTEGER NOT NULL,
-                    local_balance INTEGER NOT NULL,
-                    remote_balance INTEGER NOT NULL,
-                    state TEXT NOT NULL,
-                    last_update INTEGER NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE INDEX IF NOT EXISTS idx_channels_peer 
-                    ON channel_states(peer_id);
-                CREATE INDEX IF NOT EXISTS idx_channels_state 
-                    ON channel_states(state);
-                
-                -- Payment history
-                CREATE TABLE IF NOT EXISTS payments (
-                    payment_hash TEXT PRIMARY KEY,
-                    payment_preimage TEXT,
-                    amount INTEGER NOT NULL,
-                    fee INTEGER,
-                    status TEXT NOT NULL,
-                    direction TEXT NOT NULL,
-                    timestamp INTEGER NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE INDEX IF NOT EXISTS idx_payments_status 
-                    ON payments(status, timestamp DESC);
-                CREATE INDEX IF NOT EXISTS idx_payments_direction 
-                    ON payments(direction, timestamp DESC);
-                
-                -- Key-value store for configuration and state
-                CREATE TABLE IF NOT EXISTS kv_store (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL,
-                    expires_at INTEGER,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE INDEX IF NOT EXISTS idx_kv_expires 
-                    ON kv_store(expires_at) WHERE expires_at IS NOT NULL;
-                
-                -- Discovered Lightning Network nodes
-                CREATE TABLE IF NOT EXISTS discovered_nodes (
-                    pubkey TEXT PRIMARY KEY,
-                    alias TEXT NOT NULL,
-                    host TEXT NOT NULL,
-                    port INTEGER NOT NULL,
-                    channel_count INTEGER DEFAULT 0,
-                    capacity_btc REAL DEFAULT 0.0,
-                    connectivity_score REAL DEFAULT 0.0,
-                    discovery_method TEXT DEFAULT 'unknown',
-                    last_seen INTEGER NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE INDEX IF NOT EXISTS idx_discovered_nodes_last_seen 
-                    ON discovered_nodes(last_seen DESC);
-                CREATE INDEX IF NOT EXISTS idx_discovered_nodes_score 
-                    ON discovered_nodes(connectivity_score DESC);
+                    metric_value REAL,
+                    tags TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
             """)
             
+            # Create indexes
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_kv_key ON kv_store(key)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_metrics_name ON metrics(metric_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_metrics_timestamp ON metrics(timestamp)")
+            
             conn.commit()
-        finally:
-            self._connections.put(conn)
-    
-    def _create_connection(self) -> sqlite3.Connection:
-        """Create a new database connection"""
-        conn = sqlite3.connect(
-            self.db_path,
-            timeout=30.0,
-            isolation_level=None,  # Autocommit mode
-            check_same_thread=False
-        )
-        conn.row_factory = sqlite3.Row
-        return conn
     
     @contextmanager
     def get_connection(self):
-        """Get a connection from the pool"""
+        """Get a connection from the pool."""
         conn = None
         try:
-            # Try to get existing connection
-            try:
-                conn = self._connections.get(block=False)
-            except Empty:
-                # Create new connection if under limit
-                with self._lock:
-                    if self._created_connections < self.max_connections:
-                        conn = self._create_connection()
-                        self._created_connections += 1
-                    else:
-                        # Wait for available connection
-                        conn = self._connections.get(block=True, timeout=10.0)
+            with self.lock:
+                if self.available_connections:
+                    conn = self.available_connections.pop()
+                else:
+                    # All connections in use, create temporary one
+                    conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                    conn.row_factory = sqlite3.Row
             
             yield conn
+            
         finally:
             if conn:
-                self._connections.put(conn)
+                with self.lock:
+                    if conn in self.connections:
+                        self.available_connections.append(conn)
+                    else:
+                        conn.close()  # Close temporary connection
     
-    def close_all(self):
-        """Close all connections in the pool"""
-        while not self._connections.empty():
-            try:
-                conn = self._connections.get_nowait()
-                conn.close()
-            except Empty:
-                break
-
-
-class DatabaseManager:
-    """Optimized database manager with caching and batch operations"""
+    def execute(self, query: str, params: Optional[Tuple] = None) -> List[sqlite3.Row]:
+        """Execute a query and return results."""
+        start_time = time.time()
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            
+            if query.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER')):
+                conn.commit()
+                result = []
+            else:
+                result = cursor.fetchall()
+        
+        # Track query statistics
+        self._track_query_stats(query, time.time() - start_time)
+        
+        return result
     
-    def __init__(self, db_path: Optional[str] = None):
-        self.logger = get_logger(__name__)
-        self.config_manager = get_config_manager()
-        self.cache = get_cache()
-        
-        # Database path
-        if db_path is None:
-            db_path = self.config_manager.get('database.path', 'data/blncs.db')
-        
-        self.db_path = db_path
-        self.pool = DatabasePool(db_path)
-        
-        # Batch operation queue
-        self._batch_queue = []
-        self._batch_lock = threading.Lock()
-        self._batch_thread = None
-        self._stop_batch = threading.Event()
-        
-        # Start batch processor
-        self._start_batch_processor()
+    def execute_many(self, query: str, params_list: List[Tuple]) -> int:
+        """Execute multiple queries efficiently."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany(query, params_list)
+            conn.commit()
+            return cursor.rowcount
     
-    def _start_batch_processor(self):
-        """Start background batch processor with proper resource management"""
-        if not self._batch_thread or not self._batch_thread.is_alive():
-            from .resource_manager import get_resource_manager, ResourceType
-            self._stop_batch.clear()
-            self._batch_thread = threading.Thread(
-                target=self._batch_processor,
-                daemon=True,
-                name="DatabaseBatch"
+    def _track_query_stats(self, query: str, execution_time: float):
+        """Track query execution statistics."""
+        query_hash = hashlib.md5(query.encode()).hexdigest()
+        
+        if query_hash not in self.query_stats:
+            self.query_stats[query_hash] = QueryStats(
+                query_hash=query_hash,
+                query=query[:100]  # Store first 100 chars
             )
-            
-            # Register with resource manager for proper cleanup
-            resource_manager = get_resource_manager()
-            resource_manager.register_resource(
-                resource_id=f"db_batch_thread_{id(self)}",
-                resource=self._batch_thread,
-                resource_type=ResourceType.THREAD,
-                cleanup_func=self._stop_batch_processor,
-                description="Database batch processor thread"
-            )
-            
-            self._batch_thread.start()
+        
+        stats = self.query_stats[query_hash]
+        stats.execution_count += 1
+        stats.total_time_ms += execution_time * 1000
+        stats.avg_time_ms = stats.total_time_ms / stats.execution_count
+        stats.last_executed = datetime.now()
     
-    def _stop_batch_processor(self):
-        """Stop batch processor safely"""
-        self._stop_batch.set()
-        if self._batch_thread and self._batch_thread.is_alive():
-            self._batch_thread.join(timeout=3.0)
-            if self._batch_thread.is_alive():
-                self.logger.warning("Database batch processor did not stop gracefully")
-    
-    def _batch_processor(self):
-        """Process batched database operations"""
-        while not self._stop_batch.is_set():
+    # Key-Value Operations
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from key-value store."""
+        result = self.execute(
+            "SELECT value FROM kv_store WHERE key = ?",
+            (key,)
+        )
+        if result:
             try:
-                time.sleep(1)  # Process batch every second
-                
-                with self._batch_lock:
-                    if not self._batch_queue:
-                        continue
-                    
-                    batch = self._batch_queue[:100]  # Process up to 100 items
-                    self._batch_queue = self._batch_queue[100:]
-                
-                # Execute batch operations
-                with self.pool.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("BEGIN TRANSACTION")
-                    
-                    try:
-                        for operation in batch:
-                            cursor.execute(operation['query'], operation['params'])
-                        cursor.execute("COMMIT")
-                    except Exception as e:
-                        cursor.execute("ROLLBACK")
-                        self.logger.error(f"Batch operation failed: {e}")
-                        
-            except Exception as e:
-                self.logger.error(f"Batch processor error: {e}")
+                return json.loads(result[0]['value'])
+            except json.JSONDecodeError:
+                return result[0]['value']
+        return None
     
-    def stop(self):
-        """Stop the database manager"""
-        self._stop_batch.set()
-        if self._batch_thread:
-            self._batch_thread.join(timeout=2.0)
-        self.pool.close_all()
+    def set(self, key: str, value: Any) -> bool:
+        """Set value in key-value store."""
+        value_str = json.dumps(value) if not isinstance(value, str) else value
+        
+        self.execute("""
+            INSERT OR REPLACE INTO kv_store (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (key, value_str))
+        return True
     
-    # Metrics operations
-    def record_metric(self, name: str, value: float, labels: Optional[Dict[str, str]] = None):
-        """Record a metric value"""
-        timestamp = int(time.time())
-        labels_json = json.dumps(labels) if labels else None
-        
-        with self._batch_lock:
-            self._batch_queue.append({
-                'query': "INSERT INTO metrics (metric_name, value, labels, timestamp) VALUES (?, ?, ?, ?)",
-                'params': (name, value, labels_json, timestamp)
-            })
+    def delete(self, key: str) -> bool:
+        """Delete key from key-value store."""
+        self.execute("DELETE FROM kv_store WHERE key = ?", (key,))
+        return True
     
-    def get_metrics(self, name: str, start_time: Optional[int] = None, 
-                   end_time: Optional[int] = None, limit: int = 1000) -> List[Dict]:
-        """Get metrics within time range"""
-        # Try cache first
-        cache_key = f"metrics:{name}:{start_time}:{end_time}:{limit}"
-        cached = self.cache.get(cache_key)
-        if cached:
-            return cached
+    def get_all(self, prefix: str = "") -> Dict[str, Any]:
+        """Get all key-value pairs with optional prefix."""
+        if prefix:
+            result = self.execute(
+                "SELECT key, value FROM kv_store WHERE key LIKE ?",
+                (f"{prefix}%",)
+            )
+        else:
+            result = self.execute("SELECT key, value FROM kv_store")
         
-        query = "SELECT * FROM metrics WHERE metric_name = ?"
-        params = [name]
-        
-        if start_time:
-            query += " AND timestamp >= ?"
-            params.append(start_time)
-        if end_time:
-            query += " AND timestamp <= ?"
-            params.append(end_time)
-        
-        query += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
-        
-        with self.pool.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            results = [dict(row) for row in cursor.fetchall()]
-        
-        # Cache for 60 seconds
-        self.cache.set(cache_key, results, ttl=60)
-        return results
+        data = {}
+        for row in result:
+            try:
+                data[row['key']] = json.loads(row['value'])
+            except json.JSONDecodeError:
+                data[row['key']] = row['value']
+        return data
     
-    # Event operations
-    def record_event(self, event_type: str, severity: str, message: str, 
-                    details: Optional[Dict] = None):
-        """Record a system event"""
-        timestamp = int(time.time())
-        details_json = json.dumps(details) if details else None
-        
-        with self._batch_lock:
-            self._batch_queue.append({
-                'query': "INSERT INTO events (event_type, severity, message, details, timestamp) VALUES (?, ?, ?, ?, ?)",
-                'params': (event_type, severity, message, details_json, timestamp)
-            })
+    # Transaction Operations
+    def record_transaction(self, tx_type: str, data: Dict[str, Any]) -> int:
+        """Record a transaction."""
+        result = self.execute(
+            "INSERT INTO transactions (type, data) VALUES (?, ?)",
+            (tx_type, json.dumps(data))
+        )
+        return self.execute("SELECT last_insert_rowid()")[0][0]
     
-    def get_recent_events(self, event_type: Optional[str] = None, 
-                         severity: Optional[str] = None, limit: int = 100) -> List[Dict]:
-        """Get recent events"""
-        query = "SELECT * FROM events WHERE 1=1"
-        params = []
-        
-        if event_type:
-            query += " AND event_type = ?"
-            params.append(event_type)
-        if severity:
-            query += " AND severity = ?"
-            params.append(severity)
-        
-        query += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
-        
-        with self.pool.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
+    def update_transaction_status(self, tx_id: int, status: str):
+        """Update transaction status."""
+        self.execute(
+            "UPDATE transactions SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, tx_id)
+        )
     
-    # Channel operations
-    def update_channel_state(self, channel_id: str, peer_id: str, capacity: int,
-                            local_balance: int, remote_balance: int, state: str):
-        """Update channel state"""
-        timestamp = int(time.time())
-        
-        with self.pool.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO channel_states 
-                (channel_id, peer_id, capacity, local_balance, remote_balance, state, last_update, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, (channel_id, peer_id, capacity, local_balance, remote_balance, state, timestamp))
+    def get_recent_transactions(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get recent transactions."""
+        result = self.execute(
+            "SELECT * FROM transactions ORDER BY created_at DESC LIMIT ?",
+            (limit,)
+        )
+        return [dict(row) for row in result]
     
-    def get_channel_states(self, state: Optional[str] = None) -> List[Dict]:
-        """Get channel states"""
-        query = "SELECT * FROM channel_states"
-        params = []
-        
-        if state:
-            query += " WHERE state = ?"
-            params.append(state)
-        
-        query += " ORDER BY last_update DESC"
-        
-        with self.pool.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
+    # Metrics Operations
+    def record_metric(self, name: str, value: float, tags: Optional[Dict[str, str]] = None):
+        """Record a metric."""
+        tags_str = json.dumps(tags) if tags else None
+        self.execute(
+            "INSERT INTO metrics (metric_name, metric_value, tags) VALUES (?, ?, ?)",
+            (name, value, tags_str)
+        )
     
-    # Key-value operations
-    def set_kv(self, key: str, value: Any, ttl: Optional[int] = None):
-        """Set key-value pair with optional TTL"""
-        value_json = json.dumps(value)
-        expires_at = int(time.time()) + ttl if ttl else None
+    def get_metrics(self, name: str, hours: int = 24) -> List[Dict[str, Any]]:
+        """Get metrics for the specified time period."""
+        cutoff = datetime.now() - timedelta(hours=hours)
+        result = self.execute(
+            "SELECT * FROM metrics WHERE metric_name = ? AND timestamp > ? ORDER BY timestamp",
+            (name, cutoff)
+        )
+        return [dict(row) for row in result]
+    
+    # Migration Operations
+    def run_migrations(self, migrations: List[Tuple[int, str, str]]):
+        """Run database migrations.
         
-        with self.pool.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO kv_store (key, value, expires_at, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            """, (key, value_json, expires_at))
-    
-    def get_kv(self, key: str) -> Optional[Any]:
-        """Get key-value pair"""
-        with self.pool.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT value FROM kv_store 
-                WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)
-            """, (key, int(time.time())))
-            
-            row = cursor.fetchone()
-            if row:
-                return json.loads(row['value'])
-            return None
-    
-    def delete_kv(self, key: str):
-        """Delete key-value pair"""
-        with self.pool.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM kv_store WHERE key = ?", (key,))
-    
-    # Cleanup operations
-    def cleanup_old_data(self, days: int = 30):
-        """Clean up old data"""
-        cutoff_time = int(time.time()) - (days * 86400)
-        
-        with self.pool.get_connection() as conn:
+        Args:
+            migrations: List of (version, name, sql) tuples
+        """
+        with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Clean old metrics
-            cursor.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff_time,))
-            metrics_deleted = cursor.rowcount
+            # Get current version
+            cursor.execute(f"SELECT MAX(version) FROM {self.migrations_table}")
+            current_version = cursor.fetchone()[0] or 0
             
-            # Clean old events
-            cursor.execute("DELETE FROM events WHERE timestamp < ?", (cutoff_time,))
-            events_deleted = cursor.rowcount
+            for version, name, sql in migrations:
+                if version > current_version:
+                    self.logger.info(f"Running migration {version}: {name}")
+                    cursor.executescript(sql)
+                    cursor.execute(
+                        f"INSERT INTO {self.migrations_table} (version, name) VALUES (?, ?)",
+                        (version, name)
+                    )
             
-            # Clean expired KV pairs
-            cursor.execute("DELETE FROM kv_store WHERE expires_at IS NOT NULL AND expires_at < ?", 
-                         (int(time.time()),))
-            kv_deleted = cursor.rowcount
+            conn.commit()
+    
+    # Optimization Operations
+    def optimize(self):
+        """Optimize database performance."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
             
-            # Vacuum to reclaim space
+            # Vacuum and analyze
             cursor.execute("VACUUM")
+            cursor.execute("ANALYZE")
             
-            self.logger.info(f"Cleanup: {metrics_deleted} metrics, {events_deleted} events, {kv_deleted} KV pairs")
+            # Clean old metrics (keep 30 days)
+            cutoff = datetime.now() - timedelta(days=30)
+            cursor.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff,))
             
-            return {
-                'metrics_deleted': metrics_deleted,
-                'events_deleted': events_deleted,
-                'kv_deleted': kv_deleted
-            }
+            # Clean old completed transactions (keep 90 days)
+            cutoff = datetime.now() - timedelta(days=90)
+            cursor.execute(
+                "DELETE FROM transactions WHERE status = 'completed' AND completed_at < ?",
+                (cutoff,)
+            )
+            
+            conn.commit()
+            self.logger.info("Database optimization completed")
+    
+    def get_slow_queries(self, threshold_ms: float = 100) -> List[QueryStats]:
+        """Get queries slower than threshold."""
+        slow_queries = [
+            stats for stats in self.query_stats.values()
+            if stats.avg_time_ms > threshold_ms
+        ]
+        return sorted(slow_queries, key=lambda x: x.avg_time_ms, reverse=True)
     
     def get_database_stats(self) -> Dict[str, Any]:
-        """Get database statistics"""
-        with self.pool.get_connection() as conn:
+        """Get database statistics."""
+        with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Get table sizes
-            cursor.execute("""
-                SELECT 
-                    'metrics' as table_name,
-                    COUNT(*) as row_count,
-                    MIN(timestamp) as oldest_timestamp,
-                    MAX(timestamp) as newest_timestamp
-                FROM metrics
-                UNION ALL
-                SELECT 
-                    'events' as table_name,
-                    COUNT(*) as row_count,
-                    MIN(timestamp) as oldest_timestamp,
-                    MAX(timestamp) as newest_timestamp
-                FROM events
-                UNION ALL
-                SELECT 
-                    'channel_states' as table_name,
-                    COUNT(*) as row_count,
-                    MIN(last_update) as oldest_timestamp,
-                    MAX(last_update) as newest_timestamp
-                FROM channel_states
-                UNION ALL
-                SELECT 
-                    'payments' as table_name,
-                    COUNT(*) as row_count,
-                    MIN(timestamp) as oldest_timestamp,
-                    MAX(timestamp) as newest_timestamp
-                FROM payments
-            """)
+            # Table sizes
+            tables = ['kv_store', 'transactions', 'metrics']
+            table_stats = {}
+            for table in tables:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                table_stats[table] = cursor.fetchone()[0]
             
-            stats = {}
-            for row in cursor.fetchall():
-                stats[row['table_name']] = {
-                    'row_count': row['row_count'],
-                    'oldest_timestamp': row['oldest_timestamp'],
-                    'newest_timestamp': row['newest_timestamp']
-                }
+            # Database file size
+            db_size = Path(self.db_path).stat().st_size if Path(self.db_path).exists() else 0
             
-            # Get database file size
-            db_file = Path(self.db_path)
-            if db_file.exists():
-                stats['file_size_mb'] = round(db_file.stat().st_size / (1024 * 1024), 2)
-            
-            # Get batch queue size
-            with self._batch_lock:
-                stats['batch_queue_size'] = len(self._batch_queue)
-            
-            return stats
-    
-    def optimize_database(self) -> Dict[str, Any]:
-        """Advanced database optimization operations"""
-        start_time = time.time()
-        self.logger.info("Starting advanced database optimization")
-        
-        optimization_results = {}
-        
-        with self.pool.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            try:
-                # 1. Analyze and optimize query performance
-                self.logger.info("Analyzing query performance...")
-                cursor.execute("ANALYZE")
-                optimization_results['analyze_completed'] = True
-                
-                # 2. Rebuild indexes for better performance
-                self.logger.info("Rebuilding indexes...")
-                cursor.execute("REINDEX")
-                optimization_results['reindex_completed'] = True
-                
-                # 3. Update database statistics
-                cursor.execute("PRAGMA optimize")
-                optimization_results['optimize_completed'] = True
-                
-                # 4. Check for and fix database integrity
-                self.logger.info("Checking database integrity...")
-                cursor.execute("PRAGMA integrity_check")
-                integrity_result = cursor.fetchone()
-                optimization_results['integrity_check'] = integrity_result[0] if integrity_result else 'unknown'
-                
-                # 5. Optimize cache and memory settings
-                cursor.execute("PRAGMA cache_size=20000")  # Increase cache size
-                cursor.execute("PRAGMA mmap_size=268435456")  # 256MB memory mapping
-                optimization_results['memory_optimized'] = True
-                
-                # 6. Get performance metrics before/after
-                optimization_results['optimization_duration'] = time.time() - start_time
-                
-                self.logger.info(f"Database optimization completed in {optimization_results['optimization_duration']:.2f}s")
-                
-                # Update metrics
-                increment_counter('database_optimizations_total')
-                set_gauge('database_optimization_duration_seconds', optimization_results['optimization_duration'])
-                
-                return optimization_results
-                
-            except Exception as e:
-                self.logger.error(f"Database optimization failed: {e}")
-                optimization_results['error'] = str(e)
-                return optimization_results
-    
-    def get_performance_metrics(self) -> Dict[str, Any]:
-        """Get database performance metrics"""
-        with self.pool.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Connection pool metrics
-            pool_metrics = {
-                'active_connections': self.pool._created_connections,
-                'max_connections': self.pool.max_connections,
-                'pool_utilization': self.pool._created_connections / self.pool.max_connections
+            return {
+                "database_size_mb": db_size / (1024 * 1024),
+                "connection_pool_size": self.pool_size,
+                "available_connections": len(self.available_connections),
+                "table_row_counts": table_stats,
+                "slow_queries": len(self.get_slow_queries()),
+                "total_queries_tracked": len(self.query_stats)
             }
-            
-            # Query performance metrics
-            try:
-                # Get cache hit ratio
-                cursor.execute("PRAGMA cache_size")
-                cache_size = cursor.fetchone()[0]
-                
-                cursor.execute("PRAGMA page_count")
-                page_count = cursor.fetchone()[0]
-                
-                cursor.execute("PRAGMA page_size")
-                page_size = cursor.fetchone()[0]
-                
-                query_metrics = {
-                    'cache_size': cache_size,
-                    'page_count': page_count,
-                    'page_size': page_size,
-                    'database_size_mb': (page_count * page_size) / (1024 * 1024)
-                }
-                
-                # Batch processing metrics
-                with self._batch_lock:
-                    batch_metrics = {
-                        'batch_queue_size': len(self._batch_queue),
-                        'batch_size': self.batch_size,
-                        'batch_timeout': self.batch_timeout
-                    }
-                
-                return {
-                    'connection_pool': pool_metrics,
-                    'query_performance': query_metrics,
-                    'batch_processing': batch_metrics
-                }
-                
-            except Exception as e:
-                self.logger.error(f"Failed to get performance metrics: {e}")
-                return {'error': str(e)}
     
-    def auto_maintenance(self) -> Dict[str, Any]:
-        """Perform automatic database maintenance"""
-        self.logger.info("Starting automatic database maintenance")
-        maintenance_results = {}
-        
-        try:
-            # 1. Clean old data
-            cleanup_results = self.cleanup_old_data()
-            maintenance_results['cleanup'] = cleanup_results
-            
-            # 2. Optimize database if needed
-            stats = self.get_database_stats()
-            total_records = sum(table.get('row_count', 0) for table in stats.values() if isinstance(table, dict))
-            
-            # Optimize if we have a significant amount of data
-            if total_records > 10000:
-                opt_results = self.optimize_database()
-                maintenance_results['optimization'] = opt_results
-            
-            # 3. Update performance metrics
-            perf_metrics = self.get_performance_metrics()
-            maintenance_results['performance_metrics'] = perf_metrics
-            
-            # 4. Log maintenance completion
-            self.logger.info("Automatic database maintenance completed successfully")
-            maintenance_results['success'] = True
-            
-            # Update metrics
-            increment_counter('database_maintenance_total')
-            
-            return maintenance_results
-            
-        except Exception as e:
-            self.logger.error(f"Database maintenance failed: {e}")
-            maintenance_results['error'] = str(e)
-            maintenance_results['success'] = False
-            return maintenance_results
+    def close(self):
+        """Close all database connections."""
+        with self.lock:
+            for conn in self.connections:
+                conn.close()
+            self.connections.clear()
+            self.available_connections.clear()
 
+# Async database operations
+class AsyncDatabaseManager:
+    """Async database manager for high-performance operations."""
+    
+    def __init__(self, db_path: str = "blncs.db"):
+        """Initialize async database manager."""
+        self.db_path = db_path
+        self.logger = get_logger(__name__)
+        self._lock = asyncio.Lock()
+    
+    @asynccontextmanager
+    async def get_connection(self):
+        """Get async database connection."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+            yield conn
+    
+    async def execute(self, query: str, params: Optional[Tuple] = None) -> List[aiosqlite.Row]:
+        """Execute async query."""
+        async with self.get_connection() as conn:
+            if params:
+                cursor = await conn.execute(query, params)
+            else:
+                cursor = await conn.execute(query)
+            
+            if query.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER')):
+                await conn.commit()
+                return []
+            else:
+                return await cursor.fetchall()
+    
+    async def get(self, key: str) -> Optional[Any]:
+        """Async get from key-value store."""
+        result = await self.execute(
+            "SELECT value FROM kv_store WHERE key = ?",
+            (key,)
+        )
+        if result:
+            try:
+                return json.loads(result[0]['value'])
+            except json.JSONDecodeError:
+                return result[0]['value']
+        return None
+    
+    async def set(self, key: str, value: Any) -> bool:
+        """Async set in key-value store."""
+        value_str = json.dumps(value) if not isinstance(value, str) else value
+        await self.execute("""
+            INSERT OR REPLACE INTO kv_store (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (key, value_str))
+        return True
 
-# Global database manager instance
-_db_manager = None
+# Global instances
+_db_manager: Optional[DatabaseManager] = None
+_async_db_manager: Optional[AsyncDatabaseManager] = None
+_db_lock = threading.Lock()
 
-def get_database_manager() -> DatabaseManager:
-    """Get global database manager instance"""
+def get_database() -> DatabaseManager:
+    """Get global database manager instance."""
     global _db_manager
     if _db_manager is None:
-        _db_manager = DatabaseManager()
+        with _db_lock:
+            if _db_manager is None:
+                config = get_config_manager()
+                db_path = config.get('database.path', 'blncs.db')
+                pool_size = config.get('database.pool_size', 10)
+                _db_manager = DatabaseManager(db_path, pool_size)
     return _db_manager
 
-def stop_database_manager():
-    """Stop the global database manager"""
-    global _db_manager
-    if _db_manager:
-        _db_manager.stop()
-        _db_manager = None
+def get_async_database() -> AsyncDatabaseManager:
+    """Get global async database manager instance."""
+    global _async_db_manager
+    if _async_db_manager is None:
+        config = get_config_manager()
+        db_path = config.get('database.path', 'blncs.db')
+        _async_db_manager = AsyncDatabaseManager(db_path)
+    return _async_db_manager
+
+# Backward compatibility aliases
+def get_database_manager():
+    """Backward compatibility for get_database_manager."""
+    return get_database()
+
+def get_async_db_manager():
+    """Backward compatibility for async db manager."""
+    return get_async_database()
+
+# Example migrations
+MIGRATIONS = [
+    (1, "Add channel stats table", """
+        CREATE TABLE IF NOT EXISTS channel_stats (
+            channel_id TEXT PRIMARY KEY,
+            capacity INTEGER,
+            local_balance INTEGER,
+            remote_balance INTEGER,
+            total_sent INTEGER DEFAULT 0,
+            total_received INTEGER DEFAULT 0,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_channel_stats_updated ON channel_stats(last_updated);
+    """),
+    (2, "Add fee tracking table", """
+        CREATE TABLE IF NOT EXISTS fee_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_id TEXT,
+            base_fee INTEGER,
+            fee_rate INTEGER,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_fee_history_channel ON fee_history(channel_id);
+        CREATE INDEX idx_fee_history_timestamp ON fee_history(timestamp);
+    """)
+]
+
+if __name__ == "__main__":
+    # Test the database
+    db = get_database()
+    
+    # Test key-value operations
+    db.set("test_key", {"value": "test_data"})
+    print(f"Get test_key: {db.get('test_key')}")
+    
+    # Test transactions
+    tx_id = db.record_transaction("test", {"amount": 1000})
+    print(f"Created transaction: {tx_id}")
+    db.update_transaction_status(tx_id, "completed")
+    
+    # Test metrics
+    db.record_metric("cpu_usage", 45.5, {"host": "localhost"})
+    
+    # Run migrations
+    db.run_migrations(MIGRATIONS)
+    
+    # Get stats
+    stats = db.get_database_stats()
+    print(f"Database stats: {json.dumps(stats, indent=2)}")
+    
+    # Optimize
+    db.optimize()

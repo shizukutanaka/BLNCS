@@ -18,8 +18,8 @@ def get_logger(name: Optional[str] = None):
 
 def get_cache():
     """Get unified cache system"""
-    from .unified_cache import get_cache_manager
-    return get_cache_manager()
+    from .cache_unified import get_cache
+    return get_cache()
 
 def get_health_checker():
     """Get health checker"""
