@@ -85,7 +85,7 @@ def setup():
 def wizard():
     """Interactive setup wizard for first-time configuration"""
     
-    click.echo("🚀 Welcome to BLNCS Setup Wizard!")
+    click.echo("Welcome to BLNCS Setup Wizard!")
     click.echo("=" * 50)
     click.echo("This wizard will help you configure BLNCS for first-time use.")
     click.echo("You can skip any optional steps by pressing Enter.\n")
@@ -94,7 +94,7 @@ def wizard():
     config = {}
     
     # Step 1: Lightning Network Configuration
-    click.echo("⚡ Step 1: Lightning Network Configuration")
+    click.echo("Step 1: Lightning Network Configuration")
     click.echo("-" * 40)
     
     ln_host = prompt_with_validation(
@@ -112,7 +112,7 @@ def wizard():
     )
     
     if not validate_path(cert_path):
-        click.echo(f"⚠️  Warning: Certificate file not found at {cert_path}")
+        click.echo(f"Warning: Certificate file not found at {cert_path}")
         if click.confirm("Continue anyway?"):
             cert_path = cert_path
         else:
@@ -129,7 +129,7 @@ def wizard():
     )
     
     if not validate_path(macaroon_path):
-        click.echo(f"⚠️  Warning: Macaroon file not found at {macaroon_path}")
+        click.echo(f"Warning: Macaroon file not found at {macaroon_path}")
         if click.confirm("Continue anyway?"):
             macaroon_path = macaroon_path
         else:
@@ -146,16 +146,16 @@ def wizard():
     )
     
     # Test connection
-    click.echo("\n🔌 Testing Lightning connection...")
+    click.echo("\nTesting Lightning connection...")
     
     connection_success, connection_msg = test_lightning_connection(
         ln_host, ln_port, cert_path, macaroon_path
     )
     
     if connection_success:
-        click.echo(f"✅ Connection successful: {connection_msg}")
+        click.echo(f"Connection successful: {connection_msg}")
     else:
-        click.echo(f"❌ Connection failed: {connection_msg}")
+        click.echo(f"Connection failed: {connection_msg}")
         if not click.confirm("Continue with setup anyway?"):
             click.echo("Setup cancelled")
             return
@@ -172,7 +172,7 @@ def wizard():
     }
     
     # Step 2: System Configuration
-    click.echo("\n🔧 Step 2: System Configuration")
+    click.echo("\nStep 2: System Configuration")
     click.echo("-" * 40)
     
     # Logging level
@@ -194,7 +194,7 @@ def wizard():
     if not data_path.exists():
         if click.confirm(f"Create data directory {data_dir}?"):
             data_path.mkdir(parents=True, exist_ok=True)
-            click.echo(f"✅ Created data directory: {data_dir}")
+            click.echo(f"Created data directory: {data_dir}")
     
     config['system'] = {
         'log_level': log_level,
@@ -203,7 +203,7 @@ def wizard():
     }
     
     # Step 3: Performance Configuration
-    click.echo("\n⚡ Step 3: Performance Configuration")
+    click.echo("\nStep 3: Performance Configuration")
     click.echo("-" * 40)
     
     if click.confirm("Enable performance monitoring?", default=True):
@@ -216,7 +216,7 @@ def wizard():
         }
     
     # Step 4: Security Configuration
-    click.echo("\n🔒 Step 4: Security Configuration")
+    click.echo("\nStep 4: Security Configuration")
     click.echo("-" * 40)
     
     enable_security = click.confirm("Enable enhanced security features?", default=True)
@@ -235,14 +235,14 @@ def wizard():
             try:
                 sm = get_enhanced_security_manager()
                 if sm.key_manager.encryption_enabled:
-                    click.echo("✅ Encryption system initialized")
+                    click.echo("Encryption system initialized")
                 else:
-                    click.echo("⚠️  Encryption not available (install 'cryptography' package)")
+                    click.echo("Warning: Encryption not available (install 'cryptography' package)")
             except Exception as e:
-                click.echo(f"⚠️  Encryption initialization failed: {e}")
+                click.echo(f"Warning: Encryption initialization failed: {e}")
     
     # Step 5: Automation Setup
-    click.echo("\n🤖 Step 5: Automation Setup")
+    click.echo("\nStep 5: Automation Setup")
     click.echo("-" * 40)
     
     if click.confirm("Setup automated maintenance tasks?", default=True):
@@ -264,7 +264,7 @@ def wizard():
         if not backup_path.exists():
             if click.confirm(f"Create backup directory {backup_dir}?"):
                 backup_path.mkdir(parents=True, exist_ok=True)
-                click.echo(f"✅ Created backup directory: {backup_dir}")
+                click.echo(f"Created backup directory: {backup_dir}")
         
         config['backup'] = {
             'enabled': True,
@@ -274,7 +274,7 @@ def wizard():
         }
     
     # Step 6: Save Configuration
-    click.echo("\n💾 Step 6: Save Configuration")
+    click.echo("\nStep 6: Save Configuration")
     click.echo("-" * 40)
     
     # Display configuration summary
@@ -284,13 +284,13 @@ def wizard():
     click.echo(f"  Logging Level: {log_level}")
     
     if config.get('performance'):
-        click.echo(f"  Performance Monitoring: ✅")
+        click.echo(f"  Performance Monitoring: Enabled")
     
     if config.get('security'):
         click.echo(f"  Security Level: {config['security']['level']}")
     
     if config.get('automation'):
-        click.echo(f"  Automation: ✅")
+        click.echo(f"  Automation: Enabled")
     
     if click.confirm("\nSave this configuration?", default=True):
         try:
@@ -299,7 +299,7 @@ def wizard():
                 for key, value in values.items():
                     config_manager.set(f"{section}.{key}", value)
             
-            click.echo("✅ Configuration saved successfully!")
+            click.echo("Configuration saved successfully!")
             
             # Create essential directories
             essential_dirs = ['security', 'logs', 'automation']
@@ -316,7 +316,7 @@ def wizard():
                 if click.confirm("Setup default automated tasks now?"):
                     setup_default_automation()
             
-            click.echo("\n🎉 BLNCS setup completed successfully!")
+            click.echo("\nBLNCS setup completed successfully!")
             click.echo("\nNext steps:")
             click.echo("  1. Run 'blncs status' to check system status")
             click.echo("  2. Run 'blncs health' for a comprehensive health check")
@@ -324,13 +324,13 @@ def wizard():
             click.echo("  4. Check out 'blncs --help' for all available commands")
             
         except Exception as e:
-            click.echo(f"❌ Failed to save configuration: {e}")
+            click.echo(f"Failed to save configuration: {e}")
             return
     else:
-        click.echo("❌ Setup cancelled")
+        click.echo("Setup cancelled")
 
 
-def setup_default_automation():
+def setup_default_automation() -> None:
     """Setup default automation tasks"""
     try:
         from .automation_commands import get_scheduler
@@ -377,17 +377,17 @@ def setup_default_automation():
             )
         
         scheduler.start()
-        click.echo(f"✅ Setup {len(default_tasks)} automated tasks")
+        click.echo(f"Setup {len(default_tasks)} automated tasks")
         
     except Exception as e:
-        click.echo(f"⚠️  Failed to setup automation: {e}")
+        click.echo(f"Warning: Failed to setup automation: {e}")
 
 
 @setup.command()
 def verify():
     """Verify current system configuration"""
     
-    click.echo("🔍 BLNCS Configuration Verification")
+    click.echo("BLNCS Configuration Verification")
     click.echo("=" * 50)
     
     config_manager = get_config_manager()
@@ -399,7 +399,7 @@ def verify():
     total_checks = 0
     
     # Check Lightning configuration
-    click.echo("\n⚡ Lightning Network Configuration")
+    click.echo("\nLightning Network Configuration")
     click.echo("-" * 40)
     
     ln_host = config_manager.get('lightning.host', 'localhost')

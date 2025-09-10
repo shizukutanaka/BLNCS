@@ -26,7 +26,6 @@ from .connection_pool import ConnectionPool
 from .fast_cache import get_fast_cache
 from .metrics import get_metrics_collector, increment_counter, set_gauge
 from .circuit_breaker import circuit_breaker
-from ..lightning.client import LightningClient
 
 
 class HealthStatus(Enum):
@@ -242,6 +241,7 @@ class HealthChecker:
         start_time = time.time()
         
         try:
+            from ..lightning.client import LightningClient
             client = LightningClient(self.config.data)
             
             # Connection and info test
@@ -686,6 +686,7 @@ class HealthChecker:
             
             # Quick Lightning node check
             try:
+                from ..lightning.client import LightningClient
                 client = LightningClient(self.config.data)
                 info = client.get_info()
                 result['lightning_node'] = {

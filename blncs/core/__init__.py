@@ -11,20 +11,15 @@ def get_config():
     from .config_manager import get_config_manager
     return get_config_manager()
 
-def get_config_manager():
-    """Get enhanced configuration manager"""
-    from .config_manager import get_config_manager as _get_config_manager
-    return _get_config_manager()
-
 def get_logger(name: Optional[str] = None):
     """Get logging system"""  
     from .logger import get_logger as _get_logger
     return _get_logger(name)
 
 def get_cache():
-    """Get cache system"""
-    from .fast_cache import get_cache as _get_cache
-    return _get_cache()
+    """Get unified cache system"""
+    from .unified_cache import get_cache_manager
+    return get_cache_manager()
 
 def get_health_checker():
     """Get health checker"""
@@ -32,14 +27,9 @@ def get_health_checker():
     return _get_health_checker()
 
 def get_validator():
-    """Get enhanced validator"""
+    """Get enhanced validator system"""
     from .enhanced_validator import get_enhanced_validator
     return get_enhanced_validator()
-
-def get_enhanced_validator():
-    """Get enhanced validator system"""
-    from .enhanced_validator import get_enhanced_validator as _get_enhanced_validator
-    return _get_enhanced_validator()
 
 def get_security_manager():
     """Get security manager"""
@@ -51,9 +41,6 @@ def get_monitor():
     from .monitor import get_monitor as _get_monitor
     return _get_monitor()
 
-def get_unified_monitor():
-    """Get unified monitor (alias for get_monitor)"""
-    return get_monitor()
 
 def get_fee_optimizer():
     """Get fee optimizer"""
@@ -80,38 +67,29 @@ def get_recovery_system():
     from .recovery import get_error_recovery
     return get_error_recovery()
 
-def get_enhanced_recovery_system():
-    """Get enhanced error recovery system"""
-    from .recovery_enhanced import get_enhanced_error_recovery
-    return get_enhanced_error_recovery()
-
 def get_unified_monitoring():
     """Get unified monitoring system"""
     from .monitoring_unified import get_unified_monitoring
     return get_unified_monitoring()
 
-def get_enhanced_monitoring():
-    """Get enhanced unified monitoring system"""
-    from .monitoring_unified import get_unified_monitoring
-    return get_unified_monitoring()
+def get_service_container():
+    """Get service container for dependency injection"""
+    from .service_container import get_container
+    return get_container()
 
 __all__ = [
     'get_config',
-    'get_config_manager',
     'get_logger', 
     'get_cache',
     'get_health_checker',
     'get_validator',
-    'get_enhanced_validator',
     'get_security_manager',
     'get_monitor',
     'get_fee_optimizer',
     'get_channel_manager',
     'get_connection_pool',
-    'get_unified_monitor',
     'get_backup_manager',
     'get_recovery_system',
-    'get_enhanced_recovery_system',
     'get_unified_monitoring',
-    'get_enhanced_monitoring'
+    'get_service_container'
 ]

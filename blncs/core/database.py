@@ -16,12 +16,13 @@ import json
 from .logger import get_logger
 from .config_manager import get_config_manager
 from .fast_cache import get_cache
+from .metrics import get_metrics_collector, increment_counter, set_gauge
 
 
 class DatabasePool:
     """SQLite connection pool with optimizations"""
     
-    def __init__(self, db_path: str, max_connections: int = 5):
+    def __init__(self, db_path: str, max_connections: int = 20):
         self.logger = get_logger(__name__)
         self.db_path = db_path
         self.max_connections = max_connections
@@ -121,6 +122,24 @@ class DatabasePool:
                 );
                 CREATE INDEX IF NOT EXISTS idx_kv_expires 
                     ON kv_store(expires_at) WHERE expires_at IS NOT NULL;
+                
+                -- Discovered Lightning Network nodes
+                CREATE TABLE IF NOT EXISTS discovered_nodes (
+                    pubkey TEXT PRIMARY KEY,
+                    alias TEXT NOT NULL,
+                    host TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    channel_count INTEGER DEFAULT 0,
+                    capacity_btc REAL DEFAULT 0.0,
+                    connectivity_score REAL DEFAULT 0.0,
+                    discovery_method TEXT DEFAULT 'unknown',
+                    last_seen INTEGER NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_discovered_nodes_last_seen 
+                    ON discovered_nodes(last_seen DESC);
+                CREATE INDEX IF NOT EXISTS idx_discovered_nodes_score 
+                    ON discovered_nodes(connectivity_score DESC);
             """)
             
             conn.commit()
@@ -468,6 +487,145 @@ class DatabaseManager:
                 stats['batch_queue_size'] = len(self._batch_queue)
             
             return stats
+    
+    def optimize_database(self) -> Dict[str, Any]:
+        """Advanced database optimization operations"""
+        start_time = time.time()
+        self.logger.info("Starting advanced database optimization")
+        
+        optimization_results = {}
+        
+        with self.pool.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            try:
+                # 1. Analyze and optimize query performance
+                self.logger.info("Analyzing query performance...")
+                cursor.execute("ANALYZE")
+                optimization_results['analyze_completed'] = True
+                
+                # 2. Rebuild indexes for better performance
+                self.logger.info("Rebuilding indexes...")
+                cursor.execute("REINDEX")
+                optimization_results['reindex_completed'] = True
+                
+                # 3. Update database statistics
+                cursor.execute("PRAGMA optimize")
+                optimization_results['optimize_completed'] = True
+                
+                # 4. Check for and fix database integrity
+                self.logger.info("Checking database integrity...")
+                cursor.execute("PRAGMA integrity_check")
+                integrity_result = cursor.fetchone()
+                optimization_results['integrity_check'] = integrity_result[0] if integrity_result else 'unknown'
+                
+                # 5. Optimize cache and memory settings
+                cursor.execute("PRAGMA cache_size=20000")  # Increase cache size
+                cursor.execute("PRAGMA mmap_size=268435456")  # 256MB memory mapping
+                optimization_results['memory_optimized'] = True
+                
+                # 6. Get performance metrics before/after
+                optimization_results['optimization_duration'] = time.time() - start_time
+                
+                self.logger.info(f"Database optimization completed in {optimization_results['optimization_duration']:.2f}s")
+                
+                # Update metrics
+                increment_counter('database_optimizations_total')
+                set_gauge('database_optimization_duration_seconds', optimization_results['optimization_duration'])
+                
+                return optimization_results
+                
+            except Exception as e:
+                self.logger.error(f"Database optimization failed: {e}")
+                optimization_results['error'] = str(e)
+                return optimization_results
+    
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get database performance metrics"""
+        with self.pool.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Connection pool metrics
+            pool_metrics = {
+                'active_connections': self.pool._created_connections,
+                'max_connections': self.pool.max_connections,
+                'pool_utilization': self.pool._created_connections / self.pool.max_connections
+            }
+            
+            # Query performance metrics
+            try:
+                # Get cache hit ratio
+                cursor.execute("PRAGMA cache_size")
+                cache_size = cursor.fetchone()[0]
+                
+                cursor.execute("PRAGMA page_count")
+                page_count = cursor.fetchone()[0]
+                
+                cursor.execute("PRAGMA page_size")
+                page_size = cursor.fetchone()[0]
+                
+                query_metrics = {
+                    'cache_size': cache_size,
+                    'page_count': page_count,
+                    'page_size': page_size,
+                    'database_size_mb': (page_count * page_size) / (1024 * 1024)
+                }
+                
+                # Batch processing metrics
+                with self._batch_lock:
+                    batch_metrics = {
+                        'batch_queue_size': len(self._batch_queue),
+                        'batch_size': self.batch_size,
+                        'batch_timeout': self.batch_timeout
+                    }
+                
+                return {
+                    'connection_pool': pool_metrics,
+                    'query_performance': query_metrics,
+                    'batch_processing': batch_metrics
+                }
+                
+            except Exception as e:
+                self.logger.error(f"Failed to get performance metrics: {e}")
+                return {'error': str(e)}
+    
+    def auto_maintenance(self) -> Dict[str, Any]:
+        """Perform automatic database maintenance"""
+        self.logger.info("Starting automatic database maintenance")
+        maintenance_results = {}
+        
+        try:
+            # 1. Clean old data
+            cleanup_results = self.cleanup_old_data()
+            maintenance_results['cleanup'] = cleanup_results
+            
+            # 2. Optimize database if needed
+            stats = self.get_database_stats()
+            total_records = sum(table.get('row_count', 0) for table in stats.values() if isinstance(table, dict))
+            
+            # Optimize if we have a significant amount of data
+            if total_records > 10000:
+                opt_results = self.optimize_database()
+                maintenance_results['optimization'] = opt_results
+            
+            # 3. Update performance metrics
+            perf_metrics = self.get_performance_metrics()
+            maintenance_results['performance_metrics'] = perf_metrics
+            
+            # 4. Log maintenance completion
+            self.logger.info("Automatic database maintenance completed successfully")
+            maintenance_results['success'] = True
+            
+            # Update metrics
+            increment_counter('database_maintenance_total')
+            
+            return maintenance_results
+            
+        except Exception as e:
+            self.logger.error(f"Database maintenance failed: {e}")
+            maintenance_results['error'] = str(e)
+            maintenance_results['success'] = False
+            return maintenance_results
 
 
 # Global database manager instance

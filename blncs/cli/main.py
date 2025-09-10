@@ -33,7 +33,19 @@ def get_command_modules():
     from .commands import (
         info, balance, channels, network_test, lightning_ping, system_info,
         analyze_channels, connectivity_check, fee_estimate, payment_debug, channel_summary,
-        config_management, config_get, config_set, config_list, env_template, liquidity
+        config_management, config_get, config_set, config_list, env_template, liquidity,
+        earnings, top_channels, fee_analysis, health_check, backup_data, rebalance_suggestions,
+        dashboard, system_overview, db_status, db_optimize, db_cleanup, db_maintenance, db_vacuum,
+        fee_automation_status, fee_automation_start, fee_automation_stop, fee_automation_history, fee_automation_test,
+        rebalancer_status, rebalancer_start, rebalancer_stop, rebalancer_history, rebalancer_analyze, rebalancer_add_target, rebalancer_remove_target,
+        monitoring_status, monitoring_start, monitoring_stop, monitoring_alerts, monitoring_history, monitoring_ack, monitoring_resolve, monitoring_metrics,
+        security_status, security_start, security_stop, security_findings, security_resolve, security_false_positive, security_scan, security_harden,
+        quick_connect, connection_scan, connection_reconnect, connection_setup, connection_history, connection_status,
+        qr_create, qr_generate, qr_read, qr_scan, qr_list, qr_cleanup,
+        node_discover, node_recommend, node_cached, node_scan_local, node_info,
+        update_check, update_install, update_config, update_history, update_status, update_cleanup,
+        backup_create, backup_list, backup_restore, backup_verify, backup_status, backup_auto, backup_encrypt, backup_cleanup,
+        migrate
     )
     return {
         'info': info, 'balance': balance, 'channels': channels, 
@@ -43,20 +55,54 @@ def get_command_modules():
         'payment_debug': payment_debug, 'channel_summary': channel_summary,
         'config_management': config_management, 'config_get': config_get,
         'config_set': config_set, 'config_list': config_list,
-        'env_template': env_template, 'liquidity': liquidity
+        'env_template': env_template, 'liquidity': liquidity,
+        'earnings': earnings, 'top_channels': top_channels, 'fee_analysis': fee_analysis,
+        'health_check': health_check, 'backup_data': backup_data, 'rebalance_suggestions': rebalance_suggestions,
+        'dashboard': dashboard, 'system_overview': system_overview,
+        'db_status': db_status, 'db_optimize': db_optimize, 'db_cleanup': db_cleanup, 
+        'db_maintenance': db_maintenance, 'db_vacuum': db_vacuum,
+        'fee_automation_status': fee_automation_status, 'fee_automation_start': fee_automation_start,
+        'fee_automation_stop': fee_automation_stop, 'fee_automation_history': fee_automation_history,
+        'fee_automation_test': fee_automation_test,
+        'rebalancer_status': rebalancer_status, 'rebalancer_start': rebalancer_start,
+        'rebalancer_stop': rebalancer_stop, 'rebalancer_history': rebalancer_history,
+        'rebalancer_analyze': rebalancer_analyze, 'rebalancer_add_target': rebalancer_add_target,
+        'rebalancer_remove_target': rebalancer_remove_target,
+        'monitoring_status': monitoring_status, 'monitoring_start': monitoring_start,
+        'monitoring_stop': monitoring_stop, 'monitoring_alerts': monitoring_alerts,
+        'monitoring_history': monitoring_history, 'monitoring_ack': monitoring_ack,
+        'monitoring_resolve': monitoring_resolve, 'monitoring_metrics': monitoring_metrics,
+        'security_status': security_status, 'security_start': security_start,
+        'security_stop': security_stop, 'security_findings': security_findings,
+        'security_resolve': security_resolve, 'security_false_positive': security_false_positive,
+        'security_scan': security_scan, 'security_harden': security_harden,
+        'quick_connect': quick_connect, 'connection_scan': connection_scan,
+        'connection_reconnect': connection_reconnect, 'connection_setup': connection_setup,
+        'connection_history': connection_history, 'connection_status': connection_status,
+        'qr_create': qr_create, 'qr_generate': qr_generate, 'qr_read': qr_read,
+        'qr_scan': qr_scan, 'qr_list': qr_list, 'qr_cleanup': qr_cleanup,
+        'node_discover': node_discover, 'node_recommend': node_recommend, 
+        'node_cached': node_cached, 'node_scan_local': node_scan_local, 'node_info': node_info,
+        'update_check': update_check, 'update_install': update_install, 'update_config': update_config,
+        'update_history': update_history, 'update_status': update_status, 'update_cleanup': update_cleanup,
+        'backup_create': backup_create, 'backup_list': backup_list, 'backup_restore': backup_restore,
+        'backup_verify': backup_verify, 'backup_status': backup_status, 'backup_auto': backup_auto,
+        'backup_encrypt': backup_encrypt, 'backup_cleanup': backup_cleanup,
+        'migrate': migrate
     }
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load configuration using unified config system"""
+    from blncs.core.config_manager import get_config_manager
     config_manager = get_config_manager()
     return config_manager.get_all()
 
 
 @click.group()
-@click.option('--config', '-c', type=click.Path(exists=True), help='設定ファイルパス')
-@click.option('--verbose', '-v', is_flag=True, help='詳細出力モード')
-@click.option('--quiet', '-q', is_flag=True, help='静寂モード（エラーのみ表示）')
+@click.option('--config', '-c', type=click.Path(exists=True), help='Configuration file path')
+@click.option('--verbose', '-v', is_flag=True, help='Verbose output mode')
+@click.option('--quiet', '-q', is_flag=True, help='Quiet mode (errors only)')
 @click.pass_context
 def cli(ctx: click.Context, config: str, verbose: bool, quiet: bool) -> None:
     """
@@ -83,12 +129,49 @@ def cli(ctx: click.Context, config: str, verbose: bool, quiet: bool) -> None:
     
     # Lightning client created on demand
     ctx.obj['_client'] = None
+    ctx.obj['client'] = None
+    
+    # Set up client getter function
+    ctx.obj['get_client'] = lambda: get_client(ctx)
 
 def get_client(ctx):
     """Get or create Lightning client on demand"""
     if ctx.obj['_client'] is None:
         ctx.obj['_client'] = get_lightning_client(ctx.obj['config'])
+    ctx.obj['client'] = ctx.obj['_client']  # Make client available as 'client' key too
     return ctx.obj['_client']
+
+
+def validate_setup() -> Dict[str, bool]:
+    """Validate system setup for dashboard"""
+    validation = {}
+    
+    try:
+        # Check config
+        from blncs.core.config_manager import get_config_manager
+        config = get_config_manager()
+        config_data = config.get_all()
+        validation['Configuration'] = bool(config_data)
+    except:
+        validation['Configuration'] = False
+    
+    try:
+        # Check database
+        from blncs.core.database import get_database_manager
+        db = get_database_manager()
+        validation['Database'] = True
+    except:
+        validation['Database'] = False
+    
+    try:
+        # Check monitoring
+        from blncs.core.monitor import get_monitor
+        monitor = get_monitor()
+        validation['Monitoring'] = True
+    except:
+        validation['Monitoring'] = False
+    
+    return validation
 
 
 # info command moved to commands/info_commands.py
@@ -171,7 +254,7 @@ def close_channel(ctx, channel_id, force):
         click.echo(format_error_for_cli(e), err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"[ERROR] 予期しないエラー: {str(e)}", err=True)
+        click.echo(f"[ERROR] Unexpected error: {str(e)}", err=True)
         sys.exit(1)
     finally:
         client.disconnect()
@@ -194,7 +277,7 @@ def pay(ctx, invoice):
         click.echo(format_error_for_cli(e), err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"[ERROR] 予期しないエラー: {str(e)}", err=True)
+        click.echo(f"[ERROR] Unexpected error: {str(e)}", err=True)
         sys.exit(1)
     finally:
         client.disconnect()
@@ -222,7 +305,7 @@ def invoice(ctx, amount, memo, qr):
         click.echo(format_error_for_cli(e), err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"[ERROR] 予期しないエラー: {str(e)}", err=True)
+        click.echo(f"[ERROR] Unexpected error: {str(e)}", err=True)
         sys.exit(1)
     finally:
         client.disconnect()
@@ -240,10 +323,10 @@ def setup():
             click.echo(f"作成されたディレクトリ: {', '.join(result['created_dirs'])}")
 
         if result.get('config_file'):
-            click.echo(f"設定ファイル: {result['config_file']}")
+            click.echo(f"Configuration file: {result['config_file']}")
 
         if result.get('env_suggestions'):
-            click.echo("\n環境変数の設定を推奨:")
+            click.echo("\nRecommended environment variables:")
             for suggestion in result['env_suggestions']:
                 click.echo(f" {suggestion}")
 
@@ -259,13 +342,13 @@ def setup():
         else:
             click.echo("\n[WARNING] セットアップに問題があります。上記を確認してください。")
             if result.get('error'):
-                click.echo(f"エラー: {result['error']}")
+                click.echo(f"Error: {result['error']}")
 
     except BLNCSError as e:
         click.echo(format_error_for_cli(e), err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"[ERROR] セットアップエラー: {str(e)}", err=True)
+        click.echo(f"[ERROR] Setup error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -290,7 +373,7 @@ def status():
         click.echo(format_error_for_cli(e), err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"[ERROR] ステータスチェックエラー: {str(e)}", err=True)
+        click.echo(f"[ERROR] Status check error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -329,10 +412,10 @@ def history(limit, type):
                 status = "[OK] 成功" if data['success'] else "[ERROR] 失敗"
                 click.echo(f" 状態: {status}")
             if 'error' in data:
-                click.echo(f" エラー: {data['error']}")
+                click.echo(f" Error: {data['error']}")
 
     except Exception as e:
-        click.echo(f"履歴表示エラー: {str(e)}", err=True)
+        click.echo(f"History display error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -368,7 +451,7 @@ def stats():
         click.echo(f" ファイルサイズ: {size_str}")
 
     except Exception as e:
-        click.echo(f"統計表示エラー: {str(e)}", err=True)
+        click.echo(f"Statistics display error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -395,7 +478,7 @@ def health(quick):
                 click.echo(f"Lightning ノード: {ln_icon} {result['lightning_node']}")
 
             if 'error' in result:
-                click.echo(f"エラー: {result['error']}")
+                click.echo(f"Error: {result['error']}")
 
         else:
             click.echo("フルヘルスチェック実行中...")
@@ -425,7 +508,7 @@ def health(quick):
                         sync_icon = "[OK]" if check_result.get('synced_to_chain') else "[ERROR]"
                         click.echo(f" ブロックチェーン同期: {sync_icon}")
                     else:
-                        click.echo(f" 接続: [ERROR] {check_result.get('error', '不明なエラー')}")
+                        click.echo(f" Connection: [ERROR] {check_result.get('error', 'Unknown error')}")
 
                 elif check_name == 'network':
                     if 'internet_available' in check_result:
@@ -436,10 +519,10 @@ def health(quick):
                         click.echo(f" Lightning ポート: {port_icon}")
 
                 if 'error' in check_result:
-                    click.echo(f" エラー: {check_result['error']}")
+                    click.echo(f" Error: {check_result['error']}")
 
     except Exception as e:
-        click.echo(f"ヘルスチェックエラー: {str(e)}", err=True)
+        click.echo(f"Health check error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -455,7 +538,7 @@ def optimize(clean_logs, optimize_cache, optimize_history, all):
             clean_logs = optimize_cache = optimize_history = True
 
         if not any([clean_logs, optimize_cache, optimize_history]):
-            click.echo("最適化オプションを指定してください。--help を参照してください。")
+            click.echo("Please specify optimization option. See --help for details.")
             return
 
         optimizations_done = []
@@ -493,7 +576,7 @@ def optimize(clean_logs, optimize_cache, optimize_history, all):
         click.echo(f"\n[OK] 最適化完了: {', '.join(optimizations_done)}")
 
     except Exception as e:
-        click.echo(f"最適化エラー: {str(e)}", err=True)
+        click.echo(f"Optimization error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -531,10 +614,10 @@ def backup(create, restore, list_backups, include_logs):
                     click.echo(f" - {b['name']} ({size_str}) - {b['created']}")
 
         else:
-            click.echo("オプションを指定してください。--help を参照してください。")
+            click.echo("Please specify an option. See --help for details.")
 
     except Exception as e:
-        click.echo(f"バックアップエラー: {str(e)}", err=True)
+        click.echo(f"Backup error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -543,12 +626,12 @@ def backup(create, restore, list_backups, include_logs):
 @click.option('--reset', help='指定操作の回復状態をリセット（全体は "all" を指定）')
 @click.pass_context
 def recovery(ctx, status, reset):
-    """エラー回復システムの管理"""
+    """Error recovery system management"""
     try:
         recovery_system = get_error_recovery()
 
         if status:
-            click.echo(" エラー回復システム状態:")
+            click.echo(" Error recovery system status:")
             status_info = recovery_system.get_recovery_status()
 
             click.echo(f"最大再試行回数: {status_info['max_retries']}")
@@ -573,10 +656,10 @@ def recovery(ctx, status, reset):
                 click.echo(f"[OK] {reset} の回復状態をリセットしました")
 
         else:
-            click.echo("オプションを指定してください。--help を参照してください。")
+            click.echo("Please specify an option. See --help for details.")
 
     except Exception as e:
-        click.echo(f"回復システムエラー: {str(e)}", err=True)
+        click.echo(f"Recovery system error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -629,18 +712,18 @@ def monitor(ctx, start, stop, status):
                     for name, data in perf_summary['metrics'].items():
                         click.echo(f" {name}: {data['current']:.1f} {data['unit']}")
         else:
-            click.echo("オプションを指定してください。--help を参照してください。")
+            click.echo("Please specify an option. See --help for details.")
 
     except Exception as e:
-        click.echo(f"監視エラー: {str(e)}", err=True)
+        click.echo(f"Monitoring error: {str(e)}", err=True)
         sys.exit(1)
 
 
 @cli.command()
-@click.option('--validate', is_flag=True, help='設定ファイルを検証')
-@click.option('--repair', is_flag=True, help='設定ファイルを自動修復')
+@click.option('--validate', is_flag=True, help='Validate configuration file')
+@click.option('--repair', is_flag=True, help='Auto-repair configuration file')
 @click.option('--env-template', is_flag=True, help='環境変数テンプレートを生成')
-@click.option('--show', is_flag=True, help='現在の設定を表示')
+@click.option('--show', is_flag=True, help='Show current configuration')
 @click.option('--section', help='特定のセクションのみ表示')
 def config(validate, repair, env_template, show, section):
     """Configuration management and validation"""
@@ -650,7 +733,7 @@ def config(validate, repair, env_template, show, section):
         config_manager = get_config()
 
         if show:
-            click.echo("現在の設定:")
+            click.echo("Current configuration:")
             if section:
                 section_data = config_manager.get_section(section)
                 if section_data:
@@ -675,26 +758,26 @@ def config(validate, repair, env_template, show, section):
                 click.echo("[OK] .env.template ファイルに保存しました")
 
         elif validate:
-            click.echo("設定ファイルを検証中...")
+            click.echo("Validating configuration file...")
             result = validator.validate_config()
 
             if result['valid']:
-                click.echo("[OK] 設定ファイルは有効です")
+                click.echo("[OK] Configuration file is valid")
                 if result.get('warnings'):
                     click.echo("\n[WARNING] 警告:")
                     for warning in result['warnings']:
                         click.echo(f" - {warning}")
             else:
-                click.echo("[ERROR] 設定ファイルに問題があります")
+                click.echo("[ERROR] Configuration file has issues")
                 if result.get('errors'):
-                    click.echo("\nエラー:")
+                    click.echo("\nErrors:")
                     for error in result['errors']:
                         click.echo(f" - {error}")
                 if repair:
                     click.echo("\n自動修復を試行中...")
                     repair_result = validator.repair_config()
                     if repair_result['repaired']:
-                        click.echo("[OK] 設定ファイルを修復しました")
+                        click.echo("[OK] Configuration file repaired")
                         if repair_result.get('changes'):
                             click.echo("修復された項目:")
                             for change in repair_result['changes']:
@@ -703,7 +786,7 @@ def config(validate, repair, env_template, show, section):
                         click.echo("[ERROR] 自動修復に失敗しました")
 
         elif repair:
-            click.echo("設定ファイルの自動修復を実行中...")
+            click.echo("Auto-repairing configuration file...")
             result = validator.repair_config()
             if result['repaired']:
                 click.echo("[OK] 設定ファイルを修復しました")
@@ -715,10 +798,10 @@ def config(validate, repair, env_template, show, section):
                 click.echo("[OK] 修復の必要はありませんでした")
 
         else:
-            click.echo("オプションを指定してください。--help を参照してください。")
+            click.echo("Please specify an option. See --help for details.")
 
     except Exception as e:
-        click.echo(f"設定管理エラー: {str(e)}", err=True)
+        click.echo(f"Configuration management error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -728,6 +811,7 @@ def config(validate, repair, env_template, show, section):
 def fee_estimate(amount, urgent):
     """Estimate optimal fees for payments"""
     try:
+        from blncs.core.fee_optimizer_advanced import get_fee_optimizer
         optimizer = get_fee_optimizer()
 
         click.echo(f"支払い金額: {amount} sats の手数料見積もり")
@@ -756,7 +840,7 @@ def fee_estimate(amount, urgent):
             click.echo(f" 節約: {optimization['savings']} sats")
 
     except Exception as e:
-        click.echo(f"手数料見積もりエラー: {str(e)}", err=True)
+        click.echo(f"Fee estimation error: {str(e)}", err=True)
         sys.exit(1)
 
 
@@ -800,16 +884,16 @@ def channels_advanced(ctx, analyze, recommendations):
             click.echo("[OK] 推奨アクションはありません")
 
         else:
-            click.echo("オプションを指定してください。--help を参照してください。")
+            click.echo("Please specify an option. See --help for details.")
 
     except Exception as e:
-        click.echo(f"チャネル管理エラー: {str(e)}", err=True)
+        click.echo(f"Channel management error: {str(e)}", err=True)
         sys.exit(1)
 
 
 @cli.command()
 @click.option('--status', is_flag=True, help='接続状態を表示')
-@click.option('--reconnect', is_flag=True, help='再接続を試行')
+@click.option('--reconnect', is_flag=True, help='Attempt reconnection')
 @click.pass_context
 def connection(ctx, status, reconnect):
     """Lightning node connection management"""
@@ -821,33 +905,33 @@ def connection(ctx, status, reconnect):
             # Check connection status using pool
             click.echo("Lightning Node Connection Status:")
             click.echo(f" Status: Connected")
-        click.echo(f" 接続試行回数: {conn_status['attempts']}")
-        click.echo(f" 自動再試行: {'[OK]' if conn_status['auto_retry'] else '[ERROR]'}")
-        click.echo(f" 稼働時間: {conn_status['uptime_seconds']:.0f}秒")
+        click.echo(f" Connection attempts: {conn_status['attempts']}")
+        click.echo(f" Auto retry: {'[OK]' if conn_status['auto_retry'] else '[ERROR]'}")
+        click.echo(f" Uptime: {conn_status['uptime_seconds']:.0f} seconds")
 
         if conn_status.get('last_error'):
-            click.echo(f" 最新エラー: {conn_status['last_error']}")
+            click.echo(f" Latest error: {conn_status['last_error']}")
 
         elif reconnect:
-            click.echo("Lightning Node への再接続を試行中...")
+            click.echo("Attempting to reconnect to Lightning Node...")
             success = conn_manager.connect(client)
             if success:
-                click.echo("[OK] 再接続に成功しました")
+                click.echo("[OK] Reconnection successful")
             else:
-                click.echo("[ERROR] 再接続に失敗しました")
+                click.echo("[ERROR] Reconnection failed")
 
         else:
-            click.echo("オプションを指定してください。--help を参照してください。")
+            click.echo("Please specify an option. See --help for details.")
 
     except Exception as e:
-        click.echo(f"接続管理エラー: {str(e)}", err=True)
+        click.echo(f"Connection management error: {str(e)}", err=True)
         sys.exit(1)
 
 
 @cli.command('quick-status')
 @click.pass_context 
 def quick_status(ctx):
-    """クイック状態確認 - よく使う情報をまとめて表示"""
+    """Quick status check - Display commonly used information"""
     try:
         client = ctx.obj['client']
         quiet = ctx.obj.get('quiet', False)
@@ -867,7 +951,7 @@ def quick_status(ctx):
 
         # Lightning Node接続（クイック確認）
         try:
-            # タイムアウトを短く設定
+            # Set shorter timeout
             original_timeout = client.timeout
             original_connect_timeout = client.connect_timeout
             client.timeout = 5
@@ -905,7 +989,7 @@ def quick_status(ctx):
 @cli.command('node')
 @click.pass_context
 def node_info(ctx):
-    """Lightning Node の詳細情報を表示"""
+    """Display Lightning Node detailed information"""
     try:
         client = ctx.obj['client']
         client.connect()
@@ -923,69 +1007,21 @@ def node_info(ctx):
         click.echo(format_error_for_cli(e), err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"[ERROR] 予期しないエラー: {str(e)}", err=True)
+        click.echo(f"[ERROR] Unexpected error: {str(e)}", err=True)
         sys.exit(1)
     finally:
         client.disconnect()
 
 
-@cli.command('dashboard')
-@click.pass_context
-def dashboard(ctx):
-    """ダッシュボード表示 - 全体的な状況を一画面で"""
-    try:
-        client = ctx.obj['client']
-        click.echo(" BLNCS ダッシュボード")
-        click.echo("=" * 50)
 
-        # システム状態
-        click.echo("\n システム状態:")
-        validation = validate_setup()
-        for item, status in validation.items():
-            icon = "[OK]" if status else "[ERROR]"
-            click.echo(f" {icon} {item}")
 
-        # ノード状態
-        click.echo("\n Lightning Node:")
-        try:
-            client.connect()
-            info = client.get_info()
-            click.echo(f" ノード: {info.get('alias', 'Unknown')}")
-            click.echo(f" 同期状態: {'[OK]' if info.get('synced_to_chain') else '[ERROR]'}")
-
-            # 残高
-            balance = client.get_balance()
-            click.echo(f" ウォレット残高: {balance.get('total', 0):,} sats")
-
-            # チャネル
-            channels = client.list_channels()
-            active = len([ch for ch in channels if ch.get('active', False)])
-            click.echo(f" チャネル: {active}/{len(channels)} アクティブ")
-
-        except Exception as e:
-            click.echo(f" [ERROR] 接続エラー: {str(e)}")
-        finally:
-            try:
-                client.disconnect()
-            except:
-                pass
-
-        # 監視状態
-        click.echo("\n 監視状態:")
-        try:
-            monitor = get_monitor()
-            if hasattr(monitor, 'monitor_thread') and monitor.monitor_thread and monitor.monitor_thread.is_alive():
-                click.echo(" [OK] 統合監視: 実行中")
-            else:
-                click.echo(" [ERROR] 統合監視: 停止中")
-        except:
-            click.echo(" [ERROR] 監視: 状態不明")
-
-        click.echo(f"\n最終更新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    except Exception as e:
-        click.echo(f"[ERROR] ダッシュボードエラー: {str(e)}", err=True)
-        sys.exit(1)
+def register_commands():
+    """Register all CLI commands dynamically"""
+    commands = get_command_modules()
+    
+    # Register each command with the main CLI group
+    for name, command_func in commands.items():
+        cli.add_command(command_func, name=name)
 
 
 def main():
@@ -1013,7 +1049,7 @@ def main():
         if 'BLNCSError' in exceptions and isinstance(e, exceptions['BLNCSError']):
             click.echo(exceptions['format_error_for_cli'](e), err=True)
         else:
-            click.echo(f"予期しないエラー: {str(e)}", err=True)
+            click.echo(f"Unexpected error: {str(e)}", err=True)
         shutdown_handler.emergency_shutdown()
 
 

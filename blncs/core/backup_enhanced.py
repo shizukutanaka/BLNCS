@@ -10,15 +10,25 @@ import gzip
 import hashlib
 import threading
 import time
+import base64
+import secrets
 from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .logger import get_logger
-from .config import get_config
-from .exceptions import BLNCSError
+try:
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    ENCRYPTION_AVAILABLE = True
+except ImportError:
+    ENCRYPTION_AVAILABLE = False
+
+from blncs.core.logger import get_logger
+from blncs.core.config_manager import get_config_manager
+from blncs.core.exceptions import BLNCSError
 
 
 class BackupType(Enum):
@@ -38,6 +48,8 @@ class BackupInfo:
     file_count: int
     checksum: str
     compressed: bool = True
+    encrypted: bool = False
+    encryption_method: str = "none"
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -46,21 +58,28 @@ class EnhancedBackupManager:
     
     def __init__(self):
         self.logger = get_logger(__name__)
-        self.config = get_config()
+        config_manager = get_config_manager()
+        self.config = config_manager.get_all()
         
         # Backup configuration
-        self.enabled = self.config.get('backup.enabled', True)
-        self.backup_dir = Path(self.config.get('backup.directory', './backups'))
-        self.max_backups = self.config.get('backup.max_backups', 30)
-        self.compression_enabled = self.config.get('backup.compression', True)
-        self.auto_interval_hours = self.config.get('backup.auto_interval_hours', 6)
+        self.enabled = self.config.get('backup', {}).get('enabled', True)
+        self.backup_dir = Path(self.config.get('backup', {}).get('directory', './backups'))
+        self.max_backups = self.config.get('backup', {}).get('max_backups', 30)
+        self.compression_enabled = self.config.get('backup', {}).get('compression', True)
+        self.auto_interval_hours = self.config.get('backup', {}).get('auto_interval_hours', 6)
+        
+        # Encryption configuration
+        self.encryption_enabled = self.config.get('backup', {}).get('encryption_enabled', False)
+        self.encryption_method = self.config.get('backup', {}).get('encryption_method', 'fernet')
+        self.key_derivation_iterations = self.config.get('backup', {}).get('key_derivation_iterations', 100000)
         
         # Backup sources
+        backup_config = self.config.get('backup', {})
         self.backup_sources = {
-            'config': self.config.get('backup.config_files', ['config/']),
-            'data': self.config.get('backup.data_files', ['data/']),
-            'logs': self.config.get('backup.log_files', ['logs/']),
-            'cache': self.config.get('backup.cache_files', [])  # Usually excluded
+            'config': backup_config.get('config_files', ['config/']),
+            'data': backup_config.get('data_files', ['data/']),
+            'logs': backup_config.get('log_files', ['logs/']),
+            'cache': backup_config.get('cache_files', [])  # Usually excluded
         }
         
         # State tracking
@@ -73,6 +92,9 @@ class EnhancedBackupManager:
         self._auto_backup_thread = None
         self._stop_auto_backup = threading.Event()
         
+        # Encryption key cache (in memory only)
+        self._encryption_key: Optional[bytes] = None
+        
         self._initialize_backup_system()
     
     def _initialize_backup_system(self) -> None:
@@ -80,10 +102,16 @@ class EnhancedBackupManager:
         # Create backup directory
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         
+        # Check encryption availability
+        if self.encryption_enabled and not ENCRYPTION_AVAILABLE:
+            self.logger.warning("Encryption requested but cryptography library not available. Disabling encryption.")
+            self.encryption_enabled = False
+        
         # Load existing backup history
         self._load_backup_history()
         
-        self.logger.info(f"Backup system initialized: {self.backup_dir}")
+        encryption_status = "enabled" if self.encryption_enabled else "disabled"
+        self.logger.info(f"Backup system initialized: {self.backup_dir} (encryption {encryption_status})")
     
     def _load_backup_history(self) -> None:
         """Load backup history from disk"""
@@ -103,6 +131,8 @@ class EnhancedBackupManager:
                         file_count=item['file_count'],
                         checksum=item['checksum'],
                         compressed=item.get('compressed', True),
+                        encrypted=item.get('encrypted', False),
+                        encryption_method=item.get('encryption_method', 'none'),
                         metadata=item.get('metadata', {})
                     )
                     self.backup_history.append(backup_info)
@@ -136,6 +166,8 @@ class EnhancedBackupManager:
                     'file_count': backup.file_count,
                     'checksum': backup.checksum,
                     'compressed': backup.compressed,
+                    'encrypted': backup.encrypted,
+                    'encryption_method': backup.encryption_method,
                     'metadata': backup.metadata
                 })
             
@@ -144,6 +176,95 @@ class EnhancedBackupManager:
                 
         except Exception as e:
             self.logger.error(f"Failed to save backup history: {e}")
+    
+    def _derive_key_from_password(self, password: str, salt: bytes) -> bytes:
+        """Derive encryption key from password using PBKDF2"""
+        if not ENCRYPTION_AVAILABLE:
+            raise BLNCSError("Encryption not available - cryptography library not installed")
+        
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=self.key_derivation_iterations
+        )
+        return base64.urlsafe_b64encode(kdf.derive(password.encode()))
+    
+    def set_encryption_key(self, password: str) -> bool:
+        """Set encryption key from password"""
+        try:
+            if not ENCRYPTION_AVAILABLE:
+                self.logger.error("Encryption not available - cryptography library not installed")
+                return False
+            
+            # Generate a random salt for key derivation
+            salt = secrets.token_bytes(32)
+            
+            # Derive key from password
+            self._encryption_key = self._derive_key_from_password(password, salt)
+            
+            # Store salt in metadata for future use
+            salt_file = self.backup_dir / '.backup_salt'
+            with open(salt_file, 'wb') as f:
+                f.write(salt)
+            
+            # Set file permissions to be more restrictive
+            salt_file.chmod(0o600)
+            
+            self.logger.info("Encryption key set successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to set encryption key: {e}")
+            return False
+    
+    def load_encryption_key(self, password: str) -> bool:
+        """Load encryption key from stored salt and password"""
+        try:
+            if not ENCRYPTION_AVAILABLE:
+                self.logger.error("Encryption not available - cryptography library not installed")
+                return False
+            
+            salt_file = self.backup_dir / '.backup_salt'
+            if not salt_file.exists():
+                self.logger.error("No salt file found - encryption key not set")
+                return False
+            
+            # Read salt
+            with open(salt_file, 'rb') as f:
+                salt = f.read()
+            
+            # Derive key from password and salt
+            self._encryption_key = self._derive_key_from_password(password, salt)
+            
+            self.logger.info("Encryption key loaded successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load encryption key: {e}")
+            return False
+    
+    def _encrypt_data(self, data: bytes) -> bytes:
+        """Encrypt data using Fernet encryption"""
+        if not ENCRYPTION_AVAILABLE:
+            raise BLNCSError("Encryption not available")
+        
+        if not self._encryption_key:
+            raise BLNCSError("Encryption key not set")
+        
+        fernet = Fernet(self._encryption_key)
+        return fernet.encrypt(data)
+    
+    def _decrypt_data(self, encrypted_data: bytes) -> bytes:
+        """Decrypt data using Fernet encryption"""
+        if not ENCRYPTION_AVAILABLE:
+            raise BLNCSError("Encryption not available")
+        
+        if not self._encryption_key:
+            raise BLNCSError("Encryption key not set")
+        
+        fernet = Fernet(self._encryption_key)
+        return fernet.decrypt(encrypted_data)
     
     def start_auto_backup(self) -> None:
         """Start automatic backup"""
@@ -238,8 +359,9 @@ class EnhancedBackupManager:
                     if source_path.is_file():
                         dest_path = backup_path / source_path.name
                         
-                        if self.compression_enabled:
-                            self._compress_file(source_path, dest_path.with_suffix('.gz'))
+                        # Process file with compression and/or encryption
+                        if self.compression_enabled or (self.encryption_enabled and self._encryption_key):
+                            self._process_backup_file(source_path, dest_path)
                         else:
                             shutil.copy2(source_path, dest_path)
                         
@@ -261,6 +383,8 @@ class EnhancedBackupManager:
                 file_count=file_count,
                 checksum=checksum,
                 compressed=self.compression_enabled,
+                encrypted=self.encryption_enabled and self._encryption_key is not None,
+                encryption_method=self.encryption_method if self.encryption_enabled and self._encryption_key is not None else "none",
                 metadata={
                     'auto_backup': auto,
                     'sources': [str(p) for p in sources]
@@ -355,6 +479,34 @@ class EnhancedBackupManager:
             with gzip.open(dest_path, 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
     
+    def _process_backup_file(self, source_path: Path, dest_path: Path) -> None:
+        """Process a file for backup with optional compression and encryption"""
+        # Read source file
+        with open(source_path, 'rb') as f:
+            data = f.read()
+        
+        # Apply encryption if enabled
+        if self.encryption_enabled and self._encryption_key:
+            data = self._encrypt_data(data)
+            dest_path = dest_path.with_suffix(dest_path.suffix + '.enc')
+        
+        # Apply compression if enabled
+        if self.compression_enabled:
+            if self.encryption_enabled and self._encryption_key:
+                # Compress encrypted data
+                dest_path = dest_path.with_suffix(dest_path.suffix + '.gz')
+                with gzip.open(dest_path, 'wb') as f_out:
+                    f_out.write(data)
+            else:
+                # Regular compression
+                dest_path = dest_path.with_suffix('.gz')
+                with gzip.open(dest_path, 'wb') as f_out:
+                    f_out.write(data)
+        else:
+            # Write data as-is (may be encrypted)
+            with open(dest_path, 'wb') as f_out:
+                f_out.write(data)
+    
     def _calculate_backup_checksum(self, backup_path: Path) -> str:
         """Calculate checksum for backup verification"""
         hasher = hashlib.sha256()
@@ -405,23 +557,19 @@ class EnhancedBackupManager:
         restore_dir.mkdir(parents=True, exist_ok=True)
         
         try:
+            # Check if backup is encrypted and key is available
+            if backup_info.encrypted and not self._encryption_key:
+                raise BLNCSError("Backup is encrypted but no decryption key is available. Load encryption key first.")
+            
             files_restored = 0
             for backup_file in backup_path.glob('*'):
                 if backup_file.name == 'backup_info.json':
                     continue
                 
-                if backup_file.suffix == '.gz' and backup_info.compressed:
-                    # Decompress file
-                    dest_file = restore_dir / backup_file.stem
-                    with gzip.open(backup_file, 'rb') as f_in:
-                        with open(dest_file, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                else:
-                    # Copy file as-is
-                    dest_file = restore_dir / backup_file.name
-                    shutil.copy2(backup_file, dest_file)
-                
-                files_restored += 1
+                # Process file for restoration (handle compression and encryption)
+                dest_file = self._process_restore_file(backup_file, restore_dir, backup_info)
+                if dest_file:
+                    files_restored += 1
             
             self.logger.info(f"Restored {files_restored} files from backup {backup_id}")
             return True
@@ -429,6 +577,45 @@ class EnhancedBackupManager:
         except Exception as e:
             self.logger.error(f"Failed to restore backup {backup_id}: {e}")
             return False
+    
+    def _process_restore_file(self, backup_file: Path, restore_dir: Path, backup_info: BackupInfo) -> Optional[Path]:
+        """Process a file during restoration (handle decompression and decryption)"""
+        try:
+            # Determine original filename
+            filename = backup_file.name
+            
+            # Handle file extensions based on backup properties
+            if backup_info.compressed and filename.endswith('.gz'):
+                filename = filename[:-3]  # Remove .gz
+            
+            if backup_info.encrypted and filename.endswith('.enc'):
+                filename = filename[:-4]  # Remove .enc
+            
+            dest_file = restore_dir / filename
+            
+            # Read backup file data
+            with open(backup_file, 'rb') as f:
+                data = f.read()
+            
+            # Handle decompression
+            if backup_info.compressed and backup_file.suffix == '.gz':
+                data = gzip.decompress(data)
+            
+            # Handle decryption
+            if backup_info.encrypted and ('.enc' in backup_file.name):
+                if not self._encryption_key:
+                    raise BLNCSError("Encryption key required for decryption")
+                data = self._decrypt_data(data)
+            
+            # Write restored file
+            with open(dest_file, 'wb') as f:
+                f.write(data)
+            
+            return dest_file
+            
+        except Exception as e:
+            self.logger.error(f"Failed to restore file {backup_file}: {e}")
+            return None
     
     def verify_backup(self, backup_id: str) -> bool:
         """Verify backup integrity"""
@@ -460,7 +647,12 @@ class EnhancedBackupManager:
             'last_full_backup': self.last_full_backup.isoformat() if self.last_full_backup else None,
             'auto_backup_active': self._auto_backup_thread.is_alive() if self._auto_backup_thread else False,
             'next_backup_due': self._get_next_backup_time(),
-            'backup_sources': self.backup_sources
+            'backup_sources': self.backup_sources,
+            'compression_enabled': self.compression_enabled,
+            'encryption_enabled': self.encryption_enabled,
+            'encryption_available': ENCRYPTION_AVAILABLE,
+            'encryption_key_set': self._encryption_key is not None,
+            'encryption_method': self.encryption_method if self.encryption_enabled else None
         }
     
     def _get_next_backup_time(self) -> Optional[str]:

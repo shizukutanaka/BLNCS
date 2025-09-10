@@ -8,12 +8,13 @@ import json
 import os
 import time
 import logging
+import asyncio
+import weakref
 from typing import Dict, Optional, List, Any
 from pathlib import Path
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import asyncio
 from functools import lru_cache
 
 from ..core.exceptions import LightningError, ConnectionError
@@ -24,6 +25,8 @@ from ..core.fast_cache import get_cache, cached
 from ..core.recovery import auto_recover
 from ..core.connection_pool import get_connection_pool, get_request_cache
 from ..core.fast_cache import get_fast_cache, fast_cache
+from ..core.error_handler import get_error_handler, handle_lightning_error, handle_network_error, ErrorContext
+from ..core.async_memory_manager import get_async_resource_tracker
 
 
 class LightningClient:
@@ -33,6 +36,7 @@ class LightningClient:
         self.config = config or get_config_manager().get_all()
         self.lightning_config = self.config.get('lightning', {})
         self.logger = get_logger(__name__)
+        self.error_handler = get_error_handler()
         
         # Connection settings
         self.host = self.lightning_config.get('host', 'localhost')
@@ -82,11 +86,16 @@ class LightningClient:
         self.connection_failures = 0
         self.max_failures = 5
         
-        # Performance optimizations
+        # Performance optimizations with memory tracking
         self._thread_pool = ThreadPoolExecutor(max_workers=3)
         self._request_stats = {'total': 0, 'cached': 0, 'failed': 0}
         self._batch_size = self.lightning_config.get('batch_size', 10)
         self._fast_cache = get_fast_cache()
+        
+        # Memory management
+        self._resource_tracker = get_async_resource_tracker()
+        self._active_requests = weakref.WeakSet()
+        self._request_semaphore = asyncio.BoundedSemaphore(10)  # Limit concurrent requests
     
     def _setup_authentication(self) -> None:
         """Setup authentication with macaroon"""
@@ -107,48 +116,68 @@ class LightningClient:
                 if self.logger.isEnabledFor(logging.ERROR):
                     self.logger.error(f"Could not load macaroon: {e}")
     
+    @handle_network_error
     def connect(self) -> bool:
         """Test connection to Lightning node"""
-        try:
+        with self.error_handler.error_context(
+            component="lightning_client",
+            operation="connect",
+            metadata={"host": self.host, "port": self.port}
+        ) as context:
             info = self.get_info()
             if info:
                 self.connected = True
-                self.connection_failures = 0  # Reset failure counter
+                self.connection_failures = 0
                 self.last_heartbeat = time.time()
-                # 軽量化: 接続成功時のログレベル削減
                 if self.logger.isEnabledFor(logging.INFO):
                     self.logger.info(f"Connected to Lightning node: {info.get('alias', 'Unknown')}")
                 return True
-        except Exception as e:
+            
             self.connection_failures += 1
             self.connected = False
             
-            # 軽量化: エラー頻度を制限してログ量削減
-            if self.connection_failures <= 2 or self.connection_failures % 5 == 0:
-                self.logger.error(f"Connection failed (attempt {self.connection_failures}): {e}")
-            
-            # If too many failures, raise error
             if self.connection_failures >= self.max_failures:
-                raise ConnectionError(f"Max connection failures reached: {e}", 
-                                    host=self.host, port=self.port)
+                raise ConnectionError(
+                    f"Max connection failures reached after {self.connection_failures} attempts",
+                    host=self.host, port=self.port
+                )
             
-            raise ConnectionError(f"Failed to connect to Lightning node: {e}",
-                                host=self.host, port=self.port)
+            return False
     
     def disconnect(self) -> None:
-        """Disconnect from Lightning node"""
+        """Disconnect from Lightning node with memory cleanup"""
         self.connected = False
         self.last_heartbeat = 0
+        
+        # Clean up active requests
+        try:
+            for request in self._active_requests:
+                if hasattr(request, 'close'):
+                    request.close()
+            self._active_requests.clear()
+        except Exception:
+            pass
+        
         # Clean up cache entries for this client
         try:
             self.cache.cleanup_expired()
         except Exception:
             pass
-        # Shutdown thread pool
+            
+        # Shutdown thread pool with proper cleanup
         if hasattr(self, '_thread_pool'):
-            self._thread_pool.shutdown(wait=False)
+            try:
+                # Cancel any pending futures
+                self._thread_pool.shutdown(wait=True, timeout=5.0)
+            except Exception:
+                self._thread_pool.shutdown(wait=False)
+        
+        # Close session
         if hasattr(self.session, 'close'):
-            self.session.close()
+            try:
+                self.session.close()
+            except Exception:
+                pass
     
     def is_connection_healthy(self) -> bool:
         """Check if connection is healthy"""
@@ -162,19 +191,21 @@ class LightningClient:
         
         return True
     
+    @handle_network_error
     def heartbeat(self) -> bool:
         """Send heartbeat to check connection health"""
-        try:
-            # Simple ping using getinfo
+        with self.error_handler.error_context(
+            component="lightning_client",
+            operation="heartbeat",
+            suppress_errors=True
+        ):
             info = self.get_info()
             if info:
                 self.last_heartbeat = time.time()
                 self.connection_failures = 0
                 return True
-        except Exception as e:
-            self.connection_failures += 1
-            self.logger.warning(f"Heartbeat failed: {e}")
             
+            self.connection_failures += 1
             if self.connection_failures >= self.max_failures:
                 self.connected = False
         
@@ -376,9 +407,14 @@ class LightningClient:
             # 軽量化: チャネル取得失敗ログを削除（フォールバック動作は正常）
             return []
     
+    @handle_lightning_error
     def open_channel(self, node_pubkey: str, amount: int) -> str:
         """Open a channel to a peer"""
-        try:
+        with self.error_handler.error_context(
+            component="lightning_client",
+            operation="open_channel",
+            metadata={"node_pubkey": node_pubkey[:10] + "...", "amount": amount}
+        ):
             data = {
                 "node_pubkey": bytes.fromhex(node_pubkey),
                 "local_funding_amount": str(amount),
@@ -387,10 +423,12 @@ class LightningClient:
             }
             
             response = self._make_request("v1/channels", method='POST', data=data)
-            return response.get("funding_txid_str", "")
+            funding_txid = response.get("funding_txid_str", "")
             
-        except Exception as e:
-            raise LightningError(f"Failed to open channel: {e}")
+            if not funding_txid:
+                raise LightningError("Channel opening initiated but no funding transaction ID returned")
+            
+            return funding_txid
     
     def close_channel(self, channel_id: str, force: bool = False) -> bool:
         """Close a channel"""
@@ -413,9 +451,14 @@ class LightningClient:
             self.logger.error(f"Failed to close channel: {e}")
             return False
     
+    @handle_lightning_error
     def create_invoice(self, amount: int, memo: str = "") -> str:
         """Create a Lightning invoice"""
-        try:
+        with self.error_handler.error_context(
+            component="lightning_client",
+            operation="create_invoice",
+            metadata={"amount": amount, "memo": memo}
+        ) as context:
             data = {
                 "value": str(amount),
                 "memo": memo,
@@ -425,61 +468,57 @@ class LightningClient:
             response = self._make_request("v1/invoices", method='POST', data=data)
             payment_request = response.get("payment_request", "")
             
-            # 履歴に記録
+            if not payment_request:
+                raise LightningError("Invoice creation failed: No payment request returned")
+            
+            # Record successful transaction
             record_transaction(
                 "invoice_created",
                 amount=amount,
                 memo=memo,
                 payment_request=payment_request[:50] + "..." if payment_request else "",
-                success=bool(payment_request)
+                success=True,
+                correlation_id=context.correlation_id
             )
             
             return payment_request
-            
-        except Exception as e:
-            # エラーも履歴に記録
-            record_transaction(
-                "invoice_failed",
-                amount=amount,
-                memo=memo,
-                error=str(e)
-            )
-            raise LightningError(f"Failed to create invoice: {e}")
     
+    @handle_lightning_error
     def send_payment(self, payment_request: str) -> Dict[str, Any]:
         """Send payment via Lightning invoice"""
-        try:
+        with self.error_handler.error_context(
+            component="lightning_client",
+            operation="send_payment",
+            metadata={"payment_request_prefix": payment_request[:50] + "..."}
+        ) as context:
             data = {
                 "payment_request": payment_request
             }
             
             response = self._make_request("v1/channels/transactions", method='POST', data=data)
             
+            payment_error = response.get("payment_error")
+            if payment_error:
+                raise LightningError(f"Payment failed: {payment_error}")
+            
             result = {
                 "payment_hash": response.get("payment_hash", ""),
                 "amount": response.get("payment_route", {}).get("total_amt", 0),
-                "status": "succeeded" if not response.get("payment_error") else "failed"
+                "status": "succeeded",
+                "fee": response.get("payment_route", {}).get("total_fees", 0)
             }
             
-            # Record to history
+            # Record successful transaction
             record_transaction(
                 "payment_sent",
                 payment_request=payment_request[:50] + "...",
                 payment_hash=result["payment_hash"],
                 amount=result["amount"],
-                status=result["status"]
+                status=result["status"],
+                correlation_id=context.correlation_id
             )
             
             return result
-            
-        except Exception as e:
-            # Record error to history
-            record_transaction(
-                "payment_failed",
-                payment_request=payment_request[:50] + "...",
-                error=str(e)
-            )
-            raise LightningError(f"Failed to send payment: {e}")
     
     def estimate_fee(self, target_blocks: int = 6) -> Dict[str, int]:
         """Estimate on-chain fee rates"""
@@ -611,3 +650,78 @@ class LightningClient:
                 "num_channels": 0,
                 "total_network_capacity": 0
             }
+    
+    def get_forwarding_events(self, start_time: int = None, end_time: int = None, limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get forwarding events for the specified time period"""
+        try:
+            params = {'num_max_events': limit}
+            if start_time:
+                params['start_time'] = start_time
+            if end_time:
+                params['end_time'] = end_time
+            
+            response = self._make_request("v1/switch", params=params)
+            
+            forwarding_events = response.get('forwarding_events', [])
+            result = []
+            
+            for event in forwarding_events:
+                result.append({
+                    "timestamp": event.get("timestamp"),
+                    "chan_id_in": event.get("chan_id_in"),
+                    "chan_id_out": event.get("chan_id_out"),
+                    "amt_in_msat": event.get("amt_in_msat", 0),
+                    "amt_out_msat": event.get("amt_out_msat", 0),
+                    "fee_msat": event.get("fee_msat", 0),
+                    "status": "settled"  # Most forwarding events in history are settled
+                })
+            
+            return result
+        except Exception as e:
+            self.logger.warning(f"Failed to get forwarding events: {e}")
+            return []
+    
+    def get_channel_policy(self, chan_id: int) -> Dict[str, Any]:
+        """Get fee policy for a specific channel"""
+        try:
+            response = self._make_request(f"v1/graph/edge/{chan_id}")
+            
+            # Return our node's policy (usually node1_policy or node2_policy)
+            node_policy = response.get('node1_policy', response.get('node2_policy', {}))
+            
+            return {
+                "fee_base_msat": node_policy.get("fee_base_msat", 1000),
+                "fee_rate_milli_msat": node_policy.get("fee_rate_milli_msat", 1000),
+                "time_lock_delta": node_policy.get("time_lock_delta", 40),
+                "min_htlc": node_policy.get("min_htlc", 1),
+                "max_htlc_msat": node_policy.get("max_htlc_msat", 0),
+                "disabled": node_policy.get("disabled", False)
+            }
+        except Exception as e:
+            self.logger.warning(f"Failed to get channel policy for {chan_id}: {e}")
+            return {
+                "fee_base_msat": 1000,
+                "fee_rate_milli_msat": 1000,
+                "time_lock_delta": 40
+            }
+    
+    def update_channel_policy(self, chan_id: int, fee_rate_ppm: int = None, base_fee_msat: int = None) -> bool:
+        """Update fee policy for a specific channel"""
+        try:
+            policy_data = {}
+            
+            if fee_rate_ppm is not None:
+                policy_data['fee_rate_milli_msat'] = fee_rate_ppm * 1000
+            
+            if base_fee_msat is not None:
+                policy_data['fee_base_msat'] = base_fee_msat
+            
+            if policy_data:
+                policy_data['chan_point'] = str(chan_id)
+                response = self._make_request("v1/graph/policy", method='POST', data=policy_data)
+                return response.get('success', False)
+            
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to update channel policy for {chan_id}: {e}")
+            return False

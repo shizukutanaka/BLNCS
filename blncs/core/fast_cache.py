@@ -14,7 +14,7 @@ T = TypeVar('T')
 class FastCache:
     """Ultra-lightweight cache with minimal overhead"""
     
-    def __init__(self, max_size: int = 256, default_ttl: int = 300):
+    def __init__(self, max_size: int = 1024, default_ttl: int = 600):
         self.max_size = max_size
         self.default_ttl = default_ttl
         self._cache: Dict[str, tuple] = {}  # key: (value, expire_time)

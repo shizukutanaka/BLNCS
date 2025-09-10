@@ -242,7 +242,7 @@ class MetricsCollector:
         self.gauge("cache_hit_ratio")
         self.gauge("memory_usage_mb")
     
-    def counter(self, name: str, labels: Optional[Dict[str, str]] = None) -> Counter:
+    def counter(self, name: str, description: str = "", labels: Optional[Dict[str, str]] = None) -> Counter:
         """Get or create a counter metric"""
         key = self._metric_key(name, labels)
         with self._lock:
@@ -250,7 +250,7 @@ class MetricsCollector:
                 self.metrics[key] = Counter(name, labels)
             return self.metrics[key]
     
-    def gauge(self, name: str, labels: Optional[Dict[str, str]] = None) -> Gauge:
+    def gauge(self, name: str, description: str = "", labels: Optional[Dict[str, str]] = None) -> Gauge:
         """Get or create a gauge metric"""
         key = self._metric_key(name, labels)
         with self._lock:
@@ -258,7 +258,7 @@ class MetricsCollector:
                 self.metrics[key] = Gauge(name, labels)
             return self.metrics[key]
     
-    def histogram(self, name: str, buckets: Optional[List[float]] = None,
+    def histogram(self, name: str, description: str = "", buckets: Optional[List[float]] = None,
                   labels: Optional[Dict[str, str]] = None) -> Histogram:
         """Get or create a histogram metric"""
         key = self._metric_key(name, labels)
@@ -367,6 +367,11 @@ def observe_histogram(name: str, value: float, labels: Optional[Dict[str, str]] 
     """Record a histogram observation"""
     collector = get_metrics_collector()
     collector.histogram(name, labels=labels).observe(value)
+
+
+def record_histogram(metric_name: str, value: float, labels: Optional[Dict[str, str]] = None):
+    """Record a histogram value (alias for observe_histogram for compatibility)"""
+    observe_histogram(metric_name, value, labels)
 
 
 def timed(name: str = None, labels: Optional[Dict[str, str]] = None):

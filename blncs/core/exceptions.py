@@ -42,7 +42,7 @@ class BLNCSError(Exception):
         if not self.recoverable:
             return []
         
-        base_suggestions = ["問題が続く場合は再試行してください"]
+        base_suggestions = ["Please retry if the problem persists"]
         
         if hasattr(self, '_recovery_suggestions'):
             return self._recovery_suggestions + base_suggestions
@@ -55,9 +55,13 @@ class ConfigError(BLNCSError):
         super().__init__(message, recoverable=True, **details)
         self.config_key = config_key
         self._recovery_suggestions = [
-            "設定ファイルを確認してください",
-            "'blncs_cli.py config --repair' で自動修復を試してください"
+            "Please check your configuration file",
+            "Try 'blncs_cli.py config --repair' for automatic repair"
         ]
+
+
+# Backward compatibility alias
+ConfigurationError = ConfigError
 
 
 class ValidationError(BLNCSError):
@@ -67,8 +71,8 @@ class ValidationError(BLNCSError):
         self.field = field
         self.value = value
         self._recovery_suggestions = [
-            "入力値を確認してください",
-            "設定ファイルの形式を確認してください"
+            "Please check your input values",
+            "Please verify the configuration file format"
         ]
 
 
@@ -78,8 +82,8 @@ class LightningError(BLNCSError):
         super().__init__(message, recoverable=True, **details)
         self.operation = operation
         self._recovery_suggestions = [
-            "Lightning ノードの接続を確認してください",
-            "'blncs_cli.py connection --status' で接続状態を確認してください"
+            "Please check Lightning node connection",
+            "Check connection status with 'blncs_cli.py connection --status'"
         ]
 
 
@@ -90,9 +94,9 @@ class ConnectionError(LightningError):
         self.host = host
         self.port = port
         self._recovery_suggestions = [
-            f"Lightning ノード ({host}:{port}) が起動していることを確認してください",
-            "ネットワーク接続を確認してください",
-            "'blncs_cli.py connection --reconnect' で再接続を試してください"
+            f"Please verify Lightning node ({host}:{port}) is running",
+            "Check network connectivity",
+            "Try reconnecting with 'blncs_cli.py connection --reconnect'"
         ]
 
 
@@ -102,9 +106,9 @@ class TimeoutError(LightningError):
         super().__init__(message, operation=operation, **details)
         self.timeout_seconds = timeout_seconds
         self._recovery_suggestions = [
-            "ネットワーク接続を確認してください",
-            "Lightning ノードの応答性を確認してください",
-            f"タイムアウト値 ({timeout_seconds}秒) を増加することを検討してください"
+            "Check network connection",
+            "Verify Lightning node responsiveness",
+            f"Consider increasing timeout value ({timeout_seconds} seconds)"
         ]
 
 
@@ -116,8 +120,8 @@ class SecurityError(BLNCSError):
         self.auth_failure = auth_failure
         if auth_failure:
             self._recovery_suggestions = [
-                "認証情報を確認してください",
-                "パスワードが正しいことを確認してください"
+                "Please verify authentication credentials",
+                "Ensure password is correct"
             ]
 
 
@@ -127,8 +131,8 @@ class ChannelError(LightningError):
         super().__init__(message, operation="channel_management", **details)
         self.channel_id = channel_id
         self._recovery_suggestions = [
-            "チャネルの状態を確認してください",
-            "'blncs_cli.py channels' でチャネル一覧を確認してください"
+            "Check channel status",
+            "List channels with 'blncs_cli.py channels'"
         ]
 
 
@@ -139,9 +143,9 @@ class PaymentError(LightningError):
         self.amount = amount
         self.invoice = invoice
         self._recovery_suggestions = [
-            "残高が十分であることを確認してください",
-            "インボイスが有効であることを確認してください",
-            "手数料設定を確認してください"
+            "Ensure sufficient balance",
+            "Verify invoice is valid",
+            "Check fee settings"
         ]
 
 
@@ -151,8 +155,8 @@ class MonitoringError(BLNCSError):
         super().__init__(message, recoverable=True, **details)
         self.monitor_type = monitor_type
         self._recovery_suggestions = [
-            "監視システムの設定を確認してください",
-            "'blncs_cli.py monitor --status' で監視状態を確認してください"
+            "Check monitoring system configuration",
+            "Check monitoring status with 'blncs_cli.py monitor --status'"
         ]
 
 
@@ -163,8 +167,8 @@ class PerformanceError(BLNCSError):
         self.metric = metric
         self.threshold = threshold
         self._recovery_suggestions = [
-            "システムリソースを確認してください",
-            "パフォーマンス設定を調整してください"
+            "Check system resources",
+            "Adjust performance settings"
         ]
 
 
@@ -202,17 +206,17 @@ def format_error_for_cli(error: Exception, show_details: bool = False) -> str:
         message = f"❌ {error.get_user_message()}"
         
         if show_details and error.details:
-            message += f"\n詳細: {error.details}"
+            message += f"\nDetails: {error.details}"
         
         suggestions = error.get_recovery_suggestions()
         if suggestions:
-            message += f"\n\n💡 解決方法:"
+            message += f"\n\n💡 Solutions:"
             for i, suggestion in enumerate(suggestions, 1):
                 message += f"\n  {i}. {suggestion}"
         
         return message
     else:
-        return f"❌ エラー: {str(error)}"
+        return f"❌ Error: {str(error)}"
 
 
 class CircuitBreakerError(BLNCSError):
@@ -221,8 +225,8 @@ class CircuitBreakerError(BLNCSError):
         super().__init__(message, recoverable=False, **details)
         self.failure_count = failure_count
         self._recovery_suggestions = [
-            "システムが安定するまで待機してください",
-            "根本的な問題を解決してからリセットしてください"
+            "Wait until system stabilizes",
+            "Resolve underlying issues before resetting"
         ]
 
 
@@ -232,8 +236,8 @@ class RateLimitError(BLNCSError):
         super().__init__(message, recoverable=True, **details)
         self.retry_after = retry_after
         self._recovery_suggestions = [
-            f"リクエスト頻度を下げてください",
-            f"{retry_after}秒後に再試行してください" if retry_after else "しばらく待ってから再試行してください"
+            "Reduce request frequency",
+            f"Retry after {retry_after} seconds" if retry_after else "Wait before retrying"
         ]
 
 
@@ -401,6 +405,13 @@ class CircuitBreaker:
         self.failure_count = 0
         self.last_failure_time = None
         self.state = 'CLOSED'
+
+
+class DatabaseError(BLNCSError):
+    """Database operation error"""
+    def __init__(self, message: str, query: Optional[str] = None, **details: Any) -> None:
+        super().__init__(message, recoverable=True, **details)
+        self.query = query
 
 
 def create_error_context(operation: str, **context_data) -> Dict[str, Any]:

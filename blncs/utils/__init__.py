@@ -2,6 +2,6 @@
 BLNCS Utilities Package
 """
 
-from .qr_generator import generate_invoice_qr, QRGenerator
+# QR functionality moved to blncs.core.qr_payments
 
-__all__ = ['generate_invoice_qr', 'QRGenerator']
+__all__ = []
