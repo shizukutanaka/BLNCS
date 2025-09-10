@@ -210,7 +210,7 @@ def get_validator():
     return _get()
 
 def get_security_manager():
-    from .security import get_security_manager as _get
+    from ..security import get_security_manager as _get
     return _get()
 
 def get_monitor():
@@ -222,7 +222,7 @@ def get_fee_optimizer():
     return _get()
 
 def get_channel_manager():
-    from .channel_manager import get_channel_manager as _get
+    from ..lightning.channel_manager import get_channel_manager as _get
     return _get()
 
 def get_connection_pool():
@@ -234,7 +234,7 @@ def get_backup_manager():
     return SimpleBackup()
 
 def get_recovery_system():
-    from .error_recovery import get_error_recovery as _get
+    from .advanced_error_recovery import get_error_recovery as _get
     return _get()
 
 def get_unified_monitoring():

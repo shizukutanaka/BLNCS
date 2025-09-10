@@ -33,7 +33,7 @@ def get_validator():
 
 def get_security_manager():
     """Get security manager"""
-    from .security import get_security_manager
+    from ..security import get_security_manager
     return get_security_manager()
 
 def get_monitor():
@@ -49,7 +49,7 @@ def get_fee_optimizer():
 
 def get_channel_manager():
     """Get channel manager"""
-    from .channel_manager import get_channel_manager
+    from ..lightning.channel_manager import get_channel_manager
     return get_channel_manager()
 
 def get_connection_pool():
@@ -64,7 +64,7 @@ def get_backup_manager():
 
 def get_recovery_system():
     """Get error recovery system"""
-    from .recovery import get_error_recovery
+    from .advanced_error_recovery import get_error_recovery
     return get_error_recovery()
 
 def get_unified_monitoring():
