@@ -52,21 +52,22 @@ def validate_setup() -> Dict[str, bool]:
         config = get_config_manager()
         config_data = config.get_all()
         validation['Configuration'] = bool(config_data)
-    except:
+    except Exception:
         validation['Configuration'] = False
     
     try:
-        from blncs.core.database import get_database_manager
-        db = get_database_manager()
+        from blncs.core.database import get_database
+        db = get_database()
+        db.execute("SELECT 1")
         validation['Database'] = True
-    except:
+    except Exception:
         validation['Database'] = False
     
     try:
-        from blncs.core.monitoring_unified import get_unified_monitoring
-        monitor = get_unified_monitoring()
+        from blncs.core.monitoring_unified import UnifiedMonitor
+        monitor = UnifiedMonitor()
         validation['Monitoring'] = True
-    except:
+    except Exception:
         validation['Monitoring'] = False
     
     return validation
@@ -568,6 +569,43 @@ def version():
     except ImportError:
         click.echo("BLNCS Lightning Network Control System")
     click.echo("Bitcoin Lightning Network Control System")
+
+
+# Add command groups
+def add_command_groups():
+    """Add command groups to CLI"""
+    try:
+        from .commands.system import system_commands
+        cli.add_command(system_commands)
+    except ImportError:
+        pass
+    
+    try:
+        from .commands.connect import connect_commands
+        cli.add_command(connect_commands)
+    except ImportError:
+        pass
+    
+    try:
+        from .commands.wallet import wallet_commands
+        cli.add_command(wallet_commands)
+    except ImportError:
+        pass
+    
+    try:
+        from .commands.metrics import metrics_commands
+        cli.add_command(metrics_commands)
+    except ImportError:
+        pass
+    
+    try:
+        from .commands.maintenance import maintenance_commands
+        cli.add_command(maintenance_commands)
+    except ImportError:
+        pass
+
+# Initialize command groups
+add_command_groups()
 
 
 def main():

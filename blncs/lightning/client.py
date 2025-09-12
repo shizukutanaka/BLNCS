@@ -194,6 +194,103 @@ class SimpleClient(RetryableClient):
             self.logger.error(f"Failed to pay invoice: {e}")
             raise LightningError(f"Failed to pay invoice: {e}")
     
+    def decode_payment_request(self, payment_request: str) -> Dict[str, Any]:
+        """Decode Lightning payment request"""
+        if not self.connected:
+            if not self.connect():
+                raise LightningError("Not connected to Lightning node")
+        
+        session = self._get_session()
+        try:
+            response = session.get(
+                f"https://{self.host}:{self.port}/v1/payreq/{payment_request}",
+                timeout=10
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            self.logger.error(f"Failed to decode payment request: {e}")
+            raise LightningError(f"Failed to decode payment request: {e}")
+    
+    def send_payment(self, payment_request: str, fee_limit: int = None) -> Dict[str, Any]:
+        """Send payment using payment request"""
+        if not self.connected:
+            if not self.connect():
+                raise LightningError("Not connected to Lightning node")
+        
+        session = self._get_session()
+        payload = {
+            "payment_request": payment_request
+        }
+        if fee_limit:
+            payload["fee_limit"] = {"fixed": str(fee_limit)}
+        
+        try:
+            response = session.post(
+                f"https://{self.host}:{self.port}/v1/channels/transactions",
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            self.logger.error(f"Failed to send payment: {e}")
+            raise LightningError(f"Failed to send payment: {e}")
+    
+    def list_invoices(self, max_invoices: int = 100) -> Dict[str, Any]:
+        """List invoices"""
+        if not self.connected:
+            if not self.connect():
+                raise LightningError("Not connected to Lightning node")
+        
+        session = self._get_session()
+        try:
+            response = session.get(
+                f"https://{self.host}:{self.port}/v1/invoices?num_max_invoices={max_invoices}",
+                timeout=10
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            self.logger.error(f"Failed to list invoices: {e}")
+            raise LightningError(f"Failed to list invoices: {e}")
+    
+    def list_payments(self) -> Dict[str, Any]:
+        """List payments"""
+        if not self.connected:
+            if not self.connect():
+                raise LightningError("Not connected to Lightning node")
+        
+        session = self._get_session()
+        try:
+            response = session.get(f"https://{self.host}:{self.port}/v1/payments", timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            self.logger.error(f"Failed to list payments: {e}")
+            raise LightningError(f"Failed to list payments: {e}")
+    
+    def new_address(self, address_type: str = "p2wkh") -> Dict[str, Any]:
+        """Generate new Bitcoin address"""
+        if not self.connected:
+            if not self.connect():
+                raise LightningError("Not connected to Lightning node")
+        
+        session = self._get_session()
+        payload = {"type": address_type}
+        
+        try:
+            response = session.post(
+                f"https://{self.host}:{self.port}/v1/newaddress",
+                json=payload,
+                timeout=10
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            self.logger.error(f"Failed to generate address: {e}")
+            raise LightningError(f"Failed to generate address: {e}")
+
     def open_channel(self, node_pubkey: str, local_funding_amount: int) -> Dict[str, Any]:
         """Open Lightning channel"""
         if not self.connected:
