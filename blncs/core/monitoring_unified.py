@@ -18,7 +18,7 @@ from .config_manager import get_config_manager
 from .cache_unified import get_cache
 # Lazy imports to avoid circular dependency
 from .metrics import get_metrics_collector, MetricsCollector
-from .circuit_breaker_enhanced import CircuitBreaker, CircuitState
+from .circuit_breaker_enhanced import EnhancedCircuitBreaker as CircuitBreaker, CircuitState
 
 
 class MonitoringLevel(Enum):

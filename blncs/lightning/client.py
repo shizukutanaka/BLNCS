@@ -1,6 +1,7 @@
 """
 Simple Lightning Network Client
 Direct implementation following Pike's "do one thing well" principle.
+Enhanced with retry logic for improved stability.
 """
 
 import json
@@ -24,19 +25,29 @@ except ImportError:
     HAS_GRPC = False
     grpc = None
 
+from ..core.retry_helper import RetryableClient, standard_retry, RetryConfig
+
 
 class LightningError(Exception):
     """Lightning network operation error"""
     pass
 
 
-class SimpleClient:
+class ConnectionError(LightningError):
+    """Connection-specific error"""
+    pass
+
+
+class SimpleClient(RetryableClient):
     """
-    Simple Lightning Network client.
+    Simple Lightning Network client with retry capability.
     Does one thing: communicates with Lightning Network node.
     """
     
     def __init__(self, host='localhost', port=8080, cert_path=None, macaroon_path=None):
+        # Initialize retry capability
+        super().__init__(RetryConfig(max_attempts=3, initial_delay=1.0, max_delay=10.0))
+        
         self.host = host
         self.port = port
         self.cert_path = cert_path
@@ -62,11 +73,11 @@ class SimpleClient:
         return self._session
     
     def connect(self):
-        """Connect to Lightning node"""
+        """Connect to Lightning node with retry logic"""
         if not HAS_REQUESTS:
             raise LightningError("requests library required for HTTP connection")
         
-        try:
+        def _attempt_connection():
             session = self._get_session()
             if session:
                 # Simple ping to test connection
@@ -74,11 +85,16 @@ class SimpleClient:
                 if response.status_code == 200:
                     self.connected = True
                     return True
+                else:
+                    raise ConnectionError(f"HTTP {response.status_code}: {response.text}")
+            raise ConnectionError("Could not create session")
+        
+        try:
+            return self.with_retry(_attempt_connection)
         except Exception as e:
-            self.logger.error(f"Connection failed: {e}")
-            
-        self.connected = False
-        return False
+            self.logger.error(f"Connection failed after retries: {e}")
+            self.connected = False
+            return False
     
     def disconnect(self):
         """Disconnect from Lightning node"""
