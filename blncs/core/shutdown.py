@@ -11,7 +11,7 @@ from typing import Callable, List, Any
 from pathlib import Path
 
 from .logger import get_logger
-from .fast_cache import get_cache
+from .cache_unified import get_cache
 from .history import get_history
 
 

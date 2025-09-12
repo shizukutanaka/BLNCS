@@ -4,7 +4,6 @@ BLNCS - Bitcoin Lightning Network Control System
 Enterprise-grade Lightning Network management with proper dependency injection.
 """
 
-__version__ = "1.0.0"
 __author__ = "BLNCS Team"
 __description__ = "Bitcoin Lightning Network Control System"
 

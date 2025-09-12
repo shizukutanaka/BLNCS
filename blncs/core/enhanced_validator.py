@@ -16,7 +16,7 @@ from enum import Enum
 
 from .logger import get_logger
 from .exceptions import ValidationError, SecurityError
-from .fast_cache import get_fast_cache
+from .cache_unified import get_cache
 
 
 class ValidationType(Enum):
@@ -44,13 +44,37 @@ class ValidationRule:
 
 @dataclass
 class ValidationResult:
-    """Result of validation"""
+    """Result of validation following Carmack's no-exceptions philosophy"""
     valid: bool
     value: Any = None
     error_message: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
     security_issues: List[str] = field(default_factory=list)
     sanitized: bool = False
+    
+    @property
+    def success(self) -> bool:
+        """Check if validation succeeded"""
+        return self.valid
+    
+    @property
+    def failed(self) -> bool:
+        """Check if validation failed"""
+        return not self.valid
+    
+    def unwrap(self) -> Any:
+        """Return value if valid, otherwise return None"""
+        return self.value if self.valid else None
+    
+    @classmethod
+    def success_result(cls, value: Any) -> 'ValidationResult':
+        """Create a successful validation result"""
+        return cls(valid=True, value=value)
+    
+    @classmethod
+    def failure_result(cls, error: str) -> 'ValidationResult':
+        """Create a failed validation result"""
+        return cls(valid=False, error_message=error)
     
     @property
     def is_valid(self) -> bool:
@@ -122,7 +146,7 @@ class EnhancedValidator:
     
     def __init__(self):
         self.logger = get_logger(__name__)
-        self.cache = get_fast_cache()
+        self.cache = get_cache()
         
         # Validation rules registry
         self.rules: Dict[str, ValidationRule] = {}
@@ -334,38 +358,38 @@ class EnhancedValidator:
         return issues
     
     # Lightning Network validators
-    def _validate_channel_id(self, value: Any) -> str:
+    def _validate_channel_id(self, value: Any) -> ValidationResult:
         """Validate Lightning channel ID"""
         if not isinstance(value, str):
-            raise ValidationError("Channel ID must be a string")
+            return ValidationResult(False, None, "Channel ID must be a string")
         
         value = value.strip()
         if not self.PATTERNS['channel_id'].match(value):
-            raise ValidationError(f"Invalid channel ID format: {value}")
+            return ValidationResult(False, None, f"Invalid channel ID format: {value}")
         
         # Additional validation: check component ranges
         parts = value.split('x')
         if int(parts[0]) > 2**24:  # Block height limit
-            raise ValidationError("Block height in channel ID too large")
+            return ValidationResult(False, None, "Block height in channel ID too large")
         
-        return value
+        return ValidationResult(True, value)
     
-    def _validate_node_pubkey(self, value: Any) -> str:
+    def _validate_node_pubkey(self, value: Any) -> ValidationResult:
         """Validate node public key"""
         if not isinstance(value, str):
-            raise ValidationError("Node public key must be a string")
+            return ValidationResult(False, None, "Node public key must be a string")
         
         value = value.strip().lower()
         if not self.PATTERNS['node_pubkey'].match(value):
-            raise ValidationError(f"Invalid node public key format")
+            return ValidationResult(False, None, "Invalid node public key format")
         
         # Additional check: ensure it's valid hex
         try:
             int(value, 16)
         except ValueError:
-            raise ValidationError("Node public key contains invalid hex characters")
+            return ValidationResult(False, None, "Node public key contains invalid hex characters")
         
-        return value
+        return ValidationResult(True, value)
     
     def _validate_bitcoin_address(self, value: Any, network: str = "mainnet") -> str:
         """Validate Bitcoin address"""

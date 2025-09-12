@@ -13,7 +13,7 @@ import time
 
 from .logger import get_logger
 from .config_manager import get_config_manager
-from .fast_cache import get_cache
+from .cache_unified import get_cache
 from .exceptions import LightningError
 
 

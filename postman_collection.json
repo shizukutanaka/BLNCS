@@ -1,0 +1,182 @@
+{
+  "info": {
+    "name": "BLNCS API",
+    "description": "Bitcoin Lightning Network Control System API",
+    "version": "2.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-API-Key"
+      },
+      {
+        "key": "value",
+        "value": "{{api_key}}"
+      },
+      {
+        "key": "in",
+        "value": "header"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://api.blncs.org"
+    },
+    {
+      "key": "api_key",
+      "value": "your-api-key-here"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Generate API Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"Test Key\", \"permissions\": [\"read\", \"write\"]}"
+            },
+            "url": "{{base_url}}/api/v1/auth/generate-key"
+          }
+        },
+        {
+          "name": "Get Auth Stats",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/auth/stats"
+          }
+        }
+      ]
+    },
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{base_url}}/health"
+          }
+        },
+        {
+          "name": "API Info",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Backup Management",
+      "item": [
+        {
+          "name": "List Backup Items",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/backup/items"
+          }
+        },
+        {
+          "name": "Create Backup Item",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"Lightning Node Data\", \"source_path\": \"/home/lightning/.lnd\", \"backup_type\": \"incremental\", \"priority\": 8, \"enabled\": true, \"encryption\": true}"
+            },
+            "url": "{{base_url}}/api/v1/backup/items"
+          }
+        },
+        {
+          "name": "Create Backup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"backup_name\": \"Manual Backup\", \"backup_type\": \"full\", \"items\": [\"lightning-node\"], \"encryption\": true, \"compression\": true}"
+            },
+            "url": "{{base_url}}/api/v1/backup/create"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Recovery",
+      "item": [
+        {
+          "name": "List Available Backups",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/recovery/backups"
+          }
+        },
+        {
+          "name": "Execute Recovery",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"backup_id\": \"backup_20240101_120000\", \"target_directory\": \"/home/lightning/recovery\", \"verify_integrity\": true}"
+            },
+            "url": "{{base_url}}/api/v1/recovery/execute"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Monitoring",
+      "item": [
+        {
+          "name": "System Metrics",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/monitoring/metrics"
+          }
+        },
+        {
+          "name": "Health Status",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/monitoring/health"
+          }
+        }
+      ]
+    }
+  ]
+}

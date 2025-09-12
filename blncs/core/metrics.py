@@ -13,7 +13,7 @@ from enum import Enum
 import statistics
 
 from .logger import get_logger
-from .fast_cache import get_fast_cache
+from .cache_unified import get_cache
 
 
 class MetricType(Enum):
@@ -221,7 +221,7 @@ class MetricsCollector:
         self.logger = get_logger(__name__)
         self.metrics: Dict[str, Metric] = {}
         self._lock = threading.Lock()
-        self.cache = get_fast_cache()
+        self.cache = get_cache()
         
         # Initialize default metrics
         self._initialize_default_metrics()

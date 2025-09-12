@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-BLNCS (Bitcoin Lightning Network Control System) Setup
-Production-ready Lightning Network management and monitoring system.
+BLNCS Setup - Lightweight Edition
+Simplified Bitcoin Lightning Network Control System
 """
 
 from setuptools import setup, find_packages

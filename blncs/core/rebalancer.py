@@ -12,7 +12,7 @@ from collections import defaultdict
 
 from .logger import get_logger
 from .config import get_config
-from .fast_cache import get_cache
+from .cache_unified import get_cache
 
 
 @dataclass

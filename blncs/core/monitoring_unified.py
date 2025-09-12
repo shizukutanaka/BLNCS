@@ -15,10 +15,10 @@ import json
 
 from .logger import get_logger
 from .config_manager import get_config_manager
-from .fast_cache import get_fast_cache
+from .cache_unified import get_cache
 # Lazy imports to avoid circular dependency
 from .metrics import get_metrics_collector, MetricsCollector
-from .circuit_breaker import CircuitBreaker, CircuitState
+from .circuit_breaker_enhanced import CircuitBreaker, CircuitState
 
 
 class MonitoringLevel(Enum):
@@ -75,7 +75,7 @@ class EnhancedUnifiedMonitoring:
     def __init__(self, lightning_client=None):
         self.logger = get_logger(__name__)
         self.config = get_config_manager()
-        self.cache = get_fast_cache()
+        self.cache = get_cache()
         # Lazy import to avoid circular dependency
         try:
             from .health import get_health_checker

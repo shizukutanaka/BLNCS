@@ -14,7 +14,7 @@ from enum import Enum
 import json
 
 from .logger import get_logger
-from .unified_cache import get_cache_manager, CacheType
+from .cache_unified import get_cache_manager, CacheType
 
 
 class MetricType(Enum):

@@ -36,7 +36,6 @@ def create_basic_config_file(config_path: str) -> Dict[str, Any]:
         # Basic configuration template
         config = {
             "created": datetime.now().isoformat(),
-            "version": "0.1.0",
             "lightning": {
                 "host": "localhost",
                 "port": 8080,

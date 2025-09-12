@@ -22,10 +22,8 @@ except ImportError:
 
 from .logger import get_logger
 from .config import get_config
-from .connection_pool import ConnectionPool
-from .fast_cache import get_fast_cache
-from .metrics import get_metrics_collector, increment_counter, set_gauge
-from .circuit_breaker import circuit_breaker
+from .connection_pool_unified import get_lightning_pool
+from .metrics import get_metrics_collector
 
 
 class HealthStatus(Enum):
@@ -71,7 +69,6 @@ class HealthChecker:
     def __init__(self) -> None:
         self.logger = get_logger(__name__)
         self.config = get_config()
-        self.cache = get_fast_cache()
         self.metrics = get_metrics_collector()
         
         # Health check history
@@ -126,7 +123,6 @@ class HealthChecker:
         else:
             return HealthStatus.HEALTHY
     
-    @circuit_breaker(name="system_resources", timeout=30.0)
     def check_system_resources(self) -> HealthCheckResult:
         """Check system resources with enhanced monitoring"""
         start_time = time.time()
@@ -198,9 +194,9 @@ class HealthChecker:
                 details['network'] = network_io
             
             # Update metrics
-            set_gauge('system_cpu_percent', cpu_percent)
-            set_gauge('system_memory_percent', memory.percent)
-            set_gauge('system_disk_percent', disk_percent)
+            self.metrics.set_gauge('system_cpu_percent', cpu_percent)
+            self.metrics.set_gauge('system_memory_percent', memory.percent)
+            self.metrics.set_gauge('system_disk_percent', disk_percent)
             
             # Generate message and suggestions
             message = "System resources check completed"
@@ -222,7 +218,7 @@ class HealthChecker:
                 recovery_suggestions=suggestions
             )
             
-            increment_counter('health_checks_total', labels={'check': 'system_resources', 'status': overall_status.value})
+            self.metrics.increment_counter('health_checks_total', labels={'check': 'system_resources', 'status': overall_status.value})
             return result
             
         except Exception as e:
@@ -235,7 +231,6 @@ class HealthChecker:
                 recovery_suggestions=["Check system status manually", "Restart system monitoring"]
             )
     
-    @circuit_breaker(name="lightning_node", timeout=60.0)
     def check_lightning_node(self) -> HealthCheckResult:
         """Check Lightning node connection and health"""
         start_time = time.time()
@@ -301,9 +296,9 @@ class HealthChecker:
                 suggestions.append(f"High response time: {response_time:.2f}s")
             
             # Update metrics
-            set_gauge('lightning_response_time', response_time)
-            set_gauge('lightning_active_channels', info.get('num_active_channels', 0))
-            set_gauge('lightning_peers', info.get('num_peers', 0))
+            self.metrics.set_gauge('lightning_response_time', response_time)
+            self.metrics.set_gauge('lightning_active_channels', info.get('num_active_channels', 0))
+            self.metrics.set_gauge('lightning_peers', info.get('num_peers', 0))
             
             result = HealthCheckResult(
                 name="lightning_node",
@@ -317,7 +312,7 @@ class HealthChecker:
             # Reset failure count on success
             self.continuous_failures.pop('lightning_node', None)
             
-            increment_counter('health_checks_total', labels={'check': 'lightning_node', 'status': status.value})
+            self.metrics.increment_counter('health_checks_total', labels={'check': 'lightning_node', 'status': status.value})
             return result
             
         except Exception as e:
@@ -351,8 +346,8 @@ class HealthChecker:
                 recovery_suggestions=suggestions
             )
             
-            increment_counter('health_checks_total', labels={'check': 'lightning_node', 'status': 'critical'})
-            increment_counter('lightning_connection_failures')
+            self.metrics.increment_counter('health_checks_total', labels={'check': 'lightning_node', 'status': 'critical'})
+            self.metrics.increment_counter('lightning_connection_failures')
             
             return result
     
@@ -666,8 +661,8 @@ class HealthChecker:
             }
         
         # Update metrics
-        set_gauge('health_overall_score', health_score)
-        increment_counter('health_checks_completed')
+        self.metrics.set_gauge('health_overall_score', health_score)
+        self.metrics.increment_counter('health_checks_completed')
         
         self.logger.info(
             f"Health check completed: {overall_status.value} (score: {health_score:.1f}/100) "
@@ -805,8 +800,8 @@ class HealthChecker:
                     self._full_check_counter = 0
                     try:
                         full_report = self.run_full_health_check()
-                        # Cache the full report
-                        self.cache.set('last_full_health_report', full_report, ttl=interval * 6)
+                        # Store the full report for later retrieval
+                        self._last_full_report = full_report
                     except Exception as e:
                         self.logger.error(f"Full health check failed in monitoring loop: {e}")
                 

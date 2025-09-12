@@ -1,42 +1,33 @@
 """
 BLNCS CLI Commands Package
-Organized command structure for maintainable CLI.
+Lightweight command structure - only essential commands loaded.
 """
 
-from .info_commands import info, balance, status, health
-from .channel_commands import channels
-from .network_commands import network_test, lightning_ping, system_info
-from .management_commands import analyze_channels, connectivity_check, fee_estimate, payment_debug, channel_summary
-from .config_commands import config_management, config_get, config_set, config_list, env_template
-from .liquidity_commands import liquidity
-from .daily_commands import earnings, top_channels, fee_analysis, health_check, backup_data, rebalance_suggestions
-from .simple_dashboard import dashboard, system_overview
-from .database_commands import db_status, db_optimize, db_cleanup, db_maintenance, db_vacuum
-from .fee_automation_commands import fee_automation_status, fee_automation_start, fee_automation_stop, fee_automation_history, fee_automation_test
-from .rebalancer_commands import rebalancer_status, rebalancer_start, rebalancer_stop, rebalancer_history, rebalancer_analyze, rebalancer_add_target, rebalancer_remove_target
-from .monitoring_commands import monitoring_status, monitoring_start, monitoring_stop, monitoring_alerts, monitoring_history, monitoring_ack, monitoring_resolve, monitoring_metrics
-from .security_commands import security_status, security_start, security_stop, security_findings, security_resolve, security_false_positive, security_scan, security_harden
-from .connection_commands import quick_connect, connection_scan, connection_reconnect, connection_setup, connection_history, connection_status
-from .qr_commands import qr_create, qr_generate, qr_read, qr_scan, qr_list, qr_cleanup
-from .discovery_commands import node_discover, node_recommend, node_cached, node_scan_local, node_info
-from .update_commands import update_check, update_install, update_config, update_history, update_status, update_cleanup
-from .backup_commands import backup_create, backup_list, backup_restore, backup_verify, backup_status, backup_auto, backup_encrypt, backup_cleanup
-from .migration_commands import migrate
+# Import only essential lightweight commands - lazy loading for others
+# Basic commands are imported on demand to reduce startup time
 
+# Essential commands only - lightweight version without database dependencies
+
+# Essential commands only - lightweight version without database dependencies
 __all__ = [
-    'info', 'balance', 'status', 'health', 'channels', 'network_test', 'lightning_ping', 'system_info',
-    'analyze_channels', 'connectivity_check', 'fee_estimate', 'payment_debug', 'channel_summary',
-    'config_management', 'config_get', 'config_set', 'config_list', 'env_template', 'liquidity',
-    'earnings', 'top_channels', 'fee_analysis', 'health_check', 'backup_data', 'rebalance_suggestions',
-    'dashboard', 'system_overview', 'db_status', 'db_optimize', 'db_cleanup', 'db_maintenance', 'db_vacuum',
-    'fee_automation_status', 'fee_automation_start', 'fee_automation_stop', 'fee_automation_history', 'fee_automation_test',
-    'rebalancer_status', 'rebalancer_start', 'rebalancer_stop', 'rebalancer_history', 'rebalancer_analyze', 'rebalancer_add_target', 'rebalancer_remove_target',
-    'monitoring_status', 'monitoring_start', 'monitoring_stop', 'monitoring_alerts', 'monitoring_history', 'monitoring_ack', 'monitoring_resolve', 'monitoring_metrics',
-    'security_status', 'security_start', 'security_stop', 'security_findings', 'security_resolve', 'security_false_positive', 'security_scan', 'security_harden',
-    'quick_connect', 'connection_scan', 'connection_reconnect', 'connection_setup', 'connection_history', 'connection_status',
-    'qr_create', 'qr_generate', 'qr_read', 'qr_scan', 'qr_list', 'qr_cleanup',
-    'node_discover', 'node_recommend', 'node_cached', 'node_scan_local', 'node_info',
-    'update_check', 'update_install', 'update_config', 'update_history', 'update_status', 'update_cleanup',
-    'backup_create', 'backup_list', 'backup_restore', 'backup_verify', 'backup_status', 'backup_auto', 'backup_encrypt', 'backup_cleanup',
-    'migrate'
+    'info', 'balance', 'channels', 'system_info', 'health_check',
+    'config_get', 'config_set', 'lightning_ping', 'connectivity_check',
+    'dashboard', 'status', 'setup', 'validate_config',
+    'create_invoice', 'pay_invoice', 'estimate_fee', 'payment_history', 'test_payment',
+    'create_backup', 'restore_backup', 'list_backups',
+    'analyze_fees', 'optimize_fees', 'fee_report', 'estimate_routing_fee', 'fee_policy_wizard',
+    'transaction_history', 'transaction_stats', 'sync_history', 'export_history', 'payment_patterns',
+    'discover_nodes', 'score_node', 'recommend_nodes', 'analyze_network',
+    'monitoring_status', 'monitoring_start', 'monitoring_stop', 'monitoring_alerts',
+    'monitoring_history', 'monitoring_ack', 'monitoring_resolve', 'monitoring_metrics',
+    'alert_status', 'alert_list', 'alert_history', 'alert_ack', 'alert_resolve',
+    'alert_channels', 'alert_add_channel', 'alert_test_channel', 'alert_rules',
+    'export_all', 'export_summary', 'export_from_backup',
+    'analyze_routes', 'routing_performance', 'routing_suggestions', 'routing_stress_test',
+    'security_status', 'security_start', 'security_stop', 'security_findings',
+    'security_resolve', 'security_false_positive', 'security_scan', 'security_harden',
+    'network_topology', 'network_hubs', 'network_node_analysis', 'network_paths',
+    'network_changes', 'network_benchmarks', 'network_export',
+    'predict_liquidity', 'predict_revenue', 'predict_failures', 'predict_market_trends',
+    'optimize_predictions', 'prediction_dashboard'
 ]

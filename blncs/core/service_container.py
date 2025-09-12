@@ -194,7 +194,7 @@ def get_config_manager():
     return _get()
 
 def get_cache_manager():
-    from .unified_cache import get_cache_manager as _get
+    from .cache_unified import get_cache_manager as _get
     return _get()
 
 def get_database_manager():
@@ -226,8 +226,8 @@ def get_channel_manager():
     return _get()
 
 def get_connection_pool():
-    from .connection_pool import ConnectionPool
-    return ConnectionPool()
+    from .connection_pool_unified import get_connection_pool as _get_pool
+    return _get_pool()
 
 def get_backup_manager():
     from .backup_enhanced import SimpleBackup

@@ -1,0 +1,28 @@
+# BLNCS Backup System Requirements
+# Dependencies for the automated backup and recovery system
+
+# Core backup functionality
+cryptography>=3.4.8      # Fernet encryption for secure backups
+schedule>=1.2.0           # Job scheduling for automated backups
+
+# Database and storage
+sqlite3                   # Built-in Python module for metadata storage
+
+# Async operations
+asyncio                   # Built-in Python module for async storage operations
+
+# Optional cloud storage dependencies
+boto3>=1.26.0            # AWS S3 integration (optional)
+paramiko>=2.11.0         # SFTP storage backend (optional)
+
+# Already included in main requirements
+# click>=8.0.0           # CLI interface
+# pathlib               # Path operations (built-in)
+# json                  # JSON handling (built-in)
+# datetime              # Date/time operations (built-in)
+# threading             # Multi-threading support (built-in)
+# tarfile              # Archive creation (built-in)
+# tempfile             # Temporary file operations (built-in)
+# hashlib              # Checksum operations (built-in)
+# shutil               # File operations (built-in)
+# enum                 # Enumeration support (built-in)

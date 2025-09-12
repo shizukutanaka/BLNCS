@@ -15,7 +15,7 @@ from functools import wraps
 from .exceptions import BLNCSError, ConnectionError, TimeoutError, LightningError, ValidationError
 from .config_manager import get_config_manager
 from .logger import get_logger
-from .fast_cache import get_fast_cache
+from .cache_unified import get_cache
 from .health import get_health_checker, HealthStatus
 from .metrics import get_metrics_collector
 
@@ -70,7 +70,7 @@ class EnhancedErrorRecovery:
     def __init__(self) -> None:
         self.config = get_config_manager()
         self.logger = get_logger(__name__)
-        self.cache = get_fast_cache()
+        self.cache = get_cache()
         self.health_checker = get_health_checker()
         self.metrics = get_metrics_collector()
         
@@ -414,7 +414,7 @@ class EnhancedErrorRecovery:
             self.cache.clear_pattern("connection:*")
             
             # Reset connection pool if available
-            from .connection_pool import get_connection_pool
+            from .connection_pool_unified import get_connection_pool
             pool = get_connection_pool()
             if hasattr(pool, 'reset'):
                 pool.reset()
@@ -429,7 +429,7 @@ class EnhancedErrorRecovery:
         try:
             self.logger.info("Refreshing connection pool...")
             
-            from .connection_pool import get_connection_pool
+            from .connection_pool_unified import get_connection_pool
             pool = get_connection_pool()
             if hasattr(pool, 'refresh'):
                 pool.refresh()

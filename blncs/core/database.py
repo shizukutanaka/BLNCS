@@ -7,14 +7,22 @@ import sqlite3
 import threading
 import time
 import json
-import asyncio
-import aiosqlite
 from typing import Dict, List, Any, Optional, Union, Tuple, Callable
-from contextlib import contextmanager, asynccontextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime, timedelta
 import hashlib
+
+# Optional async support
+HAS_AIOSQLITE = False
+try:
+    import asyncio
+    import aiosqlite
+    from contextlib import asynccontextmanager
+    HAS_AIOSQLITE = True
+except ImportError:
+    pass  # Graceful degradation to sync-only
 
 from .logger import get_logger
 from .config_manager import get_config_manager
@@ -44,6 +52,11 @@ class DatabaseManager:
         self.query_stats: Dict[str, QueryStats] = {}
         self.logger = get_logger(__name__)
         
+        # Performance optimizations
+        self._query_cache = {}
+        self._cache_ttl = {}
+        self._cache_lock = threading.RLock()
+        
         # Migration tracking
         self.migrations_table = "schema_migrations"
         
@@ -54,14 +67,17 @@ class DatabaseManager:
         self._init_database()
     
     def _init_pool(self):
-        """Initialize connection pool."""
+        """Initialize connection pool with performance optimizations."""
         for _ in range(self.pool_size):
             conn = sqlite3.connect(self.db_path, check_same_thread=False)
             conn.row_factory = sqlite3.Row
+            # Performance optimizations
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=10000")
+            conn.execute("PRAGMA synchronous=NORMAL") 
+            conn.execute("PRAGMA cache_size=20000")  # Increased cache
             conn.execute("PRAGMA temp_store=MEMORY")
+            conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory map
+            conn.execute("PRAGMA optimize")  # Auto-optimize on startup
             self.connections.append(conn)
             self.available_connections.append(conn)
     
@@ -192,31 +208,63 @@ class DatabaseManager:
     
     # Key-Value Operations
     def get(self, key: str) -> Optional[Any]:
-        """Get value from key-value store."""
+        """Get value from key-value store with caching."""
+        # Check cache first
+        with self._cache_lock:
+            if key in self._query_cache:
+                # Check TTL
+                if time.time() < self._cache_ttl.get(key, 0):
+                    return self._query_cache[key]
+                else:
+                    # Expired, remove from cache
+                    self._query_cache.pop(key, None)
+                    self._cache_ttl.pop(key, None)
+        
         result = self.execute(
             "SELECT value FROM kv_store WHERE key = ?",
             (key,)
         )
+        
+        value = None
         if result:
             try:
-                return json.loads(result[0]['value'])
+                value = json.loads(result[0]['value'])
             except json.JSONDecodeError:
-                return result[0]['value']
-        return None
+                value = result[0]['value']
+        
+        # Cache the result for 60 seconds
+        if value is not None:
+            with self._cache_lock:
+                self._query_cache[key] = value
+                self._cache_ttl[key] = time.time() + 60
+        
+        return value
     
     def set(self, key: str, value: Any) -> bool:
-        """Set value in key-value store."""
+        """Set value in key-value store and update cache."""
         value_str = json.dumps(value) if not isinstance(value, str) else value
         
         self.execute("""
             INSERT OR REPLACE INTO kv_store (key, value, updated_at)
             VALUES (?, ?, CURRENT_TIMESTAMP)
         """, (key, value_str))
+        
+        # Update cache
+        with self._cache_lock:
+            self._query_cache[key] = value
+            self._cache_ttl[key] = time.time() + 60
+        
         return True
     
     def delete(self, key: str) -> bool:
-        """Delete key from key-value store."""
+        """Delete key from key-value store and cache."""
         self.execute("DELETE FROM kv_store WHERE key = ?", (key,))
+        
+        # Remove from cache
+        with self._cache_lock:
+            self._query_cache.pop(key, None)
+            self._cache_ttl.pop(key, None)
+        
         return True
     
     def get_all(self, prefix: str = "") -> Dict[str, Any]:
@@ -368,145 +416,12 @@ class DatabaseManager:
             self.connections.clear()
             self.available_connections.clear()
 
-# Async database operations
-class AsyncDatabaseManager:
-    """Async database manager for high-performance operations."""
-    
-    def __init__(self, db_path: str = "blncs.db"):
-        """Initialize async database manager."""
-        self.db_path = db_path
-        self.logger = get_logger(__name__)
-        self._lock = asyncio.Lock()
-    
-    @asynccontextmanager
-    async def get_connection(self):
-        """Get async database connection."""
-        async with aiosqlite.connect(self.db_path) as conn:
-            conn.row_factory = aiosqlite.Row
-            await conn.execute("PRAGMA journal_mode=WAL")
-            await conn.execute("PRAGMA synchronous=NORMAL")
-            yield conn
-    
-    async def execute(self, query: str, params: Optional[Tuple] = None) -> List[aiosqlite.Row]:
-        """Execute async query."""
-        async with self.get_connection() as conn:
-            if params:
-                cursor = await conn.execute(query, params)
-            else:
-                cursor = await conn.execute(query)
-            
-            if query.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER')):
-                await conn.commit()
-                return []
-            else:
-                return await cursor.fetchall()
-    
-    async def get(self, key: str) -> Optional[Any]:
-        """Async get from key-value store."""
-        result = await self.execute(
-            "SELECT value FROM kv_store WHERE key = ?",
-            (key,)
-        )
-        if result:
-            try:
-                return json.loads(result[0]['value'])
-            except json.JSONDecodeError:
-                return result[0]['value']
-        return None
-    
-    async def set(self, key: str, value: Any) -> bool:
-        """Async set in key-value store."""
-        value_str = json.dumps(value) if not isinstance(value, str) else value
-        await self.execute("""
-            INSERT OR REPLACE INTO kv_store (key, value, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-        """, (key, value_str))
-        return True
-
-# Global instances
+# Global database manager instance
 _db_manager: Optional[DatabaseManager] = None
-_async_db_manager: Optional[AsyncDatabaseManager] = None
-_db_lock = threading.Lock()
 
-def get_database() -> DatabaseManager:
-    """Get global database manager instance."""
+def get_database(db_path: str = "blncs.db") -> DatabaseManager:
+    """Get or create global database manager instance."""
     global _db_manager
     if _db_manager is None:
-        with _db_lock:
-            if _db_manager is None:
-                config = get_config_manager()
-                db_path = config.get('database.path', 'blncs.db')
-                pool_size = config.get('database.pool_size', 10)
-                _db_manager = DatabaseManager(db_path, pool_size)
+        _db_manager = DatabaseManager(db_path)
     return _db_manager
-
-def get_async_database() -> AsyncDatabaseManager:
-    """Get global async database manager instance."""
-    global _async_db_manager
-    if _async_db_manager is None:
-        config = get_config_manager()
-        db_path = config.get('database.path', 'blncs.db')
-        _async_db_manager = AsyncDatabaseManager(db_path)
-    return _async_db_manager
-
-# Backward compatibility aliases
-def get_database_manager():
-    """Backward compatibility for get_database_manager."""
-    return get_database()
-
-def get_async_db_manager():
-    """Backward compatibility for async db manager."""
-    return get_async_database()
-
-# Example migrations
-MIGRATIONS = [
-    (1, "Add channel stats table", """
-        CREATE TABLE IF NOT EXISTS channel_stats (
-            channel_id TEXT PRIMARY KEY,
-            capacity INTEGER,
-            local_balance INTEGER,
-            remote_balance INTEGER,
-            total_sent INTEGER DEFAULT 0,
-            total_received INTEGER DEFAULT 0,
-            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE INDEX idx_channel_stats_updated ON channel_stats(last_updated);
-    """),
-    (2, "Add fee tracking table", """
-        CREATE TABLE IF NOT EXISTS fee_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            channel_id TEXT,
-            base_fee INTEGER,
-            fee_rate INTEGER,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE INDEX idx_fee_history_channel ON fee_history(channel_id);
-        CREATE INDEX idx_fee_history_timestamp ON fee_history(timestamp);
-    """)
-]
-
-if __name__ == "__main__":
-    # Test the database
-    db = get_database()
-    
-    # Test key-value operations
-    db.set("test_key", {"value": "test_data"})
-    print(f"Get test_key: {db.get('test_key')}")
-    
-    # Test transactions
-    tx_id = db.record_transaction("test", {"amount": 1000})
-    print(f"Created transaction: {tx_id}")
-    db.update_transaction_status(tx_id, "completed")
-    
-    # Test metrics
-    db.record_metric("cpu_usage", 45.5, {"host": "localhost"})
-    
-    # Run migrations
-    db.run_migrations(MIGRATIONS)
-    
-    # Get stats
-    stats = db.get_database_stats()
-    print(f"Database stats: {json.dumps(stats, indent=2)}")
-    
-    # Optimize
-    db.optimize()
