@@ -1,0 +1,30 @@
+# BLNCS - Optional Dependencies
+# Enhanced features and optional functionality
+
+# Enhanced data validation
+pydantic>=2.0.0
+
+# CLI interface enhancements
+click>=8.1.0
+
+# Database support (optional)
+# sqlalchemy>=2.0.0
+# alembic>=1.11.0
+
+# Caching support (optional)
+# redis>=4.6.0
+
+# Enhanced async support (optional)
+# aiohttp>=3.8.0
+# asyncio-mqtt>=0.11.0
+
+# Web framework for enhanced API (optional)
+# fastapi>=0.100.0
+# uvicorn>=0.23.0
+
+# Production server (optional)
+# gunicorn>=21.0.0
+
+# Enhanced monitoring (optional)
+# grafana-api>=1.0.0
+# elasticsearch>=8.0.0

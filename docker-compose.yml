@@ -2,50 +2,138 @@ version: '3.8'
 
 services:
   blncs:
-    build: .
-    container_name: blncs-main
-    restart: unless-stopped
-    environment:
-      - BLNCS_ENVIRONMENT=production
-      - BLNCS_LOG_LEVEL=INFO
-    volumes:
-      - blncs_data:/home/blncs/.blncs/data
-      - blncs_logs:/home/blncs/.blncs/logs
-      - ./config:/home/blncs/.blncs/config:ro
+    build:
+      context: .
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: ${COMPOSE_PROJECT_NAME:-blncs}
     ports:
-      - "8080:8080"
-    networks:
-      - blncs-network
+      - "${BLNCS_PORT:-8080}:8080"
+    volumes:
+      - blncs_data:/app/data
+      - blncs_logs:/app/logs
+      - blncs_config:/app/config
+      - blncs_backups:/app/backups
+      # Development mode: mount source code
+      - type: bind
+        source: .
+        target: /app/src
+        read_only: false
+        consistency: cached
+        bind:
+          create_host_path: true
+    environment:
+      - BLNCS_ENV=${BLNCS_ENV:-production}
+      - BLNCS_LOG_LEVEL=${BLNCS_LOG_LEVEL:-INFO}
+      - BLNCS_API_PORT=8080
+      - PYTHONDONTWRITEBYTECODE=${PYTHONDONTWRITEBYTECODE:-0}
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-m", "blncs.cli.main", "health", "--quick"]
+      test: ["CMD", "python", "blncs_main.py", "status"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 20s
+    networks:
+      - blncs-network
+    profiles:
+      - core
 
-  # Optional: Add monitoring
-  monitoring:
-    image: prom/prometheus:latest
-    container_name: blncs-monitoring
-    restart: unless-stopped
+  # Optional: Redis for distributed caching
+  redis:
+    image: redis:7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-blncs}-redis
     ports:
-      - "9090:9090"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    networks:
+      - blncs-network
+    profiles:
+      - redis
+      - full
+
+  # Optional: PostgreSQL database for larger deployments
+  postgres:
+    image: postgres:15-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-blncs}-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-blncs}
+      POSTGRES_USER: ${POSTGRES_USER:-blncs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blncs_secure_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - blncs-network
+    profiles:
+      - postgres
+      - full
+
+  # Optional: Prometheus monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-blncs}-prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
     networks:
       - blncs-network
     profiles:
       - monitoring
+      - full
+
+  # Optional: Grafana dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-blncs}-grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    restart: unless-stopped
+    networks:
+      - blncs-network
+    profiles:
+      - monitoring
+      - full
 
 volumes:
   blncs_data:
     driver: local
   blncs_logs:
     driver: local
+  blncs_config:
+    driver: local
+  blncs_backups:
+    driver: local
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
   prometheus_data:
+    driver: local
+  grafana_data:
     driver: local
 
 networks:
   blncs-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

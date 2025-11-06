@@ -1,0 +1,36 @@
+[Unit]
+Description=BLNCS - Bitcoin Lightning Network Control System
+Documentation=https://github.com/blncs/blncs
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=blncs
+Group=blncs
+WorkingDirectory=/opt/blncs
+Environment="PATH=/opt/blncs/.venv/bin:/usr/bin"
+Environment="BLNCS_CONFIG=/opt/blncs/config/blncs.json"
+ExecStart=/opt/blncs/.venv/bin/python /opt/blncs/blncs_main.py server --config ${BLNCS_CONFIG}
+ExecReload=/bin/kill -USR1 $MAINPID
+KillMode=mixed
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+# セキュリティ設定
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/blncs/data /opt/blncs/logs /opt/blncs/backups
+
+# リソース制限
+LimitNOFILE=65536
+MemoryMax=1G
+
+# 環境変数
+Environment=BLNCS_LOG_LEVEL=INFO
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,9 @@
 """
 BLNCS CLI Package
-Command Line Interface for Bitcoin Lightning Network Control System
+
+Command-line interface for the Bitcoin Lightning Network Control System.
 """
+
+from .main import main
+
+__all__ = ['main']

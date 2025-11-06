@@ -1,0 +1,15 @@
+{
+  "timestamp": 1758374477.3868446,
+  "timestamp_iso": "2025-09-20T22:21:17.386847",
+  "metrics": {
+    "counters": {},
+    "gauges": {},
+    "histogram_counts": {},
+    "timer_counts": {},
+    "metric_names": [
+      "logs.error.total",
+      "system.memory.usage_percent",
+      "operations.response_time_ms"
+    ]
+  }
+}

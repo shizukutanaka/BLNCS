@@ -13,7 +13,7 @@ from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
 from enum import Enum
 
-from .logger import get_logger
+from ..utils.simple_logger import get_logger
 
 
 class ResourceType(Enum):
@@ -29,6 +29,7 @@ class ResourceType(Enum):
 @dataclass
 class ResourceInfo:
     """Information about a managed resource"""
+    __slots__ = ('resource_id', 'resource_type', 'resource', 'cleanup_func', 'created_at', 'description')
     resource_id: str
     resource_type: ResourceType
     resource: Any
@@ -46,7 +47,8 @@ class ManagedResource(Protocol):
 
 class ResourceManager:
     """Centralized resource management with proper cleanup"""
-    
+    __slots__ = ('logger', '_resources', '_lock', '_shutdown_requested', '_cleanup_handlers')
+
     def __init__(self):
         self.logger = get_logger(__name__)
         self._resources: Dict[str, ResourceInfo] = {}
@@ -56,8 +58,18 @@ class ResourceManager:
         
         # Register cleanup on exit
         atexit.register(self.shutdown_all)
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+
+        for _sig_name in ("SIGINT", "SIGTERM"):
+            _sig = getattr(signal, _sig_name, None)
+            if _sig is None:
+                continue
+            try:
+                signal.signal(_sig, self._signal_handler)
+            except (ValueError, OSError, RuntimeError) as exc:
+                # Some runtimes (threads, embedded interpreters) disallow signal registration.
+                self.logger.debug("Skipping signal handler %s registration: %s", _sig_name, exc)
+            except Exception as exc:  # pragma: no cover - unexpected signal error guard
+                self.logger.warning("Unexpected error registering %s handler: %s", _sig_name, exc)
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""

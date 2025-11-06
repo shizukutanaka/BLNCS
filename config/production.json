@@ -1,0 +1,169 @@
+{
+  "version": "2.0.0",
+  "environment": "production",
+
+  "lightning": {
+    "network": "mainnet",
+    "node_id": null,
+    "host": "localhost",
+    "port": 10009,
+    "tls_cert_path": "/var/lib/lnd/tls.cert",
+    "macaroon_path": "/var/lib/lnd/data/chain/bitcoin/mainnet/admin.macaroon",
+    "connection_timeout": 30,
+    "max_retries": 3,
+    "retry_delay": 5,
+    "channel_backup_enabled": true,
+    "watchtower_enabled": true,
+    "autopilot": {
+      "enabled": false,
+      "max_channels": 5,
+      "allocation": 0.6,
+      "min_channel_size": 20000,
+      "max_channel_size": 16777215
+    }
+  },
+
+  "api": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8080,
+    "cors_enabled": true,
+    "cors_allowed_origins": [
+      "${BLNCS_PRIMARY_ORIGIN:https://localhost}"
+    ],
+    "cors_supports_credentials": true,
+    "rate_limiting": {
+      "enabled": true,
+      "requests_per_minute": 100,
+      "burst_size": 10
+    },
+    "authentication": {
+      "enabled": true,
+      "jwt_secret": "${BLNCS_JWT_SECRET}",
+      "session_timeout": 3600
+    },
+    "ssl": {
+      "enabled": true,
+      "cert_path": "/etc/ssl/certs/blncs.crt",
+      "key_path": "/etc/ssl/private/blncs.key"
+    }
+  },
+
+  "websocket": {
+    "enabled": true,
+    "port": 8081,
+    "max_connections": 100,
+    "heartbeat_interval": 30,
+    "compression": true
+  },
+
+  "database": {
+    "type": "sqlite",
+    "path": "/var/lib/blncs/blncs.db",
+    "backup_enabled": true,
+    "backup_interval": 3600,
+    "max_backups": 24,
+    "connection_pool": {
+      "min_size": 5,
+      "max_size": 20,
+      "timeout": 30
+    }
+  },
+
+  "monitoring": {
+    "enabled": true,
+    "dashboard_enabled": true,
+    "dashboard_port": 9090,
+    "metrics_enabled": true,
+    "prometheus_enabled": true,
+    "prometheus_port": 9091,
+    "health_check_interval": 60,
+    "alerts": {
+      "enabled": true,
+      "webhook_url": null,
+      "email_enabled": false,
+      "smtp_host": null,
+      "smtp_port": 587,
+      "smtp_user": null,
+      "smtp_password": null
+    }
+  },
+
+  "security": {
+    "enforce_https": true,
+    "max_request_size": "10MB",
+    "request_timeout": 30,
+    "ip_whitelist": [
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16"
+    ],
+    "trusted_hosts": [
+      "${BLNCS_PRIMARY_HOST:localhost}"
+    ],
+    "encryption": {
+      "algorithm": "AES-256-GCM",
+      "key_rotation_interval": 86400,
+      "key_rotation_policy": "Rotate daily at 02:00 UTC with dual control approval"
+    },
+    "audit_logging": {
+      "enabled": true,
+      "log_file": "/var/log/blncs/audit.log",
+      "max_file_size": "100MB",
+      "retention_days": 2555
+    }
+  },
+
+  "performance": {
+    "cache_enabled": true,
+    "cache_ttl": 300,
+    "max_cache_size": "256MB",
+    "compression_enabled": true,
+    "async_processing": true,
+    "worker_threads": 4,
+    "connection_pooling": true,
+    "keep_alive_timeout": 60
+  },
+
+  "logging": {
+    "level": "INFO",
+    "format": "json",
+    "output": "file",
+    "file_path": "/var/log/blncs/blncs.log",
+    "max_file_size": "100MB",
+    "max_files": 10,
+    "log_rotation": true,
+    "structured_logging": true
+  },
+
+  "backup": {
+    "enabled": true,
+    "schedule": "0 2 * * *",
+    "retention_days": 30,
+    "compression": true,
+    "encryption": true,
+    "destinations": {
+      "local": {
+        "enabled": true,
+        "path": "/var/backup/blncs"
+      },
+      "s3": {
+        "enabled": false,
+        "bucket": null,
+        "region": null,
+        "access_key": null,
+        "secret_key": null
+      }
+    }
+  },
+
+  "maintenance": {
+    "auto_update": false,
+    "maintenance_window": "02:00-04:00",
+    "auto_restart": true,
+    "health_check_enabled": true,
+    "resource_monitoring": true,
+    "cleanup_enabled": true,
+    "cleanup_schedule": "0 3 * * 0"
+  }
+}

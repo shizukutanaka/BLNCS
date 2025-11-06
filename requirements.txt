@@ -1,42 +1,69 @@
 # BLNCS - Bitcoin Lightning Network Control System
-# Core dependencies
+# Production-Grade Requirements
 
-# Essential libraries
-pyyaml>=6.0.0
-requests>=2.31.0
+# Core Framework
+flask>=3.0.0
+flask-cors>=4.0.0
+pydantic>=2.5.0
 click>=8.1.0
+rich>=13.7.0
+typer>=0.9.0
+
+# Database & Storage
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+redis>=5.0.0
+psycopg2-binary>=2.9.0
+
+# Security & Cryptography
+cryptography>=42.0.0
+pyjwt>=2.8.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.1.2
+python-multipart>=0.0.6
+
+# Performance & Monitoring
 psutil>=5.9.0
+aiofiles>=23.2.1
+httpx>=0.26.0
+prometheus-client>=0.19.0
+structlog>=24.1.0
 
-# Input validation and data handling
+# Data Processing
+numpy>=1.26.0
+orjson>=3.9.10
+msgpack>=1.0.7
+
+# Configuration & Environment
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# Lightning Network
+grpcio>=1.60.0
+grpcio-tools>=1.60.0
+protobuf>=4.25.1
+qrcode[pil]>=7.4.2
+googleapis-common-protos>=1.62.0
+
+# Web & API
+websockets>=12.0
+jinja2>=3.1.3
+aiohttp>=3.9.1
+requests>=2.31.0
+urllib3>=2.1.0
 validators>=0.22.0
-pydantic>=2.0.0
+werkzeug>=3.0.1
 
-# QR code generation and processing
-qrcode[pil]>=7.4.0
-
-# Enhanced cryptographic operations
-cryptography>=41.0.0
-
-# Lightning Network gRPC
-grpcio>=1.59.0
-grpcio-tools>=1.59.0
-protobuf>=4.24.0
-googleapis-common-protos>=1.60.0
-
-# HTTP client improvements
-urllib3>=2.0.0
-
-# Performance and monitoring
-prometheus-client>=0.17.0
-
-# Development tools (uncommented for better development experience)
-pytest>=7.4.0
+# Testing (optional, for development)
+pytest>=8.0.0
 pytest-cov>=4.1.0
-pytest-asyncio>=0.21.0
-black>=23.0.0
-flake8>=6.0.0
-mypy>=1.5.0
+pytest-asyncio>=0.23.0
 
-# Additional quality tools
-safety>=2.3.0
-bandit>=1.7.0
+# Code Quality (optional, for development)
+black>=24.1.0
+flake8>=7.0.0
+mypy>=1.8.0
+bandit>=1.7.6
+
+# Additional Security Tools
+safety>=3.0.0

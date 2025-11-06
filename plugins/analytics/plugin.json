@@ -1,0 +1,14 @@
+{
+    "plugin_id": "transaction_analyzer",
+    "name": "Transaction Analyzer",
+    "version": "1.0.0",
+    "description": "Advanced Lightning Network transaction pattern analysis",
+    "author": "BLNCS Team",
+    "plugin_type": "analytics",
+    "status": "inactive",
+    "dependencies": [],
+    "api_version": "1.0.0",
+    "entry_point": "Plugin",
+    "config_schema": {},
+    "permissions": []
+}

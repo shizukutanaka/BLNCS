@@ -1,8 +1,8 @@
 """
-BLNCS Lightning Network Module
-Simple Lightning Network client for basic operations.
+BLNCS Lightning Module
+Interface to Lightning Network nodes
 """
 
-from .client import SimpleClient, create_client
+from .simple_client import SimpleLightningClient, get_lightning_client
 
-__all__ = ['SimpleClient', 'create_client']
+__all__ = ['SimpleLightningClient', 'get_lightning_client']

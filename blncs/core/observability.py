@@ -1,492 +1,392 @@
+#!/usr/bin/env python3
 """
-Comprehensive Observability System for BLNCS
-Provides metrics, tracing, and monitoring capabilities.
+Structured Logging and Observability
+Implements OpenTelemetry-compatible observability patterns
+Three pillars: Logs, Metrics, Traces
 """
 
-import time
-import threading
-import uuid
-from typing import Dict, Any, Optional, List, Callable, Union
-from dataclasses import dataclass, field
-from contextlib import contextmanager
-from collections import defaultdict, deque
-from enum import Enum
+import logging
 import json
+import time
+import uuid
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, field, asdict
+from datetime import datetime
+from enum import Enum
+from contextlib import contextmanager
+import contextvars
 
-from .logger import get_logger
-from .cache_unified import get_cache_manager, CacheType
+logger = logging.getLogger(__name__)
 
 
-class MetricType(Enum):
-    """Types of metrics"""
-    COUNTER = "counter"
-    GAUGE = "gauge"
-    HISTOGRAM = "histogram"
-    TIMER = "timer"
+# Context variables for request/span tracking
+request_id: contextvars.ContextVar[str] = contextvars.ContextVar('request_id', default='')
+span_id: contextvars.ContextVar[str] = contextvars.ContextVar('span_id', default='')
+trace_id: contextvars.ContextVar[str] = contextvars.ContextVar('trace_id', default='')
+
+
+@dataclass
+class LogContext:
+    """Structured log context with all relevant fields"""
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    level: str = "INFO"
+    message: str = ""
+    logger_name: str = ""
+    request_id: str = ""
+    trace_id: str = ""
+    span_id: str = ""
+    service_name: str = "blncs"
+    environment: str = "production"
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+    exception: Optional[str] = None
+    error_code: Optional[str] = None
+    context_data: Dict[str, Any] = field(default_factory=dict)
+    tags: List[str] = field(default_factory=list)
+    duration_ms: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
+        return {
+            **asdict(self),
+            'timestamp': self.timestamp.isoformat()
+        }
+
+    def to_json(self) -> str:
+        """Convert to JSON"""
+        return json.dumps(self.to_dict(), default=str)
+
+
+class LogLevel(Enum):
+    """Log levels"""
+    TRACE = "TRACE"
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+
+class StructuredLogger:
+    """
+    Structured logging following OpenTelemetry patterns
+    Emits logs with context, correlation IDs, and structured fields
+    """
+
+    def __init__(self, name: str, service_name: str = "blncs", environment: str = "production"):
+        self.logger = logging.getLogger(name)
+        self.service_name = service_name
+        self.environment = environment
+        self.logger_name = name
+
+    def _create_context(
+        self,
+        message: str,
+        level: str,
+        **kwargs
+    ) -> LogContext:
+        """Create log context"""
+        return LogContext(
+            level=level,
+            message=message,
+            logger_name=self.logger_name,
+            request_id=request_id.get(),
+            trace_id=trace_id.get(),
+            span_id=span_id.get(),
+            service_name=self.service_name,
+            environment=self.environment,
+            context_data=kwargs
+        )
+
+    def info(self, message: str, **kwargs) -> None:
+        """Log info"""
+        ctx = self._create_context(message, "INFO", **kwargs)
+        self.logger.info(ctx.to_json())
+
+    def debug(self, message: str, **kwargs) -> None:
+        """Log debug"""
+        ctx = self._create_context(message, "DEBUG", **kwargs)
+        self.logger.debug(ctx.to_json())
+
+    def warning(self, message: str, **kwargs) -> None:
+        """Log warning"""
+        ctx = self._create_context(message, "WARNING", **kwargs)
+        self.logger.warning(ctx.to_json())
+
+    def error(self, message: str, exception: Optional[Exception] = None, **kwargs) -> None:
+        """Log error"""
+        ctx = self._create_context(message, "ERROR", **kwargs)
+        ctx.exception = str(exception) if exception else None
+        self.logger.error(ctx.to_json())
+
+    def critical(self, message: str, exception: Optional[Exception] = None, **kwargs) -> None:
+        """Log critical"""
+        ctx = self._create_context(message, "CRITICAL", **kwargs)
+        ctx.exception = str(exception) if exception else None
+        self.logger.critical(ctx.to_json())
 
 
 @dataclass
 class Metric:
-    """Metric data structure"""
+    """
+    Metric data point
+    Represents a single measurement
+    """
     name: str
-    type: MetricType
-    value: Union[int, float]
-    labels: Dict[str, str] = field(default_factory=dict)
-    timestamp: float = field(default_factory=time.time)
-    description: str = ""
+    value: float
+    unit: str = ""
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    tags: Dict[str, str] = field(default_factory=dict)
+    service_name: str = "blncs"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
+        return {
+            **asdict(self),
+            'timestamp': self.timestamp.isoformat()
+        }
+
+
+class MetricsCollector:
+    """
+    Collects and aggregates metrics
+    Supports counters, gauges, histograms
+    """
+
+    def __init__(self, service_name: str = "blncs"):
+        self.service_name = service_name
+        self.counters: Dict[str, int] = {}
+        self.gauges: Dict[str, float] = {}
+        self.histograms: Dict[str, List[float]] = {}
+        self.metrics_history: List[Metric] = []
+        self.max_history = 1000
+
+    def increment_counter(self, name: str, tags: Optional[Dict[str, str]] = None) -> None:
+        """Increment counter"""
+        key = self._make_key(name, tags)
+        self.counters[key] = self.counters.get(key, 0) + 1
+        self._record_metric(Metric(name, float(self.counters[key]), tags=tags or {}))
+
+    def set_gauge(self, name: str, value: float, tags: Optional[Dict[str, str]] = None) -> None:
+        """Set gauge value"""
+        key = self._make_key(name, tags)
+        self.gauges[key] = value
+        self._record_metric(Metric(name, value, tags=tags or {}))
+
+    def record_histogram(self, name: str, value: float, tags: Optional[Dict[str, str]] = None) -> None:
+        """Record histogram value"""
+        key = self._make_key(name, tags)
+        if key not in self.histograms:
+            self.histograms[key] = []
+        self.histograms[key].append(value)
+        self._record_metric(Metric(name, value, tags=tags or {}))
+
+    def _make_key(self, name: str, tags: Optional[Dict[str, str]]) -> str:
+        """Create unique key for metric"""
+        if not tags:
+            return name
+        tag_str = ",".join(f"{k}={v}" for k, v in sorted(tags.items()))
+        return f"{name}:{tag_str}"
+
+    def _record_metric(self, metric: Metric) -> None:
+        """Record metric to history"""
+        self.metrics_history.append(metric)
+        if len(self.metrics_history) > self.max_history:
+            self.metrics_history = self.metrics_history[-self.max_history:]
+
+    def get_counter(self, name: str, tags: Optional[Dict[str, str]] = None) -> int:
+        """Get counter value"""
+        key = self._make_key(name, tags)
+        return self.counters.get(key, 0)
+
+    def get_gauge(self, name: str, tags: Optional[Dict[str, str]] = None) -> float:
+        """Get gauge value"""
+        key = self._make_key(name, tags)
+        return self.gauges.get(key, 0.0)
+
+    def get_histogram_stats(self, name: str, tags: Optional[Dict[str, str]] = None) -> Dict[str, float]:
+        """Get histogram statistics"""
+        key = self._make_key(name, tags)
+        values = self.histograms.get(key, [])
+
+        if not values:
+            return {'count': 0, 'min': 0, 'max': 0, 'avg': 0, 'p99': 0}
+
+        sorted_values = sorted(values)
+        count = len(values)
+
+        return {
+            'count': count,
+            'min': sorted_values[0],
+            'max': sorted_values[-1],
+            'avg': sum(values) / count,
+            'p50': sorted_values[count // 2],
+            'p99': sorted_values[int(count * 0.99)]
+        }
+
+    def export_metrics(self) -> List[Dict[str, Any]]:
+        """Export all metrics"""
+        return [m.to_dict() for m in self.metrics_history]
 
 
 @dataclass
 class Span:
-    """Distributed tracing span"""
-    span_id: str
+    """
+    Distributed trace span
+    Represents a unit of work within a trace
+    """
     trace_id: str
-    parent_span_id: Optional[str]
-    operation_name: str
-    start_time: float
-    end_time: Optional[float] = None
-    duration: Optional[float] = None
+    span_id: str
+    parent_span_id: Optional[str] = None
+    operation_name: str = ""
+    start_time: datetime = field(default_factory=datetime.utcnow)
+    end_time: Optional[datetime] = None
+    duration_ms: float = 0.0
+    status: str = "UNSET"  # UNSET, OK, ERROR
     tags: Dict[str, Any] = field(default_factory=dict)
-    logs: List[Dict[str, Any]] = field(default_factory=list)
-    status: str = "started"
+    events: List[Dict[str, Any]] = field(default_factory=list)
 
 
-class ObservabilityCollector:
-    """Collects and manages observability data"""
-    
-    def __init__(self, buffer_size: int = 10000):
-        self.logger = get_logger(__name__)
-        self.cache_manager = get_cache_manager()
-        self.buffer_size = buffer_size
-        
-        # Metrics storage
-        self._metrics: Dict[str, Metric] = {}
-        self._metrics_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
-        self._metrics_lock = threading.RLock()
-        
-        # Distributed tracing
-        self._spans: Dict[str, Span] = {}
-        self._traces: Dict[str, List[str]] = defaultdict(list)  # trace_id -> span_ids
-        self._spans_lock = threading.RLock()
-        
-        # Performance monitoring
-        self._performance_data: deque = deque(maxlen=buffer_size)
-        self._perf_lock = threading.RLock()
-        
-        # Business metrics
-        self._business_metrics: Dict[str, Any] = {}
-        self._business_lock = threading.RLock()
-        
-        # Alert thresholds
-        self._alert_thresholds: Dict[str, Dict[str, Any]] = {}
-        self._alert_callbacks: List[Callable] = []
-    
-    def record_metric(self, name: str, value: Union[int, float], 
-                     metric_type: MetricType = MetricType.GAUGE,
-                     labels: Dict[str, str] = None, description: str = "") -> None:
-        """Record a metric"""
-        labels = labels or {}
-        
-        with self._metrics_lock:
-            metric = Metric(
-                name=name,
-                type=metric_type,
-                value=value,
-                labels=labels,
-                description=description
-            )
-            
-            # Update current value
-            self._metrics[name] = metric
-            
-            # Add to history
-            self._metrics_history[name].append({
-                'value': value,
-                'timestamp': metric.timestamp,
-                'labels': labels
-            })
-        
-        # Check alert thresholds
-        self._check_alert_thresholds(name, value)
-        
-        self.logger.debug(f"Recorded metric: {name} = {value} ({metric_type.value})")
-    
-    def increment_counter(self, name: str, value: int = 1, 
-                         labels: Dict[str, str] = None) -> None:
-        """Increment a counter metric"""
-        labels = labels or {}
-        
-        with self._metrics_lock:
-            current_metric = self._metrics.get(name)
-            if current_metric and current_metric.type == MetricType.COUNTER:
-                new_value = current_metric.value + value
-            else:
-                new_value = value
-            
-            self.record_metric(name, new_value, MetricType.COUNTER, labels)
-    
-    def set_gauge(self, name: str, value: Union[int, float], 
-                  labels: Dict[str, str] = None) -> None:
-        """Set a gauge metric"""
-        self.record_metric(name, value, MetricType.GAUGE, labels)
-    
-    def record_timer(self, name: str, duration: float, 
-                    labels: Dict[str, str] = None) -> None:
-        """Record a timer metric"""
-        self.record_metric(name, duration, MetricType.TIMER, labels)
-    
-    @contextmanager
-    def timer(self, name: str, labels: Dict[str, str] = None):
-        """Context manager for timing operations"""
-        start_time = time.time()
-        try:
-            yield
-        finally:
-            duration = time.time() - start_time
-            self.record_timer(name, duration, labels)
-    
-    def start_span(self, operation_name: str, trace_id: str = None, 
-                   parent_span_id: str = None, tags: Dict[str, Any] = None) -> str:
-        """Start a new tracing span"""
-        span_id = str(uuid.uuid4())
-        trace_id = trace_id or str(uuid.uuid4())
-        tags = tags or {}
-        
+class TracingManager:
+    """
+    Manages distributed tracing
+    Creates and tracks spans across service boundaries
+    """
+
+    def __init__(self):
+        self.spans: Dict[str, Span] = {}
+        self.spans_history: List[Span] = []
+        self.max_history = 1000
+
+    def start_span(
+        self,
+        operation_name: str,
+        parent_span_id: Optional[str] = None,
+        tags: Optional[Dict[str, Any]] = None
+    ) -> Span:
+        """Start a new span"""
+        span_trace_id = trace_id.get() or str(uuid.uuid4())
+        span_id_val = str(uuid.uuid4())
+
         span = Span(
-            span_id=span_id,
-            trace_id=trace_id,
+            trace_id=span_trace_id,
+            span_id=span_id_val,
             parent_span_id=parent_span_id,
             operation_name=operation_name,
-            start_time=time.time(),
-            tags=tags
+            tags=tags or {}
         )
-        
-        with self._spans_lock:
-            self._spans[span_id] = span
-            self._traces[trace_id].append(span_id)
-        
-        self.logger.debug(f"Started span: {operation_name} (span_id: {span_id[:8]}, trace_id: {trace_id[:8]})")
-        return span_id
-    
-    def finish_span(self, span_id: str, status: str = "completed", 
-                   tags: Dict[str, Any] = None) -> None:
-        """Finish a tracing span"""
-        with self._spans_lock:
-            span = self._spans.get(span_id)
-            if not span:
-                self.logger.warning(f"Span not found: {span_id}")
-                return
-            
-            span.end_time = time.time()
-            span.duration = span.end_time - span.start_time
-            span.status = status
-            
-            if tags:
-                span.tags.update(tags)
-        
-        self.logger.debug(f"Finished span: {span.operation_name} ({span.duration:.3f}s)")
-    
-    def add_span_log(self, span_id: str, message: str, level: str = "info", 
-                    fields: Dict[str, Any] = None) -> None:
-        """Add log to a span"""
-        with self._spans_lock:
-            span = self._spans.get(span_id)
-            if span:
-                log_entry = {
-                    'timestamp': time.time(),
-                    'message': message,
-                    'level': level,
-                    'fields': fields or {}
-                }
-                span.logs.append(log_entry)
-    
-    @contextmanager
-    def trace(self, operation_name: str, trace_id: str = None, 
-             parent_span_id: str = None, tags: Dict[str, Any] = None):
-        """Context manager for tracing operations"""
-        span_id = self.start_span(operation_name, trace_id, parent_span_id, tags)
-        try:
-            yield span_id
-            self.finish_span(span_id, "completed")
-        except Exception as e:
-            self.finish_span(span_id, "error", {"error": str(e)})
-            raise
-    
-    def record_performance_data(self, component: str, operation: str, 
-                              duration: float, success: bool = True,
-                              metadata: Dict[str, Any] = None) -> None:
-        """Record performance data"""
-        metadata = metadata or {}
-        
-        perf_data = {
-            'timestamp': time.time(),
-            'component': component,
-            'operation': operation,
-            'duration': duration,
-            'success': success,
-            'metadata': metadata
-        }
-        
-        with self._perf_lock:
-            self._performance_data.append(perf_data)
-        
-        # Also record as metrics
-        self.record_timer(f"{component}.{operation}.duration", duration)
-        self.increment_counter(f"{component}.{operation}.total")
-        if success:
-            self.increment_counter(f"{component}.{operation}.success")
-        else:
-            self.increment_counter(f"{component}.{operation}.error")
-    
-    def record_business_metric(self, name: str, value: Any, 
-                             category: str = "general") -> None:
-        """Record business-specific metrics"""
-        with self._business_lock:
-            if category not in self._business_metrics:
-                self._business_metrics[category] = {}
-            
-            self._business_metrics[category][name] = {
-                'value': value,
-                'timestamp': time.time()
-            }
-        
-        self.logger.debug(f"Recorded business metric: {category}.{name} = {value}")
-    
-    def set_alert_threshold(self, metric_name: str, threshold_type: str, 
-                          threshold_value: Union[int, float],
-                          callback: Optional[Callable] = None) -> None:
-        """Set alert threshold for a metric"""
-        self._alert_thresholds[metric_name] = {
-            'type': threshold_type,  # 'greater_than', 'less_than', 'equals'
-            'value': threshold_value,
-            'callback': callback
-        }
-        
-        self.logger.info(f"Set alert threshold: {metric_name} {threshold_type} {threshold_value}")
-    
-    def add_alert_callback(self, callback: Callable) -> None:
-        """Add global alert callback"""
-        self._alert_callbacks.append(callback)
-    
-    def _check_alert_thresholds(self, metric_name: str, value: Union[int, float]) -> None:
-        """Check if metric value crosses alert threshold"""
-        threshold = self._alert_thresholds.get(metric_name)
-        if not threshold:
+
+        self.spans[span_id_val] = span
+        trace_id.set(span_trace_id)
+        span_id.set(span_id_val)
+
+        logger.debug(f"Started span: {operation_name} ({span_id_val})")
+        return span
+
+    def end_span(self, span_id_val: str, status: str = "OK") -> None:
+        """End a span"""
+        if span_id_val not in self.spans:
             return
-        
-        threshold_type = threshold['type']
-        threshold_value = threshold['value']
-        triggered = False
-        
-        if threshold_type == 'greater_than' and value > threshold_value:
-            triggered = True
-        elif threshold_type == 'less_than' and value < threshold_value:
-            triggered = True
-        elif threshold_type == 'equals' and value == threshold_value:
-            triggered = True
-        
-        if triggered:
-            alert_data = {
-                'metric_name': metric_name,
-                'current_value': value,
-                'threshold_type': threshold_type,
-                'threshold_value': threshold_value,
-                'timestamp': time.time()
-            }
-            
-            # Call specific callback
-            if threshold.get('callback'):
-                try:
-                    threshold['callback'](alert_data)
-                except Exception as e:
-                    self.logger.error(f"Error in alert callback: {e}")
-            
-            # Call global callbacks
-            for callback in self._alert_callbacks:
-                try:
-                    callback(alert_data)
-                except Exception as e:
-                    self.logger.error(f"Error in global alert callback: {e}")
-            
-            self.logger.warning(f"Alert triggered: {metric_name} = {value} ({threshold_type} {threshold_value})")
-    
-    def get_metrics_summary(self) -> Dict[str, Any]:
-        """Get summary of all metrics"""
-        with self._metrics_lock:
-            return {
-                'total_metrics': len(self._metrics),
-                'counters': {name: metric.value for name, metric in self._metrics.items() 
-                           if metric.type == MetricType.COUNTER},
-                'gauges': {name: metric.value for name, metric in self._metrics.items() 
-                          if metric.type == MetricType.GAUGE},
-                'timers': {name: metric.value for name, metric in self._metrics.items() 
-                          if metric.type == MetricType.TIMER}
-            }
-    
-    def get_trace_summary(self, trace_id: str) -> Dict[str, Any]:
-        """Get summary of a trace"""
-        with self._spans_lock:
-            span_ids = self._traces.get(trace_id, [])
-            if not span_ids:
-                return {}
-            
-            spans = [self._spans.get(span_id) for span_id in span_ids]
-            spans = [s for s in spans if s]  # Remove None values
-            
-            total_duration = sum(s.duration or 0 for s in spans if s.duration)
-            
-            return {
-                'trace_id': trace_id,
-                'total_spans': len(spans),
-                'total_duration': total_duration,
-                'spans': [
-                    {
-                        'span_id': s.span_id,
-                        'operation_name': s.operation_name,
-                        'duration': s.duration,
-                        'status': s.status,
-                        'tags': s.tags
-                    }
-                    for s in spans
-                ]
-            }
-    
-    def get_performance_summary(self, component: Optional[str] = None,
-                              time_window: int = 3600) -> Dict[str, Any]:
-        """Get performance summary for a component"""
-        current_time = time.time()
-        cutoff_time = current_time - time_window
-        
-        with self._perf_lock:
-            relevant_data = [
-                data for data in self._performance_data
-                if data['timestamp'] >= cutoff_time and
-                (component is None or data['component'] == component)
-            ]
-        
-        if not relevant_data:
-            return {}
-        
-        # Calculate statistics
-        durations = [data['duration'] for data in relevant_data]
-        success_count = sum(1 for data in relevant_data if data['success'])
-        
-        return {
-            'component': component or 'all',
-            'time_window_hours': time_window / 3600,
-            'total_operations': len(relevant_data),
-            'success_rate': f"{(success_count / len(relevant_data) * 100):.1f}%",
-            'avg_duration': f"{sum(durations) / len(durations):.3f}s",
-            'min_duration': f"{min(durations):.3f}s",
-            'max_duration': f"{max(durations):.3f}s",
-            'operations_per_hour': len(relevant_data) / (time_window / 3600)
-        }
-    
-    def export_metrics_prometheus(self) -> str:
-        """Export metrics in Prometheus format"""
-        lines = []
-        
-        with self._metrics_lock:
-            for name, metric in self._metrics.items():
-                # Add description
-                if metric.description:
-                    lines.append(f"# HELP {name} {metric.description}")
-                
-                lines.append(f"# TYPE {name} {metric.type.value}")
-                
-                # Add labels
-                if metric.labels:
-                    label_str = ','.join([f'{k}="{v}"' for k, v in metric.labels.items()])
-                    lines.append(f"{name}{{{label_str}}} {metric.value}")
-                else:
-                    lines.append(f"{name} {metric.value}")
-        
-        return '\n'.join(lines)
-    
-    def clear_old_data(self, max_age_hours: int = 24) -> None:
-        """Clear old observability data"""
-        cutoff_time = time.time() - (max_age_hours * 3600)
-        
-        # Clear old spans
-        with self._spans_lock:
-            old_spans = [
-                span_id for span_id, span in self._spans.items()
-                if span.start_time < cutoff_time
-            ]
-            
-            for span_id in old_spans:
-                span = self._spans.pop(span_id, None)
-                if span:
-                    # Remove from traces
-                    trace_spans = self._traces.get(span.trace_id, [])
-                    if span_id in trace_spans:
-                        trace_spans.remove(span_id)
-                    
-                    # Remove empty traces
-                    if not trace_spans:
-                        self._traces.pop(span.trace_id, None)
-        
-        # Clear old performance data
-        with self._perf_lock:
-            self._performance_data = deque(
-                (data for data in self._performance_data if data['timestamp'] >= cutoff_time),
-                maxlen=self.buffer_size
-            )
-        
-        self.logger.info(f"Cleared observability data older than {max_age_hours} hours")
+
+        span = self.spans[span_id_val]
+        span.end_time = datetime.utcnow()
+        span.duration_ms = (span.end_time - span.start_time).total_seconds() * 1000
+        span.status = status
+
+        self.spans_history.append(span)
+        del self.spans[span_id_val]
+
+        if len(self.spans_history) > self.max_history:
+            self.spans_history = self.spans_history[-self.max_history:]
+
+        logger.debug(f"Ended span: {span.operation_name} ({span_id_val}) - {span.duration_ms}ms")
+
+    def add_event(self, span_id_val: str, event_name: str, data: Optional[Dict] = None) -> None:
+        """Add event to span"""
+        if span_id_val not in self.spans:
+            return
+
+        span = self.spans[span_id_val]
+        span.events.append({
+            'name': event_name,
+            'timestamp': datetime.utcnow().isoformat(),
+            'data': data or {}
+        })
+
+    def get_trace(self, trace_id_val: str) -> List[Span]:
+        """Get all spans for a trace"""
+        return [s for s in self.spans_history if s.trace_id == trace_id_val]
 
 
-# Global observability collector
-_observability_collector: Optional[ObservabilityCollector] = None
-_collector_lock = threading.Lock()
+@contextmanager
+def log_operation(
+    logger_instance: StructuredLogger,
+    operation_name: str,
+    **context_data
+):
+    """
+    Context manager for logging an operation
+    Automatically logs start, end, and duration
+    """
+    start_time = time.time()
+
+    try:
+        logger_instance.info(
+            f"Starting operation: {operation_name}",
+            **context_data
+        )
+        yield
+
+    except Exception as e:
+        logger_instance.error(
+            f"Operation failed: {operation_name}",
+            exception=e,
+            **context_data
+        )
+        raise
+
+    finally:
+        duration_ms = (time.time() - start_time) * 1000
+        logger_instance.info(
+            f"Completed operation: {operation_name}",
+            duration_ms=duration_ms,
+            **context_data
+        )
 
 
-def get_observability_collector() -> ObservabilityCollector:
-    """Get global observability collector"""
-    global _observability_collector
-    if _observability_collector is None:
-        with _collector_lock:
-            if _observability_collector is None:
-                _observability_collector = ObservabilityCollector()
-    return _observability_collector
+@contextmanager
+def trace_operation(
+    tracing_manager: TracingManager,
+    operation_name: str,
+    tags: Optional[Dict[str, Any]] = None
+):
+    """
+    Context manager for tracing an operation
+    Automatically creates and closes span
+    """
+    span = tracing_manager.start_span(operation_name, tags=tags)
+
+    try:
+        yield span
+        tracing_manager.end_span(span.span_id, status="OK")
+
+    except Exception as e:
+        tracing_manager.end_span(span.span_id, status="ERROR")
+        span.tags['error'] = str(e)
+        raise
 
 
-# Convenience functions
-def record_metric(name: str, value: Union[int, float], 
-                 metric_type: MetricType = MetricType.GAUGE,
-                 labels: Dict[str, str] = None, description: str = "") -> None:
-    """Record a metric"""
-    collector = get_observability_collector()
-    collector.record_metric(name, value, metric_type, labels, description)
-
-
-def increment_counter(name: str, value: int = 1, labels: Dict[str, str] = None) -> None:
-    """Increment a counter"""
-    collector = get_observability_collector()
-    collector.increment_counter(name, value, labels)
-
-
-def set_gauge(name: str, value: Union[int, float], labels: Dict[str, str] = None) -> None:
-    """Set a gauge value"""
-    collector = get_observability_collector()
-    collector.set_gauge(name, value, labels)
-
-
-def timer(name: str, labels: Dict[str, str] = None):
-    """Timer context manager"""
-    collector = get_observability_collector()
-    return collector.timer(name, labels)
-
-
-def trace(operation_name: str, trace_id: str = None, 
-         parent_span_id: str = None, tags: Dict[str, Any] = None):
-    """Tracing context manager"""
-    collector = get_observability_collector()
-    return collector.trace(operation_name, trace_id, parent_span_id, tags)
-
-
-def record_performance(component: str, operation: str, duration: float, 
-                      success: bool = True, metadata: Dict[str, Any] = None) -> None:
-    """Record performance data"""
-    collector = get_observability_collector()
-    collector.record_performance_data(component, operation, duration, success, metadata)
+__all__ = [
+    'LogContext',
+    'LogLevel',
+    'StructuredLogger',
+    'Metric',
+    'MetricsCollector',
+    'Span',
+    'TracingManager',
+    'log_operation',
+    'trace_operation',
+    'request_id',
+    'trace_id',
+    'span_id',
+]

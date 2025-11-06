@@ -1,0 +1,14 @@
+{
+    "plugin_id": "metrics_api",
+    "name": "Advanced Metrics API",
+    "version": "1.1.0",
+    "description": "Extended metrics and analytics API endpoints",
+    "author": "BLNCS Team",
+    "plugin_type": "api_extension",
+    "status": "inactive",
+    "dependencies": [],
+    "api_version": "1.0.0",
+    "entry_point": "metrics_api.py",
+    "config_schema": {},
+    "permissions": []
+}

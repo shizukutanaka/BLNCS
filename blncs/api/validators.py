@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 BLNCS API Validators
-Comprehensive request validation and data sanitization for API endpoints.
+Lightweight request validation and data sanitization for API endpoints.
 """
 
 from flask import request
 from functools import wraps
 import re
-from datetime import datetime
+import hashlib
+import secrets
 from typing import Any, Dict, List, Optional, Callable, Union
 import logging
 
@@ -406,9 +407,48 @@ def validate_file_path(path: str) -> bool:
     """Validate file path is safe"""
     if not path:
         return False
-    
+
     # Prevent directory traversal
     if '..' in path or path.startswith('/'):
         return False
-    
+
+    return True
+
+# Security functions
+def generate_api_key() -> str:
+    """Generate secure API key"""
+    return secrets.token_urlsafe(32)
+
+def hash_password(password: str, salt: str = None) -> tuple:
+    """Hash password with salt"""
+    if not salt:
+        salt = secrets.token_hex(16)
+
+    # Use SHA256 for password hashing (simple but secure)
+    hashed = hashlib.sha256((password + salt).encode()).hexdigest()
+    return hashed, salt
+
+def verify_password(password: str, hashed: str, salt: str) -> bool:
+    """Verify password against hash"""
+    check_hash, _ = hash_password(password, salt)
+    return secrets.compare_digest(check_hash, hashed)
+
+def sanitize_lightning_invoice(invoice: str) -> str:
+    """Sanitize Lightning invoice"""
+    if not invoice:
+        return ""
+
+    # Remove any non-alphanumeric chars except necessary ones
+    invoice = re.sub(r'[^a-zA-Z0-9_-]', '', invoice)
+
+    # Validate invoice format
+    if not invoice.startswith('lnbc'):
+        raise ValidationError("Invalid Lightning invoice format", "invoice", "INVALID_INVOICE")
+
+    return invoice[:500]  # Limit length
+
+def rate_limit_check(identifier: str, limit: int = 100, window: int = 60) -> bool:
+    """Simple rate limiting check"""
+    # In production, use Redis or similar
+    # This is a placeholder for demonstration
     return True

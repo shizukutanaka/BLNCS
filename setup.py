@@ -6,6 +6,7 @@ Simplified Bitcoin Lightning Network Control System
 
 from setuptools import setup, find_packages
 from pathlib import Path
+import os
 import re
 
 # Read version from __init__.py
@@ -77,16 +78,16 @@ setup(
     name="blncs",
     version=get_version(),
     author="BLNCS Development Team",
-    author_email="dev@blncs.org",
+    author_email="contact@yourdomain.com",
     description="Bitcoin Lightning Network Control System - Professional Lightning Network Management",
     long_description=get_long_description(),
     long_description_content_type="text/markdown",
-    url="https://github.com/blncs/blncs",
+    url=os.getenv("BLNCS_REPO_URL", "https://github.com/blncs/blncs"),
     project_urls={
-        "Documentation": "https://docs.blncs.org",
-        "Source Code": "https://github.com/blncs/blncs",
-        "Issue Tracker": "https://github.com/blncs/blncs/issues",
-        "Changelog": "https://github.com/blncs/blncs/blob/main/CHANGELOG.md"
+        "Documentation": os.getenv("BLNCS_DOCS_URL", "https://github.com/blncs/blncs/wiki"),
+        "Source Code": os.getenv("BLNCS_REPO_URL", "https://github.com/blncs/blncs"),
+        "Issue Tracker": os.getenv("BLNCS_ISSUES_URL", "https://github.com/blncs/blncs/issues"),
+        "Changelog": os.getenv("BLNCS_CHANGELOG_URL", "https://github.com/blncs/blncs/blob/main/CHANGELOG.md")
     },
     packages=find_packages(exclude=['tests*', 'docs*', 'examples*']),
     package_data={

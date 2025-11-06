@@ -1,0 +1,323 @@
+# Default values for BLNCS Helm chart
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/your-org/blncs
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: {}
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/websocket-services: "blncs"
+  hosts:
+    - host: blncs.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: blncs-tls
+      hosts:
+        - blncs.example.com
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - blncs
+          topologyKey: kubernetes.io/hostname
+
+# Application configuration
+config:
+  logLevel: info
+  debug: false
+
+  # Lightning Network settings
+  lightning:
+    network: mainnet
+    implementation: lnd
+    rpcHost: localhost
+    rpcPort: 10009
+    maxChannels: 100
+    minChannelSize: 100000
+    maxChannelSize: 16777215
+
+  # API settings
+  api:
+    rateLimit: 100
+    corsOrigins:
+      - https://blncs.example.com
+    jwtExpiry: 24h
+
+  # Security settings
+  security:
+    enableMFA: true
+    passwordMinLength: 12
+    sessionTimeout: 60m
+    maxLoginAttempts: 5
+    lockoutDuration: 30m
+
+  # Performance settings
+  performance:
+    maxWorkers: 10
+    maxConnections: 1000
+    cacheSize: 1024
+
+  # High Availability
+  ha:
+    enabled: true
+    replicationFactor: 3
+    heartbeatInterval: 5
+    electionTimeout: 15
+
+# PostgreSQL configuration
+postgresql:
+  enabled: true
+  auth:
+    database: blncs
+    username: blncs
+    password: changeme
+    postgresPassword: changeme
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClass: gp3
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+  readReplicas:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 50Gi
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+# Redis configuration
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+    password: changeme
+  master:
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: gp3
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+  replica:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 125m
+        memory: 128Mi
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+
+  prometheus:
+    enabled: true
+    retention: 30d
+    storage: 100Gi
+
+  grafana:
+    enabled: true
+    adminPassword: changeme
+    persistence:
+      enabled: true
+      size: 10Gi
+    dashboards:
+      enabled: true
+
+  alerts:
+    enabled: true
+    slack:
+      webhook: ""
+      channel: "#alerts"
+    pagerduty:
+      serviceKey: ""
+
+# Logging configuration
+logging:
+  enabled: true
+
+  elasticsearch:
+    enabled: true
+    replicas: 3
+    storage: 100Gi
+
+  fluentd:
+    enabled: true
+
+  kibana:
+    enabled: true
+
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention: 30
+  s3:
+    bucket: blncs-backups
+    region: us-east-1
+    endpoint: ""
+    accessKey: ""
+    secretKey: ""
+
+# Network policies
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: blncs
+      - podSelector:
+          matchLabels:
+            app: blncs
+  egress:
+    - to:
+      - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 10009  # LND RPC
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Service Mesh configuration (Istio)
+serviceMesh:
+  enabled: false
+  istio:
+    mtls:
+      mode: STRICT
+    trafficPolicy:
+      connectionPool:
+        tcp:
+          maxConnections: 100
+        http:
+          http1MaxPendingRequests: 100
+          http2MaxRequests: 100
+      outlierDetection:
+        consecutiveErrors: 5
+        interval: 30s
+        baseEjectionTime: 30s
+
+# Secrets management
+secrets:
+  provider: kubernetes  # Options: kubernetes, vault, aws-secrets-manager
+  vault:
+    address: ""
+    role: ""
+    path: ""
+
+# Feature flags
+features:
+  experimental:
+    enabled: false
+  beta:
+    enabled: true
+  analytics:
+    enabled: true
+  ml:
+    enabled: true
+
+# Development/Testing overrides
+development:
+  enabled: false
+  debug: true
+  mockLightning: false
+  seedData: false

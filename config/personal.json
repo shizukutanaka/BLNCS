@@ -1,0 +1,178 @@
+{
+  "version": "2.0.0",
+  "environment": "personal",
+  "description": "Optimized configuration for personal single-user deployment",
+
+  "lightning": {
+    "network": "testnet",
+    "host": "localhost",
+    "port": 10009,
+    "connection_timeout": 30,
+    "mock_mode": true,
+    "auto_connect": true,
+    "macaroon_path": "${HOME}/.lnd/data/chain/bitcoin/testnet/admin.macaroon",
+    "tls_cert_path": "${HOME}/.lnd/tls.cert"
+  },
+
+  "api": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 3000,
+    "workers": 1,
+    "threads_per_worker": 2,
+    "cors_enabled": true,
+    "cors_allowed_origins": [
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "http://127.0.0.1:3000",
+      "http://127.0.0.1:3001"
+    ],
+    "cors_supports_credentials": true,
+    "rate_limiting": {
+      "enabled": false,
+      "requests_per_minute": 1000,
+      "burst_size": 2000,
+      "window_seconds": 60
+    },
+    "authentication": {
+      "enabled": true,
+      "type": "personal",
+      "localhost_bypass": true,
+      "require_token_for_reads": false,
+      "require_token_for_writes": true,
+      "jwt_secret": "${BLNCS_JWT_SECRET:auto_generate}"
+    }
+  },
+
+  "security": {
+    "trusted_hosts": [
+      "localhost",
+      "127.0.0.1",
+      "::1"
+    ],
+    "enforce_https": false,
+    "max_request_size": "50MB",
+    "max_query_length": 10000,
+    "request_timeout": 120,
+    "ip_whitelist": [],
+    "enable_cors": true,
+    "session_timeout": 86400,
+    "encryption": {
+      "enabled": true,
+      "algorithm": "AES-256-GCM",
+      "key_path": "${HOME}/.blncs/encryption.key"
+    }
+  },
+
+  "database": {
+    "url": "sqlite:///${HOME}/.blncs/blncs.db",
+    "pool_size": 5,
+    "max_overflow": 5,
+    "echo": false,
+    "auto_backup": true,
+    "backup_interval_hours": 24
+  },
+
+  "cache": {
+    "enabled": true,
+    "type": "memory",
+    "max_size": 1000,
+    "ttl": 300,
+    "cleanup_interval": 600,
+    "compress_large_values": true
+  },
+
+  "logging": {
+    "level": "INFO",
+    "output": "both",
+    "console_colors": true,
+    "log_dir": "${HOME}/.blncs/logs",
+    "max_file_size": "10MB",
+    "backup_count": 5,
+    "format": "text",
+    "structured": false,
+    "log_requests": true,
+    "log_sql": false
+  },
+
+  "monitoring": {
+    "enabled": true,
+    "collect_metrics": true,
+    "metrics_interval": 60,
+    "health_check_interval": 30,
+    "prometheus_enabled": false,
+    "save_metrics_to_db": true
+  },
+
+  "backup": {
+    "enabled": true,
+    "auto_backup": true,
+    "interval_hours": 24,
+    "retention_days": 30,
+    "compress": true,
+    "destinations": {
+      "local": {
+        "enabled": true,
+        "path": "${HOME}/.blncs/backups"
+      }
+    },
+    "source_paths": [
+      "${HOME}/.blncs/blncs.db",
+      "${HOME}/.blncs/auth.json"
+    ]
+  },
+
+  "performance": {
+    "enable_caching": true,
+    "cache_api_responses": true,
+    "cache_ttl": 60,
+    "async_processing": true,
+    "connection_pooling": true,
+    "lazy_loading": false,
+    "optimize_queries": true
+  },
+
+  "features": {
+    "websocket": {
+      "enabled": true,
+      "port": 3001,
+      "max_connections": 10
+    },
+    "webhooks": {
+      "enabled": false
+    },
+    "analytics": {
+      "enabled": true,
+      "track_payments": true,
+      "track_invoices": true,
+      "retention_days": 90
+    },
+    "auto_channel_management": {
+      "enabled": false,
+      "auto_open": false,
+      "auto_close": false,
+      "auto_rebalance": false
+    }
+  },
+
+  "notifications": {
+    "enabled": true,
+    "channels": {
+      "console": {
+        "enabled": true,
+        "events": ["payment_received", "payment_sent", "error"]
+      },
+      "desktop": {
+        "enabled": false
+      }
+    }
+  },
+
+  "development": {
+    "debug_mode": false,
+    "verbose_logging": false,
+    "reload_on_change": false,
+    "mock_lightning": true,
+    "test_mode": false
+  }
+}

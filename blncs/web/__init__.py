@@ -1,21 +1,20 @@
 """
-BLNCS Web Dashboard
-Modern web interface for BLNCS management and monitoring.
+BLNCS Web Module
+軽量Web機能
 """
 
-from .app import create_web_app, WebDashboardServer
-from .api_client import BLNCSAPIClient
-from .dashboard_routes import dashboard_routes
-from .static_routes import static_routes
-from .websocket_handler import WebSocketHandler
+try:
+    from .simple_dashboard import SimpleDashboard, run_dashboard
+    DASHBOARD_AVAILABLE = True
+except ImportError:
+    DASHBOARD_AVAILABLE = False
 
-__all__ = [
-    'create_web_app',
-    'WebDashboardServer',
-    'BLNCSAPIClient',
-    'dashboard_routes',
-    'static_routes',
-    'WebSocketHandler'
-]
+    class SimpleDashboard:
+        def __init__(self, *args, **kwargs): pass
+        def start(self): pass
+        def stop(self): pass
 
-__version__ = '1.0.0'
+    def run_dashboard(*args, **kwargs):
+        print("Dashboard not available")
+
+__all__ = ['SimpleDashboard', 'run_dashboard', 'DASHBOARD_AVAILABLE']

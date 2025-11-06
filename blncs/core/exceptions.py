@@ -4,24 +4,24 @@ Simple, clear error handling without unnecessary complexity.
 """
 
 import traceback
-import logging
 import sys
 import time
-from datetime import datetime
 from typing import Dict, Any, Optional, Callable, List
 from functools import wraps
 
 
 class BLNCSError(Exception):
     """Base exception for BLNCS"""
+    __slots__ = ('message', 'recoverable', 'error_code', 'details', 'timestamp')
+
     def __init__(self, message: str, recoverable: bool = True, error_code: Optional[str] = None, **details: Any) -> None:
         self.message = message
         self.recoverable = recoverable
         self.error_code = error_code or self.__class__.__name__.upper()
         self.details = details
-        self.timestamp = datetime.now()
+        self.timestamp = time.time()
         super().__init__(message)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "error": self.__class__.__name__,
@@ -29,7 +29,7 @@ class BLNCSError(Exception):
             "message": self.message,
             "severity": "warning" if self.recoverable else "error",
             "recoverable": self.recoverable,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": self.timestamp,
             "details": self.details
         }
     
@@ -176,7 +176,7 @@ class PerformanceError(BLNCSError):
 def handle_error(error: Exception, logger=None, context: str = None) -> Dict[str, Any]:
     """Standardized error handling"""
     error_info = {
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': time.time(),
         'context': context or 'unknown',
         'traceback': traceback.format_exc()
     }
@@ -195,7 +195,7 @@ def handle_error(error: Exception, logger=None, context: str = None) -> Dict[str
         })
     
     if logger:
-        logger.error(f"Error in {context}: {error_info['message']}")
+        print(f"[ERROR] {context}: {error_info['message']}")
     
     return error_info
 
@@ -257,7 +257,7 @@ def handle_exceptions(logger: Optional[logging.Logger] = None,
                 raise
             except Exception as e:
                 if logger:
-                    logger.log(log_level, f"Error in {func.__name__}: {str(e)}")
+                    print(f"[ERROR] {func.__name__}: {str(e)}")
                 
                 if reraise:
                     # Wrap in BLNCS error for consistency
@@ -289,13 +289,13 @@ def retry_on_exception(max_attempts: int = 3,
                 try:
                     result = func(*args, **kwargs)
                     if attempt > 0 and logger:
-                        logger.info(f"{func.__name__} succeeded after {attempt + 1} attempts")
+                        print(f"[INFO] {func.__name__} succeeded after {attempt + 1} attempts")
                     return result
                 except exceptions as e:
                     last_exception = e
                     if attempt < max_attempts - 1:
                         if logger:
-                            logger.warning(f"{func.__name__} failed (attempt {attempt + 1}/{max_attempts}): {str(e)}")
+                            print(f"[WARN] {func.__name__} failed (attempt {attempt + 1}/{max_attempts}): {str(e)}")
                         time.sleep(current_delay)
                         current_delay *= backoff
                     else:
@@ -385,7 +385,7 @@ class CircuitBreaker:
         """Check if enough time has passed to attempt reset"""
         if self.last_failure_time is None:
             return True
-        return (datetime.now() - self.last_failure_time).total_seconds() > self.timeout
+        return (time.time() - self.last_failure_time) > self.timeout
     
     def _on_success(self):
         """Handle successful call"""
@@ -395,7 +395,7 @@ class CircuitBreaker:
     def _on_failure(self):
         """Handle failed call"""
         self.failure_count += 1
-        self.last_failure_time = datetime.now()
+        self.last_failure_time = time.time()
         
         if self.failure_count >= self.failure_threshold:
             self.state = 'OPEN'
@@ -418,6 +418,6 @@ def create_error_context(operation: str, **context_data) -> Dict[str, Any]:
     """Create standardized error context"""
     return {
         'operation': operation,
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': time.time(),
         'context_data': context_data
     }

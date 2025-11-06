@@ -1,0 +1,28 @@
+{
+  "lightning": {
+    "network": "mainnet",
+    "node_url": "localhost:10009",
+    "macaroon_path": null,
+    "cert_path": null
+  },
+  "database": {
+    "path": "data/blncs.db",
+    "pool_size": 5,
+    "timeout": 30
+  },
+  "cache": {
+    "enabled": true,
+    "ttl": 300,
+    "max_size": 1000
+  },
+  "security": {
+    "enable_auth": true,
+    "session_timeout": 3600,
+    "max_attempts": 5
+  },
+  "monitoring": {
+    "enabled": true,
+    "interval": 60,
+    "metrics_retention": 86400
+  }
+}
