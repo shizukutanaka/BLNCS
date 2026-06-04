@@ -1,0 +1,170 @@
+package openid4vp
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"blrcs/compliance"
+)
+
+func TestBuildCredentialOfferURL(t *testing.T) {
+	offer := CredentialOffer{
+		CredentialIssuer:    "https://issue.blrcs.example",
+		CredentialConfigIDs: []string{"eu-battery-passport-v1"},
+		Grants: map[string]OfferGrant{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": {
+				PreAuthorizedCode: "abc123",
+			},
+		},
+	}
+	urlStr, err := BuildCredentialOfferURL(offer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(urlStr, "openid-credential-offer://?credential_offer=") {
+		t.Errorf("bad URL: %s", urlStr)
+	}
+	if !strings.Contains(urlStr, "eu-battery-passport-v1") {
+		t.Errorf("config missing: %s", urlStr)
+	}
+}
+
+func TestBuildCredentialOfferValidation(t *testing.T) {
+	cases := []CredentialOffer{
+		{},
+		{CredentialIssuer: "x"},
+	}
+	for i, c := range cases {
+		if _, err := BuildCredentialOfferURL(c); err == nil {
+			t.Errorf("case %d: should fail", i)
+		}
+	}
+}
+
+// ============================================================================
+// Full E2E: Verifier ↔ MockWallet round-trip
+// ============================================================================
+
+func TestFullE2E_VerifierWalletRoundTrip(t *testing.T) {
+	// --- Setup: issuer, wallet, verifier ---
+	issuer, _ := compliance.NewIssuer("did:web:factory.example")
+	wallet := NewMockWallet("did:web:alice.holder")
+	verifier := NewVerifier(
+		"https://verify.blrcs.example",
+		"https://verify.blrcs.example/cb",
+		nil,
+	)
+
+	// --- Step 1: Issuer creates SD-JWT for battery, wallet stores it ---
+	sdjwt, _, err := issuer.IssueSDJWT(
+		"battery-EV-001",
+		map[string]any{
+			"batteryCategory":       "ev",
+			"chemistry":             "nmc",
+			"capacityKWh":           75.0,
+			"carbonKgCO2ePerKWh":    48.5,
+			"supplierName":          "SECRET-Cobalt-Co", // wallet UIでは選択開示の選択肢
+			"recycledContentCobalt": 16.0,
+		},
+		map[string]any{"productId": "BAT-2026-001"},
+		365*24*time.Hour,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet.Store(StoredCredential{
+		ID:         "battery-cred-1",
+		IssuerDID:  issuer.ID,
+		IssuerPub:  issuer.PublicKey(),
+		SDJWT:      sdjwt,
+		ClaimNames: []string{"batteryCategory", "chemistry", "capacityKWh", "carbonKgCO2ePerKWh", "supplierName", "recycledContentCobalt"},
+	})
+
+	// --- Step 2: Verifier creates Authorization Request ---
+	def := PresentationDefinition{
+		ID:      "eu-battery-compliance",
+		Purpose: "EU Regulation 2023/1542 Article 77 verification",
+		RequiredClaims: []string{
+			"batteryCategory",
+			"chemistry",
+			"capacityKWh",
+			"carbonKgCO2ePerKWh",
+		},
+		AcceptableIssuers: map[string][]byte{
+			issuer.ID: issuer.PublicKey(),
+		},
+	}
+	reqURL, state, err := verifier.CreateRequest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = state // state は verifier 内部に保持、wallet には url 経由で伝わる
+
+	// --- Step 3: Wallet responds ---
+	resp, err := wallet.Present(reqURL)
+	if err != nil {
+		t.Fatalf("wallet present: %v", err)
+	}
+	if resp.State == "" {
+		t.Fatal("state not echoed")
+	}
+
+	// --- Step 4: Verifier processes response ---
+	vp, err := verifier.ProcessResponse(resp)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+
+	// --- Assertions: required claims disclosed, privacy preserved ---
+	if vp.Issuer != issuer.ID {
+		t.Errorf("issuer mismatch: %s", vp.Issuer)
+	}
+	for _, c := range def.RequiredClaims {
+		if _, ok := vp.Claims[c]; !ok {
+			t.Errorf("required claim missing: %s", c)
+		}
+	}
+	// Privacy — supplierName / recycled must NOT appear
+	if _, leaked := vp.Claims["supplierName"]; leaked {
+		t.Error("CRITICAL: supplierName leaked")
+	}
+	if _, leaked := vp.Claims["recycledContentCobalt"]; leaked {
+		t.Error("CRITICAL: recycled content leaked")
+	}
+	// Clear claim should always appear
+	if vp.Claims["productId"] != "BAT-2026-001" {
+		t.Errorf("clear claim missing: %v", vp.Claims["productId"])
+	}
+	// numeric claims come through as float64 from JSON
+	if cat, ok := vp.Claims["batteryCategory"].(string); !ok || cat != "ev" {
+		t.Errorf("category: %v", vp.Claims["batteryCategory"])
+	}
+	if f, ok := vp.Claims["capacityKWh"].(float64); !ok || f != 75.0 {
+		t.Errorf("capacity: %v", vp.Claims["capacityKWh"])
+	}
+}
+
+func TestMockWalletNoMatchingCredential(t *testing.T) {
+	wallet := NewMockWallet("did:web:holder")
+	// Wallet has nothing stored
+	def := PresentationDefinition{
+		ID: "x", RequiredClaims: []string{"foo"},
+		AcceptableIssuers: map[string][]byte{"did:web:bogus": []byte("key")},
+	}
+	verifier := NewVerifier("https://v", "https://v/cb", nil)
+	reqURL, _, _ := verifier.CreateRequest(def)
+	if _, err := wallet.Present(reqURL); err == nil {
+		t.Fatal("empty wallet should fail to present")
+	}
+}
+
+func TestMockWalletMalformedRequest(t *testing.T) {
+	wallet := NewMockWallet("x")
+	if _, err := wallet.Present("not-a-url-%%"); err == nil {
+		t.Fatal("malformed URL should fail")
+	}
+	if _, err := wallet.Present("openid4vp://authorize?state=x"); err == nil {
+		t.Fatal("missing pd should fail")
+	}
+}

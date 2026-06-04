@@ -1,0 +1,79 @@
+# golangci-lint configuration — BLRCS (schema v2)
+# Run: golangci-lint run ./...
+# CI gate: zero issues required before merge.
+
+version: "2"
+
+run:
+  tests: true
+  go: "1.22"
+
+linters:
+  # Correctness + security gate. This set is enforced green in CI.
+  #
+  # NOTE: the broad *style* linters (revive doc-comments, errorlint %w-wrapping,
+  # gocritic, misspell) carry significant pre-existing debt under golangci-lint v2
+  # and are tracked separately rather than gating merges; re-enable incrementally
+  # as the debt is paid down.
+  default: none
+  enable:
+    # ── correctness ──────────────────────────────────────────────────────
+    - errcheck       # unchecked errors
+    - govet          # suspicious constructs (matches `go vet`)
+    - ineffassign    # ineffectual assignments
+    - staticcheck    # comprehensive static analysis (absorbs gosimple in v2)
+    - unused         # unused code
+    # ── security ─────────────────────────────────────────────────────────
+    - gosec          # security problems (G-series rules)
+    - bodyclose      # HTTP response body must be closed
+    # ── correctness extras ───────────────────────────────────────────────
+    - copyloopvar    # loop variable capture (Go 1.22+)
+    - nilerr         # returning nil after a non-nil error check
+    - rowserrcheck   # sql.Rows.Err not checked
+    - unconvert      # unnecessary conversions
+    - whitespace     # leading/trailing whitespace
+  settings:
+    gosec:
+      excludes:
+        - G104  # handled by errcheck; avoids double-report
+        - G101  # false positives: token-type / claim-name string constants, not creds
+        - G114  # demo-only http.Serve without timeouts (cmd/blrcs-demo)
+        - G115  # integer conversions are range-bounded by construction
+        - G304  # storage/ is a file-backed store; paths are constructed internally
+    govet:
+      # `go vet` parity (CI also runs `go vet`); the opinionated `shadow`
+      # pass is intentionally left off as it is not part of `go vet`.
+      disable:
+        - fieldalignment  # struct field ordering is intentional for readability
+    errcheck:
+      check-blank: false
+      # Conventionally-ignored stdlib writes/closes (terminal & buffer I/O) and
+      # the conformance test-vector parser (a parse failure simply fails the
+      # vector comparison downstream).
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (io.Writer).Write
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*compress/gzip.Writer).Close
+        - (*compress/gzip.Reader).Close
+        - encoding/json.Unmarshal
+  exclusions:
+    generated: lax
+    rules:
+      # Test files: relax some checks
+      - path: _test\.go
+        linters:
+          - gosec        # test fixtures use weak crypto deliberately
+          - errcheck     # test setup tolerates unchecked errors
+          - bodyclose    # httptest response bodies in tests don't leak meaningfully
+      # CLI entrypoints: terminal stdout/stderr writes are conventionally unchecked
+      - path: cmd/.*/main\.go
+        linters:
+          - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

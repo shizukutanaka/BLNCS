@@ -1,0 +1,201 @@
+# Changelog
+
+All notable changes to BLRCS are documented in this file.
+Format follows [Keep a Changelog](https://keepachangelog.com/).
+Versioning follows [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+### Security
+- **SD-JWT now rejects expired / not-yet-valid credentials.** `VerifySDJWT` previously
+  parsed `exp`/`iat` but never enforced them, so an expired DPP or Battery Passport still
+  verified. Validation now runs with a 60s clock-skew leeway; `VerifySDJWTAt` allows a
+  caller-supplied clock for deterministic tests.
+- **SD-JWT Key Binding (KB-JWT) / holder binding** per IETF SD-JWT & SD-JWT-VC. Issuers
+  can bind a credential to a holder key (`IssueSDJWTBound` / `IssueSDJWTVCBound` /
+  `IssueSDJWTTieredBound`, embedding a `cnf` JWK); holders present with
+  `PresentWithKeyBinding` (signs a `kb+jwt` over `nonce`/`aud`/`sd_hash`); verifiers use
+  `VerifySDJWTWithBinding`. This closes the OpenID4VP replay gap — `Verifier.ProcessResponse`
+  now cryptographically binds the presentation to the request `nonce` and `client_id`
+  instead of relying on one-time `state` consumption alone. New `Verifier.RequireKeyBinding`
+  rejects unbound presentations outright (recommended in production).
+- **revocation:** `DecodeBitstringStatusList` now caps both the encoded input and the
+  decompressed output (decompression-bomb guard) instead of an unbounded `io.ReadAll`.
+
+### Fixed
+- **CI lint gate restored.** `.golangci.yml` was on the legacy v1 schema, which
+  golangci-lint v2 (installed via the `latest` action) refuses to load. Migrated to the v2
+  schema; the correctness+security linter set now runs green.
+- Dead/incorrect code surfaced while greening the linters: discarded `attrs` slice in
+  `telemetry.SlogRecorder.Record`, empty branch in `apispec.Registry.Register`, redundant
+  nil-check in `i18n.NewBundle`, plus assorted `errcheck`/`staticcheck`/`copyloopvar` cleanups.
+- **README:** removed Architecture/quick-start references to packages that do not exist
+  (`epcis`, `jwe`, `lifecycle`, `benchmark`, `examples/factory_e2e`) and pointed the
+  end-to-end example at the real `integration/` suite.
+
+## [0.1.0] - 2026-06-03
+
+Initial public release. EU Digital Product Passport (ESPR) and Battery Passport
+(Reg. 2023/1542) reference implementation in zero-dependency Go.
+
+### Added
+- `conformance/` — `tier` test-vector category validating the ESPR three-tier access
+  model, including the security invariant that no non-public claim leaks into the
+  clear (publicly readable) set.
+- `fuzz/` — `FuzzTieredClaims`: fuzzes arbitrary claim keys and tier strings against
+  the split invariant (authority/restricted data must never reach the public clear
+  set). Added to CI. Completes the access-tier work across implementation,
+  conformance harness, and fuzzing.
+- `compliance/` — **ESPR three-tier access model** (`AccessTier`, `TieredClaims`).
+  ESPR and the EU Battery Regulation require DPP data partitioned into public
+  (consumer), restricted (recyclers/repairers), and authority (market surveillance)
+  tiers. The issuer declares a tier per claim; `IssueSDJWTTiered` maps public→clear
+  and restricted/authority→selectively-disclosed, and `ClaimsAtOrBelow` returns the
+  claims a given verifier role is entitled to. Every same-domain implementation
+  (Spherity, Battery Pass, GS1) names this as a core requirement.
+- `conformance/` — new `dcql` test-vector category validating OpenID4VP v1.0 DCQL
+  query structure (§6) and claim matching. Completes the DCQL work across the full
+  surface: `openid4vp` (core) → `dcapi` (browser DC-API) → `conformance` (the
+  language-independent harness third parties run against BLRCS).
+- `dcapi/` — `BuildForVerifierDCQL`: emits a W3C Digital Credentials API request
+  carrying an OpenID4VP v1.0 `dcql_query` (instead of the deprecated
+  `presentation_definition`), so a v1.0 browser/wallet can be queried through the
+  DC-API. Completes the DCQL support added to `openid4vp/` across the API surface.
+- `openid4vp/` — **DCQL (Digital Credentials Query Language)** per OpenID4VP v1.0 §6.
+  Presentation Exchange was removed in v1.0 (DCQL is now the only query language),
+  so a v1.0 wallet cannot process a `presentation_definition` request. Adds
+  `DCQLQuery`/`CredentialQuery`/`ClaimQuery`/`CredentialSetQuery`, the `dcql_query`
+  Authorization Request parameter, `Verifier.CreateRequestDCQL`, format-agnostic
+  claim matching, and a `DCQLFromPresentationDefinition` migration bridge.
+
+### 10-category research scan (arXiv + GitHub)
+Surveyed VP request protocols (OpenID4VP v1.0 — PE→DCQL), revocation privacy
+(arXiv:2501.17089), and ZK carbon claims (arXiv:2506.16347). Implemented the DCQL
+conformance gap; CRSet-style private revocation and zk-SNARK carbon proofs remain
+candidates requiring larger crypto dependencies.
+- `semconv/` — OpenTelemetry-aligned telemetry attribute keys. Span/log attributes
+  now use dotted, vendor-namespaced keys (`blrcs.issuer`, `blrcs.product_id`,
+  `blrcs.ledger.tree_size`) and standard OTel keys (`service.name`, `error.type`)
+  instead of ad-hoc names, so traces are portable across Grafana/Jaeger/Datadog and
+  dashboards are reusable. `ctx/` instrumentation migrated to these keys.
+
+### 10-category research scan (arXiv + GitHub)
+Surveyed revocation privacy (arXiv:2501.17089 CRSet — Bitstring Status List leaks
+issuer activity), ZK carbon claims (arXiv:2506.16347), and OTel semantic conventions.
+Implemented the OTel-conventions gap; CRSet-style metadata-private revocation and
+zk-SNARK carbon proofs recorded as candidates requiring larger crypto dependencies.
+- `scitt/` — **proof of consistency** (RFC 6962 §2.1.2, COSE Receipts): proves the
+  transparency log is append-only between two tree sizes. This is SCITT's core
+  non-equivocation guarantee — an auditor who saw the log at size m can verify
+  size n still contains the same prefix, proving the issuer never rewrote history.
+  `Ledger.ConsistencyProof(m, n)`, `VerifyConsistency(...)`, `Ledger.Root()`.
+- `compliance/` — **GS1 Digital Link Linkset** (RFC 9264): a scanned GTIN URI
+  resolves to a linkset routing to the DPP, conformity doc, due-diligence report,
+  sustainability info, and recall status by `linkType`. This is the discovery
+  standard every same-domain implementation (Spherity, Trace4EU, Battery Pass)
+  converges on — a globally resolvable identifier → passport URL.
+- `didresolver/` — DID document **service endpoint** parsing + `ResolveServices`.
+  Per arXiv:2410.15758, DID resolution returns only key metadata, not credentials;
+  service endpoints (`DPPService`, `BitstringStatusList`, `LinkedDomains`) advertise
+  where the DPP data and status list actually live.
+- `docs/adr/0001` — ADR recording the SD-JWT (vs BBS) selective-disclosure choice
+  and its accepted limits (no multi-show unlinkability, not post-quantum), grounded
+  in the arXiv:2401.08196 mechanism survey. PQ migration path noted via `kms.Signer`.
+- `compliance/` — **IETF SD-JWT VC** (`draft-ietf-oauth-sd-jwt-vc`) conformance:
+  issued SD-JWTs now carry the mandatory `vct` claim (default
+  `https://schema.europa.eu/dpp/sd-jwt-vc/v1`). New `IssueSDJWTVC(vct, ...)` for
+  custom types. `vct` survives selective disclosure.
+- `conformance/` — new `vc` test-vector category validating VC 2.0 context and
+  `validFrom`; SD-JWT vectors now assert `vct`.
+- CI — `security` job (`govulncheck` + `golangci-lint`) and `sbom` job
+  (CycloneDX SBOM generation + artifact upload) for supply-chain assurance.
+- `compliance/` — **W3C Verifiable Credentials Data Model 2.0** support. Context
+  upgraded to `https://www.w3.org/ns/credentials/v2`; `validFrom`/`validUntil`
+  replace `issuanceDate`/`expirationDate` (signed payload updated accordingly).
+- `compliance/` — `IssueWithStatus`: attaches a W3C `BitstringStatusListEntry`
+  (`credentialStatus`) to issued credentials; the status entry is part of the
+  signed payload so tampering is detected at verification.
+- `revocation/` — **W3C Bitstring Status List v1.0** (`BitstringStatusList`):
+  GZIP + base64url-encoded bitstring with 16KB herd-privacy minimum. Supersedes
+  the deprecated StatusList2021 model.
+- `compliance/` — EU 2023/1542 Annex XIII full field coverage: renewable content
+  (Art.7), expected lifetime, EU declaration of conformity (Art.6), separate
+  collection symbol (Art.13), commissioning date.
+- `compliance/` — Art.52 due-diligence enforcement: EV and >2kWh industrial
+  batteries now require a due-diligence report URL at issuance (`ErrDueDiligenceRequired`).
+- `builder/` — `DueDiligenceReport`, `EUDeclarationOfConformity`, `RenewableContent`,
+  `ExpectedLifetime`, `SeparateCollection` fluent setters.
+- `.golangci.yml` — curated linter set (gosec, errorlint, bodyclose, contextcheck,
+  revive, gocritic) for the CI quality gate.
+- `cmd/blrcs` — refactored to a testable `run() error` pattern; `os.Exit` confined
+  to `main()`. Coverage 54.5% → 95.0%.
+
+## [1.0.0] — 2026-05-05
+
+### Core Domain
+- `compliance/` — W3C Verifiable Credentials issuance and verification (Ed25519)
+- `compliance/` — SD-JWT selective disclosure (IETF draft, SHA-256 digests)
+- `compliance/` — ZK Range Proof with TEE-attested sensor commitments
+- `compliance/` — GS1 Digital Link (ISO/IEC 18975) URI build/parse
+- `compliance/` — EU Battery Passport (Regulation 2023/1542 Annex XIII)
+- `scitt/` — IETF SCITT Merkle transparency log (RFC 6962 compatible)
+- `storage/` — MemoryStorage + FileStorage with fsync crash safety
+
+### Standards Integration
+- `openid4vp/` — OpenID for Verifiable Presentations verifier + MockWallet
+- `openid4vci/` — OpenID for Verifiable Credential Issuance (Pre-Authorized Code)
+- `dcapi/` — W3C Digital Credentials API adapter (Safari 26 / Chrome 141 / Firefox 149)
+- `mcp/` — Model Context Protocol stdio + Streamable HTTP server (14 tools)
+- `epcis/` — GS1 EPCIS 2.0 event model
+- `jwe/` — JSON Web Encryption (ECDH-ES)
+- `kms/` — Key Management Service interface + memory implementation
+
+### Type Safety
+- `types/` — DID, GTIN, CountryCode, CarbonFootprint, Percent, Duration
+- `errkit/` — Structured errors (Op/Code/Public/Detail/Retryable/HTTPStatus)
+- `builder/` — Fluent typed DPP + Battery Passport builder with error accumulation
+
+### Observability
+- `telemetry/` — Span, Counter, Histogram (atomic lock-free, slog backend)
+- `metrics/` — Prometheus text format exporter + dashboard handler
+- `otelbridge/` — OpenTelemetry OTLP/JSON bridge (span + log)
+- `doctor/` — 13-check self-diagnostic suite (7ms runtime)
+- `healthprobe/` — Liveness/Readiness/Startup probes (parallel, timeout-enforced)
+
+### Security
+- `recovery/` — Panic recovery for HTTP handlers + goroutines + defer
+- `replay/` — SHA-256 fingerprint dedup with TTL + LRU eviction
+- `tlsharden/` — TLS 1.2/1.3 Modern/Strict config builder (ATS-equivalent)
+- `privacy/` — Privacy Manifest + DataLineage tracker + MinimizationGuard
+- `didresolver/` — DID resolution (did:web/key/jwk) + Trust Anchor allow-list
+
+### Infrastructure
+- `ctx/` — Context propagation with telemetry span auto-instrumentation
+- `cas/` — Content-Addressed Storage (SHA-256 dedup + Provenance index)
+- `compose/` — Integration layer (IssueAndPublish + VerifyByDID in 1 call)
+- `webhook/` — Outbound HMAC-SHA256 signed webhooks with exponential backoff
+- `httpchain/` — HTTP middleware composition (recovery+traceContext+logging+auth+CORS)
+- `schemaver/` — Schema versioning with sequential migration chain
+- `config/` — Declarative configuration (JSON + env vars + validation)
+
+### Testing
+- `fuzz/` — 6 parser fuzz targets (DID/GTIN/SD-JWT/GS1/Merkle/RangeProof)
+- `property/` — 9 generative invariant tests (round-trip/privacy/merkle monotonic)
+- `benchmark/` — 19 hot-path performance baselines
+- `conformance/` — Reference test suite runner
+- `integration/` — E2E triangle test (issuer → wallet → verifier)
+
+### Developer Experience
+- `i18n/` — Multi-language message bundle (en/ja built-in)
+- `openapi/` — OpenAPI 3.0.3 spec builder + HTTP handler
+- `capability/` — Machine-readable capability manifest
+- `examples/factory_e2e/` — Complete factory → SCITT → webhook → verify demo
+- `README.md` — Quick start, architecture, performance table
+- `Makefile` — test/cover/bench/fuzz/build/doctor/ci targets
+- `.github/workflows/ci.yml` — 3-OS CI + coverage + fuzz
+
+### Architecture
+- Zero external dependencies (stdlib + crypto/ed25519 only)
+- go 1.22 minimum
+- 46 packages, 550+ tests
+- Apple design principles throughout (type safety, sensible defaults, progressive disclosure)

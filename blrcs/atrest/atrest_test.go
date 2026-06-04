@@ -1,0 +1,304 @@
+package atrest
+
+import (
+	"bytes"
+	"errors"
+	"testing"
+)
+
+// ============================================================================
+// Cipher basics
+// ============================================================================
+
+func TestEncryptDecryptRoundTrip(t *testing.T) {
+	key, _ := GenerateKey()
+	c, err := NewCipher(KeyIDFromUint32(1), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plaintext := []byte("secret payload")
+	envelope, err := c.Encrypt(plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Envelope ≠ plaintext
+	if bytes.Equal(envelope, plaintext) {
+		t.Error("envelope should differ from plaintext")
+	}
+	// Envelope contains version + keyID prefix
+	if envelope[0] != EnvelopeVersion {
+		t.Errorf("version byte: %d", envelope[0])
+	}
+
+	recovered, err := c.Decrypt(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(recovered, plaintext) {
+		t.Errorf("round-trip mismatch: %s", recovered)
+	}
+}
+
+func TestEncryptProducesDifferentCiphertext(t *testing.T) {
+	// Same plaintext should produce different envelopes (random nonce)
+	key, _ := GenerateKey()
+	c, _ := NewCipher(KeyIDFromUint32(1), key)
+	payload := []byte("identical")
+	env1, _ := c.Encrypt(payload)
+	env2, _ := c.Encrypt(payload)
+	if bytes.Equal(env1, env2) {
+		t.Error("envelopes should differ (random nonce)")
+	}
+	// Both decrypt back correctly
+	dec1, _ := c.Decrypt(env1)
+	dec2, _ := c.Decrypt(env2)
+	if !bytes.Equal(dec1, payload) || !bytes.Equal(dec2, payload) {
+		t.Error("both should decrypt back")
+	}
+}
+
+// ============================================================================
+// Key validation
+// ============================================================================
+
+func TestNewCipherRejectsWrongKeySize(t *testing.T) {
+	for _, size := range []int{0, 16, 24, 31, 33, 64} {
+		key := make([]byte, size)
+		_, err := NewCipher(KeyIDFromUint32(1), key)
+		if !errors.Is(err, ErrInvalidKey) {
+			t.Errorf("size %d: want ErrInvalidKey, got %v", size, err)
+		}
+	}
+}
+
+// ============================================================================
+// Tamper detection (GCM auth tag)
+// ============================================================================
+
+func TestTamperedCiphertextDetected(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(KeyIDFromUint32(1), key)
+	envelope, _ := c.Encrypt([]byte("important data"))
+
+	// Flip a bit in the ciphertext portion
+	tampered := make([]byte, len(envelope))
+	copy(tampered, envelope)
+	tampered[len(tampered)-5] ^= 0x01
+
+	_, err := c.Decrypt(tampered)
+	if !errors.Is(err, ErrIntegrityFail) {
+		t.Fatalf("want ErrIntegrityFail, got %v", err)
+	}
+}
+
+func TestTamperedNonceDetected(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(KeyIDFromUint32(1), key)
+	envelope, _ := c.Encrypt([]byte("data"))
+
+	// Modify nonce portion
+	tampered := make([]byte, len(envelope))
+	copy(tampered, envelope)
+	tampered[1+keyIDSize] ^= 0xFF
+
+	_, err := c.Decrypt(tampered)
+	if !errors.Is(err, ErrIntegrityFail) {
+		t.Fatalf("want ErrIntegrityFail, got %v", err)
+	}
+}
+
+// ============================================================================
+// Wrong key rejection
+// ============================================================================
+
+func TestWrongKeyCannotDecrypt(t *testing.T) {
+	key1, _ := GenerateKey()
+	key2, _ := GenerateKey()
+	c1, _ := NewCipher(KeyIDFromUint32(1), key1)
+	c2, _ := NewCipher(KeyIDFromUint32(2), key2)
+
+	envelope, _ := c1.Encrypt([]byte("secret"))
+	// c2 has different keyID — should refuse before even trying to decrypt
+	_, err := c2.Decrypt(envelope)
+	if !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("want ErrUnknownKey, got %v", err)
+	}
+}
+
+// ============================================================================
+// Envelope format validation
+// ============================================================================
+
+func TestRejectShortEnvelope(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(KeyIDFromUint32(1), key)
+	for _, size := range []int{0, 1, 5, 10, 32} {
+		_, err := c.Decrypt(make([]byte, size))
+		if !errors.Is(err, ErrInvalidEnvelope) && !errors.Is(err, ErrUnsupportedVersion) {
+			t.Errorf("size %d: want envelope/version error, got %v", size, err)
+		}
+	}
+}
+
+func TestRejectUnknownVersion(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(KeyIDFromUint32(1), key)
+	envelope, _ := c.Encrypt([]byte("x"))
+	tampered := make([]byte, len(envelope))
+	copy(tampered, envelope)
+	tampered[0] = 99 // unknown version
+
+	_, err := c.Decrypt(tampered)
+	if !errors.Is(err, ErrUnsupportedVersion) {
+		t.Fatalf("want ErrUnsupportedVersion, got %v", err)
+	}
+}
+
+// ============================================================================
+// Keyring — rotation
+// ============================================================================
+
+func TestKeyringRotation(t *testing.T) {
+	keyring := NewKeyring()
+
+	// Add v1 key, encrypt with it
+	k1, _ := GenerateKey()
+	c1, _ := NewCipher(KeyIDFromUint32(1), k1)
+	keyring.Add(c1)
+
+	envelope1, err := keyring.Encrypt([]byte("data v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Rotate: add v2, set active
+	k2, _ := GenerateKey()
+	c2, _ := NewCipher(KeyIDFromUint32(2), k2)
+	keyring.Add(c2)
+	if err := keyring.SetActive(KeyIDFromUint32(2)); err != nil {
+		t.Fatal(err)
+	}
+
+	envelope2, _ := keyring.Encrypt([]byte("data v2"))
+
+	// Both can be decrypted via keyring
+	d1, err := keyring.Decrypt(envelope1)
+	if err != nil {
+		t.Errorf("decrypt v1: %v", err)
+	}
+	if !bytes.Equal(d1, []byte("data v1")) {
+		t.Errorf("v1 mismatch: %s", d1)
+	}
+	d2, err := keyring.Decrypt(envelope2)
+	if err != nil {
+		t.Errorf("decrypt v2: %v", err)
+	}
+	if !bytes.Equal(d2, []byte("data v2")) {
+		t.Errorf("v2 mismatch: %s", d2)
+	}
+
+	// Active key is v2
+	active := keyring.ActiveKeyID()
+	if active != KeyIDFromUint32(2) {
+		t.Errorf("active: %x", active)
+	}
+}
+
+func TestKeyringEncryptWithoutActiveFails(t *testing.T) {
+	kr := NewKeyring()
+	_, err := kr.Encrypt([]byte("x"))
+	if err == nil {
+		t.Error("encrypt with empty keyring should fail")
+	}
+}
+
+func TestKeyringSetActiveUnknown(t *testing.T) {
+	kr := NewKeyring()
+	err := kr.SetActive(KeyIDFromUint32(99))
+	if !errors.Is(err, ErrUnknownKey) {
+		t.Errorf("want ErrUnknownKey, got %v", err)
+	}
+}
+
+func TestKeyringDecryptUnknownKey(t *testing.T) {
+	// Encrypt with key v1 but keyring only has v2
+	k1, _ := GenerateKey()
+	c1, _ := NewCipher(KeyIDFromUint32(1), k1)
+	envelope, _ := c1.Encrypt([]byte("x"))
+
+	kr := NewKeyring()
+	k2, _ := GenerateKey()
+	c2, _ := NewCipher(KeyIDFromUint32(2), k2)
+	kr.Add(c2)
+
+	_, err := kr.Decrypt(envelope)
+	if !errors.Is(err, ErrUnknownKey) {
+		t.Errorf("unknown keyID in envelope: want ErrUnknownKey, got %v", err)
+	}
+}
+
+func TestKeyringHasKey(t *testing.T) {
+	kr := NewKeyring()
+	k, _ := GenerateKey()
+	c, _ := NewCipher(KeyIDFromUint32(42), k)
+	kr.Add(c)
+	if !kr.HasKey(KeyIDFromUint32(42)) {
+		t.Error("HasKey: 42 should be true")
+	}
+	if kr.HasKey(KeyIDFromUint32(43)) {
+		t.Error("HasKey: 43 should be false")
+	}
+}
+
+// ============================================================================
+// Key generator + ID helpers
+// ============================================================================
+
+func TestGenerateKeyProducesCorrectSize(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		k, err := GenerateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(k) != KeySize {
+			t.Errorf("key size: %d", len(k))
+		}
+	}
+}
+
+func TestGenerateKeyDifferent(t *testing.T) {
+	k1, _ := GenerateKey()
+	k2, _ := GenerateKey()
+	if bytes.Equal(k1, k2) {
+		t.Error("two GenerateKey calls should differ")
+	}
+}
+
+func TestKeyIDFromUint32(t *testing.T) {
+	id := KeyIDFromUint32(0x12345678)
+	want := [keyIDSize]byte{0x12, 0x34, 0x56, 0x78}
+	if id != want {
+		t.Errorf("KeyIDFromUint32: %x want %x", id, want)
+	}
+}
+
+// ============================================================================
+// Empty plaintext
+// ============================================================================
+
+func TestEncryptEmptyPlaintext(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(KeyIDFromUint32(1), key)
+	envelope, err := c.Encrypt(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := c.Decrypt(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dec) != 0 {
+		t.Errorf("empty roundtrip: %v", dec)
+	}
+}

@@ -1,0 +1,136 @@
+# .goreleaser.yaml — BLRCS release automation
+#
+# Usage:
+#   goreleaser release --clean          # production release
+#   goreleaser release --snapshot       # local test (no publish)
+#
+# Requirements:
+#   GITHUB_TOKEN env var for GitHub releases
+#   GPG_FINGERPRINT env var for signing (optional)
+
+version: 2
+
+project_name: blrcs
+
+before:
+  hooks:
+    - go mod verify
+    - go test ./...
+    - go vet ./...
+
+builds:
+  - id: blrcs
+    main: ./cmd/blrcs
+    binary: blrcs
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: blrcs-mcpd
+    main: ./cmd/blrcs-mcpd
+    binary: blrcs-mcpd
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+      - SECURITY.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+sboms:
+  - artifacts: archive
+    documents:
+      - "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}.sbom.json"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: "New Features"
+      regexp: "^feat"
+      order: 0
+    - title: "Bug Fixes"
+      regexp: "^fix"
+      order: 1
+    - title: "Security"
+      regexp: "^(fix|feat).*security"
+      order: 2
+    - title: "Other"
+      order: 999
+
+release:
+  github:
+    owner: shizukutanaka
+    name: blrcs
+  draft: false
+  prerelease: auto
+  header: |
+    ## BLRCS {{ .Tag }}
+
+    EU Digital Product Passport + Battery Passport — production-grade Go.
+    Zero external dependencies.
+
+  footer: |
+    ### Installation
+
+    ```bash
+    go install github.com/shizukutanaka/blrcs/cmd/blrcs@{{ .Tag }}
+    go install github.com/shizukutanaka/blrcs/cmd/blrcs-mcpd@{{ .Tag }}
+    ```
+
+    ### Verification
+
+    ```bash
+    # Verify checksums
+    sha256sum -c checksums.txt
+
+    # Verify GPG signature
+    gpg --verify checksums.txt.sig checksums.txt
+    ```
