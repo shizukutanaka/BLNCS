@@ -212,11 +212,15 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 
 	parts := strings.Split(sdjwt, "~")
 	// 末尾要素が '.' を含めば KB-JWT (disclosure は base64url で '.' を含まない)。
+	// len(parts)==1 は区切り '~' を持たない素の JWT で、KB も開示も無い
+	// (len>1 を要求しないと parts[1:discEnd] が parts[1:0] となり panic する)。
 	var kbSegment string
 	discEnd := len(parts)
-	if last := parts[len(parts)-1]; last != "" && strings.Contains(last, ".") {
-		kbSegment = last
-		discEnd = len(parts) - 1
+	if len(parts) > 1 {
+		if last := parts[len(parts)-1]; last != "" && strings.Contains(last, ".") {
+			kbSegment = last
+			discEnd = len(parts) - 1
+		}
 	}
 
 	// Parse + verify issuer JWT
@@ -349,6 +353,21 @@ func extractHolderKey(payload map[string]any) ed25519.PublicKey {
 	return ed25519.PublicKey(raw)
 }
 
+// audienceMatches — KB-JWT の aud (文字列 or 文字列配列, JWT 仕様) と期待値を照合。
+func audienceMatches(aud any, want string) bool {
+	switch a := aud.(type) {
+	case string:
+		return a == want
+	case []any:
+		for _, v := range a {
+			if s, ok := v.(string); ok && s == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // verifyKBJWT — 末尾 KB-JWT を holder 鍵で検証し nonce/aud/sd_hash を照合。
 func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, opts VerifyOptions, now time.Time, leeway time.Duration) error {
 	segs := strings.SplitN(kb, ".", 3)
@@ -386,10 +405,8 @@ func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, opts Veri
 			return ErrKeyBindingNonce
 		}
 	}
-	if opts.ExpectedAudience != "" {
-		if s, _ := pl["aud"].(string); s != opts.ExpectedAudience {
-			return ErrKeyBindingNonce
-		}
+	if opts.ExpectedAudience != "" && !audienceMatches(pl["aud"], opts.ExpectedAudience) {
+		return ErrKeyBindingNonce
 	}
 	// sd_hash: KB-JWT 直前の '~' までを含む提示文字列の SHA-256。
 	idx := strings.LastIndex(presentation, "~")

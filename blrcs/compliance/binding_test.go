@@ -170,3 +170,40 @@ func TestRequireKeyBindingRejectsUnbound(t *testing.T) {
 		t.Fatalf("want ErrHolderKeyRequired, got %v", err)
 	}
 }
+
+// TestVerifyBareJWTNoTilde — a validly-signed JWT with no '~' separator (e.g. an
+// attacker stripping the disclosure tail off an observed vp_token) must not panic.
+func TestVerifyBareJWTNoTilde(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"a": 1}, nil, time.Hour)
+	bare := sdjwt[:strings.IndexByte(sdjwt, '~')] // "header.payload.sig", no '~'
+	// Issuer signature is still valid; must return cleanly (no disclosures), not panic.
+	vc, err := VerifySDJWTAt(bare, iss.PublicKey(), time.Now())
+	if err != nil {
+		t.Fatalf("bare JWT should verify without disclosures: %v", err)
+	}
+	if len(vc.Claims) != 0 {
+		t.Errorf("bare JWT should disclose no SD claims, got %v", vc.Claims)
+	}
+	// A bare JWT carrying cnf (bound) but no KB-JWT must be rejected, not panic.
+	holderPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	bound, _, _ := iss.IssueSDJWTBound("s", map[string]any{"a": 1}, nil, holderPub, time.Hour)
+	bareBound := bound[:strings.IndexByte(bound, '~')]
+	if _, err := VerifySDJWTAt(bareBound, iss.PublicKey(), time.Now()); err != ErrKeyBindingMissing {
+		t.Fatalf("bare bound JWT: want ErrKeyBindingMissing, got %v", err)
+	}
+}
+
+// TestKeyBindingAudienceArray — a KB-JWT whose `aud` is a JSON array (allowed by
+// the JWT spec) must match when one element equals the expected audience.
+func TestKeyBindingAudienceArray(t *testing.T) {
+	if !audienceMatches([]any{"https://other.example", "https://verifier.example"}, "https://verifier.example") {
+		t.Error("aud array containing the expected audience should match")
+	}
+	if audienceMatches([]any{"https://other.example"}, "https://verifier.example") {
+		t.Error("aud array without the expected audience must not match")
+	}
+	if !audienceMatches("https://verifier.example", "https://verifier.example") {
+		t.Error("string aud should still match")
+	}
+}
