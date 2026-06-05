@@ -141,7 +141,66 @@ build on.
 
 ---
 
-## Sources
+## Second-pass survey (additional 同種ソフト + arXiv angles)
+
+### 10. No mdoc / mDL (ISO/IEC 18013-5) credential format — eIDAS 2.0 mandates *both*
+- **Gap:** BLRCS issues only SD-JWT-VC. `dcapi/dcapi.go` advertises the
+  `org-iso-mdoc` protocol, but `buildMdocData` is an explicit MVP **stub** (it
+  re-wraps the presentation definition; there is no CBOR `doctype` + `namespaces`
+  `IssuerSigned`/`DeviceResponse` structure). So BLRCS cannot issue or verify a
+  real mdoc.
+- **Evidence:** eIDAS 2.0 mandates **both** SD-JWT-VC and mdoc/mDL; ISO/IEC
+  18013-5:2021 (mdoc) + 18013-7:2025 (OpenID4VP mdoc profile). EUDI RI, walt.id,
+  Sphereon, Microsoft Entra Verified ID all ship mdoc.
+- **Code:** `dcapi/dcapi.go` (`buildMdocData`), new `mdoc/` package.
+- **Approach:** add a CBOR `IssuerSigned` mdoc (COSE_Sign1 over MSO with
+  per-element salted digests) — shares the salted-digest model already in
+  `compliance` SD-JWT and the COSE layer needed for SCITT receipts (#3), so
+  sequence it with #3 to amortize the CBOR/COSE work.
+
+### 11. Bitstring Status List leaks issuer activity / business metrics
+- **Gap:** `revocation/bitstring.go` publishes a contiguous list whose set bits and
+  size reveal the issuer's **revocation rate and issuance volume** to anyone who
+  fetches it — herd privacy (16KB minimum) hides *which* holder, not the issuer's
+  aggregate business metrics.
+- **Evidence:** *CRSet: Private Non-Interactive VC Revocation* (arXiv 2501.17089)
+  — explicitly identifies Bitstring/Token Status List issuer-metric leakage and
+  proposes a padded Bloom-filter-cascade so the published artifact is
+  indistinguishable from random; *Privacy-Preserving Revocation with
+  Time-Flexibility* (arXiv 2503.22010, AHIBE); EVOKE (ECC accumulator).
+- **Code:** `revocation/bitstring.go`.
+- **Approach (incremental):** (a) pad the list to a fixed published size and seed
+  unused bits with deterministic noise to mask the true count (cheap); (b) longer
+  term, an accumulator + ZK non-revocation proof variant behind the same
+  `GetStatus`/status-claim interface.
+
+### 12. No crypto-agility / post-quantum path — `alg` is hardcoded `EdDSA`
+- **Gap:** the SD-JWT header (`compliance/extensions.go:153` and `:483`) hardcodes
+  `"alg":"EdDSA"` and calls `ed25519.Sign` directly; Ed25519 is wired across 15
+  non-test files. There is a `kms.Signer` interface but the credential path
+  bypasses it, so there is no algorithm negotiation and no migration path.
+- **Evidence:** NIST IR 8547 + CNSA 2.0 mandate crypto-agility and a phased move
+  to **ML-DSA** (FIPS 204); *Towards Post-Quantum Verifiable Credentials*
+  (ACM/techrxiv 2024) shows ML-DSA-44/65/87 + Falcon as drop-in VC signers with a
+  hybrid option. EUDI ARF lists crypto-agility as a requirement.
+- **Code:** `compliance/extensions.go` (issue/verify), `kms/kms.go` (`Signer`).
+- **Approach:** route issuance/verification through `kms.Signer`, read `alg` from
+  the JWT header instead of assuming EdDSA, and add an ML-DSA (or hybrid
+  Ed25519+ML-DSA) implementation of the interface. Verifiers select by header
+  `alg`. This is foundational and should precede mdoc (#10) so both formats are
+  algorithm-agile from the start.
+
+### 13. DCQL / claim-matching breadth vs Presentation Exchange parity
+- **Gap:** worth auditing that the v1.0 `dcql_query` path in `openid4vp/dcql.go`
+  covers `credential_sets`, value/path matching, and format constraints to the
+  same depth the legacy `presentation_definition` path did, so the v1.0 migration
+  doesn't silently narrow what verifiers can express.
+- **Evidence:** OpenID4VP v1.0 §6 (DCQL replaced PE); EUDI/ISO 18013-7 rely on DCQL.
+- **Code:** `openid4vp/dcql.go`, `dcapi/dcapi.go`.
+- **Approach:** add conformance vectors covering `credential_sets` and claim value
+  matching; this is a test-coverage/robustness item, not a redesign.
+
+
 - OpenID4VP formal analysis (OIDF / Univ. Stuttgart, 2025): https://openid.net/formal-security-analysis-openid-verifiable-credentials/ , https://openid.net/oidf-receives-security-analysis-of-openid-for-verifiable-presentations/
 - OID4VCI formal analysis (ETH Zürich): https://ethz.ch/content/dam/ethz/special-interest/infk/inst-infsec/information-security-group-dam/research/software/zischg-oid4vci.pdf
 - SD-JWT selective disclosure / unlinkability: arXiv 2506.00262 ( https://arxiv.org/html/2506.00262 ), SD-BLS arXiv 2406.19035 ( https://arxiv.org/pdf/2406.19035 )
@@ -150,3 +209,6 @@ build on.
 - IETF SCITT architecture: https://datatracker.ietf.org/doc/draft-ietf-scitt-architecture/
 - Transparency log witnessing: https://github.com/C2SP/C2SP/blob/main/tlog-witness.md , https://blog.transparency.dev/can-i-get-a-witness-network , IACR 2024/879 https://eprint.iacr.org/2024/879.pdf
 - EUDI ARF / Reference Implementation roadmap: https://github.com/eu-digital-identity-wallet/eudi-doc-architecture-and-reference-framework , https://github.com/eu-digital-identity-wallet/eudi-wallet-reference-implementation-roadmap/discussions/79
+- mdoc / mDL (ISO/IEC 18013-5 / 18013-7) in EUDI: https://shanedeconinck.be/posts/eudi-credential-formats-crash-course/ , https://darutk.medium.com/issuing-verifiable-credentials-in-the-sd-jwt-vc-and-mdoc-mdl-formats-mandated-in-eidas-2-0-87a232cfcc2a
+- Privacy-preserving revocation: CRSet arXiv 2501.17089 ( https://arxiv.org/abs/2501.17089 ), Time-Flexible revocation arXiv 2503.22010 ( https://arxiv.org/html/2503.22010v1 ), ZK/accumulator framework arXiv 2510.09715 ( https://arxiv.org/abs/2510.09715 )
+- Post-quantum VCs / crypto-agility: *Towards Post-Quantum Verifiable Credentials* ( https://dl.acm.org/doi/fullHtml/10.1145/3664476.3669932 ), NIST IR 8547 (PQC migration / crypto-agility)
