@@ -1,6 +1,10 @@
 package compliance
 
-import "blrcs/revocation"
+import (
+	"crypto/ed25519"
+
+	"blrcs/revocation"
+)
 
 // ============================================================================
 // Credential status (revocation) — draft-ietf-oauth-status-list の `status` claim
@@ -64,6 +68,27 @@ func CheckRevoked(vc *VerifiedClaims, list *revocation.BitstringStatusList) (boo
 	}
 	if list == nil {
 		return false, ErrStatusListRequired
+	}
+	return list.GetStatus(vc.Status.Index)
+}
+
+// CheckRevokedToken — 署名付き Status List Token を検証し、その subject が
+// credential の status.uri と一致することを確認した上で失効を判定する。
+//
+// CheckRevoked と異なり、リスト自体の真正性 (issuer 署名)・鮮度 (exp) と、
+// credential が指した URI へのバインディングまで検証する end-to-end ヘルパ。
+// token の取得 (HTTP GET vc.Status.URI) は呼び出し側の責務。
+func CheckRevokedToken(vc *VerifiedClaims, token string, statusIssuerPub ed25519.PublicKey) (bool, error) {
+	if vc == nil || vc.Status == nil {
+		return false, nil
+	}
+	list, meta, err := revocation.VerifyStatusListToken(token, statusIssuerPub, revocation.PurposeRevocation)
+	if err != nil {
+		return false, err
+	}
+	// 差し替え防止: token の subject は credential が指した URI と一致必須。
+	if meta.Subject != vc.Status.URI {
+		return false, ErrStatusListMismatch
 	}
 	return list.GetStatus(vc.Status.Index)
 }

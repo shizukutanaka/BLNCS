@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Signed Status List Token (`statuslist+jwt`) + serving helper.**
+  `BitstringStatusList.IssueToken` publishes the list as an Ed25519-signed token
+  (draft-ietf-oauth-status-list JWT form) with `ttl`/`exp`; `VerifyStatusListToken`
+  checks the signature + freshness and returns the decoded list; `TokenHandler`
+  serves it as `application/statuslist+jwt` with `Cache-Control`. `compliance.CheckRevokedToken`
+  is the end-to-end verifier helper: it authenticates the fetched list, binds the
+  token `sub` to the credential's `status.uri` (anti-substitution), and checks the bit.
 - **Credential status / revocation wiring (status_list claim).** Issued SD-JWT VCs
   can now carry a `status.status_list` reference (`IssueSDJWTStatus` /
   `IssueSDJWTVCStatus`, draft-ietf-oauth-status-list form); `VerifySDJWT*`

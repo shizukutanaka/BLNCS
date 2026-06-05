@@ -29,6 +29,7 @@ var (
 
 	// Credential status (revocation)
 	ErrStatusListRequired = errors.New("compliance: status list required to check revocation")
+	ErrStatusListMismatch = errors.New("compliance: status list token subject does not match credential status URI")
 
 	// GS1
 	ErrGTINInvalid    = errors.New("compliance: invalid GTIN")

@@ -1,11 +1,64 @@
 package compliance
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"testing"
 	"time"
 
 	"blrcs/revocation"
 )
+
+// TestCheckRevokedTokenEndToEnd — issue a credential with a status ref, publish
+// the list as a signed Status List Token, then verify the credential's status
+// against the token (authenticity + subject binding + bit check).
+func TestCheckRevokedTokenEndToEnd(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	statusPub, statusPriv, _ := ed25519.GenerateKey(rand.Reader)
+	uri := "https://issuer.example/status/1"
+	ref := &StatusRef{URI: uri, Index: 5}
+
+	sdjwt, _, _ := iss.IssueSDJWTStatus("s", map[string]any{"a": 1}, nil, ref, time.Hour)
+	vc, _ := VerifySDJWT(sdjwt, iss.PublicKey())
+
+	list := revocation.NewBitstringStatusList(revocation.PurposeRevocation, revocation.MinBitstringSize)
+	token, _ := list.IssueToken("did:web:issuer", uri, statusPriv, time.Hour)
+	revoked, err := CheckRevokedToken(vc, token, statusPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked {
+		t.Error("should not be revoked before bit is set")
+	}
+
+	// Revoke and re-publish.
+	_ = list.SetStatus(5, true)
+	token2, _ := list.IssueToken("did:web:issuer", uri, statusPriv, time.Hour)
+	revoked, err = CheckRevokedToken(vc, token2, statusPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !revoked {
+		t.Error("should be revoked after bit is set")
+	}
+}
+
+// TestCheckRevokedTokenSubjectMismatch — a token whose subject differs from the
+// credential's status.uri (a substituted list) must be rejected.
+func TestCheckRevokedTokenSubjectMismatch(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	statusPub, statusPriv, _ := ed25519.GenerateKey(rand.Reader)
+	ref := &StatusRef{URI: "https://issuer.example/status/1", Index: 5}
+	sdjwt, _, _ := iss.IssueSDJWTStatus("s", map[string]any{"a": 1}, nil, ref, time.Hour)
+	vc, _ := VerifySDJWT(sdjwt, iss.PublicKey())
+
+	list := revocation.NewBitstringStatusList(revocation.PurposeRevocation, revocation.MinBitstringSize)
+	// Token published under a DIFFERENT subject URI.
+	token, _ := list.IssueToken("did:web:issuer", "https://evil.example/status/9", statusPriv, time.Hour)
+	if _, err := CheckRevokedToken(vc, token, statusPub); err != ErrStatusListMismatch {
+		t.Fatalf("want ErrStatusListMismatch, got %v", err)
+	}
+}
 
 // TestStatusClaimRoundTrip — an issued credential carries a resolvable status
 // reference, and CheckRevoked reflects the bit in the status list.
