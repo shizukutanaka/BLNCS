@@ -27,6 +27,9 @@ var (
 	ErrKeyBindingNonce   = errors.New("compliance: key binding nonce/audience mismatch")
 	ErrKeyBindingSDHash  = errors.New("compliance: key binding sd_hash mismatch")
 
+	// Credential status (revocation)
+	ErrStatusListRequired = errors.New("compliance: status list required to check revocation")
+
 	// GS1
 	ErrGTINInvalid    = errors.New("compliance: invalid GTIN")
 	ErrDomainRequired = errors.New("compliance: domain required")

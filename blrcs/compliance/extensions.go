@@ -54,6 +54,8 @@ type VerifiedClaims struct {
 	HolderKey ed25519.PublicKey `json:"-"`
 	// KeyBound — この提示が有効な KB-JWT で holder にバインドされていれば true。
 	KeyBound bool `json:"-"`
+	// Status — status_list claim から復元した失効参照 (あれば non-nil)。CheckRevoked で使う。
+	Status *StatusRef `json:"status,omitempty"`
 }
 
 // VCTDigitalProductPassport — DPP の SD-JWT VC type 識別子 (draft-ietf-oauth-sd-jwt-vc)。
@@ -81,7 +83,20 @@ func (i *Issuer) IssueSDJWT(subject string, sdClaims, clearClaims map[string]any
 //
 // vct は IETF SD-JWT VC 必須クレーム。衝突耐性のある URI / 名前を指定する。
 func (i *Issuer) IssueSDJWTVC(vct, subject string, sdClaims, clearClaims map[string]any, validFor time.Duration) (string, []Disclosure, error) {
-	return i.issueSDJWT(vct, subject, sdClaims, clearClaims, nil, validFor)
+	return i.issueSDJWT(vct, subject, sdClaims, clearClaims, nil, nil, validFor)
+}
+
+// IssueSDJWTStatus — 失効参照 (status_list claim) 付きで DPP SD-JWT VC を発行。
+//
+// verifier は VerifiedClaims.Status から URI/index を取得し、CheckRevoked で
+// 失効確認できる (draft-ietf-oauth-status-list)。
+func (i *Issuer) IssueSDJWTStatus(subject string, sdClaims, clearClaims map[string]any, status *StatusRef, validFor time.Duration) (string, []Disclosure, error) {
+	return i.IssueSDJWTVCStatus(VCTDigitalProductPassport, subject, sdClaims, clearClaims, status, validFor)
+}
+
+// IssueSDJWTVCStatus — 任意 vct で失効参照付き SD-JWT VC を発行。
+func (i *Issuer) IssueSDJWTVCStatus(vct, subject string, sdClaims, clearClaims map[string]any, status *StatusRef, validFor time.Duration) (string, []Disclosure, error) {
+	return i.issueSDJWT(vct, subject, sdClaims, clearClaims, nil, status, validFor)
 }
 
 // IssueSDJWTBound — IssueSDJWT に holder key binding (cnf) を付与した版 (vct=DPP)。
@@ -98,7 +113,7 @@ func (i *Issuer) IssueSDJWTVCBound(vct, subject string, sdClaims, clearClaims ma
 	if len(holderPub) != ed25519.PublicKeySize {
 		return "", nil, ErrHolderKeyRequired
 	}
-	return i.issueSDJWT(vct, subject, sdClaims, clearClaims, holderPub, validFor)
+	return i.issueSDJWT(vct, subject, sdClaims, clearClaims, holderPub, nil, validFor)
 }
 
 // IssueSDJWTTieredBound — IssueSDJWTTiered の holder key binding 付き版。
@@ -107,8 +122,9 @@ func (i *Issuer) IssueSDJWTTieredBound(subject string, tc *TieredClaims, holderP
 	return i.IssueSDJWTBound(subject, sd, clear, holderPub, validFor)
 }
 
-// issueSDJWT — SD-JWT VC 発行の共通実装。holderPub が non-nil なら cnf.jwk を埋め込む。
-func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[string]any, holderPub ed25519.PublicKey, validFor time.Duration) (string, []Disclosure, error) {
+// issueSDJWT — SD-JWT VC 発行の共通実装。holderPub が non-nil なら cnf.jwk を、
+// status が non-nil なら status_list claim を埋め込む。
+func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[string]any, holderPub ed25519.PublicKey, status *StatusRef, validFor time.Duration) (string, []Disclosure, error) {
 	now := time.Now().UTC()
 	payload := map[string]any{
 		"iss":     i.ID,
@@ -129,6 +145,10 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 				"x":   base64.RawURLEncoding.EncodeToString(holderPub),
 			},
 		}
+	}
+	// Credential status (revocation): draft-ietf-oauth-status-list `status` claim
+	if status != nil {
+		payload["status"] = status.statusClaim()
 	}
 	// Clear claims → JWT body 直接
 	for k, v := range clearClaims {
@@ -262,6 +282,7 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 		vc.Expires = int64(v)
 	}
 	vc.HolderKey = extractHolderKey(payload)
+	vc.Status = extractStatus(payload)
 
 	// 有効期限の強制 (leeway 込み)
 	if vc.Expires != 0 && now.After(time.Unix(vc.Expires, 0).Add(leeway)) {
@@ -274,7 +295,7 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	// Copy clear claims (予約 claim 以外)
 	reserved := map[string]bool{
 		"iss": true, "sub": true, "vct": true, "iat": true, "exp": true,
-		"_sd": true, "_sd_alg": true, "cnf": true,
+		"_sd": true, "_sd_alg": true, "cnf": true, "status": true,
 	}
 	for k, v := range payload {
 		if !reserved[k] {

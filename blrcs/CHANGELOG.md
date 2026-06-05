@@ -6,6 +6,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Credential status / revocation wiring (status_list claim).** Issued SD-JWT VCs
+  can now carry a `status.status_list` reference (`IssueSDJWTStatus` /
+  `IssueSDJWTVCStatus`, draft-ietf-oauth-status-list form); `VerifySDJWT*`
+  populates `VerifiedClaims.Status`, and `CheckRevoked(vc, list)` checks the bit
+  against a (caller-fetched) `revocation.BitstringStatusList`. Previously the
+  revocation package existed but was never referenced by issued credentials, so
+  verifiers had no way to check revocation. (Top P0 item from `docs/IMPROVEMENT_RESEARCH.md`.)
+
 ### Security
 - **SD-JWT now rejects expired / not-yet-valid credentials.** `VerifySDJWT` previously
   parsed `exp`/`iat` but never enforced them, so an expired DPP or Battery Passport still
