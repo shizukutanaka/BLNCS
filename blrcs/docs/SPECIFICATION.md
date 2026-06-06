@@ -92,7 +92,8 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §4 issuer-metric privacy (padding/accumulator) | ❌ | backlog #11 (CRSet) |
 | §5 OpenID4VP nonce binding + one-time state | ✅ | |
 | §5 client_id scheme validation | ❌ | backlog #6 |
-| §6 SCITT register ordering + proofs | ✅ | COSE Receipts ❌ #3; witness cosigning ❌ #4 |
+| §6 SCITT register ordering + proofs | ✅ | COSE Receipts ❌ #3 |
+| §6 witness cosigning (split-view defense) | ✅ | **implemented** (`scitt.Witness`) |
 | §2 mdoc/mDL format | ❌ | backlog #10 (dcapi stub only) |
 | §3 SD-JWT-VC Type Metadata / vct#integrity | ❌ | backlog #7 |
 | §7 crypto-agility hook | ✅ | EdDSA built-in; ML-DSA pluggable |
@@ -105,7 +106,7 @@ verifier (it assumed EdDSA, ignored `_sd_alg`, did not require `vct`, and silent
 collapsed duplicate digests). All four are now implemented with tests.
 
 ### Highest-value remaining gaps (ordered)
-1. SCITT witness cosigning (§6, split-view defense) — backlog #4.
-2. HTTP rate-limit enforcement (§7) — backlog #9.
-3. mdoc/mDL format (§2) — backlog #10.
-4. client_id scheme validation (§5) — backlog #6.
+1. HTTP rate-limit enforcement (§7) — backlog #9 (config exists, unenforced).
+2. mdoc/mDL format (§2) — backlog #10.
+3. client_id scheme validation (§5) — backlog #6.
+4. COSE Receipts for SCITT (§6) — backlog #3.

@@ -34,6 +34,11 @@ var (
 	ErrBadReceipt = errors.New("scitt: receipt invalid")
 	ErrBadProof   = errors.New("scitt: inclusion proof invalid")
 	ErrEmptyStmt  = errors.New("scitt: statement payload required")
+
+	// Checkpoint / witness cosigning
+	ErrCheckpointSig        = errors.New("scitt: checkpoint signature invalid")
+	ErrCheckpointRegression = errors.New("scitt: checkpoint tree size went backwards")
+	ErrSplitView            = errors.New("scitt: checkpoint inconsistent with witness history (split view)")
 )
 
 // Statement — SCITT Signed Statement (COSE/JSON簡易版)
@@ -431,12 +436,29 @@ func (l *Ledger) SignedCheckpoint() Checkpoint {
 		Timestamp: time.Now().UTC(),
 		TSID:      l.tsID,
 	}
+	cp.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(l.tsPriv, checkpointSigPayload(cp)))
+	return cp
+}
+
+// checkpointSigPayload — checkpoint に対する署名/副署の正規バイト列 (root||size||ts)。
+func checkpointSigPayload(cp Checkpoint) []byte {
 	var sz [8]byte
 	binary.BigEndian.PutUint64(sz[:], cp.TreeSize)
 	payload := append([]byte(cp.RootHash), sz[:]...)
-	payload = append(payload, []byte(cp.Timestamp.Format(time.RFC3339Nano))...)
-	cp.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(l.tsPriv, payload))
-	return cp
+	return append(payload, []byte(cp.Timestamp.Format(time.RFC3339Nano))...)
+}
+
+// VerifyCheckpoint — log (Transparency Service) の checkpoint 署名を検証する。
+// モニター / witness が tree head の真正性を確認するのに使う。
+func VerifyCheckpoint(cp Checkpoint, tsPub ed25519.PublicKey) error {
+	sig, err := base64.StdEncoding.DecodeString(cp.Signature)
+	if err != nil {
+		return ErrCheckpointSig
+	}
+	if len(tsPub) != ed25519.PublicKeySize || !ed25519.Verify(tsPub, checkpointSigPayload(cp), sig) {
+		return ErrCheckpointSig
+	}
+	return nil
 }
 
 // Get — 位置から statement と Receipt を取得 (監査・再検証用)

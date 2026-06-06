@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **SCITT witness cosigning (split-view defense).** `scitt.VerifyCheckpoint`
+  authenticates a log's signed tree head; `scitt.Witness` cosigns a checkpoint
+  only after verifying the issuer signature and an append-only **consistency
+  proof** from the last checkpoint it cosigned (`ErrSplitView` /
+  `ErrCheckpointRegression` on inconsistency or rollback). `VerifyCosignature`
+  checks a witness attestation. Reuses the existing consistency-proof machinery;
+  closes spec §6 / backlog #4.
+
+### Added
 - **`docs/SPECIFICATION.md`** — normative spec (RFC 2119) for the core
   subsystems with a conformance matrix tracking implemented vs missing behavior.
   Writing it surfaced four specified-but-unimplemented SD-JWT verifier rules,
