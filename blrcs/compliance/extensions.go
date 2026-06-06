@@ -278,6 +278,10 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		return nil, fmt.Errorf("sdjwt: bad payload JSON: %w", err)
 	}
+	// SD-JWT: _sd_alg は sha-256 のみ対応 (hash downgrade 防止)。未指定は sha-256 既定。
+	if alg, ok := payload["_sd_alg"].(string); ok && alg != "sha-256" {
+		return nil, ErrSDJWTUnsupportedHashAlg
+	}
 
 	vc := &VerifiedClaims{Claims: make(map[string]any)}
 	if v, ok := payload["iss"].(string); ok {
@@ -298,6 +302,11 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	vc.HolderKey = extractHolderKey(payload)
 	vc.Status = extractStatus(payload)
 
+	// SD-JWT-VC: vct は必須クレーム (draft-ietf-oauth-sd-jwt-vc §3.2.2.2)。
+	if vc.VCT == "" {
+		return nil, ErrSDJWTMissingVCT
+	}
+
 	// 有効期限の強制 (leeway 込み)
 	if vc.Expires != 0 && now.After(time.Unix(vc.Expires, 0).Add(leeway)) {
 		return nil, ErrSDJWTExpired
@@ -316,11 +325,14 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 			vc.Claims[k] = v
 		}
 	}
-	// 開示の展開: digest を _sd と照合
+	// 開示の展開: digest を _sd と照合。重複 digest は拒否 (SD-JWT §verify)。
 	sdDigests := map[string]bool{}
 	if sd, ok := payload["_sd"].([]any); ok {
 		for _, d := range sd {
 			if s, ok := d.(string); ok {
+				if sdDigests[s] {
+					return nil, ErrSDJWTDuplicateDigest
+				}
 				sdDigests[s] = true
 			}
 		}

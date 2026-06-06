@@ -14,12 +14,15 @@ var (
 	ErrAttesterIDRequired   = errors.New("compliance: attester ID required")
 
 	// SD-JWT
-	ErrSDJWTEmpty          = errors.New("compliance: sd-jwt empty")
-	ErrSDJWTMalformed      = errors.New("compliance: sd-jwt malformed")
-	ErrSDJWTSigFailed      = errors.New("compliance: sd-jwt signature failed")
-	ErrSDJWTExpired        = errors.New("compliance: sd-jwt expired (exp in past)")
-	ErrSDJWTNotYetValid    = errors.New("compliance: sd-jwt not yet valid (iat in future)")
-	ErrSDJWTUnsupportedAlg = errors.New("compliance: sd-jwt unsupported JWS alg")
+	ErrSDJWTEmpty              = errors.New("compliance: sd-jwt empty")
+	ErrSDJWTMalformed          = errors.New("compliance: sd-jwt malformed")
+	ErrSDJWTSigFailed          = errors.New("compliance: sd-jwt signature failed")
+	ErrSDJWTExpired            = errors.New("compliance: sd-jwt expired (exp in past)")
+	ErrSDJWTNotYetValid        = errors.New("compliance: sd-jwt not yet valid (iat in future)")
+	ErrSDJWTUnsupportedAlg     = errors.New("compliance: sd-jwt unsupported JWS alg")
+	ErrSDJWTUnsupportedHashAlg = errors.New("compliance: sd-jwt unsupported _sd_alg (only sha-256)")
+	ErrSDJWTMissingVCT         = errors.New("compliance: sd-jwt-vc missing required vct claim")
+	ErrSDJWTDuplicateDigest    = errors.New("compliance: sd-jwt duplicate digest in _sd")
 
 	// SD-JWT Key Binding (KB-JWT) — IETF SD-JWT / SD-JWT-VC holder binding
 	ErrHolderKeyRequired = errors.New("compliance: holder public key required for key binding")

@@ -1,0 +1,80 @@
+package compliance
+
+import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+)
+
+// resignPayload rebuilds an SD-JWT's issuer JWT from a mutated payload map,
+// re-signing with priv so the signature stays valid. Disclosures/tail preserved.
+func resignPayload(t *testing.T, sdjwt string, priv ed25519.PrivateKey, mutate func(map[string]any)) string {
+	t.Helper()
+	tilde := strings.IndexByte(sdjwt, '~')
+	jwt, tail := sdjwt, ""
+	if tilde >= 0 {
+		jwt, tail = sdjwt[:tilde], sdjwt[tilde:]
+	}
+	segs := strings.SplitN(jwt, ".", 3)
+	plBytes, _ := base64.RawURLEncoding.DecodeString(segs[1])
+	var pl map[string]any
+	if err := json.Unmarshal(plBytes, &pl); err != nil {
+		t.Fatal(err)
+	}
+	mutate(pl)
+	newPl, _ := json.Marshal(pl)
+	sigInput := segs[0] + "." + base64.RawURLEncoding.EncodeToString(newPl)
+	sig := ed25519.Sign(priv, []byte(sigInput))
+	return sigInput + "." + base64.RawURLEncoding.EncodeToString(sig) + tail
+}
+
+func TestVerifyRejectsUnsupportedHashAlg(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"a": 1}, nil, time.Hour)
+	forged := resignPayload(t, sdjwt, iss.PrivateKey(), func(pl map[string]any) {
+		pl["_sd_alg"] = "sha-512" // unsupported
+	})
+	if _, err := VerifySDJWT(forged, iss.PublicKey()); err != ErrSDJWTUnsupportedHashAlg {
+		t.Fatalf("want ErrSDJWTUnsupportedHashAlg, got %v", err)
+	}
+}
+
+func TestVerifyRequiresVCT(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"a": 1}, nil, time.Hour)
+	forged := resignPayload(t, sdjwt, iss.PrivateKey(), func(pl map[string]any) {
+		delete(pl, "vct")
+	})
+	if _, err := VerifySDJWT(forged, iss.PublicKey()); err != ErrSDJWTMissingVCT {
+		t.Fatalf("want ErrSDJWTMissingVCT, got %v", err)
+	}
+}
+
+func TestVerifyRejectsDuplicateDigest(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"a": 1, "b": 2}, nil, time.Hour)
+	forged := resignPayload(t, sdjwt, iss.PrivateKey(), func(pl map[string]any) {
+		sd, _ := pl["_sd"].([]any)
+		if len(sd) > 0 {
+			pl["_sd"] = append(sd, sd[0]) // duplicate the first digest
+		}
+	})
+	if _, err := VerifySDJWT(forged, iss.PublicKey()); err != ErrSDJWTDuplicateDigest {
+		t.Fatalf("want ErrSDJWTDuplicateDigest, got %v", err)
+	}
+}
+
+func TestVerifyAcceptsDefaultSdAlgAbsent(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"a": 1}, nil, time.Hour)
+	// Absent _sd_alg defaults to sha-256 → must still verify.
+	forged := resignPayload(t, sdjwt, iss.PrivateKey(), func(pl map[string]any) {
+		delete(pl, "_sd_alg")
+	})
+	if _, err := VerifySDJWT(forged, iss.PublicKey()); err != nil {
+		t.Fatalf("absent _sd_alg should default to sha-256: %v", err)
+	}
+}

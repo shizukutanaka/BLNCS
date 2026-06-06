@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`docs/SPECIFICATION.md`** — normative spec (RFC 2119) for the core
+  subsystems with a conformance matrix tracking implemented vs missing behavior.
+  Writing it surfaced four specified-but-unimplemented SD-JWT verifier rules,
+  now fixed (below).
+
+### Security
+- **SD-JWT verifier conformance hardening** (gaps found via the new spec):
+  `_sd_alg` is now enforced to `sha-256` (hash-downgrade defense,
+  `ErrSDJWTUnsupportedHashAlg`); `vct` is required per SD-JWT-VC
+  (`ErrSDJWTMissingVCT`); duplicate digests in `_sd` are rejected
+  (`ErrSDJWTDuplicateDigest`). Absent `_sd_alg` still defaults to sha-256.
+
+### Added
 - **JWS algorithm agility + algorithm-confusion hardening.** SD-JWT verification
   now parses the issuer JWT header, pins the `alg` against a registry, and rejects
   unknown algs (`alg:none`/substitution → `ErrSDJWTUnsupportedAlg`) instead of
