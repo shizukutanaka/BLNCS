@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Hardened HTTP server helper (`tlsharden.HardenedServer`).** Returns an
+  `*http.Server` with Read/ReadHeader/Write/Idle timeouts + 1 MiB `MaxHeaderBytes`
+  (slowloris / resource-exhaustion defense); `HardenedServerWith` allows
+  per-deployment overrides (e.g. `Write=0` for SSE streaming). `cmd/blrcs-demo`
+  now uses it instead of a bare, timeout-less `http.ListenAndServe`. Closes spec
+  §7 server-timeouts / backlog #9.
+
+### Added
 - **HTTP rate-limit enforcement (`httpmw.RateLimiter`).** A zero-dependency,
   per-client-IP token-bucket middleware that actually enforces `config.RateLimitRPS`
   (previously configured but never applied): 429 + `Retry-After` on exhaustion,

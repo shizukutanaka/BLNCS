@@ -25,7 +25,49 @@ package tlsharden
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"net/http"
+	"time"
 )
+
+// ServerTimeouts — HTTP サーバのタイムアウト群 (slowloris / リソース枯渇防御)。
+//
+// 値 0 は「無制限」を意味する。SSE / 長時間ストリーミングを行うサーバは
+// Write を 0 にすること (default は通常の request/response 用)。
+type ServerTimeouts struct {
+	ReadHeader time.Duration
+	Read       time.Duration
+	Write      time.Duration
+	Idle       time.Duration
+}
+
+// DefaultTimeouts — 一般的な request/response サーバ向けの安全な既定値。
+func DefaultTimeouts() ServerTimeouts {
+	return ServerTimeouts{
+		ReadHeader: 5 * time.Second,
+		Read:       15 * time.Second,
+		Write:      30 * time.Second,
+		Idle:       120 * time.Second,
+	}
+}
+
+// HardenedServer — DefaultTimeouts と 1MiB の MaxHeaderBytes を設定した
+// *http.Server を返す。素の http.ListenAndServe(無タイムアウト) の代替。
+func HardenedServer(addr string, h http.Handler) *http.Server {
+	return HardenedServerWith(addr, h, DefaultTimeouts())
+}
+
+// HardenedServerWith — タイムアウトを明示指定して hardened *http.Server を返す。
+func HardenedServerWith(addr string, h http.Handler, t ServerTimeouts) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: t.ReadHeader,
+		ReadTimeout:       t.Read,
+		WriteTimeout:      t.Write,
+		IdleTimeout:       t.Idle,
+		MaxHeaderBytes:    1 << 20, // 1 MiB
+	}
+}
 
 // Modern — TLS 1.2 minimum, modern cipher suites
 //

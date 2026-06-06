@@ -1,8 +1,8 @@
-# Binaries
-blrcs
-blrcs-mcp
-blrcs-mcpd
-blrcs-demo
+# Binaries (anchored to the module root so they don't match cmd/ source dirs)
+/blrcs
+/blrcs-mcp
+/blrcs-mcpd
+/blrcs-demo
 *.exe
 *.exe~
 *.dll
