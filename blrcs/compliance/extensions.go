@@ -243,17 +243,31 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 		}
 	}
 
-	// Parse + verify issuer JWT
+	// Parse + verify issuer JWT (alg-aware: pin header alg, dispatch by registry)
 	jwtSegments := strings.SplitN(parts[0], ".", 3)
 	if len(jwtSegments) != 3 {
 		return nil, ErrSDJWTMalformed
+	}
+	hdrBytes, err := base64.RawURLEncoding.DecodeString(jwtSegments[0])
+	if err != nil {
+		return nil, ErrSDJWTMalformed
+	}
+	var hdr struct {
+		Alg string `json:"alg"`
+	}
+	if err := json.Unmarshal(hdrBytes, &hdr); err != nil {
+		return nil, ErrSDJWTMalformed
+	}
+	verify, ok := lookupJWSVerifier(hdr.Alg)
+	if !ok {
+		return nil, ErrSDJWTUnsupportedAlg
 	}
 	sigInput := jwtSegments[0] + "." + jwtSegments[1]
 	sigBytes, err := base64.RawURLEncoding.DecodeString(jwtSegments[2])
 	if err != nil {
 		return nil, fmt.Errorf("sdjwt: bad sig encoding: %w", err)
 	}
-	if !ed25519.Verify(pub, []byte(sigInput), sigBytes) {
+	if !verify([]byte(pub), []byte(sigInput), sigBytes) {
 		return nil, ErrSDJWTSigFailed
 	}
 	payloadBytes, err := base64.RawURLEncoding.DecodeString(jwtSegments[1])

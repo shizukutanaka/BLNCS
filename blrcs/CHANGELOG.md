@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **JWS algorithm agility + algorithm-confusion hardening.** SD-JWT verification
+  now parses the issuer JWT header, pins the `alg` against a registry, and rejects
+  unknown algs (`alg:none`/substitution → `ErrSDJWTUnsupportedAlg`) instead of
+  blindly assuming EdDSA. `RegisterJWSVerifier(alg, fn)` lets integrators plug in
+  additional algorithms (e.g. post-quantum ML-DSA) without BLRCS taking a core
+  dependency; EdDSA (Ed25519) ships built-in.
 - **Signed Status List Token (`statuslist+jwt`) + serving helper.**
   `BitstringStatusList.IssueToken` publishes the list as an Ed25519-signed token
   (draft-ietf-oauth-status-list JWT form) with `ttl`/`exp`; `VerifyStatusListToken`
