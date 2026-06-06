@@ -78,7 +78,7 @@ go test ./integration/
 ```
 core domain          compliance / scitt / storage / revocation
 typed primitives     types / builder / errkit / telemetry / ctx
-standards            openid4vp / openid4vci / dcapi / mcp / conformance
+standards            openid4vp / openid4vci / dcapi / mcp / vctmeta / conformance
 crypto/keys          kms / atrest
 hardening            recovery / replay / saga / fuzz / property / schemaver
 observability        metrics / otelbridge / doctor / healthprobe / diag

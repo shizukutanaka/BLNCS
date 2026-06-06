@@ -95,7 +95,7 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §6 SCITT register ordering + proofs | ✅ | COSE Receipts ❌ #3 |
 | §6 witness cosigning (split-view defense) | ✅ | **implemented** (`scitt.Witness`) |
 | §2 mdoc/mDL format | ❌ | backlog #10 (dcapi stub only) |
-| §3 SD-JWT-VC Type Metadata / vct#integrity | ❌ | backlog #7 |
+| §3 SD-JWT-VC Type Metadata / vct#integrity | ⚠️ | resolution + integrity ✅ (`vctmeta`); JSON-Schema validation ❌ #7 |
 | §7 crypto-agility hook | ✅ | EdDSA built-in; ML-DSA pluggable |
 | §7 HTTP rate-limit enforcement | ✅ | **implemented** (`httpmw.RateLimiter`) |
 | §7 HTTP server read/write/idle timeouts | ✅ | **implemented** (`tlsharden.HardenedServer`) |
@@ -109,5 +109,5 @@ collapsed duplicate digests). All four are now implemented with tests.
 ### Highest-value remaining gaps (ordered)
 1. mdoc/mDL format (§2) — backlog #10 (needs a CBOR/COSE layer).
 2. COSE Receipts for SCITT (§6) — backlog #3 (shares the CBOR/COSE layer).
-3. SD-JWT-VC Type Metadata / `vct#integrity` (§3) — backlog #7.
+3. SD-JWT-VC JSON-Schema validation (§3) — backlog #7 (needs a schema validator).
 4. did:webvh verifiable history (§1) — backlog #5.

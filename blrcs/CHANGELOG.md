@@ -6,6 +6,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **SD-JWT-VC Type Metadata resolution + `vct#integrity` (`vctmeta` package).**
+  `vctmeta.Resolve` fetches Type Metadata from an https `vct` and verifies it
+  against the credential's `vct#integrity` (W3C SRI `sha256-…`) so the metadata
+  can be trusted and cached; `Integrity` computes the value for issuers,
+  `HTTPFetcher` is the default (size-bounded) transport, and the fetcher is
+  injectable for tests. JSON-Schema validation (`schema`/`schema_uri`) is left to
+  an external validator (zero-dependency policy). Spec §3 / backlog #7 (partial).
+
 ### Security
 - **OpenID4VP `client_id` scheme validation (`ValidateClientID`).** Authorization
   Requests now reject malformed verifier identifiers at creation
