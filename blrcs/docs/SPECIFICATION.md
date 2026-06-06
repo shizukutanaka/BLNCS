@@ -97,7 +97,8 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §2 mdoc/mDL format | ❌ | backlog #10 (dcapi stub only) |
 | §3 SD-JWT-VC Type Metadata / vct#integrity | ❌ | backlog #7 |
 | §7 crypto-agility hook | ✅ | EdDSA built-in; ML-DSA pluggable |
-| §7 HTTP server timeouts / rate-limit enforce | ❌ | backlog #9 (config exists, unenforced) |
+| §7 HTTP rate-limit enforcement | ✅ | **implemented** (`httpmw.RateLimiter`) |
+| §7 HTTP server read/write/idle timeouts | ❌ | backlog #9 |
 
 ### Gaps found while writing this spec and **fixed in this change**
 §3.1 alg pinning, §3.2 `_sd_alg` enforcement, §3.3 mandatory `vct`, and §3.5
@@ -106,7 +107,7 @@ verifier (it assumed EdDSA, ignored `_sd_alg`, did not require `vct`, and silent
 collapsed duplicate digests). All four are now implemented with tests.
 
 ### Highest-value remaining gaps (ordered)
-1. HTTP rate-limit enforcement (§7) — backlog #9 (config exists, unenforced).
-2. mdoc/mDL format (§2) — backlog #10.
-3. client_id scheme validation (§5) — backlog #6.
+1. mdoc/mDL format (§2) — backlog #10.
+2. `client_id` scheme validation (§5) — backlog #6.
+3. HTTP server read/write/idle timeouts (§7) — backlog #9.
 4. COSE Receipts for SCITT (§6) — backlog #3.

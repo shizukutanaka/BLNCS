@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **HTTP rate-limit enforcement (`httpmw.RateLimiter`).** A zero-dependency,
+  per-client-IP token-bucket middleware that actually enforces `config.RateLimitRPS`
+  (previously configured but never applied): 429 + `Retry-After` on exhaustion,
+  `rps<=0` disables it, and `GC(ttl)` reclaims idle buckets. Compose via
+  `chain.Use(rl.Middleware)`. Closes spec §7 / backlog #9 (enforcement half).
+
+### Added
 - **SCITT witness cosigning (split-view defense).** `scitt.VerifyCheckpoint`
   authenticates a log's signed tree head; `scitt.Witness` cosigns a checkpoint
   only after verifying the issuer signature and an append-only **consistency
