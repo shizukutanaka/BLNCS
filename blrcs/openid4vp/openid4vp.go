@@ -43,6 +43,7 @@ var (
 	ErrPresentationMissing = errors.New("openid4vp: vp_token missing")
 	ErrClaimMissing        = errors.New("openid4vp: required claim not disclosed")
 	ErrDefinitionEmpty     = errors.New("openid4vp: presentation_definition requires >=1 input descriptor")
+	ErrClientIDInvalid     = errors.New("openid4vp: invalid client_id (scheme/format)")
 )
 
 // ============================================================================
@@ -202,6 +203,9 @@ func NewVerifier(clientID, responseURI string, store SessionStore) *Verifier {
 // 戻り値: QRやディープリンクに埋込む URL (openid4vp://...) と state
 // Walletはこの URL を解釈し、ユーザに同意を求めた後、vp_token を ResponseURI に POST する
 func (v *Verifier) CreateRequest(def PresentationDefinition) (requestURL string, state string, err error) {
+	if err := ValidateClientID(v.ClientID); err != nil {
+		return "", "", err
+	}
 	if len(def.RequiredClaims) == 0 {
 		return "", "", ErrDefinitionEmpty
 	}
@@ -238,6 +242,9 @@ func (v *Verifier) CreateRequest(def PresentationDefinition) (requestURL string,
 // Presentation Exchange は v1.0 で削除されたため、v1.0 準拠ウォレットには
 // こちらを使う。query は §6 に従い検証される。
 func (v *Verifier) CreateRequestDCQL(query DCQLQuery) (requestURL string, state string, err error) {
+	if err := ValidateClientID(v.ClientID); err != nil {
+		return "", "", err
+	}
 	if err := query.Validate(); err != nil {
 		return "", "", err
 	}

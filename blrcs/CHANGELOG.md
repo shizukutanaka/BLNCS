@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **OpenID4VP `client_id` scheme validation (`ValidateClientID`).** Authorization
+  Requests now reject malformed verifier identifiers at creation
+  (`CreateRequest`/`CreateRequestDCQL` → `ErrClientIDInvalid`): empty/whitespace,
+  and per-scheme format errors for the OpenID4VP v1.0 Client Identifier Prefixes
+  (`redirect_uri`/`web-origin`/`openid_federation` must be absolute https,
+  `decentralized_identifier` must be a DID, `x509_san_dns` a DNS name, etc.).
+  Bare/pre-registered identifiers (incl. plain https URLs) remain accepted.
+  Completes the OpenID4VP anti-phishing story (spec §5 / backlog #6).
+
 ### Added
 - **Hardened HTTP server helper (`tlsharden.HardenedServer`).** Returns an
   `*http.Server` with Read/ReadHeader/Write/Idle timeouts + 1 MiB `MaxHeaderBytes`

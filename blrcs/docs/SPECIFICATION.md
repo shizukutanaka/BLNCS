@@ -91,7 +91,7 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §4 signed Status List Token + sub binding | ✅ | |
 | §4 issuer-metric privacy (padding/accumulator) | ❌ | backlog #11 (CRSet) |
 | §5 OpenID4VP nonce binding + one-time state | ✅ | |
-| §5 client_id scheme validation | ❌ | backlog #6 |
+| §5 client_id scheme validation | ✅ | **implemented** (`openid4vp.ValidateClientID`) |
 | §6 SCITT register ordering + proofs | ✅ | COSE Receipts ❌ #3 |
 | §6 witness cosigning (split-view defense) | ✅ | **implemented** (`scitt.Witness`) |
 | §2 mdoc/mDL format | ❌ | backlog #10 (dcapi stub only) |
@@ -107,7 +107,7 @@ verifier (it assumed EdDSA, ignored `_sd_alg`, did not require `vct`, and silent
 collapsed duplicate digests). All four are now implemented with tests.
 
 ### Highest-value remaining gaps (ordered)
-1. `client_id` scheme validation (§5) — backlog #6.
-2. mdoc/mDL format (§2) — backlog #10.
-3. COSE Receipts for SCITT (§6) — backlog #3.
-4. SD-JWT-VC Type Metadata / `vct#integrity` (§3) — backlog #7.
+1. mdoc/mDL format (§2) — backlog #10 (needs a CBOR/COSE layer).
+2. COSE Receipts for SCITT (§6) — backlog #3 (shares the CBOR/COSE layer).
+3. SD-JWT-VC Type Metadata / `vct#integrity` (§3) — backlog #7.
+4. did:webvh verifiable history (§1) — backlog #5.
