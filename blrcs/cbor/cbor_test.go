@@ -1,0 +1,448 @@
+package cbor
+
+import (
+	"bytes"
+	"encoding/hex"
+	"testing"
+)
+
+// ============================================================================
+// Encoding — RFC 8949 §A test vectors
+// ============================================================================
+
+func mustHex(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+var encodeVectors = []struct {
+	name  string
+	value any
+	want  string // hex
+}{
+	// Unsigned integers (RFC 8949 §A.1)
+	{"uint 0", uint64(0), "00"},
+	{"uint 1", uint64(1), "01"},
+	{"uint 10", uint64(10), "0a"},
+	{"uint 23", uint64(23), "17"},
+	{"uint 24", uint64(24), "1818"},
+	{"uint 25", uint64(25), "1819"},
+	{"uint 100", uint64(100), "1864"},
+	{"uint 1000", uint64(1000), "1903e8"},
+	{"uint 1000000", uint64(1000000), "1a000f4240"},
+	{"uint 18446744073709551615", uint64(18446744073709551615), "1bffffffffffffffff"},
+
+	// Negative integers (RFC 8949 §A.1)
+	{"int -1", int64(-1), "20"},
+	{"int -10", int64(-10), "29"},
+	{"int -100", int64(-100), "3863"},
+	{"int -1000", int64(-1000), "3903e7"},
+
+	// Byte strings (RFC 8949 §A.2)
+	{"bstr empty", []byte{}, "40"},
+	{"bstr 0104", []byte{0x01, 0x02, 0x03, 0x04}, "4401020304"},
+
+	// Text strings (RFC 8949 §A.3)
+	{"tstr empty", "", "60"},
+	{"tstr a", "a", "6161"},
+	{"tstr IETF", "IETF", "6449455446"},
+
+	// Arrays (RFC 8949 §A.4)
+	{"array []", []any{}, "80"},
+	{"array [1,2,3]", []any{uint64(1), uint64(2), uint64(3)}, "83010203"},
+	{"array [1,[2,3],[4,5]]", []any{uint64(1), []any{uint64(2), uint64(3)}, []any{uint64(4), uint64(5)}}, "8301820203820405"},
+
+	// Simple values
+	{"false", false, "f4"},
+	{"true", true, "f5"},
+	{"null", nil, "f6"},
+}
+
+func TestMarshalVectors(t *testing.T) {
+	for _, tc := range encodeVectors {
+		got, err := Marshal(tc.value)
+		if err != nil {
+			t.Errorf("%s: Marshal error: %v", tc.name, err)
+			continue
+		}
+		want := mustHex(tc.want)
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s: got %x, want %x", tc.name, got, want)
+		}
+	}
+}
+
+func TestMarshalGoInts(t *testing.T) {
+	// Verify all Go integer types encode correctly
+	cases := []struct {
+		v    any
+		want uint64
+	}{
+		{uint(42), 42},
+		{uint8(42), 42},
+		{uint16(42), 42},
+		{uint32(42), 42},
+		{uint64(42), 42},
+		{int(42), 42},
+		{int8(42), 42},
+		{int16(42), 42},
+		{int32(42), 42},
+		{int64(42), 42},
+	}
+	for _, tc := range cases {
+		b, err := Marshal(tc.v)
+		if err != nil {
+			t.Fatalf("Marshal(%T(%v)): %v", tc.v, tc.v, err)
+		}
+		got, err := Unmarshal(b)
+		if err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		n, ok := got.(uint64)
+		if !ok || n != tc.want {
+			t.Errorf("got %v (%T), want uint64(%d)", got, got, tc.want)
+		}
+	}
+}
+
+func TestMarshalUnsupportedType(t *testing.T) {
+	_, err := Marshal(struct{ X int }{1})
+	if err == nil {
+		t.Error("expected error for unsupported struct type")
+	}
+}
+
+// ============================================================================
+// Decoding — roundtrip
+// ============================================================================
+
+func TestRoundtripUint(t *testing.T) {
+	for _, n := range []uint64{0, 1, 23, 24, 255, 256, 65535, 65536, 1<<32 - 1, 1 << 32, 1<<64 - 1} {
+		b, _ := Marshal(n)
+		v, err := Unmarshal(b)
+		if err != nil {
+			t.Errorf("Unmarshal uint %d: %v", n, err)
+			continue
+		}
+		got, ok := v.(uint64)
+		if !ok || got != n {
+			t.Errorf("uint %d: got %v (%T)", n, v, v)
+		}
+	}
+}
+
+func TestRoundtripNeg(t *testing.T) {
+	for _, n := range []int64{-1, -24, -25, -256, -257, -1000, -1 << 31} {
+		b, _ := Marshal(n)
+		v, err := Unmarshal(b)
+		if err != nil {
+			t.Errorf("Unmarshal int %d: %v", n, err)
+			continue
+		}
+		got, ok := v.(int64)
+		if !ok || got != n {
+			t.Errorf("int %d: got %v (%T)", n, v, v)
+		}
+	}
+}
+
+func TestRoundtripBytes(t *testing.T) {
+	cases := [][]byte{
+		nil,
+		{},
+		{0x01, 0x02, 0x03},
+		make([]byte, 300),
+	}
+	for _, c := range cases {
+		b, _ := Marshal(c)
+		v, err := Unmarshal(b)
+		if err != nil {
+			t.Errorf("Unmarshal []byte: %v", err)
+			continue
+		}
+		got, ok := v.([]byte)
+		if c == nil {
+			// nil []byte marshals as empty bstr (len=0)
+			if !ok || len(got) != 0 {
+				t.Errorf("nil []byte: got %v (%T)", v, v)
+			}
+			continue
+		}
+		if !ok || !bytes.Equal(got, c) {
+			t.Errorf("[]byte: got %x, want %x", got, c)
+		}
+	}
+}
+
+func TestRoundtripString(t *testing.T) {
+	for _, s := range []string{"", "hello", "IETF"} {
+		b, _ := Marshal(s)
+		v, err := Unmarshal(b)
+		if err != nil {
+			t.Errorf("Unmarshal string: %v", err)
+			continue
+		}
+		got, ok := v.(string)
+		if !ok || got != s {
+			t.Errorf("string %q: got %v (%T)", s, v, v)
+		}
+	}
+}
+
+func TestRoundtripArray(t *testing.T) {
+	orig := []any{uint64(1), "hello", []byte{0xde, 0xad}}
+	b, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Unmarshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arr, ok := v.([]any)
+	if !ok || len(arr) != 3 {
+		t.Fatalf("got %T", v)
+	}
+	if arr[0].(uint64) != 1 {
+		t.Errorf("arr[0]: %v", arr[0])
+	}
+	if arr[1].(string) != "hello" {
+		t.Errorf("arr[1]: %v", arr[1])
+	}
+	if !bytes.Equal(arr[2].([]byte), []byte{0xde, 0xad}) {
+		t.Errorf("arr[2]: %v", arr[2])
+	}
+}
+
+func TestRoundtripIntKeyMap(t *testing.T) {
+	orig := map[int]any{1: AlgEdDSA, 4: []byte("mykey")}
+	b, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Unmarshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawMap, ok := v.(map[any]any)
+	if !ok {
+		t.Fatalf("not a map: %T", v)
+	}
+	m := IntMap(rawMap)
+	alg, ok := GetInt(m[1])
+	if !ok || alg != AlgEdDSA {
+		t.Errorf("alg: %v", m[1])
+	}
+}
+
+func TestRoundtripStrKeyMap(t *testing.T) {
+	orig := map[string]any{"vct": "https://example.com/type", "iss": "did:web:issuer"}
+	b, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Unmarshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawMap, ok := v.(map[any]any)
+	if !ok {
+		t.Fatalf("not a map: %T", v)
+	}
+	if rawMap["vct"].(string) != "https://example.com/type" {
+		t.Errorf("vct: %v", rawMap["vct"])
+	}
+}
+
+func TestRoundtripTag(t *testing.T) {
+	orig := Tag{Number: TagCOSESign1, Content: []any{[]byte("protected"), map[int]any{}, nil, []byte("sig")}}
+	b, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Unmarshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, ok := v.(Tag)
+	if !ok || tag.Number != TagCOSESign1 {
+		t.Fatalf("not tag 18: %v", v)
+	}
+}
+
+func TestRoundtripBool(t *testing.T) {
+	for _, bv := range []bool{true, false} {
+		b, _ := Marshal(bv)
+		v, err := Unmarshal(b)
+		if err != nil {
+			t.Errorf("bool %v: %v", bv, err)
+		}
+		if v.(bool) != bv {
+			t.Errorf("bool mismatch: %v", v)
+		}
+	}
+}
+
+func TestRoundtripNull(t *testing.T) {
+	b, _ := Marshal(nil)
+	v, err := Unmarshal(b)
+	if err != nil {
+		t.Errorf("null: %v", err)
+	}
+	if v != nil {
+		t.Errorf("null decoded to %v", v)
+	}
+}
+
+// ============================================================================
+// Decode error cases
+// ============================================================================
+
+func TestDecodeTrailingBytes(t *testing.T) {
+	b := []byte{0x01, 0x02} // uint 1 + trailing 0x02
+	_, err := Unmarshal(b)
+	if err == nil {
+		t.Error("expected error for trailing bytes")
+	}
+}
+
+func TestDecodeUnexpectedEOF(t *testing.T) {
+	cases := [][]byte{
+		{0x41},         // bstr of length 1, but no data
+		{0x82, 0x01},   // array of 2, only 1 element
+		{0x18},         // uint with 1-byte arg, no arg byte
+	}
+	for _, c := range cases {
+		_, err := Unmarshal(c)
+		if err == nil {
+			t.Errorf("expected error for %x", c)
+		}
+	}
+}
+
+func TestDecodeDepthLimit(t *testing.T) {
+	// Build 70 levels deep nested array: more than maxDepth=64
+	b := []byte{}
+	for i := 0; i < 70; i++ {
+		b = append(b, 0x81) // array of 1
+	}
+	b = append(b, 0x00) // final uint 0
+	_, err := Unmarshal(b)
+	if err == nil {
+		t.Error("expected error for too-deep nesting")
+	}
+}
+
+// ============================================================================
+// UnmarshalFirst
+// ============================================================================
+
+func TestUnmarshalFirst(t *testing.T) {
+	b := []byte{0x01, 0x02} // uint 1 followed by extra byte
+	v, n, err := UnmarshalFirst(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.(uint64) != 1 {
+		t.Errorf("value: %v", v)
+	}
+	if n != 1 {
+		t.Errorf("consumed: %d", n)
+	}
+}
+
+// ============================================================================
+// Marshaler interface
+// ============================================================================
+
+type rawCBOR []byte
+
+func (r rawCBOR) MarshalCBOR() ([]byte, error) { return []byte(r), nil }
+
+func TestMarshalerInterface(t *testing.T) {
+	payload := rawCBOR(mustHex("820102")) // [1,2]
+	b, err := Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Unmarshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arr, ok := v.([]any)
+	if !ok || len(arr) != 2 {
+		t.Errorf("unexpected: %v", v)
+	}
+}
+
+// ============================================================================
+// IntMap / GetInt / GetBytes helpers
+// ============================================================================
+
+func TestIntMapHelpers(t *testing.T) {
+	raw := map[any]any{
+		uint64(1): int64(-8),
+		int64(4):  []byte("kid"),
+		"str":     "ignored-by-IntMap",
+	}
+	m := IntMap(raw)
+	if len(m) != 2 {
+		t.Errorf("expected 2 int keys, got %d", len(m))
+	}
+	alg, ok := GetInt(m[1])
+	if !ok || alg != -8 {
+		t.Errorf("alg: %v", m[1])
+	}
+	kid, ok := GetBytes(m[4])
+	if !ok || string(kid) != "kid" {
+		t.Errorf("kid: %v", m[4])
+	}
+}
+
+// ============================================================================
+// Deterministic encoding
+// ============================================================================
+
+func TestDeterministicIntKeyMap(t *testing.T) {
+	// Same map encoded twice must produce identical bytes
+	m := map[int]any{3: "c", 1: "a", 2: "b"}
+	b1, _ := Marshal(m)
+	b2, _ := Marshal(m)
+	if !bytes.Equal(b1, b2) {
+		t.Error("int key map encoding not deterministic")
+	}
+	// Keys must appear in ascending order: 1, 2, 3
+	// Each key is a single-byte CBOR int (0x01, 0x02, 0x03)
+	// Value "a"=0x6161, "b"=0x6162, "c"=0x6163
+	// Expected: a3 01 61 61 02 61 62 03 61 63
+	want := mustHex("a3016161026162036163")
+	if !bytes.Equal(b1, want) {
+		t.Errorf("got %x, want %x", b1, want)
+	}
+}
+
+func TestDeterministicStrKeyMap(t *testing.T) {
+	// Shorter keys first (len 1 before len 2), then lexicographic for equal lengths.
+	// "c"(len1) < "aa"(len2) < "bb"(len2).
+	// a3 = map(3)
+	// 61 63 = tstr "c"   03 = uint 3
+	// 62 61 61 = tstr "aa"  01 = uint 1
+	// 62 62 62 = tstr "bb"  02 = uint 2
+	want := []byte{
+		0xa3,
+		0x61, 'c', 0x03,
+		0x62, 'a', 'a', 0x01,
+		0x62, 'b', 'b', 0x02,
+	}
+	m := map[string]any{"bb": uint64(2), "aa": uint64(1), "c": uint64(3)}
+	b, err := Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b, want) {
+		t.Errorf("got %x, want %x", b, want)
+	}
+}

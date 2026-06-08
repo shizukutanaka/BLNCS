@@ -63,6 +63,18 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 - `Register` MUST durably persist, then update the in-memory Merkle tree, then
   sign a Receipt (inclusion proof). Ordering MUST hold under failure.
 - The log MUST provide inclusion and consistency proofs.
+- Receipts SHOULD be available as **COSE_Sign1** (tag 18, RFC 9052) structures for
+  IETF SCITT interoperability; the JSON+Ed25519 format remains supported for
+  backward compatibility. `IssueCOSEReceipt` / `VerifyCOSEReceipt` implement this.
+
+## 8. CBOR / COSE foundation
+- A minimal zero-dependency CBOR encoder/decoder (`cbor` package, RFC 8949) MUST
+  support: major types 0–7, definite-length arrays/maps, tag 18 (COSE_Sign1), and
+  deterministic encoding (integer keys sorted numerically, string keys sorted by
+  encoded length then lexicographically per RFC 8949 §4.2.1).
+- `cbor.Sign1` / `cbor.Verify1` MUST use Sig_Structure (RFC 9052 §4.4) with
+  algorithm pinning (reject absent or unknown `alg`). Additional algorithms MAY be
+  registered via `cbor.RegisterVerifier` without modifying the core package.
 
 ## 7. Cross-cutting
 - Zero external dependencies (stdlib + Ed25519 only). Crypto agility: additional
@@ -92,22 +104,22 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §4 issuer-metric privacy (padding/accumulator) | ❌ | backlog #11 (CRSet) |
 | §5 OpenID4VP nonce binding + one-time state | ✅ | |
 | §5 client_id scheme validation | ✅ | **implemented** (`openid4vp.ValidateClientID`) |
-| §6 SCITT register ordering + proofs | ✅ | COSE Receipts ❌ #3 |
+| §6 SCITT register ordering + proofs | ✅ | |
+| §6 COSE_Sign1 receipts (IETF SCITT interop) | ✅ | **implemented** (`scitt.IssueCOSEReceipt`, `cbor` package) |
 | §6 witness cosigning (split-view defense) | ✅ | **implemented** (`scitt.Witness`) |
-| §2 mdoc/mDL format | ❌ | backlog #10 (dcapi stub only) |
+| §8 CBOR encoder/decoder (RFC 8949, deterministic) | ✅ | **implemented** (`cbor` package) |
+| §8 COSE_Sign1 sign/verify (RFC 9052) | ✅ | **implemented** (`cbor.Sign1`, `cbor.Verify1`) |
+| §8 COSE algorithm agility (`RegisterVerifier`) | ✅ | **implemented** |
+| §2 mdoc/mDL format | ❌ | backlog #10 (dcapi stub; CBOR/COSE layer now available) |
 | §3 SD-JWT-VC Type Metadata / vct#integrity | ⚠️ | resolution + integrity ✅ (`vctmeta`); JSON-Schema validation ❌ #7 |
-| §7 crypto-agility hook | ✅ | EdDSA built-in; ML-DSA pluggable |
+| §7 crypto-agility hook (JWS) | ✅ | EdDSA built-in; ML-DSA pluggable |
 | §7 HTTP rate-limit enforcement | ✅ | **implemented** (`httpmw.RateLimiter`) |
 | §7 HTTP server read/write/idle timeouts | ✅ | **implemented** (`tlsharden.HardenedServer`) |
-
-### Gaps found while writing this spec and **fixed in this change**
-§3.1 alg pinning, §3.2 `_sd_alg` enforcement, §3.3 mandatory `vct`, and §3.5
-duplicate-digest rejection were all specified-but-unimplemented in the SD-JWT
-verifier (it assumed EdDSA, ignored `_sd_alg`, did not require `vct`, and silently
-collapsed duplicate digests). All four are now implemented with tests.
+| §1 did:webvh verifiable history | ❌ | backlog #5 |
+| §4 issuer-metric privacy (CRSet accumulator) | ❌ | backlog #11 |
 
 ### Highest-value remaining gaps (ordered)
-1. mdoc/mDL format (§2) — backlog #10 (needs a CBOR/COSE layer).
-2. COSE Receipts for SCITT (§6) — backlog #3 (shares the CBOR/COSE layer).
-3. SD-JWT-VC JSON-Schema validation (§3) — backlog #7 (needs a schema validator).
-4. did:webvh verifiable history (§1) — backlog #5.
+1. mdoc/mDL format (§2) — backlog #10; CBOR/COSE layer now ready, needs ISO 18013-5 IssuerSigned structure.
+2. SD-JWT-VC JSON-Schema validation (§3) — backlog #7 (zero-dep constraint; embed a minimal draft-07 validator).
+3. did:webvh verifiable history (§1) — backlog #5.
+4. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).

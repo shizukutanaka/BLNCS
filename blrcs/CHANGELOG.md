@@ -7,6 +7,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Minimal zero-dependency CBOR/COSE layer (`cbor` package).** Implements RFC
+  8949 CBOR encoding/decoding (major types 0–7, deterministic integer-key and
+  string-key map ordering per §4.2.1, tag 18 for COSE_Sign1, depth/size bounds
+  to prevent stack exhaustion or OOM) and RFC 9052 COSE_Sign1 sign/verify over
+  Ed25519 with algorithm-confusion defense (missing/unknown `alg` rejected) and a
+  `RegisterVerifier` hook for pluggable algorithms. Serves as the foundation for
+  SCITT COSE receipts and future mdoc/mDL (ISO 18013-5) support. 36 tests.
+
+- **COSE_Sign1 receipts for IETF SCITT (`scitt.IssueCOSEReceipt` /
+  `VerifyCOSEReceipt`).** An alternative to the JSON+Ed25519 receipt format that
+  is interoperable with IETF SCITT-compliant verifiers: the COSE_Sign1 payload is
+  a CBOR map carrying `leaf_index`, `tree_size`, `root_hash`, `audit_path`, `ts_id`,
+  and `reg_at`; the protected header pins `alg=EdDSA` and carries the TS key-ID.
+  Existing JSON receipts and all prior tests are unaffected. Closes spec §6 backlog
+  #3 (COSE Receipts). 5 new tests.
+
+### Added
 - **SD-JWT-VC Type Metadata resolution + `vct#integrity` (`vctmeta` package).**
   `vctmeta.Resolve` fetches Type Metadata from an https `vct` and verifies it
   against the credential's `vct#integrity` (W3C SRI `sha256-…`) so the metadata

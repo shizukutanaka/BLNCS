@@ -4,7 +4,7 @@
 
 ```
 stdlib + ed25519 only — zero external dependencies
-804 tests · 47 packages · ~15,400 LoC implementation · 9 fuzz targets
+847 tests · 48 packages · ~15,800 LoC implementation · 9 fuzz targets
 ```
 
 ## Status
@@ -17,7 +17,7 @@ stdlib + ed25519 only — zero external dependencies
 | GS1 Digital Link (ISO/IEC 18975) | ✅ | compliance, fuzz |
 | EU Battery Passport (Reg 2023/1542) | ✅ | compliance |
 | EU ESPR Digital Product Passport | ✅ | compliance |
-| IETF SCITT Merkle Log | ✅ | scitt |
+| IETF SCITT Merkle Log + COSE_Sign1 Receipts | ✅ | scitt, cbor |
 | OpenID4VP Verifier | ✅ | openid4vp |
 | OpenID4VCI Issuer | ✅ | openid4vci |
 | W3C DC-API (Safari 26 / Chrome 141) | ✅ | dcapi |
@@ -80,12 +80,13 @@ core domain          compliance / scitt / storage / revocation
 typed primitives     types / builder / errkit / telemetry / ctx
 standards            openid4vp / openid4vci / dcapi / mcp / vctmeta / conformance
 crypto/keys          kms / atrest
+encoding             cbor (RFC 8949 encoder/decoder + COSE_Sign1 RFC 9052)
 hardening            recovery / replay / saga / fuzz / property / schemaver
 observability        metrics / otelbridge / doctor / healthprobe / diag
 privacy              privacy
 trust/distribution   didresolver / webhook / cas / compose
-http composition     httpchain / httpmw (recovery+trace+log+auth+CORS)
-TLS                  tlsharden (Modern / Strict / mTLS)
+http composition     httpchain / httpmw (recovery+trace+log+auth+CORS+rate-limit)
+TLS                  tlsharden (Modern / Strict / mTLS / hardened server timeouts)
 config/spec          openapi / apispec / apiversion / config / capability / semconv
 i18n                 i18n
 integration          integration (E2E triangle test)
