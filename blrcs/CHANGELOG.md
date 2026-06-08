@@ -7,6 +7,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **ISO/IEC 18013-5 mdoc / mDL credential format (`mdoc` package).** Full
+  `IssuerSigned` issuance, verification, and selective disclosure on top of the
+  `cbor` layer — the format every comparable EUDI stack ships (eudi-lib,
+  walt.id, A-SIT vck) and previously only a `dcapi` request stub in BLRCS.
+  `Issue` builds `IssuerSignedItem`s (≥16-byte CSPRNG salt each), records
+  `SHA-256(IssuerSignedItemBytes)` in the MobileSecurityObject `valueDigests`, and
+  signs the MSO with a COSE_Sign1 `issuerAuth`. `Verify` checks the issuerAuth
+  signature, MSO `version`/`digestAlgorithm`, the validity window, and every
+  disclosed item's digest. `Present` performs selective disclosure (drop items;
+  the MSO still attests to the full set). Holder binding via COSE_Key (OKP
+  Ed25519) `deviceKey` is supported. Device-signature / session-transcript
+  binding (proximity transport) is out of scope. Closes spec §2a / backlog #10.
+  11 tests + runnable example.
+
+- **Fuzz targets for the CBOR decoder and mdoc verifier (`FuzzCBOR`, `FuzzMdoc`).**
+  Both passed ~100k executions each; `FuzzCBOR` surfaced an unhashable-map-key
+  panic that is now fixed (see below). Brings the fuzz suite to 11 targets.
+
+### Fixed
+- **CBOR decoder panic on unhashable map keys.** A crafted CBOR map with a
+  composite key (byte/text array, map, …) caused `map[k]=v` to panic when used as
+  a Go map key. The decoder now rejects non-hashable keys
+  (`cbor: unsupported map key type`) — integer/text/bool/null keys cover all real
+  COSE/mdoc/SD-JWT usage. Found by `FuzzCBOR`.
+
+### Added
 - **Minimal zero-dependency CBOR/COSE layer (`cbor` package).** Implements RFC
   8949 CBOR encoding/decoding (major types 0–7, deterministic integer-key and
   string-key map ordering per §4.2.1, tag 18 for COSE_Sign1, depth/size bounds

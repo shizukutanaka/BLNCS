@@ -11,6 +11,7 @@
 package cbor
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -196,6 +197,8 @@ func appendValue(dst []byte, v any) ([]byte, error) {
 		return appendIntKeyMap(dst, val)
 	case map[string]any:
 		return appendStrKeyMap(dst, val)
+	case map[any]any:
+		return appendAnyKeyMap(dst, val)
 	case Tag:
 		dst = AppendTagHeader(dst, val.Number)
 		return appendValue(dst, val.Content)
@@ -227,6 +230,38 @@ func appendIntKeyMap(dst []byte, m map[int]any) ([]byte, error) {
 	for _, k := range keys {
 		dst = AppendInt(dst, int64(k))
 		dst, err = appendValue(dst, m[k])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return dst, nil
+}
+
+// appendAnyKeyMap encodes a map[any]any (the form produced by the decoder),
+// applying RFC 8949 §4.2.1 core deterministic ordering: keys are sorted by their
+// encoded byte representation (bytewise lexicographic). This lets decoded values
+// — e.g. a COSE_Sign1 unprotected header — be re-encoded deterministically.
+func appendAnyKeyMap(dst []byte, m map[any]any) ([]byte, error) {
+	type kv struct {
+		enc []byte
+		val any
+	}
+	pairs := make([]kv, 0, len(m))
+	for k, v := range m {
+		ek, err := appendValue(nil, k)
+		if err != nil {
+			return nil, err
+		}
+		pairs = append(pairs, kv{enc: ek, val: v})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		return bytes.Compare(pairs[i].enc, pairs[j].enc) < 0
+	})
+	dst = AppendMapHeader(dst, len(m))
+	var err error
+	for _, p := range pairs {
+		dst = append(dst, p.enc...)
+		dst, err = appendValue(dst, p.val)
 		if err != nil {
 			return nil, err
 		}
@@ -431,6 +466,9 @@ func (d *decoder) decode() (any, error) {
 			if err != nil {
 				return nil, fmt.Errorf("cbor: map key[%d]: %w", i, err)
 			}
+			if !hashableKey(k) {
+				return nil, fmt.Errorf("cbor: unsupported map key type %T", k)
+			}
 			v, err := d.decode()
 			if err != nil {
 				return nil, fmt.Errorf("cbor: map val[%d]: %w", i, err)
@@ -463,6 +501,19 @@ func (d *decoder) decode() (any, error) {
 // ============================================================================
 // Convenience helpers for callers dealing with decoded map[any]any
 // ============================================================================
+
+// hashableKey reports whether k is a CBOR key type we accept as a Go map key.
+// Composite keys (byte/text-array, map, tag wrapping such) are rejected to avoid
+// a runtime panic from using an unhashable value as a map key. Integer, text,
+// boolean, and null keys cover all real COSE / mdoc / SD-JWT usage.
+func hashableKey(k any) bool {
+	switch k.(type) {
+	case uint64, int64, string, bool, nil:
+		return true
+	default:
+		return false
+	}
+}
 
 // IntMap converts the int/uint64-keyed entries of a decoded map[any]any into
 // a map[int]any. Non-integer keys are silently dropped.

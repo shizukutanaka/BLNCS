@@ -1,10 +1,12 @@
 // COSE_Sign1 (RFC 9052 §4.2) over Ed25519 — zero external dependencies.
 //
 // COSE_Sign1 = #6.18([
-//   protected:   bstr .cbor Header,
-//   unprotected: Header,
-//   payload:     bstr / nil,
-//   signature:   bstr
+//
+//	protected:   bstr .cbor Header,
+//	unprotected: Header,
+//	payload:     bstr / nil,
+//	signature:   bstr
+//
 // ])
 //
 // Only EdDSA (alg=-8) is built in. Other algorithms may be registered via

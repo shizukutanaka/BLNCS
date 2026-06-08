@@ -311,9 +311,9 @@ func TestDecodeTrailingBytes(t *testing.T) {
 
 func TestDecodeUnexpectedEOF(t *testing.T) {
 	cases := [][]byte{
-		{0x41},         // bstr of length 1, but no data
-		{0x82, 0x01},   // array of 2, only 1 element
-		{0x18},         // uint with 1-byte arg, no arg byte
+		{0x41},       // bstr of length 1, but no data
+		{0x82, 0x01}, // array of 2, only 1 element
+		{0x18},       // uint with 1-byte arg, no arg byte
 	}
 	for _, c := range cases {
 		_, err := Unmarshal(c)

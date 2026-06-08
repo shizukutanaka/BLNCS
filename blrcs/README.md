@@ -4,7 +4,7 @@
 
 ```
 stdlib + ed25519 only — zero external dependencies
-847 tests · 48 packages · ~15,800 LoC implementation · 9 fuzz targets
+880+ tests · 50 packages · ~16,400 LoC implementation · 11 fuzz targets
 ```
 
 ## Status
@@ -17,6 +17,7 @@ stdlib + ed25519 only — zero external dependencies
 | GS1 Digital Link (ISO/IEC 18975) | ✅ | compliance, fuzz |
 | EU Battery Passport (Reg 2023/1542) | ✅ | compliance |
 | EU ESPR Digital Product Passport | ✅ | compliance |
+| ISO 18013-5 mdoc / mDL (IssuerSigned + MSO) | ✅ | mdoc, cbor, fuzz |
 | IETF SCITT Merkle Log + COSE_Sign1 Receipts | ✅ | scitt, cbor |
 | OpenID4VP Verifier | ✅ | openid4vp |
 | OpenID4VCI Issuer | ✅ | openid4vci |
@@ -78,7 +79,7 @@ go test ./integration/
 ```
 core domain          compliance / scitt / storage / revocation
 typed primitives     types / builder / errkit / telemetry / ctx
-standards            openid4vp / openid4vci / dcapi / mcp / vctmeta / conformance
+standards            openid4vp / openid4vci / dcapi / mdoc / mcp / vctmeta / conformance
 crypto/keys          kms / atrest
 encoding             cbor (RFC 8949 encoder/decoder + COSE_Sign1 RFC 9052)
 hardening            recovery / replay / saga / fuzz / property / schemaver

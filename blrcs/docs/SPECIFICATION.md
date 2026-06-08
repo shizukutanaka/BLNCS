@@ -25,6 +25,24 @@ backlog and references).
 - Status (optional): when a status reference is given, the payload MUST carry
   `status.status_list` with `idx` and `uri` (draft-ietf-oauth-status-list).
 
+### 2a. Credential issuance (ISO 18013-5 mdoc / mDL)
+- An mdoc credential is an `IssuerSigned` structure (CBOR): `nameSpaces` mapping
+  each NameSpace to an array of `IssuerSignedItemBytes` (`#6.24(bstr .cbor
+  IssuerSignedItem)`), plus an `issuerAuth` COSE_Sign1 over the
+  MobileSecurityObject (MSO).
+- Each `IssuerSignedItem` MUST carry a `digestID`, a ≥16-byte CSPRNG `random`
+  salt, an `elementIdentifier`, and an `elementValue`.
+- The MSO MUST set `version` (`1.0`), `digestAlgorithm` (`SHA-256`),
+  `valueDigests` (NameSpace → DigestID → SHA-256 of the corresponding
+  `IssuerSignedItemBytes`), `docType`, and `validityInfo`
+  (`signed`/`validFrom`/`validUntil` as tdate). It MAY carry `deviceKeyInfo`
+  (`deviceKey` as COSE_Key) for holder binding.
+- A verifier MUST verify the `issuerAuth` signature, enforce `version` /
+  `digestAlgorithm`, enforce the validity window, and confirm every disclosed
+  item's SHA-256 digest matches the MSO `valueDigests` entry for its `digestID`.
+- Selective disclosure: a holder MAY drop items from `nameSpaces`; the credential
+  still verifies (MSO attests to the full digest set).
+
 ## 3. Credential verification — normative rules
 A verifier MUST:
 1. Parse the issuer JWS header and verify `alg` is **supported** (reject
@@ -110,7 +128,9 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §8 CBOR encoder/decoder (RFC 8949, deterministic) | ✅ | **implemented** (`cbor` package) |
 | §8 COSE_Sign1 sign/verify (RFC 9052) | ✅ | **implemented** (`cbor.Sign1`, `cbor.Verify1`) |
 | §8 COSE algorithm agility (`RegisterVerifier`) | ✅ | **implemented** |
-| §2 mdoc/mDL format | ❌ | backlog #10 (dcapi stub; CBOR/COSE layer now available) |
+| §2 mdoc/mDL format (ISO 18013-5 IssuerSigned + MSO) | ✅ | **implemented** (`mdoc` package: Issue/Verify/Present) |
+| §2 mdoc selective disclosure + value-digest integrity | ✅ | **implemented** (`mdoc.Present`, digest checks in `mdoc.Verify`) |
+| §2 mdoc device/holder binding (COSE_Key) | ✅ | deviceKey recovered; device-signature transport ❌ (out of scope) |
 | §3 SD-JWT-VC Type Metadata / vct#integrity | ⚠️ | resolution + integrity ✅ (`vctmeta`); JSON-Schema validation ❌ #7 |
 | §7 crypto-agility hook (JWS) | ✅ | EdDSA built-in; ML-DSA pluggable |
 | §7 HTTP rate-limit enforcement | ✅ | **implemented** (`httpmw.RateLimiter`) |
@@ -119,7 +139,7 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §4 issuer-metric privacy (CRSet accumulator) | ❌ | backlog #11 |
 
 ### Highest-value remaining gaps (ordered)
-1. mdoc/mDL format (§2) — backlog #10; CBOR/COSE layer now ready, needs ISO 18013-5 IssuerSigned structure.
-2. SD-JWT-VC JSON-Schema validation (§3) — backlog #7 (zero-dep constraint; embed a minimal draft-07 validator).
-3. did:webvh verifiable history (§1) — backlog #5.
-4. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).
+1. SD-JWT-VC JSON-Schema validation (§3) — backlog #7 (zero-dep constraint; embed a minimal draft-07 validator).
+2. did:webvh verifiable history (§1) — backlog #5 (verifiable update log + SCID + pre-rotation keys).
+3. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).
+4. mdoc DeviceResponse / session-transcript binding (§2a) — proximity transport (ISO 18013-5 §8/§9), beyond the credential-format scope now covered.

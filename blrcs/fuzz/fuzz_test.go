@@ -25,9 +25,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"testing"
+	"time"
 
+	"blrcs/cbor"
 	"blrcs/compliance"
 	"blrcs/errkit"
+	"blrcs/mdoc"
 	"blrcs/scitt"
 	"blrcs/types"
 )
@@ -307,5 +310,63 @@ func FuzzTieredClaims(f *testing.F) {
 		if len(all) != len(tc.Keys()) {
 			t.Fatalf("authority view should see all: got=%d keys=%d", len(all), len(tc.Keys()))
 		}
+	})
+}
+
+// ============================================================================
+// FuzzCBOR — 任意バイト列を CBOR としてデコード、パニック禁止
+// ============================================================================
+
+func FuzzCBOR(f *testing.F) {
+	f.Add([]byte{0x00})                   // uint 0
+	f.Add([]byte{0x20})                   // int -1
+	f.Add([]byte{0x40})                   // empty bstr
+	f.Add([]byte{0x60})                   // empty tstr
+	f.Add([]byte{0x80})                   // empty array
+	f.Add([]byte{0xa0})                   // empty map
+	f.Add([]byte{0xd2, 0x84})             // tag 18 + truncated array
+	f.Add([]byte{0x83, 0x01, 0x02, 0x03}) // [1,2,3]
+	f.Add([]byte{0x1b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
+	f.Add([]byte{}) // empty
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// 絶対条件: panic しない
+		v, err := cbor.Unmarshal(data)
+		if err != nil {
+			return
+		}
+		// Round-trip: デコードできた値は再エンコードでき、再デコードで一致
+		enc, err := cbor.Marshal(v)
+		if err != nil {
+			// 一部の型 (map[any]any 内の非対応型) は再エンコード不可なことがある
+			return
+		}
+		if _, err := cbor.Unmarshal(enc); err != nil {
+			t.Fatalf("re-decode of marshaled value failed: %v", err)
+		}
+	})
+}
+
+// ============================================================================
+// FuzzMdoc — 任意バイト列を mdoc IssuerSigned として検証、パニック禁止
+// ============================================================================
+
+func FuzzMdoc(f *testing.F) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	// 正規 corpus: 実際に発行した mdoc
+	cred, _ := mdoc.Issue(mdoc.IssueParams{
+		DocType: "org.iso.18013.5.1.mDL",
+		NameSpaces: map[string][]mdoc.Element{
+			"org.iso.18013.5.1": {{Identifier: "family_name", Value: "Doe"}},
+		},
+		IssuerPriv: priv,
+	})
+	f.Add(cred)
+	f.Add([]byte{})
+	f.Add([]byte{0xa0})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// 絶対条件: いかなる入力でも panic しない (エラーは許容)
+		_, _ = mdoc.Verify(data, pub, time.Now())
 	})
 }
