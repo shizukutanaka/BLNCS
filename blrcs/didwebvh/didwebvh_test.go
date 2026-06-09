@@ -3,6 +3,7 @@ package didwebvh
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -370,5 +371,60 @@ func TestSCIDPlaceholderInjectionRejected(t *testing.T) {
 	}
 	if _, err := Verify([]LogEntry{forged}); err == nil {
 		t.Fatal("genesis state containing the {SCID} placeholder must be rejected")
+	}
+}
+
+// ============================================================================
+// versionTime monotonicity — backward time and proof tampering
+// ============================================================================
+
+// TestVersionTimeBackwardDetected verifies that an update whose versionTime
+// precedes the genesis entry is rejected with ErrMalformedEntry.
+func TestVersionTimeBackwardDetected(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesisTime := time.Now().UTC()
+	genesis, did, err := Create(CreateParams{
+		DIDPath:     "ex:p",
+		UpdateKey:   updateKey,
+		VersionTime: genesisTime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := []LogEntry{*genesis}
+
+	// Build an update whose VersionTime is one hour before genesis — must fail.
+	upd, err := Update(UpdateParams{
+		Log:         log,
+		SignKey:     updateKey,
+		NewState:    map[string]any{"id": did, "v": "2"},
+		VersionTime: genesisTime.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Update itself should not fail (time is not checked at write): %v", err)
+	}
+	log = append(log, *upd)
+
+	_, err = Verify(log)
+	if !errors.Is(err, ErrMalformedEntry) {
+		t.Fatalf("backward versionTime: want ErrMalformedEntry, got %v", err)
+	}
+}
+
+// TestProofInvalidDetected verifies that an entry with no proof is rejected
+// with ErrProofInvalid, guarding against log entries that lack a data integrity
+// proof (e.g. truncated or hand-crafted entries).
+func TestProofInvalidDetected(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, _, err := Create(CreateParams{DIDPath: "ex:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Strip the cryptographic proof from the genesis entry.
+	genesis.Proof = nil
+
+	_, err = Verify([]LogEntry{*genesis})
+	if !errors.Is(err, ErrProofInvalid) {
+		t.Fatalf("missing proof: want ErrProofInvalid, got %v", err)
 	}
 }

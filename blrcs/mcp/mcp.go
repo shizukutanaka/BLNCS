@@ -383,6 +383,12 @@ func (s *Server) toolIssuePassport(args json.RawMessage) (string, error) {
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
 	}
+	if in.CarbonKgCO2e < 0 {
+		return "", errors.New("mcp: carbonKgCO2e must be non-negative")
+	}
+	if in.Recyclability < 0 || in.Recyclability > 100 {
+		return "", errors.New("mcp: recyclability must be between 0 and 100")
+	}
 	s.mu.RLock()
 	iss, ok := s.issuers[in.IssuerID]
 	s.mu.RUnlock()
@@ -457,6 +463,9 @@ func (s *Server) toolAttestRange(args json.RawMessage) (string, error) {
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
+	}
+	if in.Min > in.Max {
+		return "", errors.New("mcp: min must be <= max")
 	}
 	s.mu.RLock()
 	att, ok := s.attesters[in.AttesterID]

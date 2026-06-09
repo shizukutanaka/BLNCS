@@ -237,7 +237,11 @@ func (v *Verifier) CreateRequest(def PresentationDefinition) (requestURL string,
 	if err := v.store.Save(state, req, v.DefaultTTL); err != nil {
 		return "", "", err
 	}
-	return buildRequestURL(req), state, nil
+	reqURL, err := buildRequestURL(req)
+	if err != nil {
+		return "", "", err
+	}
+	return reqURL, state, nil
 }
 
 // CreateRequestDCQL — OpenID4VP v1.0 §5 の dcql_query で Authorization Request を作成。
@@ -266,11 +270,15 @@ func (v *Verifier) CreateRequestDCQL(query DCQLQuery) (requestURL string, state 
 	if err := v.store.Save(state, req, v.DefaultTTL); err != nil {
 		return "", "", err
 	}
-	return buildRequestURL(req), state, nil
+	reqURL, err := buildRequestURL(req)
+	if err != nil {
+		return "", "", err
+	}
+	return reqURL, state, nil
 }
 
 // 本番は request_uri モード推奨 (URLが長大化しないよう)、MVP は inline query parameters
-func buildRequestURL(req *AuthorizationRequest) string {
+func buildRequestURL(req *AuthorizationRequest) (string, error) {
 	q := url.Values{}
 	q.Set("client_id", req.ClientID)
 	q.Set("response_type", req.ResponseType)
@@ -278,10 +286,22 @@ func buildRequestURL(req *AuthorizationRequest) string {
 	q.Set("response_uri", req.ResponseURI)
 	q.Set("nonce", req.Nonce)
 	q.Set("state", req.State)
-	// presentation_definition は JSON 文字列として渡す (OpenID4VP §5.4)
-	pdBytes, _ := json.Marshal(req.PresentationDefinition)
-	q.Set("presentation_definition", string(pdBytes))
-	return "openid4vp://authorize?" + q.Encode()
+	if req.DCQLQuery != nil {
+		// OpenID4VP v1.0 §5: dcql_query supersedes presentation_definition
+		b, err := json.Marshal(req.DCQLQuery)
+		if err != nil {
+			return "", fmt.Errorf("openid4vp: marshal dcql_query: %w", err)
+		}
+		q.Set("dcql_query", string(b))
+	} else {
+		// OpenID4VP §5.4: presentation_definition (JSON string)
+		b, err := json.Marshal(req.PresentationDefinition)
+		if err != nil {
+			return "", fmt.Errorf("openid4vp: marshal presentation_definition: %w", err)
+		}
+		q.Set("presentation_definition", string(b))
+	}
+	return "openid4vp://authorize?" + q.Encode(), nil
 }
 
 // ============================================================================

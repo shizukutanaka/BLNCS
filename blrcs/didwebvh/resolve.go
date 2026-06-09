@@ -223,10 +223,10 @@ func Verify(log []LogEntry) (*Resolution, error) {
 		}
 
 		// 4. versionTime monotonicity.
-		if !versionTimeValid(entry.VersionTime) {
+		t, err := time.Parse(time.RFC3339, entry.VersionTime)
+		if err != nil {
 			return nil, fmt.Errorf("%w: bad versionTime %q", ErrMalformedEntry, entry.VersionTime)
 		}
-		t, _ := time.Parse(time.RFC3339, entry.VersionTime)
 		if i > 0 && t.Before(prevTime) {
 			return nil, fmt.Errorf("%w: versionTime went backwards at entry %d", ErrMalformedEntry, num)
 		}
