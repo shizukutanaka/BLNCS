@@ -152,3 +152,38 @@ func BenchmarkRegister(b *testing.B) {
 		_, _ = ledger.Register(stmts[i])
 	}
 }
+
+// TestCachedMerkleMatchesReference verifies the memoized perfect-subtree root
+// and audit path are byte-identical to the reference merkleRoot/auditPath for
+// every tree size and leaf index (the cache must not change any hash).
+func TestCachedMerkleMatchesReference(t *testing.T) {
+	l := &Ledger{}
+	for n := 1; n <= 130; n++ {
+		leaf := make([]byte, 32)
+		leaf[0] = byte(n)
+		leaf[1] = byte(n >> 8)
+		l.leafHashes = append(l.leafHashes, hashLeaf(leaf))
+
+		wantRoot := merkleRoot(l.leafHashes)
+		gotRoot := l.cachedRoot(n)
+		if !equalBytes(wantRoot, gotRoot) {
+			t.Fatalf("n=%d root mismatch:\n ref %x\n got %x", n, wantRoot, gotRoot)
+		}
+		for idx := 0; idx < n; idx++ {
+			want := auditPath(l.leafHashes, idx)
+			got := l.cachedAuditPath(idx, n)
+			if len(want) != len(got) {
+				t.Fatalf("n=%d idx=%d path len: ref=%d got=%d", n, idx, len(want), len(got))
+			}
+			for i := range want {
+				if !equalBytes(want[i], got[i]) {
+					t.Fatalf("n=%d idx=%d path[%d] mismatch", n, idx, i)
+				}
+			}
+			// And the cached path must verify against the cached root.
+			if !VerifyInclusion(l.leafHashes[idx], gotRoot, uint64(idx), uint64(n), got) {
+				t.Fatalf("n=%d idx=%d cached path fails inclusion", n, idx)
+			}
+		}
+	}
+}

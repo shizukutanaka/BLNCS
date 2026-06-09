@@ -178,6 +178,67 @@ type Ledger struct {
 	tsPriv     ed25519.PrivateKey
 	tsPub      ed25519.PublicKey
 	tsID       string
+
+	// subtreeCache memoizes the hashes of completed perfect subtrees, keyed by
+	// (offset, size) with size a power of two. Such subtrees are immutable in an
+	// append-only log, so entries never need invalidation. This turns the per-
+	// append root/audit-path computation from O(n) into O(log n) amortized,
+	// avoiding the O(n²) cost of building a large log. (Reference funcs
+	// merkleRoot/auditPath remain for verification and as a correctness oracle.)
+	subtreeCache sync.Map // map[[2]int][]byte
+}
+
+// perfectSubtree returns the Merkle root of the immutable perfect subtree
+// covering leaves [off, off+size) where size is a power of two, memoizing it.
+func (l *Ledger) perfectSubtree(off, size int) []byte {
+	if size == 1 {
+		return l.leafHashes[off]
+	}
+	key := [2]int{off, size}
+	if v, ok := l.subtreeCache.Load(key); ok {
+		return v.([]byte)
+	}
+	half := size / 2
+	h := hashNode(l.perfectSubtree(off, half), l.perfectSubtree(off+half, half))
+	l.subtreeCache.Store(key, h)
+	return h
+}
+
+// cachedRoot computes the RFC 6962 root over the first n leaves using the
+// perfect-subtree cache. Identical result to merkleRoot(l.leafHashes[:n]).
+func (l *Ledger) cachedRoot(n int) []byte {
+	if n == 0 {
+		return sha256.New().Sum(nil)
+	}
+	return l.cachedSubtreeRoot(0, n)
+}
+
+func (l *Ledger) cachedSubtreeRoot(off, n int) []byte {
+	if n == 1 {
+		return l.leafHashes[off]
+	}
+	k := largestPow2Below(n)
+	return hashNode(l.perfectSubtree(off, k), l.cachedSubtreeRoot(off+k, n-k))
+}
+
+// cachedAuditPath returns the inclusion path for leaf idx within the first n
+// leaves, using the perfect-subtree cache. Identical to auditPath(leaves[:n], idx).
+func (l *Ledger) cachedAuditPath(idx, n int) [][]byte {
+	return l.cachedAuditPathAbs(0, idx, n)
+}
+
+// cachedAuditPathAbs mirrors the reference auditPath but uses absolute leaf
+// offsets so it can consult the perfect-subtree cache. idx is relative to off;
+// it operates over leaves[off : off+n).
+func (l *Ledger) cachedAuditPathAbs(off, idx, n int) [][]byte {
+	if n <= 1 {
+		return nil
+	}
+	k := largestPow2Below(n)
+	if idx < k {
+		return append(l.cachedAuditPathAbs(off, idx, k), l.cachedSubtreeRoot(off+k, n-k))
+	}
+	return append(l.cachedAuditPathAbs(off+k, idx-k, n-k), l.perfectSubtree(off, k))
 }
 
 // NewLedger — 揮発版 (後方互換)。メモリstorageを内部使用。
@@ -308,9 +369,9 @@ func (l *Ledger) Register(stmt Statement) (*Receipt, error) {
 	l.cached = append(l.cached, stmt)
 	l.leafHashes = append(l.leafHashes, leaf)
 
-	root := merkleRoot(l.leafHashes)
 	size := uint64(len(l.leafHashes))
-	pathBytes := auditPath(l.leafHashes, int(idx))
+	root := l.cachedRoot(int(size))
+	pathBytes := l.cachedAuditPath(int(idx), int(size))
 	pathHex := make([]string, len(pathBytes))
 	for i, p := range pathBytes {
 		pathHex[i] = fmt.Sprintf("%x", p)
@@ -474,8 +535,8 @@ func (l *Ledger) Get(idx uint64) (Statement, *Receipt, error) {
 	}
 	stmt := l.cached[idx]
 	size := uint64(len(l.leafHashes))
-	root := merkleRoot(l.leafHashes)
-	pathBytes := auditPath(l.leafHashes, int(idx))
+	root := l.cachedRoot(int(size))
+	pathBytes := l.cachedAuditPath(int(idx), int(size))
 	pathHex := make([]string, len(pathBytes))
 	for i, p := range pathBytes {
 		pathHex[i] = fmt.Sprintf("%x", p)
