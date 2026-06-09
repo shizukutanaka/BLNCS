@@ -151,6 +151,14 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 	if status != nil {
 		payload["status"] = status.statusClaim()
 	}
+	// Guard against callers accidentally (or adversarially) injecting reserved
+	// JWT/SD-JWT claims via clearClaims — those have security-critical semantics
+	// that must only be set by the issuer.
+	for k := range clearClaims {
+		if reservedSDJWTClaim(k) {
+			return "", nil, fmt.Errorf("compliance: clearClaims: %q collides with reserved claim", k)
+		}
+	}
 	// Clear claims → JWT body 直接
 	for k, v := range clearClaims {
 		payload[k] = v
@@ -811,4 +819,15 @@ func randomB64(n int) (string, error) {
 		return "", fmt.Errorf("compliance: salt generation failed: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// reservedSDJWTClaim reports whether k is a JWT/SD-JWT reserved claim name
+// that must not appear in caller-supplied clearClaims or sdClaims.
+func reservedSDJWTClaim(k string) bool {
+	switch k {
+	case "iss", "sub", "vct", "iat", "exp", "nbf",
+		"_sd", "_sd_alg", "cnf", "status":
+		return true
+	}
+	return false
 }

@@ -121,16 +121,16 @@ func DCQLFromPresentationDefinition(def PresentationDefinition) DCQLQuery {
 
 // MatchClaims — credential のクレーム集合が CredentialQuery を満たすか判定。
 //
-// presented は開示されたクレーム名→値。全 ClaimQuery.Path[0] が存在し、
-// Values 指定があれば一致することを要求する。
+// claim.Path の全セグメントを辿ってネストオブジェクトに対応する (DCQL §6.3)。
+// 例: Path=["address","country"] は {"address":{"country":"DE"}} にマッチする。
+// Values が指定されている場合は最終値がそのいずれかに一致しなければならない。
 func (cq *CredentialQuery) MatchClaims(presented map[string]any) bool {
 	for _, claim := range cq.Claims {
 		if len(claim.Path) == 0 {
 			continue
 		}
-		key := claim.Path[0]
-		val, ok := presented[key]
-		if !ok {
+		val, found := walkPath(presented, claim.Path)
+		if !found {
 			return false
 		}
 		if len(claim.Values) > 0 {
@@ -147,6 +147,23 @@ func (cq *CredentialQuery) MatchClaims(presented map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// walkPath navigates a nested map[string]any using the given path segments,
+// returning the value at the end of the path and whether it was found.
+func walkPath(root map[string]any, path []string) (any, bool) {
+	var cur any = root
+	for _, seg := range path {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		cur, ok = m[seg]
+		if !ok {
+			return nil, false
+		}
+	}
+	return cur, true
 }
 
 // MarshalDCQL — DCQLQuery を JSON にシリアライズ (Authorization Request 埋込用)。

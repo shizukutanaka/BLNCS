@@ -214,3 +214,64 @@ func TestAuthorizationRequestDCQLSerialization(t *testing.T) {
 		t.Error("dcql_query should serialize the credential query")
 	}
 }
+
+// ============================================================================
+// MatchClaims — nested path support (DCQL §6.3)
+// ============================================================================
+
+func TestMatchClaimsNestedPath(t *testing.T) {
+	cq := CredentialQuery{
+		ID:     "q",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{
+			{Path: []string{"address", "country"}},
+			{Path: []string{"name"}},
+		},
+	}
+	presented := map[string]any{
+		"name": "Alice",
+		"address": map[string]any{
+			"country": "DE",
+			"city":    "Berlin",
+		},
+	}
+	if !cq.MatchClaims(presented) {
+		t.Error("nested path should match")
+	}
+}
+
+func TestMatchClaimsNestedPathMissing(t *testing.T) {
+	cq := CredentialQuery{
+		ID:     "q",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{
+			{Path: []string{"address", "country"}},
+		},
+	}
+	// No nested "address" object → must not match.
+	if cq.MatchClaims(map[string]any{"address": "flat string"}) {
+		t.Error("flat value at intermediate path should not match nested query")
+	}
+	// Missing top-level key.
+	if cq.MatchClaims(map[string]any{"name": "Bob"}) {
+		t.Error("missing top-level key should not match")
+	}
+}
+
+func TestMatchClaimsNestedValues(t *testing.T) {
+	cq := CredentialQuery{
+		ID:     "q",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{
+			{Path: []string{"address", "country"}, Values: []any{"DE", "FR"}},
+		},
+	}
+	match := map[string]any{"address": map[string]any{"country": "DE"}}
+	noMatch := map[string]any{"address": map[string]any{"country": "US"}}
+	if !cq.MatchClaims(match) {
+		t.Error("country=DE should match Values=[DE,FR]")
+	}
+	if cq.MatchClaims(noMatch) {
+		t.Error("country=US should not match Values=[DE,FR]")
+	}
+}
