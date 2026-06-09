@@ -264,9 +264,22 @@ func multibaseToEd25519(s string) (ed25519.PublicKey, error) {
 	if s[0] == 'z' {
 		return base58Ed25519Decode(s[1:])
 	}
-	// 'm' = base64
+	// 'm' = base64 (multibase). MUST length-check: ed25519.Verify panics on a
+	// wrong-length key, so an attacker-controlled did:web document with a short
+	// base64 key would otherwise crash any verifier that resolves the issuer.
 	if s[0] == 'm' {
-		return base64.RawStdEncoding.DecodeString(s[1:])
+		b, err := base64.RawStdEncoding.DecodeString(s[1:])
+		if err != nil {
+			return nil, err
+		}
+		// Strip an optional multicodec ed25519-pub prefix (0xed 0x01).
+		if len(b) == 2+ed25519.PublicKeySize && b[0] == 0xed && b[1] == 0x01 {
+			b = b[2:]
+		}
+		if len(b) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("multibase Ed25519 key wrong size: %d", len(b))
+		}
+		return ed25519.PublicKey(b), nil
 	}
 	return nil, fmt.Errorf("unsupported multibase prefix: %c", s[0])
 }

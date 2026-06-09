@@ -2,6 +2,8 @@ package dcapi
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -109,12 +111,19 @@ func TestDemoFullRoundTripWithMockWallet(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&auth)
 	resp.Body.Close()
 
-	// 2. Mock wallet fulfills via native URL (bypassing browser DC-API)
+	// 2. Mock wallet fulfills via native URL (bypassing browser DC-API).
+	// Holder binding (cnf + KB-JWT) is required for anti-replay; the verifier
+	// rejects unbound presentations when a nonce is expected.
 	wallet := openid4vp.NewMockWallet("did:web:holder")
-	sdjwt, _, err := iss.IssueSDJWT("demo-subject", map[string]any{
+	holderPub, holderPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet.HolderKey = holderPriv
+	sdjwt, _, err := iss.IssueSDJWTBound("demo-subject", map[string]any{
 		"category":     "textile",
 		"carbonKgCO2e": 1.8,
-	}, nil, time.Hour)
+	}, nil, holderPub, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

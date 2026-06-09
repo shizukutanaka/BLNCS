@@ -1,6 +1,8 @@
 package openid4vp
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"net/url"
 	"strings"
@@ -9,6 +11,32 @@ import (
 
 	"blrcs/compliance"
 )
+
+// boundPresent issues a holder-bound SD-JWT and returns a KB-JWT presentation
+// bound to the request's nonce + client_id (OpenID4VP anti-replay). Verifiers
+// reject unbound presentations when a nonce/audience is expected, so e2e flows
+// must use holder binding.
+func boundPresent(t *testing.T, iss *compliance.Issuer, reqURL, subject string, sd, clear map[string]any, reveal []string) string {
+	t.Helper()
+	holderPub, holderPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdjwt, _, err := iss.IssueSDJWTBound(subject, sd, clear, holderPub, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(reqURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	presented, err := compliance.PresentWithKeyBinding(sdjwt, reveal, holderPriv, q.Get("nonce"), q.Get("client_id"), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return presented
+}
 
 // ============================================================================
 // Helper: end-to-end flow setup
@@ -102,12 +130,12 @@ func TestE2EBatteryPassportFlow(t *testing.T) {
 			iss.ID: iss.PublicKey(),
 		},
 	}
-	_, state, err := ver.CreateRequest(def)
+	reqURL, state, err := ver.CreateRequest(def)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// 2. Wallet side: issue an SD-JWT containing ALL battery claims
+	// 2. Wallet side: issue a holder-bound SD-JWT containing ALL battery claims
 	// (consumer chose to disclose these specific fields)
 	sdClaims := map[string]any{
 		"batteryCategory":    "ev",
@@ -121,15 +149,9 @@ func TestE2EBatteryPassportFlow(t *testing.T) {
 	clearClaims := map[string]any{
 		"productId": "EV-BAT-001",
 	}
-	sdjwt, _, err := iss.IssueSDJWT("battery-abc", sdClaims, clearClaims, 365*24*time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Holder chooses to disclose only the required ones (not supplier/recycled)
-	presented, err := compliance.Present(sdjwt, []string{"batteryCategory", "chemistry", "capacityKWh", "carbonKgCO2ePerKWh"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Holder discloses only the required ones, bound to the request nonce/client_id.
+	presented := boundPresent(t, iss, reqURL, "battery-abc", sdClaims, clearClaims,
+		[]string{"batteryCategory", "chemistry", "capacityKWh", "carbonKgCO2ePerKWh"})
 
 	// 3. Verifier receives response
 	resp := &AuthorizationResponse{
@@ -178,10 +200,10 @@ func TestReplayRejected(t *testing.T) {
 			iss.ID: iss.PublicKey(),
 		},
 	}
-	_, state, _ := ver.CreateRequest(def)
-	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"foo": "bar"}, nil, time.Hour)
+	reqURL, state, _ := ver.CreateRequest(def)
+	presented := boundPresent(t, iss, reqURL, "s", map[string]any{"foo": "bar"}, nil, []string{"foo"})
 
-	resp := &AuthorizationResponse{VPToken: sdjwt, State: state}
+	resp := &AuthorizationResponse{VPToken: presented, State: state}
 
 	// First attempt succeeds
 	if _, err := ver.ProcessResponse(resp); err != nil {
@@ -202,10 +224,10 @@ func TestMissingRequiredClaim(t *testing.T) {
 			iss.ID: iss.PublicKey(),
 		},
 	}
-	_, state, _ := ver.CreateRequest(def)
-	// SD-JWT only discloses "foo", "critical" is not disclosed
-	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"foo": "bar"}, nil, time.Hour)
-	resp := &AuthorizationResponse{VPToken: sdjwt, State: state}
+	reqURL, state, _ := ver.CreateRequest(def)
+	// Holder-bound SD-JWT discloses only "foo"; "critical" is not disclosed.
+	presented := boundPresent(t, iss, reqURL, "s", map[string]any{"foo": "bar"}, nil, []string{"foo"})
+	resp := &AuthorizationResponse{VPToken: presented, State: state}
 	_, err := ver.ProcessResponse(resp)
 	if !strings.Contains(err.Error(), "openid4vp: required claim not disclosed: critical") {
 		t.Fatalf("want claim missing error, got %v", err)

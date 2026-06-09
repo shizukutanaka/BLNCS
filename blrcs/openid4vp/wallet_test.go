@@ -1,6 +1,8 @@
 package openid4vp
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"strings"
 	"testing"
 	"time"
@@ -50,14 +52,20 @@ func TestFullE2E_VerifierWalletRoundTrip(t *testing.T) {
 	// --- Setup: issuer, wallet, verifier ---
 	issuer, _ := compliance.NewIssuer("did:web:factory.example")
 	wallet := NewMockWallet("did:web:alice.holder")
+	// Holder key binds presentations to the request nonce/client_id (anti-replay).
+	holderPub, holderPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet.HolderKey = holderPriv
 	verifier := NewVerifier(
 		"https://verify.blrcs.example",
 		"https://verify.blrcs.example/cb",
 		nil,
 	)
 
-	// --- Step 1: Issuer creates SD-JWT for battery, wallet stores it ---
-	sdjwt, _, err := issuer.IssueSDJWT(
+	// --- Step 1: Issuer creates a holder-bound SD-JWT for battery, wallet stores it ---
+	sdjwt, _, err := issuer.IssueSDJWTBound(
 		"battery-EV-001",
 		map[string]any{
 			"batteryCategory":       "ev",
@@ -68,6 +76,7 @@ func TestFullE2E_VerifierWalletRoundTrip(t *testing.T) {
 			"recycledContentCobalt": 16.0,
 		},
 		map[string]any{"productId": "BAT-2026-001"},
+		holderPub,
 		365*24*time.Hour,
 	)
 	if err != nil {

@@ -242,9 +242,15 @@ func Verify(log []LogEntry) (*Resolution, error) {
 			return nil, ErrNoUpdateKeys
 		}
 
-		// 6. Pre-rotation: if the predecessor committed nextKeyHashes, every
-		//    update key newly taking effect in this entry must be pre-committed.
-		if pendingNextHashes != nil && entry.Parameters.UpdateKeys != nil {
+		// 6. Pre-rotation: if the predecessor committed nextKeyHashes, this entry
+		//    MUST rotate to a pre-committed key. An attacker with the current key
+		//    must not be able to bypass the commitment by simply omitting
+		//    updateKeys (which would silently keep the compromised key in force).
+		//    Genesis (i==0) has no predecessor commitment to honor.
+		if i > 0 && pendingNextHashes != nil {
+			if entry.Parameters.UpdateKeys == nil {
+				return nil, fmt.Errorf("%w: entry %d must rotate to a pre-committed key", ErrPreRotation, num)
+			}
 			if err := checkPreRotation(entry.Parameters.UpdateKeys, pendingNextHashes); err != nil {
 				return nil, err
 			}

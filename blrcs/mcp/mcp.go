@@ -409,9 +409,24 @@ func (s *Server) toolVerifyPassport(args json.RawMessage) (string, error) {
 	}
 	if err := compliance.Verify(&cred, ed25519.PublicKey(pub)); err != nil {
 		// 検証失敗は MCP ツールの構造化結果として返す (Go の error ではない)。
-		return `{"valid":false,"reason":"` + err.Error() + `"}`, nil //nolint:nilerr
+		// err.Error() は攻撃者由来の入力を含み得るため必ず json.Marshal でエスケープ。
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
 	}
 	return `{"valid":true}`, nil
+}
+
+// verifyResult builds a structured {"valid":..,"reason":..} result with the
+// reason properly JSON-escaped (never string concatenation — the reason carries
+// attacker-controlled error text).
+func verifyResult(valid bool, reason string) string {
+	b, err := json.Marshal(struct {
+		Valid  bool   `json:"valid"`
+		Reason string `json:"reason,omitempty"`
+	}{Valid: valid, Reason: reason})
+	if err != nil {
+		return `{"valid":false,"reason":"internal error"}`
+	}
+	return string(b)
 }
 
 func (s *Server) toolAttestRange(args json.RawMessage) (string, error) {
@@ -464,7 +479,7 @@ func (s *Server) toolVerifyRange(args json.RawMessage) (string, error) {
 	}
 	if err := compliance.VerifyRange(&proof, ed25519.PublicKey(pub)); err != nil {
 		// 検証失敗は MCP ツールの構造化結果として返す (Go の error ではない)。
-		return `{"valid":false,"reason":"` + err.Error() + `"}`, nil //nolint:nilerr
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
 	}
 	return `{"valid":true}`, nil
 }

@@ -446,3 +446,24 @@ func TestDeterministicStrKeyMap(t *testing.T) {
 		t.Errorf("got %x, want %x", b, want)
 	}
 }
+
+// TestDeterministicIntKeyMapNegative verifies RFC 8949 §4.2.1 bytewise key
+// ordering for negative integer keys (COSE_Key uses keys 1, -1, -2). Canonical
+// order is non-negatives first (ascending), then negatives by ascending
+// magnitude: 1 (0x01), -1 (0x20), -2 (0x21).
+func TestDeterministicIntKeyMapNegative(t *testing.T) {
+	m := map[int]any{-2: "c", -1: "b", 1: "a"}
+	got, err := Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{
+		0xa3,            // map(3)
+		0x01, 0x61, 'a', // 1 => "a"
+		0x20, 0x61, 'b', // -1 => "b"
+		0x21, 0x61, 'c', // -2 => "c"
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("got %x, want %x", got, want)
+	}
+}

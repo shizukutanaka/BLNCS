@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"blrcs/compliance"
 )
@@ -99,17 +98,17 @@ func TestCallbackHandlerFormPost(t *testing.T) {
 			iss.ID: iss.PublicKey(),
 		},
 	}
-	_, state, _ := ver.CreateRequest(def)
+	reqURL, state, _ := ver.CreateRequest(def)
 
-	// Issue SD-JWT with required claims
-	sdjwt, _, _ := iss.IssueSDJWT("dpp-battery-1", map[string]any{
+	// Issue a holder-bound SD-JWT and present it bound to the request.
+	presented := boundPresent(t, iss, reqURL, "dpp-battery-1", map[string]any{
 		"category":     "battery/ev",
 		"carbonKgCO2e": 3.2,
-	}, nil, time.Hour)
+	}, nil, []string{"category", "carbonKgCO2e"})
 
 	// Wallet POSTs form-encoded
 	form := BuildResponseForm(&AuthorizationResponse{
-		VPToken: sdjwt,
+		VPToken: presented,
 		State:   state,
 	})
 	resp, err := http.Post(ts.URL, "application/x-www-form-urlencoded", strings.NewReader(form))
@@ -145,10 +144,10 @@ func TestCallbackHandlerJSONFallback(t *testing.T) {
 		ID: "cb-json", RequiredClaims: []string{"x"},
 		AcceptableIssuers: map[string][]byte{iss.ID: iss.PublicKey()},
 	}
-	_, state, _ := ver.CreateRequest(def)
-	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"x": 1}, nil, time.Hour)
+	reqURL, state, _ := ver.CreateRequest(def)
+	presented := boundPresent(t, iss, reqURL, "s", map[string]any{"x": 1}, nil, []string{"x"})
 
-	payload, _ := json.Marshal(&AuthorizationResponse{VPToken: sdjwt, State: state})
+	payload, _ := json.Marshal(&AuthorizationResponse{VPToken: presented, State: state})
 	resp, err := http.Post(ts.URL, "application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
@@ -168,10 +167,11 @@ func TestCallbackHandlerInvalidClaim(t *testing.T) {
 		ID: "cb-bad", RequiredClaims: []string{"missing"},
 		AcceptableIssuers: map[string][]byte{iss.ID: iss.PublicKey()},
 	}
-	_, state, _ := ver.CreateRequest(def)
-	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"other": 1}, nil, time.Hour)
+	reqURL, state, _ := ver.CreateRequest(def)
+	// Bound SD-JWT that does NOT contain the required "missing" claim.
+	presented := boundPresent(t, iss, reqURL, "s", map[string]any{"other": 1}, nil, []string{"other"})
 
-	form := BuildResponseForm(&AuthorizationResponse{VPToken: sdjwt, State: state})
+	form := BuildResponseForm(&AuthorizationResponse{VPToken: presented, State: state})
 	resp, err := http.Post(ts.URL, "application/x-www-form-urlencoded", strings.NewReader(form))
 	if err != nil {
 		t.Fatal(err)

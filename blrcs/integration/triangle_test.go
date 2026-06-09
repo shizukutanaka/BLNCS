@@ -71,6 +71,10 @@ func TestTriangle_IssuerWalletVerifier(t *testing.T) {
 		"https://verify.tri.example/cb",
 		nil,
 	)
+	// This triangle exercises the OpenID4VCI issuance path, which issues bearer
+	// (unbound) SD-JWTs, so opt out of the secure-by-default key-binding
+	// requirement. Anti-replay here relies on one-time state consumption.
+	verifier.RequireKeyBinding = false
 	def := openid4vp.PresentationDefinition{
 		ID:      "eu-compliance-check",
 		Purpose: "EU Regulation 2023/1542 Art.77 verification",

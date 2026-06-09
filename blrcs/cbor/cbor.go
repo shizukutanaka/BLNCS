@@ -224,7 +224,16 @@ func appendIntKeyMap(dst []byte, m map[int]any) ([]byte, error) {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	sort.Ints(keys)
+	// RFC 8949 §4.2.1 deterministic encoding: order map keys by their *encoded*
+	// bytes (bytewise lexicographic), NOT by signed numeric value. For CBOR
+	// integers this puts all non-negative keys (major type 0) before negative
+	// keys (major type 1), with negatives ordered by ascending magnitude
+	// (-1, -2, -3, …). Sorting numerically (sort.Ints) would wrongly place
+	// negatives first and in reverse order, corrupting COSE_Key / mdoc canonical
+	// form for any external verifier that re-canonicalizes.
+	sort.Slice(keys, func(i, j int) bool {
+		return bytes.Compare(AppendInt(nil, int64(keys[i])), AppendInt(nil, int64(keys[j]))) < 0
+	})
 	dst = AppendMapHeader(dst, len(m))
 	var err error
 	for _, k := range keys {

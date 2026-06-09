@@ -158,7 +158,10 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 	var disclosures []Disclosure
 	var sdDigests []string
 	for name, value := range sdClaims {
-		salt := randomB64(16)
+		salt, err := randomB64(16)
+		if err != nil {
+			return "", nil, err
+		}
 		d := Disclosure{Salt: salt, Name: name, Value: value}
 		// Encode: base64url(json([salt, name, value]))
 		arr, _ := json.Marshal([]any{salt, name, value})
@@ -343,27 +346,40 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 		}
 		h := sha256.Sum256([]byte(disc))
 		if !sdDigests[base64.RawURLEncoding.EncodeToString(h[:])] {
-			continue // disclosure not in _sd — skip (not from this JWT)
+			// SD-JWT §verify: a presented disclosure whose digest is not in _sd
+			// signals tampering or a disclosure from a different credential —
+			// MUST reject, not silently skip.
+			return nil, ErrSDJWTMalformed
 		}
 		raw, err := base64.RawURLEncoding.DecodeString(disc)
 		if err != nil {
-			continue
+			return nil, ErrSDJWTMalformed
 		}
 		var arr []any
 		if err := json.Unmarshal(raw, &arr); err != nil {
-			continue
+			return nil, ErrSDJWTMalformed
 		}
 		if len(arr) != 3 {
-			continue
+			return nil, ErrSDJWTMalformed
 		}
 		name, ok := arr[1].(string)
 		if !ok {
-			continue
+			return nil, ErrSDJWTMalformed
+		}
+		// A disclosed claim MUST NOT collide with a reserved claim or an
+		// already-present (clear or previously-disclosed) claim.
+		if reserved[name] {
+			return nil, ErrSDJWTMalformed
+		}
+		if _, exists := vc.Claims[name]; exists {
+			return nil, ErrSDJWTMalformed
 		}
 		vc.Claims[name] = arr[2]
 	}
 
-	// Key binding: cnf 有り、または明示要求時に KB-JWT を検証
+	// Key binding: cnf 有り credential は常に KB-JWT を検証 (nonce/aud バインド)。
+	// holder key の無い credential を拒否するかは呼び出し側のポリシー
+	// (opts.RequireKeyBinding) に委ねる。OpenID4VP verifier は既定で要求する。
 	if vc.HolderKey != nil || opts.RequireKeyBinding {
 		if vc.HolderKey == nil {
 			return nil, ErrHolderKeyRequired
@@ -769,8 +785,11 @@ func requiresDueDiligence(claim BatteryPassportClaim) bool {
 // helpers
 // ============================================================================
 
-func randomB64(n int) string {
+func randomB64(n int) (string, error) {
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		// A CSPRNG failure must never yield a weak (all-zero) salt.
+		return "", fmt.Errorf("compliance: salt generation failed: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

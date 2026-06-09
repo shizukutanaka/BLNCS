@@ -311,3 +311,48 @@ func TestParseVersionIDBad(t *testing.T) {
 		}
 	}
 }
+
+// TestPreRotationBypassByOmittingUpdateKeys ensures an attacker who controls the
+// current update key cannot bypass a nextKeyHashes commitment by omitting
+// updateKeys in the next entry (which would otherwise silently keep the
+// compromised key authorized).
+func TestPreRotationBypassByOmittingUpdateKeys(t *testing.T) {
+	updateKey, _ := genKey(t)
+	_, rotMK := genKey(t)
+
+	// Genesis commits: the next entry MUST rotate to rotMK.
+	genesis, did, err := Create(CreateParams{
+		DIDPath:       "ex:p",
+		UpdateKey:     updateKey,
+		NextKeyHashes: []string{KeyHash(rotMK)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := []LogEntry{*genesis}
+
+	// Craft entry 2 with NO updateKeys (bypass attempt), signed by the old key.
+	// Build it manually so Update's back-fill of updateKeys doesn't mask the bug.
+	prev := log[0]
+	entry := &LogEntry{
+		VersionTime: time.Now().Add(time.Second).UTC().Format(time.RFC3339),
+		Parameters:  Parameters{SCID: prev.Parameters.SCID}, // updateKeys intentionally nil
+		State:       map[string]any{"id": did, "v": "2"},
+	}
+	eh, err := computeEntryHash(entry, prev.VersionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.VersionID = "2-" + eh
+	vm := did + "#" + genesis.Parameters.UpdateKeys[0]
+	proof, err := signEntry(entry, prev.VersionID, updateKey, vm, entry.VersionTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.Proof = []Proof{proof}
+	log = append(log, *entry)
+
+	if _, err := Verify(log); err == nil {
+		t.Fatal("omitting updateKeys after a nextKeyHashes commitment must be rejected")
+	}
+}

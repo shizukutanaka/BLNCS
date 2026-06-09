@@ -180,21 +180,24 @@ type Verifier struct {
 	DefaultTTL  time.Duration
 
 	// RequireKeyBinding — true なら holder binding (cnf + KB-JWT) 無しの提示を拒否。
-	// 本番では true 推奨 (eIDAS 2.0 / OpenID4VP のリプレイ防止)。
-	// false (既定) でも cnf 付き credential には KB-JWT + nonce 検証が強制される。
+	// NewVerifier は既定で true (secure-by-default): holder key の無い credential は
+	// 暗号的に nonce へバインドできず、捕捉した vp_token がリプレイ可能なため。
+	// bearer credential を許容する場合のみ明示的に false を設定する
+	// (anti-replay はワンタイム state 消費のみに依存することになる)。
 	RequireKeyBinding bool
 }
 
-// NewVerifier — Apple式の1行構築
+// NewVerifier — Apple式の1行構築。secure-by-default で RequireKeyBinding=true。
 func NewVerifier(clientID, responseURI string, store SessionStore) *Verifier {
 	if store == nil {
 		store = NewMemoryStore()
 	}
 	return &Verifier{
-		ClientID:    clientID,
-		ResponseURI: responseURI,
-		store:       store,
-		DefaultTTL:  10 * time.Minute,
+		ClientID:          clientID,
+		ResponseURI:       responseURI,
+		store:             store,
+		DefaultTTL:        10 * time.Minute,
+		RequireKeyBinding: true,
 	}
 }
 
