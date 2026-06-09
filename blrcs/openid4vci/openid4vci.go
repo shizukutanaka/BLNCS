@@ -35,10 +35,12 @@ import (
 )
 
 var (
-	ErrUnknownConfig  = errors.New("vci: unknown credential_configuration_id")
-	ErrBadPreAuthCode = errors.New("vci: pre-authorized_code invalid or consumed")
-	ErrBadAccessToken = errors.New("vci: access_token invalid or expired")
-	ErrMissingClaims  = errors.New("vci: required claims missing from offer")
+	ErrUnknownConfig      = errors.New("vci: unknown credential_configuration_id")
+	ErrBadPreAuthCode     = errors.New("vci: pre-authorized_code invalid or consumed")
+	ErrBadAccessToken     = errors.New("vci: access_token invalid or expired")
+	ErrMissingClaims      = errors.New("vci: required claims missing from offer")
+	ErrInvalidProof       = errors.New("vci: proof invalid")
+	ErrProofNonceMismatch = errors.New("vci: proof nonce mismatch")
 )
 
 // ============================================================================
@@ -68,7 +70,8 @@ type preAuthEntry struct {
 	expiresAt      time.Time
 	accessToken    string // 一度交換されると埋まる
 	tokenExpiresAt time.Time
-	consumed       bool // credentialエンドポイント使用済み
+	consumed       bool   // credentialエンドポイント使用済み
+	cNonce         string // Proof-of-Possession nonce (token交換時に発行)
 }
 
 // ============================================================================
@@ -86,11 +89,12 @@ type preAuthEntry struct {
 //	Token:       POST {IssuerURL}/token
 //	Credential:  POST {IssuerURL}/credential
 type Issuer struct {
-	URL        string
-	signer     *compliance.Issuer // 既存の compliance.Issuer を再利用 (DRY)
-	configs    map[string]CredentialConfiguration
-	preAuthTTL time.Duration
-	tokenTTL   time.Duration
+	URL          string
+	RequireProof bool // OpenID4VCI Draft 15 §5.1.2: Proof-of-Possession を必須化
+	signer       *compliance.Issuer // 既存の compliance.Issuer を再利用 (DRY)
+	configs      map[string]CredentialConfiguration
+	preAuthTTL   time.Duration
+	tokenTTL     time.Duration
 
 	mu       sync.Mutex
 	preAuths map[string]*preAuthEntry // code → entry
@@ -211,6 +215,7 @@ func (iss *Issuer) ExchangeCode(code string) (*TokenResponse, error) {
 	cNonce := randomB64(16)
 	entry.accessToken = accessToken
 	entry.tokenExpiresAt = time.Now().Add(iss.tokenTTL)
+	entry.cNonce = cNonce // Proof-of-Possession 用 nonce を保持
 	iss.tokens[accessToken] = entry
 	// code は消費済みにする
 	delete(iss.preAuths, code)
@@ -241,8 +246,18 @@ type CredentialResponse struct {
 	CNonceExpiresIn int    `json:"c_nonce_expires_in,omitempty"`
 }
 
-// IssueCredential — access_token を検証し SD-JWT を生成
+// IssueCredential — access_token を検証し SD-JWT を生成 (proof なし / 後方互換)
 func (iss *Issuer) IssueCredential(accessToken string) (*CredentialResponse, error) {
+	return iss.IssueCredentialWithProof(accessToken, CredentialRequest{})
+}
+
+// IssueCredentialWithProof — access_token + Proof-of-Possession を検証し SD-JWT を生成。
+//
+// OpenID4VCI Draft 15 §5.1.2:
+//   - req.Proof が存在する場合は proof JWT を検証 (typ, alg, nonce, aud, iat, 署名)
+//   - iss.RequireProof=true かつ proof 欠如 → ErrInvalidProof
+//   - proof なし かつ iss.RequireProof=false → 従来動作 (後方互換)
+func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRequest) (*CredentialResponse, error) {
 	iss.mu.Lock()
 	entry, ok := iss.tokens[accessToken]
 	if !ok || time.Now().After(entry.tokenExpiresAt) || entry.consumed {
@@ -254,18 +269,41 @@ func (iss *Issuer) IssueCredential(accessToken string) (*CredentialResponse, err
 		iss.mu.Unlock()
 		return nil, ErrUnknownConfig
 	}
-	// Mark consumed optimistically under the lock so concurrent requests see
-	// the token as used. If credential generation fails below, we restore it
-	// so the wallet can retry with the same token.
+	// Optimistically consume under lock; restore on error below.
 	entry.consumed = true
+	cNonce := entry.cNonce
 	subject, sdClaims, clearClaims := entry.subject, entry.sdClaims, entry.clearClaims
 	validForDays := cfg.ValidForDays
 	iss.mu.Unlock()
 
+	// Proof-of-Possession validation (OpenID4VCI Draft 15 §5.1.2)
+	if len(req.Proof) > 0 {
+		var proofEnv struct {
+			ProofType string `json:"proof_type"`
+			JWT       string `json:"jwt"`
+		}
+		if err := json.Unmarshal(req.Proof, &proofEnv); err != nil || proofEnv.ProofType != "jwt" || proofEnv.JWT == "" {
+			iss.mu.Lock()
+			entry.consumed = false
+			iss.mu.Unlock()
+			return nil, ErrInvalidProof
+		}
+		if _, err := verifyProofJWT(proofEnv.JWT, cNonce, iss.URL); err != nil {
+			iss.mu.Lock()
+			entry.consumed = false
+			iss.mu.Unlock()
+			return nil, err
+		}
+	} else if iss.RequireProof {
+		iss.mu.Lock()
+		entry.consumed = false
+		iss.mu.Unlock()
+		return nil, ErrInvalidProof
+	}
+
 	validFor := time.Duration(validForDays) * 24 * time.Hour
 	sdjwt, _, err := iss.signer.IssueSDJWT(subject, sdClaims, clearClaims, validFor)
 	if err != nil {
-		// Restore token so the wallet can retry after a transient signing failure.
 		iss.mu.Lock()
 		entry.consumed = false
 		iss.mu.Unlock()
@@ -277,6 +315,78 @@ func (iss *Issuer) IssueCredential(accessToken string) (*CredentialResponse, err
 		CNonce:          newCNonce,
 		CNonceExpiresIn: 600,
 	}, nil
+}
+
+// verifyProofJWT — OpenID4VCI Draft 15 §5.1.2 の proof JWT を検証する。
+//
+// 対応アルゴリズム: EdDSA (Ed25519) のみ (ゼロ依存制約)。
+// header に jwk (OKP/Ed25519) が必須。
+func verifyProofJWT(proofJWT, expectedNonce, issuerURL string) (ed25519.PublicKey, error) {
+	parts := strings.SplitN(proofJWT, ".", 3)
+	if len(parts) != 3 {
+		return nil, ErrInvalidProof
+	}
+	// header
+	hdrBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, ErrInvalidProof
+	}
+	var hdr struct {
+		Alg string          `json:"alg"`
+		Typ string          `json:"typ"`
+		JWK json.RawMessage `json:"jwk"`
+	}
+	if err := json.Unmarshal(hdrBytes, &hdr); err != nil || hdr.Alg != "EdDSA" || hdr.Typ != "openid4vci-proof+jwt" || len(hdr.JWK) == 0 {
+		return nil, ErrInvalidProof
+	}
+	// JWK (OKP Ed25519)
+	var jwk struct {
+		Kty string `json:"kty"`
+		Crv string `json:"crv"`
+		X   string `json:"x"`
+	}
+	if err := json.Unmarshal(hdr.JWK, &jwk); err != nil || jwk.Kty != "OKP" || jwk.Crv != "Ed25519" {
+		return nil, ErrInvalidProof
+	}
+	keyBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
+	if err != nil || len(keyBytes) != ed25519.PublicKeySize {
+		return nil, ErrInvalidProof
+	}
+	pub := ed25519.PublicKey(keyBytes)
+	// signature
+	sigBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || len(sigBytes) != ed25519.SignatureSize {
+		return nil, ErrInvalidProof
+	}
+	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sigBytes) {
+		return nil, ErrInvalidProof
+	}
+	// payload
+	plBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, ErrInvalidProof
+	}
+	var pl struct {
+		Nonce string `json:"nonce"`
+		Aud   string `json:"aud"`
+		Iat   int64  `json:"iat"`
+	}
+	if err := json.Unmarshal(plBytes, &pl); err != nil {
+		return nil, ErrInvalidProof
+	}
+	if pl.Nonce != expectedNonce {
+		return nil, ErrProofNonceMismatch
+	}
+	if pl.Aud != issuerURL {
+		return nil, ErrInvalidProof
+	}
+	// iat freshness: ±5 分
+	iat := time.Unix(pl.Iat, 0)
+	now := time.Now()
+	if iat.After(now.Add(30*time.Second)) || iat.Before(now.Add(-5*time.Minute)) {
+		return nil, ErrInvalidProof
+	}
+	return pub, nil
 }
 
 // ============================================================================
@@ -410,7 +520,7 @@ func (iss *Issuer) handleCredential(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	resp, err := iss.IssueCredential(accessToken)
+	resp, err := iss.IssueCredentialWithProof(accessToken, req)
 	if err != nil {
 		writeVCIError(w, http.StatusBadRequest, "invalid_token", err.Error())
 		return

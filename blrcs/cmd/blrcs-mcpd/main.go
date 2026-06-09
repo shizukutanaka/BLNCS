@@ -29,8 +29,11 @@ import (
 	"time"
 
 	"blrcs/compliance"
+	"blrcs/httpmw"
 	"blrcs/mcp"
+	"blrcs/metrics"
 	"blrcs/storage"
+	"blrcs/telemetry"
 )
 
 func main() {
@@ -89,9 +92,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "rate limit: %.0f rps per principal\n", rps)
 	}
 
+	// Telemetry + metrics
+	jsonLog := os.Getenv("BLRCS_LOG_FORMAT") == "json"
+	tel := telemetry.New(telemetry.NewSlogRecorder(os.Stderr, jsonLog))
+	telemetry.SetDefault(tel)
+	exp := metrics.NewExporter(tel, map[string]string{"service": "blrcs-mcpd"})
+
 	// Routes
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", mcp.NewHTTPHandler(srv, auth, limiter))
+	// Wrap MCP handler with panic recovery so a tool panic cannot crash the daemon.
+	mux.Handle("/mcp", httpmw.Recovery(mcp.NewHTTPHandler(srv, auth, limiter)))
+	mux.Handle("/metrics", exp)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

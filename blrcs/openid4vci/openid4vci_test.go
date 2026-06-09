@@ -1,8 +1,12 @@
 package openid4vci
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -333,5 +337,106 @@ func TestHTTPMetadataDiscovery(t *testing.T) {
 	}
 	if meta["credential_issuer"] != ts.URL {
 		t.Errorf("discovery URL: %v", meta["credential_issuer"])
+	}
+}
+
+// ============================================================================
+// Proof-of-Possession (OpenID4VCI Draft 15 §5.1.2)
+// ============================================================================
+
+// buildProofJWT は Ed25519 holderKey で署名した openid4vci-proof+jwt を返す。
+func buildProofJWT(t *testing.T, holderPriv ed25519.PrivateKey, nonce, aud string) string {
+	t.Helper()
+	pub := holderPriv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := `{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`
+	pl := `{"nonce":"` + nonce + `","aud":"` + aud + `","iat":` + strconv.FormatInt(time.Now().Unix(), 10) + `}`
+	h := base64.RawURLEncoding.EncodeToString([]byte(hdr))
+	p := base64.RawURLEncoding.EncodeToString([]byte(pl))
+	sig := ed25519.Sign(holderPriv, []byte(h+"."+p))
+	return h + "." + p + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func TestIssueCredentialWithProofHappy(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-proof",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a valid proof JWT using a fresh holder key.
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, tr.CNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatalf("valid proof should succeed: %v", err)
+	}
+	if cr.Credential == "" {
+		t.Error("credential must not be empty")
+	}
+}
+
+func TestIssueCredentialWithProofWrongNonce(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-proof2",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, _ := iss.ExchangeCode(code)
+
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, "wrong-nonce", iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrProofNonceMismatch {
+		t.Fatalf("want ErrProofNonceMismatch, got %v", err)
+	}
+}
+
+func TestIssueCredentialRequireProof(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.RequireProof = true
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-proof3",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, _ := iss.ExchangeCode(code)
+
+	// No proof provided → must fail
+	_, err := iss.IssueCredential(tr.AccessToken)
+	if err != ErrInvalidProof {
+		t.Fatalf("RequireProof=true with no proof: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestIssueCredentialProofBadSignature(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-proof4",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, _ := iss.ExchangeCode(code)
+
+	// Build JWT, then corrupt the signature.
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, tr.CNonce, iss.URL)
+	// Overwrite last byte of sig (base64 last segment)
+	parts := strings.Split(proofJWT, ".")
+	sigBytes, _ := base64.RawURLEncoding.DecodeString(parts[2])
+	sigBytes[0] ^= 0xFF
+	parts[2] = base64.RawURLEncoding.EncodeToString(sigBytes)
+	badJWT := strings.Join(parts, ".")
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": badJWT})
+
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad sig: want ErrInvalidProof, got %v", err)
 	}
 }
