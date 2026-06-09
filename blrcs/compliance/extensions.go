@@ -198,6 +198,7 @@ type VerifyOptions struct {
 	ExpectedNonce     string        // 設定時、KB-JWT の nonce と一致必須
 	ExpectedAudience  string        // 設定時、KB-JWT の aud と一致必須
 	RequireKeyBinding bool          // true なら cnf 無し credential も拒否
+	MaxKBAge          time.Duration // >0 なら KB-JWT iat の最大許容経過時間 (freshness)
 }
 
 const defaultLeeway = 60 * time.Second
@@ -477,8 +478,17 @@ func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, opts Veri
 	if s, _ := pl["sd_hash"].(string); s != base64.RawURLEncoding.EncodeToString(h[:]) {
 		return ErrKeyBindingSDHash
 	}
-	// iat が未来すぎる KB-JWT を拒否 (再生成検知)。
-	if v, ok := pl["iat"].(float64); ok && int64(v) > now.Add(leeway).Unix() {
+	// KB-JWT は iat 必須 (draft-ietf-oauth-sd-jwt §KB-JWT)。未来すぎる iat は
+	// 拒否し (再生成検知)、MaxKBAge>0 なら古すぎる iat も拒否する (freshness)。
+	iatRaw, ok := pl["iat"].(float64)
+	if !ok {
+		return ErrKeyBindingInvalid
+	}
+	iat := int64(iatRaw)
+	if iat > now.Add(leeway).Unix() {
+		return ErrKeyBindingInvalid
+	}
+	if opts.MaxKBAge > 0 && iat < now.Add(-opts.MaxKBAge).Add(-leeway).Unix() {
 		return ErrKeyBindingInvalid
 	}
 	return nil

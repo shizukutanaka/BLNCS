@@ -148,6 +148,11 @@ type Verify1Result struct {
 //
 // pub is the Ed25519 public key of the signer. externalAAD should be nil or
 // empty for most use cases. Returns the protected header and payload on success.
+//
+// Detached payloads are not supported: if the encoded payload is CBOR null, the
+// signature is verified over an empty payload (matching Sign1 with a nil
+// payload). Callers needing true detached COSE (payload transmitted separately)
+// must embed the payload instead — every BLRCS user (mdoc, SCITT receipts) does.
 func Verify1(data []byte, pub ed25519.PublicKey, externalAAD []byte) (*Verify1Result, error) {
 	v, err := Unmarshal(data)
 	if err != nil {
