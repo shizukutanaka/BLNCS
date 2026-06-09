@@ -14,6 +14,7 @@ package types
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -259,6 +260,10 @@ type CarbonFootprint struct {
 }
 
 func NewCarbonFootprint(kg float64) (CarbonFootprint, error) {
+	// NaN/Inf slip past < / > comparisons, defeating the non-negativity invariant.
+	if math.IsNaN(kg) || math.IsInf(kg, 0) {
+		return CarbonFootprint{}, fmt.Errorf("carbon: not a finite number")
+	}
 	if kg < 0 {
 		return CarbonFootprint{}, fmt.Errorf("carbon: negative %f", kg)
 	}
@@ -309,6 +314,9 @@ type Percent struct {
 }
 
 func NewPercent(v float64) (Percent, error) {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return Percent{}, fmt.Errorf("percent: not a finite number")
+	}
 	if v < 0 || v > 100 {
 		return Percent{}, fmt.Errorf("percent: %f out of [0..100]", v)
 	}

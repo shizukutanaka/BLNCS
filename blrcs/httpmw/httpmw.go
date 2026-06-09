@@ -181,19 +181,30 @@ func AccessLog(next http.Handler) http.Handler {
 	})
 }
 
-// clientIP — 真のクライアント IP (X-Forwarded-For 尊重)
+// TrustProxyHeaders controls whether clientIP honors the client-supplied
+// X-Forwarded-For / X-Real-IP headers. It defaults to false (secure): those
+// headers are trivially spoofable, so honoring them unconditionally lets any
+// client mint a fresh rate-limit bucket per request (bypass) and forge access
+// logs. Set to true ONLY when the server sits behind a trusted reverse proxy
+// that overwrites these headers.
+var TrustProxyHeaders = false
+
+// clientIP — 真のクライアント IP。TrustProxyHeaders=true のときのみ
+// X-Forwarded-For / X-Real-IP を尊重し、それ以外は r.RemoteAddr を使う。
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// 最初の値のみ (chained proxies)
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' || xff[i] == ' ' {
-				return xff[:i]
+	if TrustProxyHeaders {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// 最初の値のみ (chained proxies)
+			for i := 0; i < len(xff); i++ {
+				if xff[i] == ',' || xff[i] == ' ' {
+					return xff[:i]
+				}
 			}
+			return xff
 		}
-		return xff
-	}
-	if xr := r.Header.Get("X-Real-IP"); xr != "" {
-		return xr
+		if xr := r.Header.Get("X-Real-IP"); xr != "" {
+			return xr
+		}
 	}
 	return r.RemoteAddr
 }

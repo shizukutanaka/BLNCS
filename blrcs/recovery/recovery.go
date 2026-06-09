@@ -40,6 +40,7 @@ func Wrap(h http.Handler, tel *telemetry.Telemetry) http.Handler {
 		tel = telemetry.Default()
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w}
 		defer func() {
 			rec := recover()
 			if rec == nil {
@@ -50,15 +51,43 @@ func Wrap(h http.Handler, tel *telemetry.Telemetry) http.Handler {
 				slog.String("method", r.Method),
 				slog.String("remote", r.RemoteAddr),
 			)
-			// 既に何か書込まれている場合は何もしない (途中失敗)
-			// クライアントにはコネクションを切って終わる選択肢もあるが、500 を返す方が観測性良い
+			// 既にレスポンスが書込み始められている場合、500 を上書きすると
+			// "superfluous WriteHeader" と body 破損を招くため何もしない。
+			if sw.wrote {
+				return
+			}
 			defer func() { _ = recover() }() // double-panic 防止
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"error":"internal server error","status":500}`))
 		}()
-		h.ServeHTTP(w, r)
+		h.ServeHTTP(sw, r)
 	})
+}
+
+// statusWriter records whether the wrapped handler has begun writing the
+// response, so the panic guard can avoid a superfluous WriteHeader on a partial
+// response.
+type statusWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.wrote = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	w.wrote = true
+	return w.ResponseWriter.Write(b)
+}
+
+// Flush forwards to the underlying writer when it supports http.Flusher.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // Go — panic 回復付き goroutine

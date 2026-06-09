@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ import (
 
 func TestSubscribeAndCount(t *testing.T) {
 	b := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	b.AllowPrivateTargets = true
 	b.Subscribe("dpp.issued", Subscriber{URL: "http://test/1"})
 	b.Subscribe("dpp.issued", Subscriber{URL: "http://test/2"})
 	b.Subscribe("dpp.verified", Subscriber{URL: "http://test/3"})
@@ -56,6 +58,7 @@ func TestPublishHappyPath(t *testing.T) {
 	defer server.Close()
 
 	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
 	bus.Subscribe("test.event", Subscriber{
 		URL:    server.URL,
 		Secret: []byte("shared-secret"),
@@ -105,6 +108,7 @@ func TestPublishMultipleSubscribers(t *testing.T) {
 	defer server.Close()
 
 	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
 	for i := 0; i < 10; i++ {
 		bus.Subscribe("burst", Subscriber{URL: server.URL, Secret: []byte("s")})
 	}
@@ -135,6 +139,7 @@ func TestRetryOnFailure(t *testing.T) {
 	defer server.Close()
 
 	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
 	// Speed up retries for test
 	bus.Subscribe("flaky", Subscriber{
 		URL:     server.URL,
@@ -162,6 +167,7 @@ func TestExhaustedRetriesGiveUp(t *testing.T) {
 	defer server.Close()
 
 	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
 	bus.Subscribe("doomed", Subscriber{
 		URL:     server.URL,
 		Secret:  []byte("s"),
@@ -279,6 +285,7 @@ func TestVerifyMissingHeaders(t *testing.T) {
 
 func TestPublishWithNoSubscribers(t *testing.T) {
 	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
 	succ, total, err := bus.Publish(context.Background(), "no-listeners", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -301,6 +308,7 @@ func TestCustomHeaders(t *testing.T) {
 	defer server.Close()
 
 	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
 	bus.Subscribe("auth.test", Subscriber{
 		URL:     server.URL,
 		Secret:  []byte("k"),
@@ -309,5 +317,26 @@ func TestCustomHeaders(t *testing.T) {
 	bus.Publish(context.Background(), "auth.test", "x")
 	if capturedAuth != "Bearer custom-token" {
 		t.Errorf("custom auth not set: %s", capturedAuth)
+	}
+}
+
+func TestSSRFGuardBlocksLoopback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	// Secure-by-default bus (AllowPrivateTargets=false) must refuse loopback.
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.Subscribe("evt", Subscriber{URL: srv.URL, Retries: 1, Timeout: time.Second})
+	_, _, _ = bus.Publish(context.Background(), "evt", map[string]any{"x": 1})
+
+	// Direct check: delivery to the loopback URL is blocked.
+	if err := bus.deliverOnce(context.Background(), Subscriber{URL: srv.URL}, "evt", []byte("{}")); !errors.Is(err, ErrBlockedTarget) {
+		t.Fatalf("want ErrBlockedTarget, got %v", err)
+	}
+	// Non-http scheme is blocked too.
+	if err := bus.deliverOnce(context.Background(), Subscriber{URL: "file:///etc/passwd"}, "evt", []byte("{}")); !errors.Is(err, ErrBlockedTarget) {
+		t.Fatalf("file:// want ErrBlockedTarget, got %v", err)
 	}
 }

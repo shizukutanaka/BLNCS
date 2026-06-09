@@ -28,13 +28,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -73,6 +76,12 @@ type Bus struct {
 	HTTP *http.Client
 	Now  func() time.Time
 
+	// AllowPrivateTargets — true で loopback / private / link-local 宛の配信を許可。
+	// 既定 false (secure-by-default): subscriber URL は信頼境界外で設定され得るため、
+	// 内部サービスやクラウドメタデータ (169.254.169.254) への SSRF を防ぐ。
+	// httptest など localhost を相手にするテスト/開発時のみ true。
+	AllowPrivateTargets bool
+
 	mu          sync.RWMutex
 	subscribers map[string][]Subscriber // event type → subscribers
 }
@@ -82,12 +91,49 @@ func NewBus(tel *telemetry.Telemetry) *Bus {
 	if tel == nil {
 		tel = telemetry.Default()
 	}
-	return &Bus{
+	b := &Bus{
 		tel:         tel,
-		HTTP:        &http.Client{Timeout: 5 * time.Second},
 		Now:         time.Now,
 		subscribers: make(map[string][]Subscriber),
 	}
+	b.HTTP = &http.Client{
+		Timeout: 5 * time.Second,
+		// Re-validate every redirect hop so a 30x cannot bounce delivery into a
+		// private/loopback target (SSRF).
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			return b.validateOutboundURL(req.URL)
+		},
+	}
+	return b
+}
+
+// ErrBlockedTarget is returned when a subscriber URL resolves to a disallowed
+// (private/loopback/link-local) address or uses a non-http(s) scheme.
+var ErrBlockedTarget = errors.New("webhook: delivery target blocked (SSRF guard)")
+
+// validateOutboundURL enforces the SSRF policy for a delivery target.
+func (b *Bus) validateOutboundURL(u *url.URL) error {
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%w: scheme %q", ErrBlockedTarget, u.Scheme)
+	}
+	if b.AllowPrivateTargets {
+		return nil
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("%w: empty host", ErrBlockedTarget)
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("%w: resolve %s: %v", ErrBlockedTarget, host, err)
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("%w: %s resolves to non-public %s", ErrBlockedTarget, host, ip)
+		}
+	}
+	return nil
 }
 
 // Subscribe — イベント種別 → subscriber を追加
@@ -203,6 +249,10 @@ func (b *Bus) deliverOnce(ctx context.Context, s Subscriber, eventType string, p
 	if err != nil {
 		return err
 	}
+	// SSRF guard: reject private/loopback/link-local targets before sending.
+	if err := b.validateOutboundURL(req.URL); err != nil {
+		return err
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "BLRCS-Webhook/1.0")
 	req.Header.Set("X-BLRCS-Event", eventType)
@@ -296,14 +346,18 @@ func VerifyRequest(secret []byte, headers map[string]string, body []byte, timeWi
 // Helpers
 // ============================================================================
 
-// randomEventID — UUIDv4-style identifier (依存 0)
+// randomEventID — UUIDv4 identifier. The event ID is the receiver-side
+// replay-detection key, so it MUST be unpredictable and collision-resistant:
+// use crypto/rand, not the clock (clock-derived IDs share most bytes and are
+// forgeable). Falls back to time only if the CSPRNG is unavailable.
 func randomEventID() string {
 	b := make([]byte, 16)
-	for i := range b {
-		// time-based + counter で十分一意 (本MVP)。本番は crypto/rand.Read
-		b[i] = byte(time.Now().UnixNano() >> uint(i*4))
+	if _, err := rand.Read(b); err != nil {
+		for i := range b {
+			b[i] = byte(time.Now().UnixNano() >> uint(i*4))
+		}
 	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }

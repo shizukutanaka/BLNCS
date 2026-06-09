@@ -190,7 +190,10 @@ func runDID(v TestVector) Result {
 		return r
 	}
 	var want didOut
-	json.Unmarshal(v.Expected, &want)
+	if err := json.Unmarshal(v.Expected, &want); err != nil {
+		r.Reason = "bad expected vector: " + err.Error()
+		return r
+	}
 	d, err := types.NewDID(in.DID)
 	gotValid := err == nil
 	if gotValid != want.Valid {
@@ -251,7 +254,10 @@ func runVC(v TestVector) Result {
 		return r
 	}
 	var want vcOut
-	json.Unmarshal(v.Expected, &want)
+	if err := json.Unmarshal(v.Expected, &want); err != nil {
+		r.Reason = "bad expected vector: " + err.Error()
+		return r
+	}
 
 	seed, err := hex.DecodeString(in.IssuerSeedHex)
 	if err != nil || len(seed) != ed25519.SeedSize {
@@ -312,7 +318,10 @@ func runDCQL(v TestVector) Result {
 		return r
 	}
 	var want dcqlOut
-	json.Unmarshal(v.Expected, &want)
+	if err := json.Unmarshal(v.Expected, &want); err != nil {
+		r.Reason = "bad expected vector: " + err.Error()
+		return r
+	}
 
 	q, parseErr := openid4vp.ParseDCQL(in.Query)
 	validQuery := parseErr == nil
@@ -361,7 +370,10 @@ func runTier(v TestVector) Result {
 		return r
 	}
 	var want tierOut
-	json.Unmarshal(v.Expected, &want)
+	if err := json.Unmarshal(v.Expected, &want); err != nil {
+		r.Reason = "bad expected vector: " + err.Error()
+		return r
+	}
 
 	tc := compliance.NewTieredClaims()
 	for k, c := range in.Claims {
@@ -405,7 +417,10 @@ func runSDJWT(v TestVector) Result {
 		return r
 	}
 	var want sdjwtOut
-	json.Unmarshal(v.Expected, &want)
+	if err := json.Unmarshal(v.Expected, &want); err != nil {
+		r.Reason = "bad expected vector: " + err.Error()
+		return r
+	}
 
 	seed, err := hex.DecodeString(in.IssuerSeedHex)
 	if err != nil || len(seed) != ed25519.SeedSize {
@@ -474,7 +489,10 @@ func runMerkle(v TestVector) Result {
 		return r
 	}
 	var want merkleOut
-	json.Unmarshal(v.Expected, &want)
+	if err := json.Unmarshal(v.Expected, &want); err != nil {
+		r.Reason = "bad expected vector: " + err.Error()
+		return r
+	}
 	leaves := make([][]byte, len(in.Leaves))
 	for i, h := range in.Leaves {
 		b, err := hex.DecodeString(h)
@@ -516,7 +534,10 @@ func runGS1(v TestVector) Result {
 		return r
 	}
 	var want gs1Out
-	json.Unmarshal(v.Expected, &want)
+	if err := json.Unmarshal(v.Expected, &want); err != nil {
+		r.Reason = "bad expected vector: " + err.Error()
+		return r
+	}
 	url, err := compliance.BuildDLURI(in.Domain, compliance.GS1Key{
 		GTIN:   in.GTIN,
 		Serial: in.Serial,

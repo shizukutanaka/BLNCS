@@ -265,3 +265,45 @@ func TestPanicEventIncludesStack(t *testing.T) {
 	}
 	t.Error("stack attr missing from panic event")
 }
+
+// TestWrapNoDoubleWriteOnPartialResponse verifies that a panic AFTER the handler
+// has begun writing does not trigger a superfluous 500 WriteHeader (which would
+// corrupt the body / log "superfluous WriteHeader").
+func TestWrapNoDoubleWriteOnPartialResponse(t *testing.T) {
+	tel := telemetry.New(telemetry.NopRecorder{})
+	h := Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("partial"))
+		panic("boom after write")
+	}), tel)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+
+	// Status must remain 200 (the handler's), not overwritten to 500.
+	if rec.Code != http.StatusOK {
+		t.Errorf("status got %d, want 200 (no overwrite)", rec.Code)
+	}
+	// Body must be exactly what the handler wrote (no appended 500 JSON).
+	if rec.Body.String() != "partial" {
+		t.Errorf("body got %q, want %q", rec.Body.String(), "partial")
+	}
+	// Panic still recorded.
+	if tel.Counter("panic.recovered.total").Value() != 1 {
+		t.Error("panic not counted")
+	}
+}
+
+// TestWrap500OnPanicBeforeWrite verifies the 500 is still written when the
+// handler panics before writing anything.
+func TestWrap500OnPanicBeforeWrite(t *testing.T) {
+	tel := telemetry.New(telemetry.NopRecorder{})
+	h := Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("boom before write")
+	}), tel)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status got %d, want 500", rec.Code)
+	}
+}

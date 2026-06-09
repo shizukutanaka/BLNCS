@@ -164,6 +164,9 @@ func TestAccessLog4xxCounter(t *testing.T) {
 }
 
 func TestClientIPXForwardedFor(t *testing.T) {
+	// Proxy headers are only honored when explicitly trusted.
+	TrustProxyHeaders = true
+	defer func() { TrustProxyHeaders = false }()
 	cases := []struct {
 		header, want string
 	}{
@@ -181,10 +184,24 @@ func TestClientIPXForwardedFor(t *testing.T) {
 }
 
 func TestClientIPXRealIP(t *testing.T) {
+	TrustProxyHeaders = true
+	defer func() { TrustProxyHeaders = false }()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("X-Real-IP", "198.51.100.42")
 	if got := clientIP(req); got != "198.51.100.42" {
 		t.Errorf("X-Real-IP: %s", got)
+	}
+}
+
+// TestClientIPIgnoresSpoofedXFFByDefault verifies the secure default: spoofed
+// proxy headers are ignored, so they cannot be used to bypass per-IP rate limits.
+func TestClientIPIgnoresSpoofedXFFByDefault(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "192.0.2.50:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.99")
+	req.Header.Set("X-Real-IP", "203.0.113.99")
+	if got := clientIP(req); got != "192.0.2.50:1234" {
+		t.Errorf("spoofed headers should be ignored, got %s", got)
 	}
 }
 

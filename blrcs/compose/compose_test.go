@@ -39,6 +39,7 @@ func setup(t *testing.T) (*Composer, *compliance.Issuer, *cas.Provenance) {
 
 	tel := telemetry.New(telemetry.NopRecorder{})
 	bus := webhook.NewBus(tel)
+	bus.AllowPrivateTargets = true // test delivers to httptest (loopback)
 
 	ledger, _ := scitt.NewLedger("did:web:ts.compose.test")
 

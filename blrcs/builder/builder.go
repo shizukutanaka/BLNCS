@@ -20,6 +20,7 @@
 package builder
 
 import (
+	"strconv"
 	"time"
 
 	"blrcs/compliance"
@@ -329,7 +330,7 @@ func (e *BuildValidationError) Error() string {
 	if len(e.Issues) == 1 {
 		return "builder: " + e.Issues[0]
 	}
-	out := "builder: " + string(rune(len(e.Issues)+'0')) + " validation errors:\n"
+	out := "builder: " + strconv.Itoa(len(e.Issues)) + " validation errors:\n"
 	for _, issue := range e.Issues {
 		out += "  • " + issue + "\n"
 	}

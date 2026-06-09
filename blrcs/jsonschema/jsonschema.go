@@ -284,7 +284,10 @@ func (v *validator) checkNumber(sch map[string]any, inst any, path string) {
 		v.fail(path, "value %v >= exclusiveMaximum %v", f, m)
 	}
 	if m, ok := toFloat(sch["multipleOf"]); ok && m > 0 {
-		if r := f / m; r != math.Trunc(r) {
+		// Float division (f/m) loses integrality for e.g. 0.3/0.1; use a
+		// remainder with tolerance instead to avoid spurious failures.
+		rem := math.Abs(math.Remainder(f, m))
+		if rem > 1e-9*math.Max(1, math.Abs(f)) {
 			v.fail(path, "value %v is not a multiple of %v", f, m)
 		}
 	}

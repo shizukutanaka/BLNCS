@@ -112,6 +112,12 @@ func VerifyStatusListToken(token string, pub ed25519.PublicKey, purpose StatusPu
 	if err := json.Unmarshal(plBytes, &claims); err != nil {
 		return nil, nil, ErrTokenMalformed
 	}
+	// BLRCS reads the list as 1 bit per entry. A token declaring a different
+	// bit width would be misread (every index after the first maps to the wrong
+	// entry), so reject anything other than the implicit/explicit 1-bit form.
+	if claims.StatusList.Bits != 0 && claims.StatusList.Bits != 1 {
+		return nil, nil, ErrTokenMalformed
+	}
 	if claims.Exp != 0 && time.Now().After(time.Unix(claims.Exp, 0).Add(60*time.Second)) {
 		return nil, nil, ErrTokenExpired
 	}

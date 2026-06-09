@@ -167,7 +167,26 @@ func NewFileStorage(dir string) (*FileStorage, error) {
 		f.Close()
 		return nil, err
 	}
+	// fsync the directory so the ledger file's directory entry is durable on
+	// crash (file.Sync alone flushes file data/inode, not the dir entry).
+	if err := syncDir(dir); err != nil {
+		f.Close()
+		return nil, err
+	}
 	return fs, nil
+}
+
+// syncDir fsyncs a directory so newly created/renamed entries survive a crash.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 func (fs *FileStorage) rescanSize() error {
@@ -254,6 +273,12 @@ func (fs *FileStorage) IterateStatements(fn func(idx uint64, blob StatementBlob)
 			return err
 		}
 		n := binary.BigEndian.Uint32(header[:])
+		// Bound the frame size before allocating (matches rescanSize): a
+		// corrupted/truncated header can declare up to ~4 GiB, which would
+		// otherwise OOM on replay of a damaged log.
+		if n == 0 || n > 16*1024*1024 {
+			return fmt.Errorf("%w: frame size %d at idx %d", ErrCorrupted, n, idx)
+		}
 		payload := make([]byte, n)
 		if _, err := io.ReadFull(br, payload); err != nil {
 			return fmt.Errorf("read payload at idx %d: %w", idx, err)
@@ -303,7 +328,12 @@ func (fs *FileStorage) SaveKeyPair(pub ed25519.PublicKey, priv ed25519.PrivateKe
 	if err := os.WriteFile(tmp, buf, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, final)
+	if err := os.Rename(tmp, final); err != nil {
+		return err
+	}
+	// fsync the directory so the rename (the keypair's directory entry) is
+	// durable on crash — otherwise a reported-successful SaveKeyPair can be lost.
+	return syncDir(fs.dir)
 }
 
 func (fs *FileStorage) Close() error {
