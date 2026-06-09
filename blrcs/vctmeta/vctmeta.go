@@ -156,3 +156,46 @@ func ValidateClaimsWithSchema(schema json.RawMessage, claims map[string]any) err
 	}
 	return s.Validate(map[string]any(claims))
 }
+
+// ResolveSchema returns the JSON Schema document for this Type Metadata,
+// preferring the embedded `schema` and otherwise fetching `schema_uri`.
+//
+// When `schema_uri` is used it MUST be an https URL; if `schema_uri#integrity`
+// is present the fetched bytes are verified against it (W3C SRI) before use, so
+// the schema can be trusted and cached. Returns ErrNoSchema when neither a
+// `schema` nor a `schema_uri` is present.
+func (tm *TypeMetadata) ResolveSchema(ctx context.Context, fetch FetchFunc) (json.RawMessage, error) {
+	if tm.HasSchema() {
+		return tm.Schema, nil
+	}
+	if tm.SchemaURI == "" {
+		return nil, ErrNoSchema
+	}
+	if !strings.HasPrefix(tm.SchemaURI, "https://") {
+		return nil, ErrNotHTTPS
+	}
+	data, err := fetch(ctx, tm.SchemaURI)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxMetadataBytes {
+		return nil, ErrTooLarge
+	}
+	if tm.SchemaURIIntegrity != "" {
+		if err := VerifyIntegrity(data, tm.SchemaURIIntegrity); err != nil {
+			return nil, err
+		}
+	}
+	return json.RawMessage(data), nil
+}
+
+// ResolveAndValidate resolves the schema (embedded or via `schema_uri`) and
+// validates the claim set against it. It is the one-call path for verifiers that
+// hold Type Metadata and a verified claim set.
+func (tm *TypeMetadata) ResolveAndValidate(ctx context.Context, claims map[string]any, fetch FetchFunc) error {
+	schema, err := tm.ResolveSchema(ctx, fetch)
+	if err != nil {
+		return err
+	}
+	return ValidateClaimsWithSchema(schema, claims)
+}

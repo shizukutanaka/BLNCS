@@ -131,3 +131,70 @@ func TestValidateClaimsNoSchema(t *testing.T) {
 		t.Errorf("want ErrNoSchema, got %v", err)
 	}
 }
+
+// ============================================================================
+// Remote schema_uri resolution
+// ============================================================================
+
+var schemaDoc = []byte(`{"type":"object","properties":{"vct":{"type":"string"},"product_id":{"type":"string","pattern":"^[0-9]{14}$"}},"required":["vct","product_id"]}`)
+
+func TestResolveSchemaEmbeddedPreferred(t *testing.T) {
+	tm, _ := Resolve(context.Background(), vctURL, "", memFetcher(metaWithSchema))
+	// Even with a fetcher present, embedded schema wins (no fetch needed).
+	got, err := tm.ResolveSchema(context.Background(), func(context.Context, string) ([]byte, error) {
+		t.Fatal("fetch should not be called when schema is embedded")
+		return nil, nil
+	})
+	if err != nil || len(got) == 0 {
+		t.Fatalf("embedded schema: got=%d err=%v", len(got), err)
+	}
+}
+
+func TestResolveSchemaViaURI(t *testing.T) {
+	metaURIOnly := []byte(`{"vct":"` + vctURL + `","schema_uri":"https://schema.europa.eu/dpp/schema.json"}`)
+	tm, _ := Resolve(context.Background(), vctURL, "", memFetcher(metaURIOnly))
+
+	err := tm.ResolveAndValidate(context.Background(), map[string]any{
+		"vct": "x", "product_id": "04012345678901",
+	}, memFetcher(schemaDoc))
+	if err != nil {
+		t.Errorf("valid claims via schema_uri should pass: %v", err)
+	}
+
+	// Violation surfaces through the remote schema too.
+	err = tm.ResolveAndValidate(context.Background(), map[string]any{"vct": "x"}, memFetcher(schemaDoc))
+	if err == nil {
+		t.Error("missing required product_id should fail")
+	}
+}
+
+func TestResolveSchemaURIIntegrity(t *testing.T) {
+	integ := Integrity(schemaDoc)
+	metaWithIntegrity := []byte(`{"vct":"` + vctURL + `","schema_uri":"https://schema.europa.eu/dpp/schema.json","schema_uri#integrity":"` + integ + `"}`)
+	tm, _ := Resolve(context.Background(), vctURL, "", memFetcher(metaWithIntegrity))
+
+	// Correct bytes pass integrity.
+	if _, err := tm.ResolveSchema(context.Background(), memFetcher(schemaDoc)); err != nil {
+		t.Errorf("matching integrity should pass: %v", err)
+	}
+	// Tampered schema bytes are rejected.
+	if _, err := tm.ResolveSchema(context.Background(), memFetcher([]byte(`{"type":"string"}`))); err != ErrIntegrityMismatch {
+		t.Errorf("want ErrIntegrityMismatch, got %v", err)
+	}
+}
+
+func TestResolveSchemaNone(t *testing.T) {
+	tm, _ := Resolve(context.Background(), vctURL, "", memFetcher(sampleMeta))
+	// sampleMeta has schema_uri but pointing at non-https? It is https. Override:
+	tm.SchemaURI = ""
+	if _, err := tm.ResolveSchema(context.Background(), memFetcher(nil)); err != ErrNoSchema {
+		t.Errorf("want ErrNoSchema, got %v", err)
+	}
+}
+
+func TestResolveSchemaURINotHTTPS(t *testing.T) {
+	tm := &TypeMetadata{SchemaURI: "http://insecure.example/schema.json"}
+	if _, err := tm.ResolveSchema(context.Background(), memFetcher(schemaDoc)); err != ErrNotHTTPS {
+		t.Errorf("want ErrNotHTTPS, got %v", err)
+	}
+}

@@ -133,6 +133,7 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §2 mdoc device/holder binding (COSE_Key) | ✅ | deviceKey recovered; device-signature transport ❌ (out of scope) |
 | §3 SD-JWT-VC Type Metadata / vct#integrity | ✅ | resolution + integrity ✅ (`vctmeta`); JSON-Schema validation ✅ (`jsonschema` + `vctmeta.ValidateClaims`) |
 | §3 JSON Schema validator (draft 2020-12 subset) | ✅ | **implemented** (`jsonschema` package) |
+| §3 remote `schema_uri` resolution + integrity | ✅ | **implemented** (`vctmeta.ResolveSchema` / `ResolveAndValidate`) |
 | §7 crypto-agility hook (JWS) | ✅ | EdDSA built-in; ML-DSA pluggable |
 | §7 HTTP rate-limit enforcement | ✅ | **implemented** (`httpmw.RateLimiter`) |
 | §7 HTTP server read/write/idle timeouts | ✅ | **implemented** (`tlsharden.HardenedServer`) |
@@ -143,4 +144,3 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 1. did:webvh verifiable history (§1) — backlog #5 (verifiable update log + SCID + pre-rotation keys).
 2. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).
 3. mdoc DeviceResponse / session-transcript binding (§2a) — proximity transport (ISO 18013-5 §8/§9), beyond the credential-format scope now covered.
-4. SD-JWT-VC `schema_uri` remote-schema resolution — resolve+integrity-check the referenced schema then validate (the embedded `schema` path is done).

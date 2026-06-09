@@ -21,9 +21,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **SD-JWT-VC claim-set schema validation (`vctmeta.TypeMetadata.ValidateClaims`).**
   Wires the new validator into Type Metadata: `HasSchema` reports an embedded
   `schema`; `ValidateClaims` validates a verified claim set against it (or
-  `ValidateClaimsWithSchema` for an explicit schema). Completes spec §3 / backlog
-  #7 for the embedded-schema path (remote `schema_uri` resolution remains a
-  follow-up).
+  `ValidateClaimsWithSchema` for an explicit schema).
+
+- **Remote `schema_uri` resolution (`vctmeta.ResolveSchema` / `ResolveAndValidate`).**
+  When Type Metadata references its schema by `schema_uri` instead of embedding
+  it, the schema is fetched over https (size-bounded) and, when
+  `schema_uri#integrity` is present, verified against it (W3C SRI) before use.
+  `ResolveAndValidate` is the one-call path: resolve (embedded or remote) then
+  validate the claim set. Completes spec §3 / backlog #7.
 
 ### Added
 - **ISO/IEC 18013-5 mdoc / mDL credential format (`mdoc` package).** Full
