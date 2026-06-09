@@ -12,8 +12,30 @@ import "errors"
 // base58btcAlphabet is the Bitcoin/IPFS base58 alphabet.
 const base58btcAlphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
+// maxBase58Input bounds decode input length. Base58 decode is O(n²); legitimate
+// inputs (32-byte keys → ~44 chars, 34-byte multihash → ~46 chars, 64-byte sigs
+// → ~88 chars) are tiny, so an 8 KiB cap rejects adversarial oversized strings
+// well before the quadratic cost matters.
+const maxBase58Input = 8192
+
+// base58Inverse maps each ASCII byte to its base58 digit value, or -1. Built
+// once at init so decoding does not linear-scan the alphabet per character.
+var base58Inverse = func() [256]int8 {
+	var t [256]int8
+	for i := range t {
+		t[i] = -1
+	}
+	for i := 0; i < len(base58btcAlphabet); i++ {
+		t[base58btcAlphabet[i]] = int8(i)
+	}
+	return t
+}()
+
 // ErrInvalidBase58 is returned when decoding a string with a non-alphabet character.
 var ErrInvalidBase58 = errors.New("multiformats: invalid base58btc character")
+
+// ErrBase58TooLong is returned when decode input exceeds maxBase58Input.
+var ErrBase58TooLong = errors.New("multiformats: base58 input too long")
 
 // Base58Encode encodes bytes to a base58btc string (Bitcoin alphabet).
 func Base58Encode(input []byte) string {
@@ -66,6 +88,9 @@ func Base58Decode(input string) ([]byte, error) {
 	if input == "" {
 		return []byte{}, nil
 	}
+	if len(input) > maxBase58Input {
+		return nil, ErrBase58TooLong
+	}
 
 	// Count leading '1's — each maps to a leading zero byte.
 	zeros := 0
@@ -76,7 +101,7 @@ func Base58Decode(input string) ([]byte, error) {
 	// Decode base-58 digits into a base-256 big-endian number.
 	buf := make([]byte, 0, len(input))
 	for i := zeros; i < len(input); i++ {
-		val := base58Index(input[i])
+		val := int(base58Inverse[input[i]])
 		if val < 0 {
 			return nil, ErrInvalidBase58
 		}
@@ -101,13 +126,4 @@ func Base58Decode(input string) ([]byte, error) {
 		res = append(res, buf[i])
 	}
 	return res, nil
-}
-
-func base58Index(c byte) int {
-	for i := 0; i < len(base58btcAlphabet); i++ {
-		if base58btcAlphabet[i] == c {
-			return i
-		}
-	}
-	return -1
 }

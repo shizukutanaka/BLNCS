@@ -221,3 +221,13 @@ func mustHex(t *testing.T, s string) []byte {
 	}
 	return b
 }
+
+func TestBase58DecodeTooLong(t *testing.T) {
+	long := make([]byte, maxBase58Input+1)
+	for i := range long {
+		long[i] = '1'
+	}
+	if _, err := Base58Decode(string(long)); err != ErrBase58TooLong {
+		t.Errorf("want ErrBase58TooLong, got %v", err)
+	}
+}

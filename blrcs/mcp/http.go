@@ -23,6 +23,7 @@ package mcp
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -335,8 +336,18 @@ func (b *BearerTokenAuth) Verify(_ context.Context, r *http.Request) (string, er
 		return "", errors.New("missing or malformed Authorization header")
 	}
 	token := strings.TrimPrefix(h, "Bearer ")
-	principal, ok := b.Tokens[token]
-	if !ok {
+	// Constant-time comparison against every configured token (no early exit),
+	// so timing does not reveal which token matched or how many bytes were right.
+	tb := []byte(token)
+	var principal string
+	found := 0
+	for k, v := range b.Tokens {
+		if subtle.ConstantTimeCompare([]byte(k), tb) == 1 {
+			principal = v
+			found = 1
+		}
+	}
+	if found == 0 {
 		return "", errors.New("invalid token")
 	}
 	return principal, nil

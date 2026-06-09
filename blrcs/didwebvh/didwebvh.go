@@ -142,13 +142,49 @@ func computeEntryHash(entry *LogEntry, predecessorVersionID string) (string, err
 
 // deriveSCID computes the SCID from a genesis entry, by substituting the actual
 // SCID back to the placeholder in the hash input (the inverse of issuance).
+//
+// It rejects a genesis that already contains the placeholder literal ("{SCID}")
+// anywhere, since that would make the substitution non-invertible and let a
+// crafted entry forge a matching SCID. It also requires a non-trivial SCID.
 func deriveSCID(entry *LogEntry) (string, error) {
+	if len(entry.Parameters.SCID) < 8 {
+		return "", fmt.Errorf("%w: scid too short", ErrSCIDMismatch)
+	}
+	// The genesis DID document (state) and its parameters must not themselves
+	// contain the placeholder literal at verify time — that would make the
+	// substitution non-invertible and let a crafted entry forge a matching SCID.
+	// (versionId is set to the placeholder by us below, so it is excluded.)
+	if containsPlaceholder(entry.State) {
+		return "", fmt.Errorf("%w: genesis state contains the SCID placeholder literal", ErrSCIDMismatch)
+	}
 	in, err := entryHashInput(entry, SCIDPlaceholder)
 	if err != nil {
 		return "", err
 	}
 	withPlaceholder := substituteSCID(in, entry.Parameters.SCID, SCIDPlaceholder)
 	return computeHash(withPlaceholder)
+}
+
+// containsPlaceholder reports whether any string in a decoded-JSON structure
+// contains the SCID placeholder literal.
+func containsPlaceholder(v any) bool {
+	switch val := v.(type) {
+	case string:
+		return strings.Contains(val, SCIDPlaceholder)
+	case []any:
+		for _, e := range val {
+			if containsPlaceholder(e) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, e := range val {
+			if containsPlaceholder(e) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // substituteSCID recursively replaces every occurrence of `from` with `to` in

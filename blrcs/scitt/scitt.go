@@ -461,7 +461,11 @@ func VerifyCheckpoint(cp Checkpoint, tsPub ed25519.PublicKey) error {
 	return nil
 }
 
-// Get — 位置から statement と Receipt を取得 (監査・再検証用)
+// Get — 位置から statement と Receipt を取得 (監査・再検証用)。
+//
+// 返す Receipt は現在のツリー (最新 root) に対して新規に署名し直したもので、
+// RegisteredAt はその再発行時刻を表す。元の Register が返した Receipt とは
+// (root もタイムスタンプも変わり得るため) バイト一致しない。
 func (l *Ledger) Get(idx uint64) (Statement, *Receipt, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -482,7 +486,7 @@ func (l *Ledger) Get(idx uint64) (Statement, *Receipt, error) {
 		RootHash:     fmt.Sprintf("%x", root),
 		AuditPath:    pathHex,
 		TSKey:        base64.StdEncoding.EncodeToString(l.tsPub),
-		RegisteredAt: stmt.IssuedAt,
+		RegisteredAt: time.Now().UTC(),
 	}
 	sigPayload := receiptSigPayload(receipt)
 	receipt.TSSignature = base64.StdEncoding.EncodeToString(ed25519.Sign(l.tsPriv, sigPayload))

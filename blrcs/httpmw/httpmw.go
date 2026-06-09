@@ -102,7 +102,11 @@ type requestIDKey struct{}
 // なければサーバ側で生成
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rid := r.Header.Get("X-Request-ID")
+		// Sanitize any client-supplied X-Request-ID: it is echoed into the
+		// response header and concatenated into JSON error bodies, so restrict it
+		// to a safe charset and bounded length (else a value like `"},"x":"`
+		// would corrupt the error JSON / log lines).
+		rid := sanitizeRequestID(r.Header.Get("X-Request-ID"))
 		if rid == "" {
 			b := make([]byte, 8)
 			_, _ = rand.Read(b)
@@ -112,6 +116,24 @@ func RequestID(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), requestIDKey{}, rid)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// sanitizeRequestID keeps only safe identifier characters (alphanumeric, '-',
+// '_', '.') and caps the length at 128. Returns "" if nothing survives.
+func sanitizeRequestID(s string) string {
+	if len(s) > 128 {
+		s = s[:128]
+	}
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '-', c == '_', c == '.':
+			out = append(out, c)
+		}
+	}
+	return string(out)
 }
 
 // RequestIDFromContext — handler 内から request ID を取得

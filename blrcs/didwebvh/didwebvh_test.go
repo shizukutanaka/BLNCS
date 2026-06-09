@@ -356,3 +356,19 @@ func TestPreRotationBypassByOmittingUpdateKeys(t *testing.T) {
 		t.Fatal("omitting updateKeys after a nextKeyHashes commitment must be rejected")
 	}
 }
+
+// TestSCIDPlaceholderInjectionRejected ensures a hand-crafted genesis whose
+// state embeds the {SCID} placeholder literal is rejected (it would make SCID
+// derivation non-invertible / forgeable). The attack vector is a forged log, so
+// the entry is built directly rather than via Create (which substitutes it away).
+func TestSCIDPlaceholderInjectionRejected(t *testing.T) {
+	forged := LogEntry{
+		VersionID:   "1-Qmforged",
+		VersionTime: time.Now().UTC().Format(time.RFC3339),
+		Parameters:  Parameters{SCID: "QmSomeLongEnoughScidValue"},
+		State:       map[string]any{"id": "did:webvh:x:ex", "note": "embeds {SCID} here"},
+	}
+	if _, err := Verify([]LogEntry{forged}); err == nil {
+		t.Fatal("genesis state containing the {SCID} placeholder must be rejected")
+	}
+}

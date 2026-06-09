@@ -31,6 +31,7 @@ package httpchain
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -167,7 +168,10 @@ func parseTraceparent(header string) *TraceContextValues {
 		tc.Sampled = true
 		return tc
 	}
-	if len(parts[1]) != 32 || len(parts[2]) != 16 {
+	// Validate length AND that the IDs are lowercase hex (W3C trace-context).
+	// Without the hex check, attacker-controlled non-hex IDs are reflected into
+	// the response traceparent header and logs (log injection).
+	if len(parts[1]) != 32 || len(parts[2]) != 16 || !isLowerHex(parts[1]) || !isLowerHex(parts[2]) {
 		tc.TraceID = randomTraceID()
 		tc.SpanID = randomSpanID()
 		return tc
@@ -179,6 +183,20 @@ func parseTraceparent(header string) *TraceContextValues {
 		tc.Sampled = flags == "01" || flags == "03"
 	}
 	return tc
+}
+
+// isLowerHex reports whether s is non-empty and all lowercase hex digits.
+func isLowerHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func buildTraceparent(tc *TraceContextValues) string {
@@ -312,12 +330,28 @@ func BearerAuth(tokens map[string]string) AuthFunc {
 			return "", errors.New("missing Bearer token")
 		}
 		token := strings.TrimPrefix(header, "Bearer ")
-		principal, ok := tokens[token]
+		principal, ok := constantTimeTokenLookup(tokens, token)
 		if !ok {
 			return "", errors.New("invalid token")
 		}
 		return principal, nil
 	}
+}
+
+// constantTimeTokenLookup compares the presented token against every configured
+// token with a constant-time comparison and no early exit, so validation time
+// does not leak which (if any) token matched or how many bytes were correct.
+func constantTimeTokenLookup(tokens map[string]string, token string) (string, bool) {
+	tb := []byte(token)
+	var principal string
+	found := 0
+	for k, v := range tokens {
+		if subtle.ConstantTimeCompare([]byte(k), tb) == 1 {
+			principal = v
+			found = 1
+		}
+	}
+	return principal, found == 1
 }
 
 // ============================================================================

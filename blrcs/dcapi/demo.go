@@ -258,7 +258,11 @@ func renderDemoHTML(prefix string, def openid4vp.PresentationDefinition) string 
       const out = await cbResp.json();
       if (out.status === 'success') {
         statusEl.className = 'ok';
-        statusEl.innerHTML = '✓ Verified — issuer: <code>' + out.issuer + '</code>';
+        // textContent (not innerHTML) — never render server-echoed values as HTML.
+        statusEl.textContent = '';
+        const issuerCode = document.createElement('code');
+        issuerCode.textContent = out.issuer;
+        statusEl.append('✓ Verified — issuer: ', issuerCode);
         payloadEl.textContent = JSON.stringify(out.claims, null, 2);
       } else {
         statusEl.className = 'err';
