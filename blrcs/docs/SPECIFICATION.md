@@ -131,7 +131,8 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §2 mdoc/mDL format (ISO 18013-5 IssuerSigned + MSO) | ✅ | **implemented** (`mdoc` package: Issue/Verify/Present) |
 | §2 mdoc selective disclosure + value-digest integrity | ✅ | **implemented** (`mdoc.Present`, digest checks in `mdoc.Verify`) |
 | §2 mdoc device/holder binding (COSE_Key) | ✅ | deviceKey recovered; device-signature transport ❌ (out of scope) |
-| §3 SD-JWT-VC Type Metadata / vct#integrity | ⚠️ | resolution + integrity ✅ (`vctmeta`); JSON-Schema validation ❌ #7 |
+| §3 SD-JWT-VC Type Metadata / vct#integrity | ✅ | resolution + integrity ✅ (`vctmeta`); JSON-Schema validation ✅ (`jsonschema` + `vctmeta.ValidateClaims`) |
+| §3 JSON Schema validator (draft 2020-12 subset) | ✅ | **implemented** (`jsonschema` package) |
 | §7 crypto-agility hook (JWS) | ✅ | EdDSA built-in; ML-DSA pluggable |
 | §7 HTTP rate-limit enforcement | ✅ | **implemented** (`httpmw.RateLimiter`) |
 | §7 HTTP server read/write/idle timeouts | ✅ | **implemented** (`tlsharden.HardenedServer`) |
@@ -139,7 +140,7 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §4 issuer-metric privacy (CRSet accumulator) | ❌ | backlog #11 |
 
 ### Highest-value remaining gaps (ordered)
-1. SD-JWT-VC JSON-Schema validation (§3) — backlog #7 (zero-dep constraint; embed a minimal draft-07 validator).
-2. did:webvh verifiable history (§1) — backlog #5 (verifiable update log + SCID + pre-rotation keys).
-3. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).
-4. mdoc DeviceResponse / session-transcript binding (§2a) — proximity transport (ISO 18013-5 §8/§9), beyond the credential-format scope now covered.
+1. did:webvh verifiable history (§1) — backlog #5 (verifiable update log + SCID + pre-rotation keys).
+2. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).
+3. mdoc DeviceResponse / session-transcript binding (§2a) — proximity transport (ISO 18013-5 §8/§9), beyond the credential-format scope now covered.
+4. SD-JWT-VC `schema_uri` remote-schema resolution — resolve+integrity-check the referenced schema then validate (the embedded `schema` path is done).

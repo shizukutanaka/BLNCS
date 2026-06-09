@@ -66,3 +66,68 @@ func TestResolveNoIntegritySkipsCheck(t *testing.T) {
 		t.Fatalf("resolve without integrity: tm=%+v err=%v", tm, err)
 	}
 }
+
+// ============================================================================
+// Schema validation (jsonschema integration)
+// ============================================================================
+
+var metaWithSchema = []byte(`{
+	"vct":"https://schema.europa.eu/dpp/sd-jwt-vc/v1",
+	"name":"EU DPP",
+	"schema":{
+		"type":"object",
+		"properties":{
+			"vct":{"type":"string"},
+			"product_id":{"type":"string","pattern":"^[0-9]{14}$"},
+			"recyclability_pct":{"type":"integer","minimum":0,"maximum":100}
+		},
+		"required":["vct","product_id"]
+	}
+}`)
+
+func TestValidateClaimsHappyPath(t *testing.T) {
+	tm, err := Resolve(context.Background(), vctURL, "", memFetcher(metaWithSchema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tm.HasSchema() {
+		t.Fatal("expected embedded schema")
+	}
+	claims := map[string]any{
+		"vct":               vctURL,
+		"product_id":        "04012345678901",
+		"recyclability_pct": float64(82),
+	}
+	if err := tm.ValidateClaims(claims); err != nil {
+		t.Errorf("valid claims should pass: %v", err)
+	}
+}
+
+func TestValidateClaimsViolations(t *testing.T) {
+	tm, _ := Resolve(context.Background(), vctURL, "", memFetcher(metaWithSchema))
+
+	// Bad product_id pattern.
+	if err := tm.ValidateClaims(map[string]any{"vct": "x", "product_id": "abc"}); err == nil {
+		t.Error("bad product_id should fail")
+	}
+	// Missing required product_id.
+	if err := tm.ValidateClaims(map[string]any{"vct": "x"}); err == nil {
+		t.Error("missing required should fail")
+	}
+	// recyclability out of range.
+	if err := tm.ValidateClaims(map[string]any{
+		"vct": "x", "product_id": "04012345678901", "recyclability_pct": float64(150),
+	}); err == nil {
+		t.Error("out-of-range should fail")
+	}
+}
+
+func TestValidateClaimsNoSchema(t *testing.T) {
+	tm, _ := Resolve(context.Background(), vctURL, "", memFetcher(sampleMeta))
+	if tm.HasSchema() {
+		t.Fatal("sampleMeta has no embedded schema")
+	}
+	if err := tm.ValidateClaims(map[string]any{"vct": "x"}); err != ErrNoSchema {
+		t.Errorf("want ErrNoSchema, got %v", err)
+	}
+}

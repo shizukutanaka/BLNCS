@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Minimal zero-dependency JSON Schema validator (`jsonschema` package).**
+  Implements the draft 2020-12 / draft-07-compatible subset needed to validate
+  SD-JWT-VC claim sets against the `schema` in Type Metadata: `type` (incl.
+  unions and `integer`), `enum`/`const`, string (`minLength`/`maxLength`/
+  `pattern`/`format`), numeric (`minimum`/`maximum`/exclusive/`multipleOf`),
+  object (`required`/`properties`/`additionalProperties`/`patternProperties`/
+  min-max-properties), array (`items`/`prefixItems`/`minItems`/`maxItems`/
+  `uniqueItems`/`contains`), combinators (`allOf`/`anyOf`/`oneOf`/`not`), local
+  `$ref` (`#/...` JSON pointers), and boolean schemas. Errors aggregate all
+  violations. `format` is lenient (unknown formats pass). 30 tests + `FuzzJSONSchema`.
+
+- **SD-JWT-VC claim-set schema validation (`vctmeta.TypeMetadata.ValidateClaims`).**
+  Wires the new validator into Type Metadata: `HasSchema` reports an embedded
+  `schema`; `ValidateClaims` validates a verified claim set against it (or
+  `ValidateClaimsWithSchema` for an explicit schema). Completes spec §3 / backlog
+  #7 for the embedded-schema path (remote `schema_uri` resolution remains a
+  follow-up).
+
+### Added
 - **ISO/IEC 18013-5 mdoc / mDL credential format (`mdoc` package).** Full
   `IssuerSigned` issuance, verification, and selective disclosure on top of the
   `cbor` layer — the format every comparable EUDI stack ships (eudi-lib,

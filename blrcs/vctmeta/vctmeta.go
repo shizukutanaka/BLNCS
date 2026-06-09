@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"blrcs/jsonschema"
 )
 
 var (
@@ -29,6 +31,7 @@ var (
 	ErrIntegrityFormat   = errors.New("vctmeta: malformed integrity metadata")
 	ErrIntegrityMismatch = errors.New("vctmeta: type metadata integrity mismatch")
 	ErrTooLarge          = errors.New("vctmeta: type metadata too large")
+	ErrNoSchema          = errors.New("vctmeta: type metadata has no embedded schema")
 )
 
 const maxMetadataBytes = 1 << 20 // 1 MiB
@@ -123,4 +126,33 @@ func Resolve(ctx context.Context, vct, expectedIntegrity string, fetch FetchFunc
 	}
 	tm.Raw = data
 	return &tm, nil
+}
+
+// HasSchema reports whether the Type Metadata carries an embedded `schema`.
+func (tm *TypeMetadata) HasSchema() bool { return len(tm.Schema) > 0 }
+
+// ValidateClaims validates a decoded SD-JWT-VC claim set against the Type
+// Metadata's embedded `schema` (draft-ietf-oauth-sd-jwt-vc §Type Metadata).
+//
+// claims is the verified claim set (e.g. compliance.VerifiedClaims.Claims, a
+// map[string]any). Reserved SD-JWT claims that the verifier already strips
+// (`_sd`, `cnf`, …) are not the schema's concern. Returns ErrNoSchema when no
+// embedded schema is present (callers that require one should check HasSchema).
+//
+// Note: only the embedded `schema` is validated here. `schema_uri` is a remote
+// reference; fetch it with the resolver and pass it to ValidateClaimsWithSchema.
+func (tm *TypeMetadata) ValidateClaims(claims map[string]any) error {
+	if !tm.HasSchema() {
+		return ErrNoSchema
+	}
+	return ValidateClaimsWithSchema(tm.Schema, claims)
+}
+
+// ValidateClaimsWithSchema validates a claim set against a JSON Schema document.
+func ValidateClaimsWithSchema(schema json.RawMessage, claims map[string]any) error {
+	s, err := jsonschema.Compile(schema)
+	if err != nil {
+		return fmt.Errorf("vctmeta: compile schema: %w", err)
+	}
+	return s.Validate(map[string]any(claims))
 }

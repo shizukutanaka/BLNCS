@@ -4,7 +4,7 @@
 
 ```
 stdlib + ed25519 only — zero external dependencies
-880+ tests · 50 packages · ~16,400 LoC implementation · 11 fuzz targets
+910+ tests · 51 packages · ~16,900 LoC implementation · 12 fuzz targets
 ```
 
 ## Status
@@ -13,6 +13,7 @@ stdlib + ed25519 only — zero external dependencies
 |---|---|---|
 | W3C Verifiable Credentials | ✅ | compliance |
 | SD-JWT (selective disclosure) | ✅ | compliance, property, fuzz |
+| SD-JWT-VC Type Metadata + schema validation | ✅ | vctmeta, jsonschema |
 | ZK Range Proof (TEE-attested) | ✅ | compliance |
 | GS1 Digital Link (ISO/IEC 18975) | ✅ | compliance, fuzz |
 | EU Battery Passport (Reg 2023/1542) | ✅ | compliance |
@@ -81,7 +82,7 @@ core domain          compliance / scitt / storage / revocation
 typed primitives     types / builder / errkit / telemetry / ctx
 standards            openid4vp / openid4vci / dcapi / mdoc / mcp / vctmeta / conformance
 crypto/keys          kms / atrest
-encoding             cbor (RFC 8949 encoder/decoder + COSE_Sign1 RFC 9052)
+encoding             cbor (RFC 8949 + COSE_Sign1 RFC 9052) / jsonschema (draft 2020-12 subset)
 hardening            recovery / replay / saga / fuzz / property / schemaver
 observability        metrics / otelbridge / doctor / healthprobe / diag
 privacy              privacy

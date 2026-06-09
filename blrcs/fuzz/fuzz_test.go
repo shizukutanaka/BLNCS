@@ -24,12 +24,14 @@ package fuzz
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"blrcs/cbor"
 	"blrcs/compliance"
 	"blrcs/errkit"
+	"blrcs/jsonschema"
 	"blrcs/mdoc"
 	"blrcs/scitt"
 	"blrcs/types"
@@ -368,5 +370,33 @@ func FuzzMdoc(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// 絶対条件: いかなる入力でも panic しない (エラーは許容)
 		_, _ = mdoc.Verify(data, pub, time.Now())
+	})
+}
+
+// ============================================================================
+// FuzzJSONSchema — 任意バイト列を schema/instance として処理、パニック禁止
+// ============================================================================
+
+func FuzzJSONSchema(f *testing.F) {
+	f.Add(`{"type":"string"}`, `"hello"`)
+	f.Add(`{"type":"object","required":["a"]}`, `{"a":1}`)
+	f.Add(`{"properties":{"x":{"type":"integer"}}}`, `{"x":3}`)
+	f.Add(`{"$ref":"#/$defs/foo"}`, `1`)
+	f.Add(`true`, `null`)
+	f.Add(`false`, `{}`)
+	f.Add(`{"allOf":[{"minimum":0}]}`, `5`)
+	f.Add(``, ``)
+
+	f.Fuzz(func(t *testing.T, schemaSrc, instanceSrc string) {
+		sch, err := jsonschema.Compile([]byte(schemaSrc))
+		if err != nil {
+			return
+		}
+		var inst any
+		if err := json.Unmarshal([]byte(instanceSrc), &inst); err != nil {
+			return
+		}
+		// 絶対条件: いかなる入力でも panic しない
+		_ = sch.Validate(inst)
 	})
 }
