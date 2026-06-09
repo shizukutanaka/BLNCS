@@ -158,9 +158,15 @@ func TestGoRecoversPanicInGoroutine(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("goroutine hung")
 	}
-	// Counter incremented
-	if tel.Counter("panic.recovered.total").Value() != 1 {
-		t.Errorf("goroutine panic not counted")
+	// close(done) は fn の defer で走り、panic 回復 (handlePanic) は外側の defer で
+	// その後に走るため、カウンタ確定まで短時間ポーリングする (close との競合を避ける)。
+	deadline := time.After(2 * time.Second)
+	for tel.Counter("panic.recovered.total").Value() != 1 {
+		select {
+		case <-deadline:
+			t.Fatalf("goroutine panic not counted: total=%d", tel.Counter("panic.recovered.total").Value())
+		case <-time.After(time.Millisecond):
+		}
 	}
 	// Source-specific counter
 	if tel.Counter("panic.recovered.goroutine.worker").Value() != 1 {

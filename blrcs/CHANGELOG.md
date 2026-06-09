@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security & robustness audit (per-category)
+A category-by-category audit of the whole product surfaced and fixed defects
+across credential formats, identity/trust, protocols/HTTP, and storage/infra.
+Highlights (full detail in the git history):
+
+- **HIGH** — `cbor` non-canonical negative-integer map-key ordering (broke COSE_Key/
+  mdoc deterministic encoding); `mcp` JSON-injection via concatenated error text;
+  `openid4vp` verifier now secure-by-default (`RequireKeyBinding=true`) so bearer
+  presentations can't replay; `didwebvh` pre-rotation bypass (omitting `updateKeys`
+  kept a compromised key); `didresolver` multibase 'm' key length not validated
+  (panicked `ed25519.Verify` → DoS).
+- **MED** — webhook SSRF guard + crypto/rand event IDs; `httpmw` no longer trusts
+  spoofable `X-Forwarded-For` for rate-limit keying by default; `recovery` no longer
+  double-writes a 500 over a partial response; `storage` directory fsync for true
+  crash-safety + frame-size bound on replay; Status List Token `bits` validation;
+  `types` NaN/Inf rejection; `builder` error count formatting; `jsonschema`
+  `multipleOf` precision; `conformance` no longer swallows malformed-vector errors.
+- **LOW** — `config.FromEnv` returns an error and rejects malformed ints; `cas`
+  provenance de-dups reverse-index entries; `ctx.RegisterSCITT` no longer reports a
+  false cancellation while the ledger commit proceeds; cmd entrypoints close storage
+  and fail fast on a malformed rate-limit value.
+
+All fixes ship with regression tests; secure-by-default behavior changes have
+explicit opt-outs for legitimate local/bearer flows. `go test -race ./...` clean.
+
 ### Added
 - **did:webvh verifiable-history DID method (`didwebvh` package).** Implements
   the did:webvh model that hardens did:web against key-substitution and silent
