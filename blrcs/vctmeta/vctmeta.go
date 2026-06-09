@@ -27,14 +27,19 @@ import (
 )
 
 var (
-	ErrNotHTTPS          = errors.New("vctmeta: vct is not an https URL")
-	ErrIntegrityFormat   = errors.New("vctmeta: malformed integrity metadata")
-	ErrIntegrityMismatch = errors.New("vctmeta: type metadata integrity mismatch")
-	ErrTooLarge          = errors.New("vctmeta: type metadata too large")
-	ErrNoSchema          = errors.New("vctmeta: type metadata has no embedded schema")
+	ErrNotHTTPS            = errors.New("vctmeta: vct is not an https URL")
+	ErrIntegrityFormat     = errors.New("vctmeta: malformed integrity metadata")
+	ErrIntegrityMismatch   = errors.New("vctmeta: type metadata integrity mismatch")
+	ErrTooLarge            = errors.New("vctmeta: type metadata too large")
+	ErrNoSchema            = errors.New("vctmeta: type metadata has no embedded schema")
+	ErrExtendsChainTooDeep = errors.New("vctmeta: extends chain exceeds maximum depth")
+	ErrExtendsCycle        = errors.New("vctmeta: extends chain contains a cycle")
 )
 
-const maxMetadataBytes = 1 << 20 // 1 MiB
+const (
+	maxMetadataBytes = 1 << 20 // 1 MiB
+	maxExtendsDepth  = 8       // DoS guard on extends chain depth
+)
 
 // TypeMetadata — SD-JWT-VC Type Metadata ドキュメント。
 type TypeMetadata struct {
@@ -198,4 +203,48 @@ func (tm *TypeMetadata) ResolveAndValidate(ctx context.Context, claims map[strin
 		return err
 	}
 	return ValidateClaimsWithSchema(schema, claims)
+}
+
+// ResolveChain follows the `extends` links of a Type Metadata document and
+// returns the full inheritance chain from the root (most-base type) to the
+// leaf (the type requested by vct), in that order.
+//
+// Guards:
+//   - ErrExtendsChainTooDeep if the chain exceeds maxExtendsDepth (DoS defense)
+//   - ErrExtendsCycle if a URL appears twice (cycle detection)
+//   - ErrNotHTTPS if any link in the chain is a non-https URL
+//   - ErrTooLarge, ErrIntegrityMismatch from each Resolve call
+//
+// If vct has no `extends` the result is a single-element slice.
+func ResolveChain(ctx context.Context, vct, expectedIntegrity string, fetch FetchFunc) ([]TypeMetadata, error) {
+	seen := make(map[string]struct{})
+	var chain []TypeMetadata
+	cur, curIntegrity := vct, expectedIntegrity
+
+	for {
+		if len(chain) >= maxExtendsDepth {
+			return nil, ErrExtendsChainTooDeep
+		}
+		if _, dup := seen[cur]; dup {
+			return nil, ErrExtendsCycle
+		}
+		seen[cur] = struct{}{}
+
+		tm, err := Resolve(ctx, cur, curIntegrity, fetch)
+		if err != nil {
+			return nil, err
+		}
+		chain = append(chain, *tm)
+
+		if tm.Extends == "" {
+			break
+		}
+		cur, curIntegrity = tm.Extends, tm.ExtendsIntegrity
+	}
+
+	// Reverse so index 0 is the most-base (root) type.
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	return chain, nil
 }

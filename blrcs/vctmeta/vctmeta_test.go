@@ -224,3 +224,93 @@ func TestResolveSchemaURITooLarge(t *testing.T) {
 		t.Errorf("want ErrTooLarge, got %v", err)
 	}
 }
+
+// ============================================================================
+// ResolveChain — extends chain resolution, depth limit, cycle detection
+// ============================================================================
+
+// chainFetcher builds a FetchFunc that serves a linear extends chain:
+// url0 → url1 → url2 → … with no extends on the last.
+func chainFetcher(urls []string) FetchFunc {
+	docs := make(map[string][]byte, len(urls))
+	for i, u := range urls {
+		var extends string
+		if i+1 < len(urls) {
+			extends = `,"extends":"` + urls[i+1] + `"`
+		}
+		docs[u] = []byte(`{"vct":"` + u + `"` + extends + `}`)
+	}
+	return func(_ context.Context, url string) ([]byte, error) {
+		if d, ok := docs[url]; ok {
+			return d, nil
+		}
+		return nil, &notFoundErr{url}
+	}
+}
+
+type notFoundErr struct{ url string }
+
+func (e *notFoundErr) Error() string { return "not found: " + e.url }
+
+func TestResolveChainSingleNode(t *testing.T) {
+	// No extends → chain of length 1.
+	chain, err := ResolveChain(context.Background(), vctURL, "", memFetcher(sampleMeta))
+	if err != nil {
+		t.Fatalf("single-node chain: %v", err)
+	}
+	if len(chain) != 1 {
+		t.Errorf("want 1, got %d", len(chain))
+	}
+	if chain[0].VCT != vctURL {
+		t.Errorf("VCT: %s", chain[0].VCT)
+	}
+}
+
+func TestResolveChainMultipleNodes(t *testing.T) {
+	urls := []string{
+		"https://eu.example/base",
+		"https://eu.example/derived",
+		"https://eu.example/leaf",
+	}
+	chain, err := ResolveChain(context.Background(), urls[0], "", chainFetcher(urls))
+	if err != nil {
+		t.Fatalf("multi-node chain: %v", err)
+	}
+	if len(chain) != 3 {
+		t.Errorf("want 3, got %d", len(chain))
+	}
+	// Chain returned root-first: urls[2] is root (no extends), urls[0] is leaf.
+	if chain[0].VCT != urls[2] {
+		t.Errorf("root should be %s, got %s", urls[2], chain[0].VCT)
+	}
+	if chain[len(chain)-1].VCT != urls[0] {
+		t.Errorf("leaf should be %s, got %s", urls[0], chain[len(chain)-1].VCT)
+	}
+}
+
+func TestResolveChainTooDeep(t *testing.T) {
+	// Build a chain of maxExtendsDepth+1 nodes.
+	urls := make([]string, maxExtendsDepth+1)
+	for i := range urls {
+		urls[i] = "https://eu.example/type" + string(rune('0'+i))
+	}
+	_, err := ResolveChain(context.Background(), urls[0], "", chainFetcher(urls))
+	if err != ErrExtendsChainTooDeep {
+		t.Fatalf("want ErrExtendsChainTooDeep, got %v", err)
+	}
+}
+
+func TestResolveChainCycle(t *testing.T) {
+	// A → B → A (cycle)
+	a := "https://eu.example/a"
+	b := "https://eu.example/b"
+	docs := map[string][]byte{
+		a: []byte(`{"vct":"` + a + `","extends":"` + b + `"}`),
+		b: []byte(`{"vct":"` + b + `","extends":"` + a + `"}`),
+	}
+	fetch := func(_ context.Context, url string) ([]byte, error) { return docs[url], nil }
+	_, err := ResolveChain(context.Background(), a, "", fetch)
+	if err != ErrExtendsCycle {
+		t.Fatalf("want ErrExtendsCycle, got %v", err)
+	}
+}
