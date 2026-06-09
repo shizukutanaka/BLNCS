@@ -78,3 +78,54 @@ func TestVerifyAcceptsDefaultSdAlgAbsent(t *testing.T) {
 		t.Fatalf("absent _sd_alg should default to sha-256: %v", err)
 	}
 }
+
+// ============================================================================
+// nbf (not-before) — RFC 9901 §4.2.1
+// ============================================================================
+
+func TestVerifyRejectsFutureNbf(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"a": 1}, nil, time.Hour)
+	// Set nbf 1 hour in the future — credential must not be accepted yet.
+	future := float64(time.Now().Add(time.Hour).Unix())
+	forged := resignPayload(t, sdjwt, iss.PrivateKey(), func(pl map[string]any) {
+		pl["nbf"] = future
+	})
+	if _, err := VerifySDJWT(forged, iss.PublicKey()); err != ErrSDJWTNotYetValid {
+		t.Fatalf("future nbf: want ErrSDJWTNotYetValid, got %v", err)
+	}
+}
+
+func TestVerifyAcceptsPastNbf(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"a": 1}, nil, time.Hour)
+	// nbf in the past — credential is valid.
+	past := float64(time.Now().Add(-time.Hour).Unix())
+	forged := resignPayload(t, sdjwt, iss.PrivateKey(), func(pl map[string]any) {
+		pl["nbf"] = past
+	})
+	vc, err := VerifySDJWT(forged, iss.PublicKey())
+	if err != nil {
+		t.Fatalf("past nbf should verify: %v", err)
+	}
+	if vc.NotBefore == 0 {
+		t.Error("NotBefore field should be populated from nbf claim")
+	}
+}
+
+func TestVerifyNbfNotInClaims(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"a": 1}, nil, time.Hour)
+	past := float64(time.Now().Add(-time.Minute).Unix())
+	forged := resignPayload(t, sdjwt, iss.PrivateKey(), func(pl map[string]any) {
+		pl["nbf"] = past
+	})
+	vc, err := VerifySDJWT(forged, iss.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// nbf is a reserved claim and must not appear in vc.Claims.
+	if _, ok := vc.Claims["nbf"]; ok {
+		t.Error("nbf must be stripped from vc.Claims (reserved)")
+	}
+}

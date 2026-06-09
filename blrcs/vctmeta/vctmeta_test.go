@@ -198,3 +198,29 @@ func TestResolveSchemaURINotHTTPS(t *testing.T) {
 		t.Errorf("want ErrNotHTTPS, got %v", err)
 	}
 }
+
+// ============================================================================
+// ErrTooLarge — metadata and schema_uri body-size cap
+// ============================================================================
+
+func oversizedFetcher() FetchFunc {
+	// maxMetadataBytes+1 bytes of printable ASCII so the check is clear.
+	big := make([]byte, maxMetadataBytes+1)
+	for i := range big {
+		big[i] = 'a'
+	}
+	return memFetcher(big)
+}
+
+func TestResolveTooLarge(t *testing.T) {
+	if _, err := Resolve(context.Background(), vctURL, "", oversizedFetcher()); err != ErrTooLarge {
+		t.Errorf("want ErrTooLarge, got %v", err)
+	}
+}
+
+func TestResolveSchemaURITooLarge(t *testing.T) {
+	tm := &TypeMetadata{SchemaURI: "https://schema.europa.eu/large.json"}
+	if _, err := tm.ResolveSchema(context.Background(), oversizedFetcher()); err != ErrTooLarge {
+		t.Errorf("want ErrTooLarge, got %v", err)
+	}
+}

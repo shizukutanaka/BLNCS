@@ -394,3 +394,69 @@ func TestHeaderWrittenOnPlainResponseWriter(t *testing.T) {
 		t.Error("plain ResponseWriter should return false (not statusWriter)")
 	}
 }
+
+// ============================================================================
+// sanitizeRequestID — injection and overflow protection
+// ============================================================================
+
+func TestSanitizeRequestIDAllowedChars(t *testing.T) {
+	safe := "abc-XYZ_123.ok"
+	if got := sanitizeRequestID(safe); got != safe {
+		t.Errorf("safe chars changed: %q", got)
+	}
+}
+
+func TestSanitizeRequestIDStripsInjectionChars(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{`{"key":"value"}`, "keyvalue"},
+		{"<script>", "script"},
+		{"a&b", "ab"},
+		{"a\nb\rc", "abc"},
+		{"a b", "ab"},
+		{"a/b", "ab"},
+	}
+	for _, c := range cases {
+		if got := sanitizeRequestID(c.in); got != c.want {
+			t.Errorf("sanitizeRequestID(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestSanitizeRequestIDTruncatesAt128(t *testing.T) {
+	long := strings.Repeat("a", 200)
+	got := sanitizeRequestID(long)
+	if len(got) > 128 {
+		t.Errorf("length %d, want <= 128", len(got))
+	}
+}
+
+func TestSanitizeRequestIDEmptyAfterFilter(t *testing.T) {
+	// All characters are illegal; result must be empty string.
+	if got := sanitizeRequestID("!!!???"); got != "" {
+		t.Errorf("want empty string, got %q", got)
+	}
+}
+
+// TestRequestIDSanitizesIncomingHeader verifies that a header containing
+// injection characters is sanitized before being reflected in the response.
+func TestRequestIDSanitizesIncomingHeader(t *testing.T) {
+	var capturedRID string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedRID = RequestIDFromContext(r.Context())
+	})
+	wrapped := RequestID(handler)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("X-Request-ID", `{"inject":"true"}`)
+	wrapped.ServeHTTP(rec, req)
+	// Only safe chars survive: { } " : are all stripped.
+	if strings.ContainsAny(capturedRID, `{}":<>`) {
+		t.Errorf("unsafe chars in sanitized RID: %q", capturedRID)
+	}
+	if capturedRID == "" {
+		// At least the alphabetic parts ("injecttrue") survive.
+		t.Errorf("RID should not be empty after sanitization")
+	}
+}

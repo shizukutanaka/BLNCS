@@ -191,20 +191,44 @@ func TestHasTLS(t *testing.T) {
 
 func TestParseTokens(t *testing.T) {
 	cases := []struct {
-		input string
-		want  int
+		input   string
+		want    int
+		wantErr bool
 	}{
-		{"tok1:alice,tok2:bob", 2},
-		{"single:user", 1},
-		{"", 0},
-		{"  ,  ,  ", 0},
-		{"a:1, b:2, c:3", 3},
+		{"tok1:alice,tok2:bob", 2, false},
+		{"single:user", 1, false},
+		{"", 0, false},
+		{"  ,  ,  ", 0, false},
+		{"a:1, b:2, c:3", 3, false},
+		// Malformed: missing ':' separator
+		{"baretoken", 0, true},
+		{"ok:user,badtoken,other:user", 0, true},
+		// Empty token part
+		{":principal", 0, true},
 	}
 	for _, c := range cases {
-		got := parseTokens(c.input)
+		got, err := parseTokens(c.input)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("parseTokens(%q): expected error", c.input)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseTokens(%q): unexpected error: %v", c.input, err)
+			continue
+		}
 		if len(got) != c.want {
 			t.Errorf("parseTokens(%q): got %d want %d", c.input, len(got), c.want)
 		}
+	}
+}
+
+func TestFromEnvMalformedTokens(t *testing.T) {
+	os.Setenv("BLRCS_AUTH_TOKENS", "validtoken:alice,malformed")
+	defer os.Unsetenv("BLRCS_AUTH_TOKENS")
+	if _, err := FromEnv(); err == nil {
+		t.Fatal("malformed BLRCS_AUTH_TOKENS should fail fast")
 	}
 }
 

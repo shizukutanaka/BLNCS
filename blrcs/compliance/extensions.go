@@ -43,12 +43,13 @@ type Disclosure struct {
 
 // VerifiedClaims — SD-JWT 検証結果
 type VerifiedClaims struct {
-	Issuer   string         `json:"iss"`
-	Subject  string         `json:"sub"`
-	VCT      string         `json:"vct"` // SD-JWT VC type (draft-ietf-oauth-sd-jwt-vc)
-	IssuedAt int64          `json:"iat"`
-	Expires  int64          `json:"exp"`
-	Claims   map[string]any `json:"claims"`
+	Issuer     string         `json:"iss"`
+	Subject    string         `json:"sub"`
+	VCT        string         `json:"vct"` // SD-JWT VC type (draft-ietf-oauth-sd-jwt-vc)
+	IssuedAt   int64          `json:"iat"`
+	Expires    int64          `json:"exp"`
+	NotBefore  int64          `json:"nbf,omitempty"` // RFC 9901: not-before (optional)
+	Claims     map[string]any `json:"claims"`
 
 	// HolderKey — cnf.jwk から復元した holder 公開鍵 (発行時にバインドされていれば non-nil)。
 	HolderKey ed25519.PublicKey `json:"-"`
@@ -303,6 +304,9 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	if v, ok := payload["exp"].(float64); ok {
 		vc.Expires = int64(v)
 	}
+	if v, ok := payload["nbf"].(float64); ok {
+		vc.NotBefore = int64(v)
+	}
 	vc.HolderKey = extractHolderKey(payload)
 	vc.Status = extractStatus(payload)
 
@@ -315,14 +319,19 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	if vc.Expires != 0 && now.After(time.Unix(vc.Expires, 0).Add(leeway)) {
 		return nil, ErrSDJWTExpired
 	}
+	// iat: future-dated issuance rejected.
 	if vc.IssuedAt != 0 && time.Unix(vc.IssuedAt, 0).After(now.Add(leeway)) {
+		return nil, ErrSDJWTNotYetValid
+	}
+	// nbf: RFC 9901 §4.2.1 — credential not yet valid before this time.
+	if vc.NotBefore != 0 && time.Unix(vc.NotBefore, 0).After(now.Add(leeway)) {
 		return nil, ErrSDJWTNotYetValid
 	}
 
 	// Copy clear claims (予約 claim 以外)
 	reserved := map[string]bool{
 		"iss": true, "sub": true, "vct": true, "iat": true, "exp": true,
-		"_sd": true, "_sd_alg": true, "cnf": true, "status": true,
+		"nbf": true, "_sd": true, "_sd_alg": true, "cnf": true, "status": true,
 	}
 	for k, v := range payload {
 		if !reserved[k] {

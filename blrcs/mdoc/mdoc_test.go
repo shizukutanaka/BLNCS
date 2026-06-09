@@ -3,8 +3,11 @@ package mdoc
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"testing"
 	"time"
+
+	"blrcs/cbor"
 )
 
 func testKeys(t *testing.T) (ed25519.PrivateKey, ed25519.PublicKey) {
@@ -77,8 +80,87 @@ func TestVerifyWrongIssuerKey(t *testing.T) {
 	_, wrongPub := testKeys(t)
 
 	cred, _ := Issue(sampleParams(issuerPriv, nil))
-	if _, err := Verify(cred, wrongPub, time.Now()); err == nil {
+	_, err := Verify(cred, wrongPub, time.Now())
+	if err == nil {
 		t.Error("verification with wrong issuer key should fail")
+	}
+	if !errors.Is(err, ErrIssuerAuth) {
+		t.Errorf("want ErrIssuerAuth, got %v", err)
+	}
+}
+
+// ============================================================================
+// Error sentinel coverage — ErrDigestMismatch, ErrUnknownDigestID
+// ============================================================================
+
+// tamperedCred mutates an element value inside the first disclosed IssuerSignedItem
+// so that its SHA-256 digest no longer matches the MSO valueDigest entry.
+func tamperedCred(t *testing.T, cred []byte, mutateFn func(map[any]any)) []byte {
+	t.Helper()
+	top, err := cbor.Unmarshal(cred)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	topMap := top.(map[any]any)
+	nsMap := topMap[isNameSpaces].(map[any]any)
+	var mutated bool
+	for nsKey, itemsRaw := range nsMap {
+		items := itemsRaw.([]any)
+		if len(items) == 0 {
+			continue
+		}
+		tag0 := items[0].(cbor.Tag)
+		innerBytes := tag0.Content.([]byte)
+		inner, err := cbor.Unmarshal(innerBytes)
+		if err != nil {
+			t.Fatalf("decode item: %v", err)
+		}
+		innerMap := inner.(map[any]any)
+		mutateFn(innerMap)
+		newInner, err := cbor.Marshal(innerMap)
+		if err != nil {
+			t.Fatalf("re-encode item: %v", err)
+		}
+		items[0] = cbor.Tag{Number: tagEncodedCBOR, Content: newInner}
+		nsMap[nsKey] = items
+		mutated = true
+		break
+	}
+	if !mutated {
+		t.Fatal("no items to tamper")
+	}
+	topMap[isNameSpaces] = nsMap
+	out, err := cbor.Marshal(topMap)
+	if err != nil {
+		t.Fatalf("re-encode cred: %v", err)
+	}
+	return out
+}
+
+func TestVerifyDigestMismatch(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+
+	bad := tamperedCred(t, cred, func(m map[any]any) {
+		m[isiElementVal] = "TAMPERED_VALUE"
+	})
+	_, err := Verify(bad, issuerPub, time.Now())
+	if !errors.Is(err, ErrDigestMismatch) {
+		t.Errorf("want ErrDigestMismatch, got %v", err)
+	}
+}
+
+func TestVerifyUnknownDigestID(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+
+	// Change digestID to a value absent from the MSO's valueDigests.
+	bad := tamperedCred(t, cred, func(m map[any]any) {
+		m[isiDigestID] = uint64(9999)
+	})
+	_, err := Verify(bad, issuerPub, time.Now())
+	if !errors.Is(err, ErrUnknownDigestID) {
+		t.Errorf("want ErrUnknownDigestID, got %v", err)
 	}
 }
 

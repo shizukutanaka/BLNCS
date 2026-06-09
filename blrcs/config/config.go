@@ -117,7 +117,12 @@ func FromEnv() (*Config, error) {
 		cfg.TLSMode = v
 	}
 	if v := os.Getenv("BLRCS_AUTH_TOKENS"); v != "" {
-		cfg.AuthTokens = parseTokens(v)
+		tokens, err := parseTokens(v)
+		if err != nil {
+			errs = append(errs, err.Error())
+		} else {
+			cfg.AuthTokens = tokens
+		}
 	}
 	atoiEnv("BLRCS_RATE_LIMIT_RPS", func(n int) { cfg.RateLimitRPS = n })
 	if v := os.Getenv("BLRCS_DATA_DIR"); v != "" {
@@ -196,8 +201,11 @@ func (c *Config) JSON() ([]byte, error) {
 // helpers
 // ============================================================================
 
-// parseTokens — "token1:principal1,token2:principal2" → map
-func parseTokens(s string) map[string]string {
+// parseTokens — "token1:principal1,token2:principal2" → map.
+// Returns an error for any pair that does not contain the required ':' separator
+// or that has an empty token part, so that misconfigured auth tokens are caught
+// at startup instead of being silently dropped.
+func parseTokens(s string) (map[string]string, error) {
 	tokens := map[string]string{}
 	for _, pair := range strings.Split(s, ",") {
 		pair = strings.TrimSpace(pair)
@@ -205,9 +213,10 @@ func parseTokens(s string) map[string]string {
 			continue
 		}
 		parts := strings.SplitN(pair, ":", 2)
-		if len(parts) == 2 {
-			tokens[parts[0]] = parts[1]
+		if len(parts) != 2 || parts[0] == "" {
+			return nil, fmt.Errorf("config: malformed auth token pair %q (expected non-empty-token:principal)", pair)
 		}
+		tokens[parts[0]] = parts[1]
 	}
-	return tokens
+	return tokens, nil
 }

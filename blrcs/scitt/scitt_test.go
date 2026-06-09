@@ -3,6 +3,8 @@ package scitt
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -86,9 +88,67 @@ func TestTamperedStatementBreaksInclusion(t *testing.T) {
 	priv, _ := mustIssuer(t, "iss")
 	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("p"))
 	receipt, _ := ledger.Register(stmt)
-	stmt.Subject = "tampered" // 改ざん — 署名破壊
-	if err := VerifyReceipt(receipt, stmt, ledger.PublicKey()); err == nil {
+	stmt.Subject = "tampered" // 改ざん — leaf hash 変化
+	err := VerifyReceipt(receipt, stmt, ledger.PublicKey())
+	if err == nil {
 		t.Fatal("tampered stmt verified wrongly")
+	}
+	if !errors.Is(err, ErrBadProof) {
+		t.Errorf("want ErrBadProof, got %v", err)
+	}
+}
+
+func TestVerifyReceiptBadTSSignature(t *testing.T) {
+	ledger, _ := NewLedger("ts-btsig")
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("p"))
+	receipt, _ := ledger.Register(stmt)
+
+	bad := *receipt
+	// All-zero bytes: valid base64 but wrong ed25519 signature.
+	bad.TSSignature = base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+	if err := VerifyReceipt(&bad, stmt, ledger.PublicKey()); !errors.Is(err, ErrBadReceipt) {
+		t.Errorf("want ErrBadReceipt, got %v", err)
+	}
+}
+
+func TestVerifyReceiptBadAuditPath(t *testing.T) {
+	ledger, _ := NewLedger("ts-bap")
+	priv, _ := mustIssuer(t, "iss")
+
+	// Register 3 statements so leaf 0 has a non-empty audit path.
+	var stmt0 Statement
+	for i := 0; i < 3; i++ {
+		s, _ := SignStatement(priv, "iss", fmt.Sprintf("s%d", i), "c", []byte(fmt.Sprintf("p%d", i)))
+		if _, err := ledger.Register(s); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			stmt0 = s
+		}
+	}
+
+	_, receipt, err := ledger.Get(0) // fresh receipt in size-3 tree
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(receipt.AuditPath) == 0 {
+		t.Fatal("expected non-empty audit path for leaf 0 in size-3 tree")
+	}
+
+	bad := *receipt
+	bad.AuditPath = make([]string, len(receipt.AuditPath))
+	copy(bad.AuditPath, receipt.AuditPath)
+	// Corrupt first sibling hash: flip the first byte (00→ff or ff→00).
+	h := bad.AuditPath[0]
+	if len(h) >= 2 && h[:2] == "ff" {
+		bad.AuditPath[0] = "00" + h[2:]
+	} else {
+		bad.AuditPath[0] = "ff" + h[2:]
+	}
+
+	if err := VerifyReceipt(&bad, stmt0, ledger.PublicKey()); !errors.Is(err, ErrBadProof) {
+		t.Errorf("want ErrBadProof, got %v", err)
 	}
 }
 

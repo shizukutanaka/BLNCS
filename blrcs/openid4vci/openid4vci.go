@@ -254,12 +254,21 @@ func (iss *Issuer) IssueCredential(accessToken string) (*CredentialResponse, err
 		iss.mu.Unlock()
 		return nil, ErrUnknownConfig
 	}
+	// Mark consumed optimistically under the lock so concurrent requests see
+	// the token as used. If credential generation fails below, we restore it
+	// so the wallet can retry with the same token.
 	entry.consumed = true
+	subject, sdClaims, clearClaims := entry.subject, entry.sdClaims, entry.clearClaims
+	validForDays := cfg.ValidForDays
 	iss.mu.Unlock()
 
-	validFor := time.Duration(cfg.ValidForDays) * 24 * time.Hour
-	sdjwt, _, err := iss.signer.IssueSDJWT(entry.subject, entry.sdClaims, entry.clearClaims, validFor)
+	validFor := time.Duration(validForDays) * 24 * time.Hour
+	sdjwt, _, err := iss.signer.IssueSDJWT(subject, sdClaims, clearClaims, validFor)
 	if err != nil {
+		// Restore token so the wallet can retry after a transient signing failure.
+		iss.mu.Lock()
+		entry.consumed = false
+		iss.mu.Unlock()
 		return nil, fmt.Errorf("vci: sdjwt sign: %w", err)
 	}
 	newCNonce := randomB64(16)

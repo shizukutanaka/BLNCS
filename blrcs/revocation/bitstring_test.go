@@ -130,3 +130,91 @@ func TestBitstringPurpose(t *testing.T) {
 		t.Errorf("purpose: %s", bsl.Purpose())
 	}
 }
+
+// ============================================================================
+// Edge-case coverage
+// ============================================================================
+
+func TestBitstringByteBoundaryBits(t *testing.T) {
+	// Bits at byte boundaries: index 7 (last bit of byte 0) and index 8 (first
+	// bit of byte 1) must round-trip independently without cross-contamination.
+	bsl := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	bsl.SetStatus(7, true)
+	bsl.SetStatus(8, false)
+
+	on7, _ := bsl.GetStatus(7)
+	on8, _ := bsl.GetStatus(8)
+	if !on7 {
+		t.Error("bit 7 (last bit of byte 0) should be set")
+	}
+	if on8 {
+		t.Error("bit 8 (first bit of byte 1) should be clear")
+	}
+
+	bsl.SetStatus(8, true)
+	on7, _ = bsl.GetStatus(7)
+	if !on7 {
+		t.Error("bit 7 must not be cleared when bit 8 is set")
+	}
+}
+
+func TestBitstringAllRevoked(t *testing.T) {
+	// Set every entry to verify encode/decode with a fully-set bitstring.
+	bsl := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	cap := bsl.Capacity()
+	for i := 0; i < cap; i++ {
+		if err := bsl.SetStatus(i, true); err != nil {
+			t.Fatalf("SetStatus(%d): %v", i, err)
+		}
+	}
+	encoded, err := bsl.EncodedList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeBitstringStatusList(PurposeRevocation, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, idx := range []int{0, 1, cap/2 - 1, cap/2, cap - 1} {
+		on, err := decoded.GetStatus(idx)
+		if err != nil {
+			t.Fatalf("GetStatus(%d): %v", idx, err)
+		}
+		if !on {
+			t.Errorf("index %d should be set (all-revoked list)", idx)
+		}
+	}
+}
+
+func TestBitstringPurposeSuspensionRoundTrip(t *testing.T) {
+	bsl := NewBitstringStatusList(PurposeSuspension, MinBitstringSize)
+	suspended := []int{10, 20, 1000}
+	for _, idx := range suspended {
+		bsl.SetStatus(idx, true)
+	}
+	encoded, err := bsl.EncodedList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeBitstringStatusList(PurposeSuspension, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Purpose() != PurposeSuspension {
+		t.Errorf("purpose preserved: %s", decoded.Purpose())
+	}
+	for _, idx := range suspended {
+		on, err := decoded.GetStatus(idx)
+		if err != nil {
+			t.Fatalf("GetStatus(%d): %v", idx, err)
+		}
+		if !on {
+			t.Errorf("suspended index %d not preserved after round-trip", idx)
+		}
+	}
+	// Non-suspended entries must remain clear.
+	on, _ := decoded.GetStatus(5)
+	if on {
+		t.Error("index 5 should be clear")
+	}
+}
