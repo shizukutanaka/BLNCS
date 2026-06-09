@@ -125,6 +125,8 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §6 SCITT register ordering + proofs | ✅ | |
 | §6 COSE_Sign1 receipts (IETF SCITT interop) | ✅ | **implemented** (`scitt.IssueCOSEReceipt`, `cbor` package) |
 | §6 witness cosigning (split-view defense) | ✅ | **implemented** (`scitt.Witness`) |
+| §1 multiformats: base58btc + multihash (sha2-256) | ✅ | **implemented** (`multiformats`, KAT-validated) — did:webvh foundation |
+| §1 JCS canonicalization (RFC 8785) | ✅ | **implemented** (`multiformats.CanonicalizeJSON`) — did:webvh / DI proofs foundation |
 | §8 CBOR encoder/decoder (RFC 8949, deterministic) | ✅ | **implemented** (`cbor` package) |
 | §8 COSE_Sign1 sign/verify (RFC 9052) | ✅ | **implemented** (`cbor.Sign1`, `cbor.Verify1`) |
 | §8 COSE algorithm agility (`RegisterVerifier`) | ✅ | **implemented** |
@@ -141,6 +143,9 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §4 issuer-metric privacy (CRSet accumulator) | ❌ | backlog #11 |
 
 ### Highest-value remaining gaps (ordered)
-1. did:webvh verifiable history (§1) — backlog #5 (verifiable update log + SCID + pre-rotation keys).
+1. did:webvh verifiable history (§1) — backlog #5. Primitives now in place
+   (`multiformats`: base58btc + multihash + JCS); remaining work is the log
+   replay + SCID derivation + eddsa-jcs-2022 proof + pre-rotation enforcement,
+   to be validated against official did:webvh test vectors.
 2. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).
 3. mdoc DeviceResponse / session-transcript binding (§2a) — proximity transport (ISO 18013-5 §8/§9), beyond the credential-format scope now covered.

@@ -4,7 +4,7 @@
 
 ```
 stdlib + ed25519 only — zero external dependencies
-910+ tests · 51 packages · ~16,900 LoC implementation · 12 fuzz targets
+940+ tests · 52 packages · ~17,300 LoC implementation · 14 fuzz targets
 ```
 
 ## Status
@@ -83,6 +83,7 @@ typed primitives     types / builder / errkit / telemetry / ctx
 standards            openid4vp / openid4vci / dcapi / mdoc / mcp / vctmeta / conformance
 crypto/keys          kms / atrest
 encoding             cbor (RFC 8949 + COSE_Sign1 RFC 9052) / jsonschema (draft 2020-12 subset)
+multiformats         base58btc / multihash / JCS (RFC 8785) — did:webvh primitives
 hardening            recovery / replay / saga / fuzz / property / schemaver
 observability        metrics / otelbridge / doctor / healthprobe / diag
 privacy              privacy

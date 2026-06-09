@@ -33,6 +33,7 @@ import (
 	"blrcs/errkit"
 	"blrcs/jsonschema"
 	"blrcs/mdoc"
+	"blrcs/multiformats"
 	"blrcs/scitt"
 	"blrcs/types"
 )
@@ -398,5 +399,68 @@ func FuzzJSONSchema(f *testing.F) {
 		}
 		// 絶対条件: いかなる入力でも panic しない
 		_ = sch.Validate(inst)
+	})
+}
+
+// ============================================================================
+// FuzzBase58 — base58btc decode/encode round-trip, パニック禁止
+// ============================================================================
+
+func FuzzBase58(f *testing.F) {
+	f.Add("")
+	f.Add("1")
+	f.Add("2NEpo7TZRRrLZSi2U")
+	f.Add("Qm")
+	f.Add("0OIl") // invalid chars
+	f.Add(string(make([]byte, 200)))
+
+	f.Fuzz(func(t *testing.T, s string) {
+		dec, err := multiformats.Base58Decode(s)
+		if err != nil {
+			return // invalid input is fine, panic is not
+		}
+		// Decoded bytes must re-encode to a canonical form that decodes equal.
+		enc := multiformats.Base58Encode(dec)
+		dec2, err := multiformats.Base58Decode(enc)
+		if err != nil {
+			t.Fatalf("re-decode of %q failed: %v", enc, err)
+		}
+		if len(dec) != len(dec2) {
+			t.Fatalf("round-trip length mismatch: %d vs %d", len(dec), len(dec2))
+		}
+		for i := range dec {
+			if dec[i] != dec2[i] {
+				t.Fatalf("round-trip byte mismatch at %d", i)
+			}
+		}
+	})
+}
+
+// ============================================================================
+// FuzzJCS — 任意 JSON の正規化、パニック禁止 + 冪等性
+// ============================================================================
+
+func FuzzJCS(f *testing.F) {
+	f.Add(`{"b":1,"a":2}`)
+	f.Add(`[1,2,3]`)
+	f.Add(`"string"`)
+	f.Add(`{"nested":{"z":1,"a":[true,null,false]}}`)
+	f.Add(`{"unicode":"日本語"}`)
+	f.Add(``)
+	f.Add(`not json`)
+
+	f.Fuzz(func(t *testing.T, src string) {
+		out, err := multiformats.CanonicalizeJSON([]byte(src))
+		if err != nil {
+			return
+		}
+		// Idempotent: canonicalizing canonical output yields the same bytes.
+		out2, err := multiformats.CanonicalizeJSON(out)
+		if err != nil {
+			t.Fatalf("re-canonicalize failed: %v (first=%s)", err, out)
+		}
+		if string(out) != string(out2) {
+			t.Fatalf("JCS not idempotent:\n1: %s\n2: %s", out, out2)
+		}
 	})
 }

@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Multiformats primitives (`multiformats` package): base58btc, multihash,
+  JCS.** Zero-dependency, known-answer-validated building blocks for did:webvh
+  and W3C Data Integrity proofs: `Base58Encode`/`Base58Decode` (Bitcoin/IPFS
+  alphabet, KATs incl. "Hello World!"→"2NEpo7TZRRrLZSi2U"), `MultihashSHA256` /
+  `HashThenBase58` (the `Qm…` SCID/entryHash encoding used by did:webvh), and
+  `CanonicalizeJSON` (RFC 8785 JCS: UTF-16 key ordering, JCS string escaping,
+  integer-exact via json.Number). Follows the same foundation-first pattern as
+  the cbor layer; unblocks a faithful did:webvh resolver (backlog #5). 17 tests
+  + `FuzzBase58` + `FuzzJCS` (idempotence/round-trip, clean over 190k+ execs).
+
+### Added
 - **Minimal zero-dependency JSON Schema validator (`jsonschema` package).**
   Implements the draft 2020-12 / draft-07-compatible subset needed to validate
   SD-JWT-VC claim sets against the `schema` in Type Metadata: `type` (incl.

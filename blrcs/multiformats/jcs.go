@@ -1,0 +1,213 @@
+package multiformats
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strconv"
+)
+
+// ErrJCSUnsupported is returned for values JCS cannot canonicalize here.
+var ErrJCSUnsupported = errors.New("multiformats: value not canonicalizable")
+
+// CanonicalizeJSON returns the RFC 8785 (JCS) canonical form of a JSON document.
+//
+// It parses with json.Number (so integers round-trip exactly) and re-serializes
+// with: object keys sorted by UTF-16 code-unit order, no insignificant
+// whitespace, and JCS string escaping (only ", \, and control characters are
+// escaped; '/', '<', '>', '&', and non-ASCII are emitted literally as UTF-8).
+//
+// Number formatting follows RFC 8785 for integers exactly. Non-integer numbers
+// are emitted via Go's shortest round-trip formatting, which matches ECMAScript
+// for the values that appear in DID documents / credential metadata (which do
+// not rely on float edge cases); callers needing full ES number canonicalization
+// for arbitrary floats should not depend on this.
+func CanonicalizeJSON(data []byte) ([]byte, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, fmt.Errorf("multiformats: parse JSON: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := canonicalValue(&buf, v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// Canonicalize serializes an in-memory JSON value (the decoded-JSON Go model:
+// map[string]any, []any, string, json.Number, float64, bool, nil) to JCS form.
+func Canonicalize(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := canonicalValue(&buf, v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func canonicalValue(buf *bytes.Buffer, v any) error {
+	switch val := v.(type) {
+	case nil:
+		buf.WriteString("null")
+	case bool:
+		if val {
+			buf.WriteString("true")
+		} else {
+			buf.WriteString("false")
+		}
+	case string:
+		writeJCSString(buf, val)
+	case json.Number:
+		return writeJCSNumber(buf, val.String())
+	case float64:
+		return writeJCSNumber(buf, strconv.FormatFloat(val, 'g', -1, 64))
+	case int:
+		buf.WriteString(strconv.Itoa(val))
+	case int64:
+		buf.WriteString(strconv.FormatInt(val, 10))
+	case []any:
+		buf.WriteByte('[')
+		for i, elem := range val {
+			if i > 0 {
+				buf.WriteByte(',')
+			}
+			if err := canonicalValue(buf, elem); err != nil {
+				return err
+			}
+		}
+		buf.WriteByte(']')
+	case map[string]any:
+		return canonicalObject(buf, val)
+	default:
+		return fmt.Errorf("%w: %T", ErrJCSUnsupported, v)
+	}
+	return nil
+}
+
+func canonicalObject(buf *bytes.Buffer, m map[string]any) error {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	// RFC 8785: sort by UTF-16 code units. For BMP strings this equals byte-order
+	// sort of the UTF-8 encoding; we sort the runes' UTF-16 units to be exact.
+	sort.Slice(keys, func(i, j int) bool {
+		return lessUTF16(keys[i], keys[j])
+	})
+	buf.WriteByte('{')
+	for i, k := range keys {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		writeJCSString(buf, k)
+		buf.WriteByte(':')
+		if err := canonicalValue(buf, m[k]); err != nil {
+			return err
+		}
+	}
+	buf.WriteByte('}')
+	return nil
+}
+
+// lessUTF16 compares two strings by UTF-16 code-unit sequence (RFC 8785 §3.2.3).
+func lessUTF16(a, b string) bool {
+	ar, br := []rune(a), []rune(b)
+	i, j := 0, 0
+	for i < len(ar) && j < len(br) {
+		ua := utf16Units(ar[i])
+		ub := utf16Units(br[j])
+		for k := 0; k < len(ua) && k < len(ub); k++ {
+			if ua[k] != ub[k] {
+				return ua[k] < ub[k]
+			}
+		}
+		if len(ua) != len(ub) {
+			return len(ua) < len(ub)
+		}
+		i++
+		j++
+	}
+	return len(ar) < len(br)
+}
+
+func utf16Units(r rune) []uint16 {
+	if r < 0x10000 {
+		return []uint16{uint16(r)}
+	}
+	r -= 0x10000
+	return []uint16{uint16(0xd800 + (r >> 10)), uint16(0xdc00 + (r & 0x3ff))}
+}
+
+// writeJCSString writes a JSON string with JCS escaping rules.
+func writeJCSString(buf *bytes.Buffer, s string) {
+	buf.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '"':
+			buf.WriteString(`\"`)
+		case '\\':
+			buf.WriteString(`\\`)
+		case '\b':
+			buf.WriteString(`\b`)
+		case '\f':
+			buf.WriteString(`\f`)
+		case '\n':
+			buf.WriteString(`\n`)
+		case '\r':
+			buf.WriteString(`\r`)
+		case '\t':
+			buf.WriteString(`\t`)
+		default:
+			if r < 0x20 {
+				buf.WriteString(`\u`)
+				const hex = "0123456789abcdef"
+				buf.WriteByte('0')
+				buf.WriteByte('0')
+				buf.WriteByte(hex[(r>>4)&0xf])
+				buf.WriteByte(hex[r&0xf])
+			} else {
+				buf.WriteRune(r)
+			}
+		}
+	}
+	buf.WriteByte('"')
+}
+
+// writeJCSNumber emits an integer verbatim; for non-integers it passes through
+// the already-shortest representation produced by the caller.
+func writeJCSNumber(buf *bytes.Buffer, s string) error {
+	// Integers (no '.', 'e', 'E') are emitted as-is — JCS keeps integer form.
+	if isIntegerLiteral(s) {
+		buf.WriteString(s)
+		return nil
+	}
+	// Non-integer: re-parse and emit shortest round-trip (best effort, see doc).
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return fmt.Errorf("%w: number %q", ErrJCSUnsupported, s)
+	}
+	buf.WriteString(strconv.FormatFloat(f, 'g', -1, 64))
+	return nil
+}
+
+func isIntegerLiteral(s string) bool {
+	if s == "" {
+		return false
+	}
+	i := 0
+	if s[0] == '-' {
+		i = 1
+	}
+	if i >= len(s) {
+		return false
+	}
+	for ; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
