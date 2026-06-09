@@ -374,3 +374,35 @@ func TestJSONNumberInstance(t *testing.T) {
 	tooSmall := json.Number("5")
 	mustInvalid(t, s, tooSmall)
 }
+
+func TestFormatValidators(t *testing.T) {
+	cases := []struct {
+		format, value string
+		valid         bool
+	}{
+		{"hostname", "example.com", true},
+		{"hostname", "sub.example.co.jp", true},
+		{"hostname", "-bad.example", false},
+		{"hostname", "bad-.example", false},
+		{"hostname", "", false},
+		{"ipv4", "192.168.0.1", true},
+		{"ipv4", "255.255.255.255", true},
+		{"ipv4", "256.0.0.1", false},
+		{"ipv4", "01.2.3.4", false}, // leading zero
+		{"ipv4", "1.2.3", false},
+		{"uuid", "123e4567-e89b-12d3-a456-426614174000", true},
+		{"uuid", "123e4567e89b12d3a456426614174000", false}, // no hyphens
+		{"uuid", "xyz", false},
+		{"ipv6", "::1", true}, // unknown format → passes (annotation)
+	}
+	for _, c := range cases {
+		s := compile(t, `{"type":"string","format":"`+c.format+`"}`)
+		err := s.Validate(c.value)
+		if c.valid && err != nil {
+			t.Errorf("format %s value %q: want valid, got %v", c.format, c.value, err)
+		}
+		if !c.valid && err == nil {
+			t.Errorf("format %s value %q: want invalid", c.format, c.value)
+		}
+	}
+}

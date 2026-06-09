@@ -298,7 +298,13 @@ func (s *Server) handleToolCall(id json.RawMessage, params json.RawMessage) *rpc
 	if err := json.Unmarshal(params, &p); err != nil {
 		return errorResp(id, errInvalidParams, "bad params", err.Error())
 	}
-	s.auditToolCall(p.Name, p.Arguments)
+	// Only mutating tools are audited to the transparency log. Read-only tools
+	// (verify_*, get_*, checkpoint) must not append a ledger leaf per call —
+	// otherwise a client issuing cheap reads grows the ledger without bound and
+	// amplifies the O(n) cost of each append.
+	if auditableTool[p.Name] {
+		s.auditToolCall(p.Name, p.Arguments)
+	}
 
 	result, err := s.dispatch(p.Name, p.Arguments)
 	if err != nil {
@@ -313,9 +319,20 @@ func (s *Server) handleToolCall(id json.RawMessage, params json.RawMessage) *rpc
 	})
 }
 
+// auditableTool lists the state-changing tools whose calls are recorded to the
+// transparency log. Read-only tools are intentionally excluded.
+var auditableTool = map[string]bool{
+	"issue_passport": true,
+	"attest_range":   true,
+	"register_scitt": true,
+}
+
 func (s *Server) auditToolCall(name string, args json.RawMessage) {
-	audit := map[string]any{"tool": name, "args": args, "at": time.Now().UTC()}
-	b, _ := json.Marshal(audit)
+	b, _ := json.Marshal(struct {
+		Tool string          `json:"tool"`
+		Args json.RawMessage `json:"args"`
+		At   time.Time       `json:"at"`
+	}{Tool: name, Args: args, At: time.Now().UTC()})
 	stmt, err := scitt.SignStatement(
 		s.selfIssuer.PrivateKey(),
 		s.selfIssuer.ID,

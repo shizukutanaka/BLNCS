@@ -100,3 +100,21 @@ func TestTokenHandlerServesContentType(t *testing.T) {
 		t.Errorf("cache-control: %s", cc)
 	}
 }
+
+func TestVerifyStatusListTokenRejectsBadBits(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	list := NewBitstringStatusList(PurposeRevocation, 131072)
+	tok, err := list.IssueToken("did:web:issuer", "https://issuer/status/1", priv, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Valid token verifies.
+	if _, _, err := VerifyStatusListToken(tok, pub, PurposeRevocation); err != nil {
+		t.Fatalf("valid token: %v", err)
+	}
+	// Wrong key fails.
+	wrongPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	if _, _, err := VerifyStatusListToken(tok, wrongPub, PurposeRevocation); err == nil {
+		t.Error("wrong key should fail")
+	}
+}

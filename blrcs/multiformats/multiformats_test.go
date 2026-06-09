@@ -2,8 +2,11 @@ package multiformats
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -229,5 +232,63 @@ func TestBase58DecodeTooLong(t *testing.T) {
 	}
 	if _, err := Base58Decode(string(long)); err != ErrBase58TooLong {
 		t.Errorf("want ErrBase58TooLong, got %v", err)
+	}
+}
+
+// ============================================================================
+// Multikey + multibase (Ed25519)
+// ============================================================================
+
+func TestEd25519MultikeyRoundTrip(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := EncodeEd25519Multikey(pub)
+	if len(mk) < 1 || mk[0] != 'z' {
+		t.Fatalf("multikey should be multibase base58btc (z…): %q", mk)
+	}
+	if !strings.HasPrefix(mk, "z6Mk") {
+		t.Errorf("Ed25519 multikey should start z6Mk, got %q", mk[:6])
+	}
+	got, err := DecodeEd25519Multikey(mk)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.Equal(pub) {
+		t.Error("round-trip key mismatch")
+	}
+}
+
+func TestDecodeEd25519MultikeyBad(t *testing.T) {
+	cases := []string{
+		"",                                     // empty
+		"6MkxxxxNoZPrefix",                     // missing 'z'
+		"z",                                    // just prefix
+		"z" + Base58Encode([]byte{0x01, 0x02}), // wrong codec/length
+		"z" + Base58Encode(append([]byte{0xed, 0x01}, make([]byte, 10)...)), // short key
+	}
+	for _, c := range cases {
+		if _, err := DecodeEd25519Multikey(c); err == nil {
+			t.Errorf("DecodeEd25519Multikey(%q) should fail", c)
+		}
+	}
+}
+
+func TestMultibaseBase58RoundTrip(t *testing.T) {
+	data := []byte("data-integrity-proof-value")
+	enc := EncodeMultibaseBase58(data)
+	if enc[0] != 'z' {
+		t.Fatalf("multibase should start 'z': %q", enc)
+	}
+	got, err := DecodeMultibaseBase58(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Error("multibase round-trip mismatch")
+	}
+	if _, err := DecodeMultibaseBase58("no-z-prefix"); err == nil {
+		t.Error("missing 'z' prefix should fail")
 	}
 }

@@ -327,14 +327,15 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 	}
 	var verified *compliance.VerifiedClaims
 	var usedIssuer string
-	for did, pubKey := range req.PresentationDefinition.AcceptableIssuers {
-		vc, verr := compliance.VerifySDJWTWithBinding(resp.VPToken, ed25519.PublicKey(pubKey), opts)
-		if verr == nil {
-			// Issuer DID と claims.iss が一致していること
-			if vc.Issuer == did {
+	// Read the (unverified) iss claim once and verify against exactly that
+	// issuer's key, instead of trial-verifying against every acceptable issuer
+	// (O(issuers) Ed25519 verifies per token). The cryptographic check below is
+	// what establishes trust; iss is only used to select the key.
+	if claimedIss, ok := peekIssuer(resp.VPToken); ok {
+		if pubKey, known := req.PresentationDefinition.AcceptableIssuers[claimedIss]; known {
+			if vc, verr := compliance.VerifySDJWTWithBinding(resp.VPToken, ed25519.PublicKey(pubKey), opts); verr == nil && vc.Issuer == claimedIss {
 				verified = vc
-				usedIssuer = did
-				break
+				usedIssuer = claimedIss
 			}
 		}
 	}
@@ -363,6 +364,31 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 // ============================================================================
 // Helpers
 // ============================================================================
+
+// peekIssuer extracts the UNVERIFIED `iss` claim from an SD-JWT vp_token so the
+// verifier can select the matching issuer key. The signature is verified
+// separately; this only chooses which key to verify against.
+func peekIssuer(vpToken string) (string, bool) {
+	jwt := vpToken
+	if i := strings.IndexByte(jwt, '~'); i >= 0 {
+		jwt = jwt[:i]
+	}
+	parts := strings.Split(jwt, ".")
+	if len(parts) < 2 {
+		return "", false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", false
+	}
+	var claims struct {
+		Iss string `json:"iss"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.Iss == "" {
+		return "", false
+	}
+	return claims.Iss, true
+}
 
 func randomB64(n int) string {
 	b := make([]byte, n)

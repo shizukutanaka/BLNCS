@@ -93,7 +93,36 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// GC — last アクセスが ttl より古いバケットを削除する。長期稼働サーバは
+// StartGC runs GC(ttl) every interval in a background goroutine until the
+// returned stop function is called. Long-running servers should call this so the
+// per-IP bucket map cannot grow without bound (a memory-exhaustion vector under
+// many distinct/spoofed source IPs). Example:
+//
+//	rl := NewRateLimiter(100, 200)
+//	stop := rl.StartGC(time.Minute, 10*time.Minute)
+//	defer stop()
+func (rl *RateLimiter) StartGC(interval, ttl time.Duration) (stop func()) {
+	if rl.disabled || interval <= 0 {
+		return func() {}
+	}
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				rl.GC(ttl)
+			case <-done:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
+}
+
+// GC — last アクセスが ttl より古いバケットを削除する。StartGC が無い場合は
 // 定期的に呼ぶこと (メモリ肥大防止)。
 func (rl *RateLimiter) GC(ttl time.Duration) {
 	rl.mu.Lock()

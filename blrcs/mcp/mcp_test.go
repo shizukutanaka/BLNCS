@@ -181,16 +181,25 @@ func TestSCITTFullRoundTrip(t *testing.T) {
 
 func TestAutoAudit(t *testing.T) {
 	srv, _, _ := setupServer(t)
-	// 最初のledgerサイズ
+
+	// Read-only tools must NOT be audited (no ledger growth from reads).
 	before := srv.Ledger().Size()
-	// ツール呼出を1回 (register_scitt以外)
 	resp := callRaw(t, srv, `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"ledger_checkpoint","arguments":{}}}`)
 	if resp["result"].(map[string]any)["isError"].(bool) {
 		t.Fatal("checkpoint tool failed")
 	}
-	after := srv.Ledger().Size()
-	if after != before+1 {
-		t.Fatalf("auto-audit should add 1 entry: before=%d after=%d", before, after)
+	if got := srv.Ledger().Size(); got != before {
+		t.Fatalf("read-only tool should not be audited: before=%d after=%d", before, got)
+	}
+
+	// A mutating tool (issue_passport) IS audited → ledger grows by 1.
+	before = srv.Ledger().Size()
+	resp = callRaw(t, srv, `{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"issue_passport","arguments":{"issuerId":"did:web:factory.example","productId":"01034531200000111","category":"textile","originCountry":"JP","carbonKgCO2e":2.4,"recyclability":0.85,"validForDays":365}}}`)
+	if resp["result"].(map[string]any)["isError"].(bool) {
+		t.Fatalf("issue_passport failed: %v", resp["result"])
+	}
+	if got := srv.Ledger().Size(); got != before+1 {
+		t.Fatalf("mutating tool should add 1 audit entry: before=%d after=%d", before, got)
 	}
 }
 
