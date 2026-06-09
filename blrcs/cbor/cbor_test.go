@@ -467,3 +467,32 @@ func TestDeterministicIntKeyMapNegative(t *testing.T) {
 		t.Errorf("got %x, want %x", got, want)
 	}
 }
+
+// TestUnmarshalDuplicateMapKey verifies that RFC 8949 §5.4 duplicate key
+// rejection is enforced: a CBOR map with two identical keys must be rejected
+// rather than silently keeping the last value (which would hide injected entries).
+func TestUnmarshalDuplicateMapKey(t *testing.T) {
+	// Manually encode {1: "a", 1: "b"} — two entries with key 1.
+	// map(2) | 0x01 "a" | 0x01 "b"
+	data := []byte{
+		0xa2,            // map(2)
+		0x01, 0x61, 'a', // 1 => "a"
+		0x01, 0x61, 'b', // 1 => "b"  (duplicate key!)
+	}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("duplicate CBOR map key must be rejected per RFC 8949 §5.4")
+	}
+}
+
+// TestUnmarshalDuplicateStringKey verifies duplicate string key rejection.
+func TestUnmarshalDuplicateStringKey(t *testing.T) {
+	// {"foo": 1, "foo": 2}
+	data := []byte{
+		0xa2,                               // map(2)
+		0x63, 'f', 'o', 'o', 0x01,         // "foo" => 1
+		0x63, 'f', 'o', 'o', 0x02,         // "foo" => 2  (duplicate!)
+	}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("duplicate CBOR string map key must be rejected per RFC 8949 §5.4")
+	}
+}

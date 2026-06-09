@@ -482,6 +482,12 @@ func (d *decoder) decode() (any, error) {
 			if err != nil {
 				return nil, fmt.Errorf("cbor: map val[%d]: %w", i, err)
 			}
+			// RFC 8949 §5.4: duplicate keys in a definite-length map MUST be
+			// treated as malformed; silently overwriting hides attacker-injected
+			// duplicate entries used to confuse verifiers.
+			if _, exists := m[k]; exists {
+				return nil, fmt.Errorf("cbor: duplicate map key %v", k)
+			}
 			m[k] = v
 		}
 		return m, nil
