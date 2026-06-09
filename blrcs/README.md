@@ -4,7 +4,7 @@
 
 ```
 stdlib + ed25519 only — zero external dependencies
-940+ tests · 52 packages · ~17,300 LoC implementation · 14 fuzz targets
+960+ tests · 53 packages · ~18,000 LoC implementation · 15 fuzz targets
 ```
 
 ## Status
@@ -25,6 +25,7 @@ stdlib + ed25519 only — zero external dependencies
 | W3C DC-API (Safari 26 / Chrome 141) | ✅ | dcapi |
 | MCP (Model Context Protocol) | ✅ | mcp |
 | DID Resolver (web/key/jwk) | ✅ | didresolver |
+| did:webvh (verifiable history + pre-rotation) | ✅ | didwebvh, multiformats |
 | Webhook outbound | ✅ | webhook |
 | Content-Addressed Storage | ✅ | cas |
 | Privacy Manifest (PrivacyInfo equivalent) | ✅ | privacy |
@@ -87,7 +88,7 @@ multiformats         base58btc / multihash / JCS (RFC 8785) — did:webvh primit
 hardening            recovery / replay / saga / fuzz / property / schemaver
 observability        metrics / otelbridge / doctor / healthprobe / diag
 privacy              privacy
-trust/distribution   didresolver / webhook / cas / compose
+trust/distribution   didresolver / didwebvh / webhook / cas / compose
 http composition     httpchain / httpmw (recovery+trace+log+auth+CORS+rate-limit)
 TLS                  tlsharden (Modern / Strict / mTLS / hardened server timeouts)
 config/spec          openapi / apispec / apiversion / config / capability / semconv

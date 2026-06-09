@@ -7,6 +7,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **did:webvh verifiable-history DID method (`didwebvh` package).** Implements
+  the did:webvh model that hardens did:web against key-substitution and silent
+  history rewrites: self-certifying SCID
+  (`base58btc(multihash(sha-256(JCS(genesis with {SCID}))))`), hash-chained log
+  entries (`versionId = "<n>-<entryHash>"`), `eddsa-jcs-2022` Data Integrity
+  proofs, and key pre-rotation via `nextKeyHashes`. `Create` issues a genesis
+  DID, `Update` appends signed/rotated entries, and `Verify` replays a log
+  enforcing SCID self-certification, entry chaining, sequential versions,
+  monotonic `versionTime`, update-key authorization, and pre-rotation
+  commitments. Built on the KAT-validated `multiformats` primitives and the new
+  Ed25519 Multikey codec. 14 tests (incl. tamper/truncation/unauthorized-key/
+  pre-rotation-violation) + runnable example + `FuzzDIDWebVH`. Wire-vector
+  interop with the official did:webvh test vectors, witness cosigning, and
+  did:web fallback are follow-ups. Closes spec §1 / backlog #5 (model).
+
+- **Ed25519 Multikey + multibase codec (`multiformats`).** `EncodeEd25519Multikey`
+  / `DecodeEd25519Multikey` (the `z6Mk…` did:key/did:webvh verification-method
+  form, multicodec 0xed01) and `EncodeMultibaseBase58` / `DecodeMultibaseBase58`
+  for Data Integrity `proofValue`.
+
+### Added
 - **Multiformats primitives (`multiformats` package): base58btc, multihash,
   JCS.** Zero-dependency, known-answer-validated building blocks for did:webvh
   and W3C Data Integrity proofs: `Base58Encode`/`Base58Decode` (Bitcoin/IPFS

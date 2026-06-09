@@ -30,6 +30,7 @@ import (
 
 	"blrcs/cbor"
 	"blrcs/compliance"
+	"blrcs/didwebvh"
 	"blrcs/errkit"
 	"blrcs/jsonschema"
 	"blrcs/mdoc"
@@ -462,5 +463,36 @@ func FuzzJCS(f *testing.F) {
 		if string(out) != string(out2) {
 			t.Fatalf("JCS not idempotent:\n1: %s\n2: %s", out, out2)
 		}
+	})
+}
+
+// ============================================================================
+// FuzzDIDWebVH — 任意 JSON を did:webvh ログとして検証、パニック禁止
+// ============================================================================
+
+func FuzzDIDWebVH(f *testing.F) {
+	// Seed with a real, valid genesis log.
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	genesis, _, err := didwebvh.Create(didwebvh.CreateParams{
+		DIDPath:   "example.com:dids:seed",
+		UpdateKey: priv,
+	})
+	if err == nil {
+		if blob, err := json.Marshal([]didwebvh.LogEntry{*genesis}); err == nil {
+			f.Add(blob)
+		}
+	}
+	f.Add([]byte(`[]`))
+	f.Add([]byte(`[{"versionId":"1-abc","parameters":{"scid":"x"},"state":{}}]`))
+	f.Add([]byte(`not json`))
+	f.Add([]byte{})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var log []didwebvh.LogEntry
+		if err := json.Unmarshal(data, &log); err != nil {
+			return
+		}
+		// 絶対条件: いかなる入力でも panic しない
+		_, _ = didwebvh.Verify(log)
 	})
 }

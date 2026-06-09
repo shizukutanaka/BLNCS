@@ -11,6 +11,13 @@ backlog and references).
   `did:jwk`. Issuer/holder signing keys are Ed25519 (`crypto/ed25519`).
 - `did:web` resolution MUST enforce HTTPS, bound the response size, and fetch
   `/.well-known/did.json` (or `<path>/did.json`).
+- `did:webvh` DIDs carry a verifiable history. A resolver MUST: derive and match
+  the genesis SCID (`base58btc(multihash(sha-256(JCS(genesis with {SCID}))))`);
+  verify each entry's `entryHash` chains from its predecessor `versionId`;
+  enforce sequential version numbers and monotonic `versionTime`; verify each
+  entry's `eddsa-jcs-2022` Data Integrity proof against an authorized `updateKey`;
+  and enforce key pre-rotation (a newly-effective update key MUST be committed in
+  the predecessor's `nextKeyHashes`).
 
 ## 2. Credential issuance (SD-JWT VC)
 - Issued credentials are SD-JWT VCs: a JWS over a JSON payload, `~`-separated
@@ -106,7 +113,8 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 
 | Requirement | Status | Notes |
 |---|---|---|
-| §1 did:web/key/jwk resolution | ✅ | did:webvh (verifiable history) ❌ — backlog #5 |
+| §1 did:web/key/jwk resolution | ✅ | |
+| §1 did:webvh verifiable history (SCID + hash chain + pre-rotation) | ✅ | **implemented** (`didwebvh`); wire-vector interop pending official vectors |
 | §2 SD-JWT VC issuance (vct/iat/exp/_sd_alg) | ✅ | |
 | §2 holder binding (cnf) | ✅ | |
 | §2 status reference (status_list) | ✅ | |
@@ -143,9 +151,6 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §4 issuer-metric privacy (CRSet accumulator) | ❌ | backlog #11 |
 
 ### Highest-value remaining gaps (ordered)
-1. did:webvh verifiable history (§1) — backlog #5. Primitives now in place
-   (`multiformats`: base58btc + multihash + JCS); remaining work is the log
-   replay + SCID derivation + eddsa-jcs-2022 proof + pre-rotation enforcement,
-   to be validated against official did:webvh test vectors.
-2. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).
-3. mdoc DeviceResponse / session-transcript binding (§2a) — proximity transport (ISO 18013-5 §8/§9), beyond the credential-format scope now covered.
+1. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).
+2. mdoc DeviceResponse / session-transcript binding (§2a) — proximity transport (ISO 18013-5 §8/§9), beyond the credential-format scope now covered.
+3. did:webvh official-vector interop — the verification model is implemented and tested (`didwebvh`); validate byte-for-byte against the published did:webvh test vectors and add witness cosigning + did:web fallback.
