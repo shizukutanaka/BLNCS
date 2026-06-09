@@ -190,6 +190,22 @@ func (p *Provenance) Record(externalID string, payload []byte) (Hash, error) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// If this external ID already maps to the same hash, don't append a
+	// duplicate (re-recording the same pair would otherwise inflate
+	// hashToIDs / TotalMappings without bound and return dupes from LookupIDs).
+	if prev, ok := p.idToHash[externalID]; ok && prev == h {
+		return h, nil
+	}
+	// If the ID previously mapped to a different hash, drop the stale reverse entry.
+	if prev, ok := p.idToHash[externalID]; ok && prev != h {
+		ids := p.hashToIDs[prev]
+		for i, id := range ids {
+			if id == externalID {
+				p.hashToIDs[prev] = append(ids[:i], ids[i+1:]...)
+				break
+			}
+		}
+	}
 	p.idToHash[externalID] = h
 	p.hashToIDs[h] = append(p.hashToIDs[h], externalID)
 	return h, nil

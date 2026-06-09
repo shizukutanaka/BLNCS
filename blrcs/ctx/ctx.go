@@ -24,7 +24,6 @@ package ctx
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"blrcs/compliance"
@@ -183,8 +182,12 @@ func AttestRange(
 
 // RegisterSCITT — context 対応 SCITT 登録
 //
-// ledger.Register() はメモリ操作 + fsync のみ。
-// I/O が入る FileStorage では context でのキャンセルが有効。
+// 重要: ledger.Register() は durable な append (commit) であり、いったん開始すると
+// 中断できない。そのため context は「開始前」のキャンセルにのみ作用する: ctx が
+// 既に done なら登録を開始せず err を返す。開始後の deadline 超過では登録は完了し、
+// その Receipt を返す (途中キャンセルして「未登録」を装うと、リトライで台帳に
+// 重複 leaf を生む — それを避けるための設計)。呼出側はタイトな deadline が必要なら
+// 事前に十分な余裕を確保すること。
 func RegisterSCITT(
 	ctx context.Context,
 	tel *telemetry.Telemetry,
@@ -201,33 +204,14 @@ func RegisterSCITT(
 		semconv.IssuerAttr(stmt.Issuer),
 		semconv.SubjectAttr(stmt.Subject),
 	)
-	// channel で goroutine 化して deadline を尊重
-	type result struct {
-		r   *scitt.Receipt
-		err error
+	defer span.End()
+	// Register は中断不能なため同期実行する。goroutine+select で早期 return すると
+	// 登録自体は裏で commit され、呼出側の「キャンセルされた」という認識と矛盾する。
+	r, err := ledger.Register(stmt)
+	if err != nil {
+		span.RecordError(err)
 	}
-	done := make(chan result, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				done <- result{nil, fmt.Errorf("scitt.Register panic: %v", r)}
-			}
-		}()
-		r, err := ledger.Register(stmt)
-		done <- result{r, err}
-	}()
-	select {
-	case <-ctx.Done():
-		span.RecordError(ctx.Err())
-		span.End()
-		return nil, ctx.Err()
-	case res := <-done:
-		if res.err != nil {
-			span.RecordError(res.err)
-		}
-		span.End()
-		return res.r, res.err
-	}
+	return r, err
 }
 
 // SignAndRegister — 署名 + 登録を1コールで

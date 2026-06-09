@@ -46,13 +46,16 @@ func main() {
 	// Server init
 	var srv *mcp.Server
 	var err error
+	var store *storage.FileStorage
 	if dataDir == "" {
 		srv, err = mcp.NewServer(tsID, serverDID)
 	} else {
-		store, serr := storage.NewFileStorage(dataDir)
-		if serr != nil {
-			fatal("storage init:", serr)
+		store, err = storage.NewFileStorage(dataDir)
+		if err != nil {
+			fatal("storage init:", err)
 		}
+		// Persisted storage must be closed on shutdown to release the file handle.
+		defer func() { _ = store.Close() }()
 		srv, err = mcp.NewServerWithStorage(tsID, serverDID, store)
 	}
 	if err != nil {
@@ -76,11 +79,14 @@ func main() {
 	// Rate limiting
 	var limiter mcp.RateLimiter
 	if rateLimitStr != "" {
-		rps, err := strconv.ParseFloat(rateLimitStr, 64)
-		if err == nil && rps > 0 {
-			limiter = mcp.NewTokenBucketLimiter(rps, rps*2)
-			fmt.Fprintf(os.Stderr, "rate limit: %.0f rps per principal\n", rps)
+		rps, perr := strconv.ParseFloat(rateLimitStr, 64)
+		if perr != nil || rps <= 0 {
+			// Fail fast: a malformed value must not silently leave the daemon
+			// with NO rate limiting (which is what dropping the error did).
+			fatal("invalid BLRCS_RATE_LIMIT_RPS:", fmt.Errorf("%q must be a positive number", rateLimitStr))
 		}
+		limiter = mcp.NewTokenBucketLimiter(rps, rps*2)
+		fmt.Fprintf(os.Stderr, "rate limit: %.0f rps per principal\n", rps)
 	}
 
 	// Routes

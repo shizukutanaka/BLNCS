@@ -41,6 +41,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "storage init:", serr)
 			os.Exit(1)
 		}
+		defer func() { _ = store.Close() }()
 		srv, err = mcp.NewServerWithStorage(tsID, serverDID, store)
 		fmt.Fprintf(os.Stderr, "blrcs-mcp: mode=persistent dir=%s\n", dataDir)
 	}

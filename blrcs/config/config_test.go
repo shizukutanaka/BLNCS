@@ -114,7 +114,10 @@ func TestFromEnv(t *testing.T) {
 		}
 	}()
 
-	cfg := FromEnv()
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.Listen != ":9999" {
 		t.Errorf("listen: %s", cfg.Listen)
 	}
@@ -216,7 +219,10 @@ func TestFromEnvTLSFields(t *testing.T) {
 			os.Unsetenv(k)
 		}
 	}()
-	cfg := FromEnv()
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.TLSCert != "/etc/tls/cert.pem" {
 		t.Errorf("tls cert: %s", cfg.TLSCert)
 	}
@@ -234,3 +240,11 @@ func TestFromEnvTLSFields(t *testing.T) {
 // suppress unused import warning
 var _ = json.Marshal
 var _ = strings.Contains
+
+func TestFromEnvRejectsMalformedInt(t *testing.T) {
+	os.Setenv("BLRCS_RATE_LIMIT_RPS", "not-a-number")
+	defer os.Unsetenv("BLRCS_RATE_LIMIT_RPS")
+	if _, err := FromEnv(); err == nil {
+		t.Fatal("malformed BLRCS_RATE_LIMIT_RPS should fail fast, not silently default")
+	}
+}

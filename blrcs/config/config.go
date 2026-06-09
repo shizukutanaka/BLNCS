@@ -87,8 +87,23 @@ func Default() *Config {
 //	BLRCS_LOG_FORMAT, BLRCS_SESSION_TTL_SECONDS
 //	BLRCS_SCITT_ENABLED, BLRCS_SCITT_SIGNER_DID
 //	BLRCS_WEBHOOK_RETRIES
-func FromEnv() *Config {
+func FromEnv() (*Config, error) {
 	cfg := Default()
+	var errs []string
+	atoiEnv := func(key string, set func(int)) {
+		v := os.Getenv(key)
+		if v == "" {
+			return
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			// Fail fast instead of silently keeping the default — a malformed
+			// BLRCS_RATE_LIMIT_RPS must not silently disable the rate limiter.
+			errs = append(errs, fmt.Sprintf("%s=%q: not an integer", key, v))
+			return
+		}
+		set(n)
+	}
 	if v := os.Getenv("BLRCS_LISTEN"); v != "" {
 		cfg.Listen = v
 	}
@@ -104,11 +119,7 @@ func FromEnv() *Config {
 	if v := os.Getenv("BLRCS_AUTH_TOKENS"); v != "" {
 		cfg.AuthTokens = parseTokens(v)
 	}
-	if v := os.Getenv("BLRCS_RATE_LIMIT_RPS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.RateLimitRPS = n
-		}
-	}
+	atoiEnv("BLRCS_RATE_LIMIT_RPS", func(n int) { cfg.RateLimitRPS = n })
 	if v := os.Getenv("BLRCS_DATA_DIR"); v != "" {
 		cfg.DataDir = v
 	}
@@ -118,23 +129,18 @@ func FromEnv() *Config {
 	if v := os.Getenv("BLRCS_LOG_FORMAT"); v != "" {
 		cfg.LogFormat = v
 	}
-	if v := os.Getenv("BLRCS_SESSION_TTL_SECONDS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.SessionTTL = time.Duration(n) * time.Second
-		}
-	}
+	atoiEnv("BLRCS_SESSION_TTL_SECONDS", func(n int) { cfg.SessionTTL = time.Duration(n) * time.Second })
 	if v := os.Getenv("BLRCS_SCITT_ENABLED"); v != "" {
 		cfg.SCITTEnabled = v == "true" || v == "1"
 	}
 	if v := os.Getenv("BLRCS_SCITT_SIGNER_DID"); v != "" {
 		cfg.SCITTSignerDID = v
 	}
-	if v := os.Getenv("BLRCS_WEBHOOK_RETRIES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.WebhookRetries = n
-		}
+	atoiEnv("BLRCS_WEBHOOK_RETRIES", func(n int) { cfg.WebhookRetries = n })
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("config: invalid environment: %s", strings.Join(errs, "; "))
 	}
-	return cfg
+	return cfg, nil
 }
 
 // FromJSON — JSON データから設定読込
