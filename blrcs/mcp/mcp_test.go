@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"blrcs/compliance"
 	"blrcs/scitt"
@@ -316,6 +317,53 @@ func TestVerifyRangeFailure(t *testing.T) {
 	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
 	if !strings.Contains(text, `"valid":false`) {
 		t.Fatalf("expected valid:false, got: %s", text)
+	}
+}
+
+func TestSessionStoreGC(t *testing.T) {
+	s := &sessionStore{data: make(map[string]*sessionEntry)}
+	s.create("sess1", "user1")
+	// Artificially age the entry so GC will remove it.
+	s.mu.Lock()
+	s.data["sess1"].lastSeen = time.Now().Add(-2 * sessionIdleTimeout)
+	s.mu.Unlock()
+	s.gc()
+	s.mu.Lock()
+	_, exists := s.data["sess1"]
+	s.mu.Unlock()
+	if exists {
+		t.Error("stale session should have been GC'd")
+	}
+}
+
+func TestBuildServerInvalidDID(t *testing.T) {
+	ledger, _ := scitt.NewLedger("did:web:ts.test")
+	// Empty serverDID → compliance.NewIssuer("") should fail
+	_, err := buildServer("did:web:ts.test", "", ledger)
+	if err == nil {
+		t.Fatal("empty serverDID should fail")
+	}
+}
+
+func TestVerifyResult(t *testing.T) {
+	got := verifyResult(true, "")
+	if got != `{"valid":true}` {
+		t.Errorf("valid result: %s", got)
+	}
+	got2 := verifyResult(false, "bad sig")
+	if !strings.Contains(got2, `"valid":false`) {
+		t.Errorf("invalid result: %s", got2)
+	}
+	if !strings.Contains(got2, "bad sig") {
+		t.Errorf("reason missing: %s", got2)
+	}
+}
+
+func TestNewServerWithEmptyTSID(t *testing.T) {
+	// Empty tsID → scitt.NewLedger should fail
+	_, err := NewServer("", "did:web:server")
+	if err == nil {
+		t.Fatal("empty tsID should fail")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -371,5 +372,52 @@ func TestHTTPFetcherConstructor(t *testing.T) {
 	f2 := HTTPFetcher(&http.Client{})
 	if f2 == nil {
 		t.Error("HTTPFetcher(client) returned nil")
+	}
+}
+
+func TestHTTPFetcherHappy(t *testing.T) {
+	body := []byte(`{"vct":"https://example.com/vc"}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	f := HTTPFetcher(srv.Client())
+	got, err := f(context.Background(), srv.URL+"/metadata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(body) {
+		t.Errorf("body: %q", got)
+	}
+}
+
+func TestHTTPFetcherNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	f := HTTPFetcher(srv.Client())
+	_, err := f(context.Background(), srv.URL+"/missing")
+	if err == nil {
+		t.Error("404 should return error")
+	}
+}
+
+func TestHTTPFetcherCancelled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("{}"))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	f := HTTPFetcher(srv.Client())
+	_, err := f(ctx, srv.URL+"/metadata")
+	if err == nil {
+		t.Error("cancelled context should produce error")
 	}
 }
