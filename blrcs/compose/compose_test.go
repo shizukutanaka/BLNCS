@@ -372,3 +372,63 @@ func TestDiscoverServicesNoResolver(t *testing.T) {
 		t.Error("missing resolver should error")
 	}
 }
+
+// ============================================================================
+// Guard-clause coverage: nil Resolver/TrustAnchor, cancelled context, bad JSON
+// ============================================================================
+
+func TestVerifyByDIDNoResolver(t *testing.T) {
+	c, iss, _ := setup(t)
+	cred, _ := iss.Issue(compliance.PassportClaim{ProductID: "x"}, time.Hour)
+	c.opts.Resolver = nil
+	if err := c.VerifyByDID(context.Background(), cred, iss.ID); err == nil {
+		t.Error("nil Resolver should error")
+	}
+}
+
+func TestVerifyByDIDNoTrustAnchor(t *testing.T) {
+	c, iss, _ := setup(t)
+	cred, _ := iss.Issue(compliance.PassportClaim{ProductID: "x"}, time.Hour)
+	c.opts.TrustAnchor = nil
+	if err := c.VerifyByDID(context.Background(), cred, iss.ID); err == nil {
+		t.Error("nil TrustAnchor should error")
+	}
+}
+
+func TestVerifyByDIDCancelledContext(t *testing.T) {
+	c, iss, _ := setup(t)
+	cred, _ := iss.Issue(compliance.PassportClaim{ProductID: "x"}, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.VerifyByDID(ctx, cred, iss.ID); err == nil {
+		t.Error("cancelled context should error")
+	}
+}
+
+func TestVerifySDJWTByDIDNoResolver(t *testing.T) {
+	c, iss, _ := setup(t)
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"x": 1}, nil, time.Hour)
+	c.opts.Resolver = nil
+	if _, err := c.VerifySDJWTByDID(context.Background(), sdjwt, iss.ID); err == nil {
+		t.Error("nil Resolver should error")
+	}
+}
+
+func TestVerifySDJWTByDIDNoTrustAnchor(t *testing.T) {
+	c, iss, _ := setup(t)
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"x": 1}, nil, time.Hour)
+	c.opts.TrustAnchor = nil
+	if _, err := c.VerifySDJWTByDID(context.Background(), sdjwt, iss.ID); err == nil {
+		t.Error("nil TrustAnchor should error")
+	}
+}
+
+func TestLookupByExternalIDBadJSON(t *testing.T) {
+	c, _, prov := setup(t)
+	if _, err := prov.Record("bad-json-id", []byte("{not valid json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.LookupByExternalID("bad-json-id"); err == nil {
+		t.Error("bad JSON payload should cause unmarshal error")
+	}
+}

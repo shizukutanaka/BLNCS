@@ -4,7 +4,9 @@ package compliance
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -328,5 +330,54 @@ func TestNewIssuerEmptyID(t *testing.T) {
 	_, err := NewIssuer("")
 	if err == nil {
 		t.Error("empty issuer ID should fail")
+	}
+}
+
+// ============================================================================
+// VerifyRange — bad base64 signature path
+// ============================================================================
+
+func TestVerifyRangeBadBase64Sig(t *testing.T) {
+	att, _ := NewSensorAttester("did:device:test")
+	salt := make([]byte, 16)
+	stmt := RangeStatement{Min: 0, Max: 100, Unit: "c", Name: "temp"}
+	commit := Commit(50.0, salt, stmt)
+	proof, _ := att.Attest(commit, 50.0)
+	proof.Signature = "!!not-valid-base64!!"
+	if err := VerifyRange(proof, att.PublicKey()); err == nil {
+		t.Error("bad base64 signature should fail VerifyRange")
+	}
+}
+
+// ============================================================================
+// Present — malformed disclosure paths
+// ============================================================================
+
+func TestPresentMalformedDisclosures(t *testing.T) {
+	iss, _ := NewIssuer("did:web:p.test")
+	// Use a real JWT header for the first segment; disclosures we fabricate.
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"x": 1}, nil, time.Hour)
+	jwtPart := sdjwt[:strings.IndexByte(sdjwt, '~')]
+
+	cases := []string{
+		// bad base64 disclosure
+		jwtPart + "~AAAA===~",
+		// valid base64 but not JSON
+		jwtPart + "~" + base64.RawURLEncoding.EncodeToString([]byte("not-json")) + "~",
+		// valid base64 + JSON but array len != 3
+		jwtPart + "~" + base64.RawURLEncoding.EncodeToString([]byte(`["a","b"]`)) + "~",
+		// valid base64 + JSON array len 3 but arr[1] not string
+		jwtPart + "~" + base64.RawURLEncoding.EncodeToString([]byte(`["salt",42,"val"]`)) + "~",
+	}
+	for i, c := range cases {
+		result, err := Present(c, []string{"x"})
+		if err != nil {
+			t.Errorf("case %d: Present returned error %v (should not error)", i, err)
+			continue
+		}
+		// Malformed disclosures should be silently skipped; result must end with "~"
+		if result[len(result)-1] != '~' {
+			t.Errorf("case %d: result should end with '~': %q", i, result)
+		}
 	}
 }

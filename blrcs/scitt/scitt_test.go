@@ -559,3 +559,170 @@ func TestVerifyStatementBadBase64Sig(t *testing.T) {
 		t.Error("bad base64 signature should fail VerifyStatement")
 	}
 }
+
+// ============================================================================
+// Additional coverage: SignStatement empty payload, VerifyInclusion out-of-bounds,
+// hexDecode invalid lo nibble, VerifyReceipt bad base64 TS sig, Get out-of-bounds,
+// merkleRoot empty, VerifyConsistency edge cases.
+// ============================================================================
+
+func TestSignStatementEmptyPayload(t *testing.T) {
+	priv, _ := mustIssuer(t, "iss")
+	if _, err := SignStatement(priv, "iss", "s", "c", nil); err != ErrEmptyStmt {
+		t.Errorf("empty payload: want ErrEmptyStmt, got %v", err)
+	}
+}
+
+func TestVerifyInclusionIdxGESize(t *testing.T) {
+	leaf := HashLeaf([]byte("x"))
+	if VerifyInclusion(leaf, leaf, 5, 3, nil) {
+		t.Error("idx>=size should return false")
+	}
+}
+
+func TestHexDecodeInvalidLoNibble(t *testing.T) {
+	// 'a' is valid hi nibble, 'z' is invalid lo nibble
+	if _, err := hexDecode("az"); err == nil {
+		t.Error("invalid lo nibble should fail hexDecode")
+	}
+}
+
+func TestVerifyReceiptBadBase64TSSig(t *testing.T) {
+	ledger, _ := NewLedger("ts-b64")
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("p"))
+	receipt, _ := ledger.Register(stmt)
+	bad := *receipt
+	bad.TSSignature = "!!not-valid-base64!!"
+	if err := VerifyReceipt(&bad, stmt, ledger.PublicKey()); err != ErrBadReceipt {
+		t.Errorf("bad base64 TSSignature: want ErrBadReceipt, got %v", err)
+	}
+}
+
+func TestGetOutOfBounds(t *testing.T) {
+	ledger, _ := NewLedger("ts-oob")
+	if _, _, err := ledger.Get(0); err != ErrNotFound {
+		t.Errorf("empty ledger Get(0): want ErrNotFound, got %v", err)
+	}
+}
+
+func TestMerkleRootEmptyLeaves(t *testing.T) {
+	root := merkleRoot(nil)
+	if len(root) != 32 {
+		t.Errorf("merkleRoot(nil): want 32 bytes, got %d", len(root))
+	}
+}
+
+func TestVerifyConsistencyEqualSizeNonNilProof(t *testing.T) {
+	// m==n but proof is non-empty → should fail
+	root := HashLeaf([]byte("r"))
+	proof := [][]byte{root}
+	if err := VerifyConsistency(5, 5, root, root, proof); err == nil {
+		t.Error("equal size with non-nil proof should fail")
+	}
+}
+
+func TestVerifyConsistencyEmptyProofNonTrivial(t *testing.T) {
+	// m!=n, m!=0, but proof is empty (and m is not a power of 2 to keep proofArr empty)
+	// m=3 (not pow2), n=5, proof=nil → proofArr still nil → len=0 → ErrConsistency
+	root := HashLeaf([]byte("r"))
+	if err := VerifyConsistency(3, 5, root, root, nil); err == nil {
+		t.Error("empty proof for non-trivial consistency should fail")
+	}
+}
+
+// ============================================================================
+// Mock stores for Register / NewLedgerWithStorage error paths
+// ============================================================================
+
+type failAppendStore struct {
+	*storage.MemoryStorage
+}
+
+func (f *failAppendStore) AppendStatement(_ storage.StatementBlob) (uint64, error) {
+	return 0, errors.New("simulated append failure")
+}
+
+func TestRegisterAppendFailure(t *testing.T) {
+	l, err := NewLedgerWithStorage("ts-fa", &failAppendStore{storage.NewMemoryStorage()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("payload"))
+	if _, err := l.Register(stmt); err == nil {
+		t.Error("AppendStatement failure should propagate from Register")
+	}
+}
+
+// ============================================================================
+// Cosign paths: hexDecode(prev.RootHash) error and hexDecode(cp.RootHash) error
+// ============================================================================
+
+func makeSignedCheckpoint(tsID string, treeSize uint64, rootHash string, tsPriv ed25519.PrivateKey) Checkpoint {
+	cp := Checkpoint{TSID: tsID, TreeSize: treeSize, RootHash: rootHash}
+	cp.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(tsPriv, checkpointSigPayload(cp)))
+	return cp
+}
+
+func TestCosignPrevRootHashBadHex(t *testing.T) {
+	_, tsPriv, _ := ed25519.GenerateKey(rand.Reader)
+	tsPub := tsPriv.Public().(ed25519.PublicKey)
+	_, wPriv, _ := ed25519.GenerateKey(rand.Reader)
+	w := NewWitness("w", wPriv)
+
+	// First checkpoint: root hash is invalid hex (not parseable by hexDecode) but
+	// the signature is valid, so VerifyCheckpoint passes and it gets stored.
+	cp1 := makeSignedCheckpoint("ts-bad1", 1, "GGGG", tsPriv)
+	if _, err := w.Cosign(cp1, tsPub, nil); err != nil {
+		t.Fatalf("first cosign should succeed: %v", err)
+	}
+
+	// Second checkpoint: larger tree size → enters default branch, tries
+	// hexDecode(prev.RootHash) = hexDecode("GGGG") → error → ErrSplitView.
+	cp2 := makeSignedCheckpoint("ts-bad1", 2, "aabbccdd", tsPriv)
+	if _, err := w.Cosign(cp2, tsPub, nil); err != ErrSplitView {
+		t.Errorf("bad prev root hex: want ErrSplitView, got %v", err)
+	}
+}
+
+func TestCosignCPRootHashBadHex(t *testing.T) {
+	_, tsPriv, _ := ed25519.GenerateKey(rand.Reader)
+	tsPub := tsPriv.Public().(ed25519.PublicKey)
+	_, wPriv, _ := ed25519.GenerateKey(rand.Reader)
+	w := NewWitness("w", wPriv)
+
+	// First checkpoint: valid hex root hash (44 chars = 22 bytes, arbitrary).
+	cp1 := makeSignedCheckpoint("ts-bad2", 1, "aabb", tsPriv)
+	if _, err := w.Cosign(cp1, tsPub, nil); err != nil {
+		t.Fatalf("first cosign should succeed: %v", err)
+	}
+
+	// Second checkpoint: tree size grows, but cp.RootHash is invalid hex
+	// → hexDecode(prev.RootHash) succeeds, hexDecode(cp.RootHash) fails → ErrSplitView.
+	cp2 := makeSignedCheckpoint("ts-bad2", 2, "GGGG", tsPriv)
+	if _, err := w.Cosign(cp2, tsPub, nil); err != ErrSplitView {
+		t.Errorf("bad cp root hex: want ErrSplitView, got %v", err)
+	}
+}
+
+func TestVerifyCOSEReceiptBadPayload(t *testing.T) {
+	// Build a COSE_Sign1 with a valid TS signature but payload that fails decodeReceiptPayload.
+	ledger, _ := NewLedger("ts-badpay")
+	// Payload is just a CBOR string — not a map → decodeReceiptPayload will error.
+	badPayload, _ := cbor.Marshal("not-a-map")
+	protected := cbor.Header{
+		cbor.HeaderAlg: cbor.AlgEdDSA,
+		cbor.HeaderKid: []byte("ts-badpay"),
+	}
+	data, err := cbor.Sign1(protected, nil, badPayload, nil, ledger.tsPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("p"))
+	if err := VerifyCOSEReceipt(data, stmt, ledger.PublicKey()); err == nil {
+		t.Error("COSE receipt with bad payload should fail VerifyCOSEReceipt")
+	}
+}
+

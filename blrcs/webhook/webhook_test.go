@@ -422,3 +422,87 @@ func TestValidateOutboundURLUnresolvable(t *testing.T) {
 		t.Error("unresolvable host should be blocked")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: missing-signature path, context-cancelled retry, redirect guard
+// ============================================================================
+
+func TestVerifyRequestMissingSignatureWithValidTimestamp(t *testing.T) {
+	secret := []byte("k")
+	body := []byte("{}")
+	now := time.Now()
+	ts := strconv.FormatInt(now.Unix(), 10)
+	// Valid timestamp, but NO signature header at all.
+	headers := map[string]string{
+		"X-BLRCS-Timestamp": ts,
+	}
+	if err := VerifyRequest(secret, headers, body, 5*time.Minute, now); err == nil {
+		t.Error("missing signature should fail even with valid timestamp")
+	}
+}
+
+func TestDeliverWithRetryContextCancelledDuringWait(t *testing.T) {
+	// Server always fails — forces a retry delay, during which we cancel ctx.
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		http.Error(w, "fail", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel after first delivery attempt completes so the retry wait is interrupted.
+	go func() {
+		for attempts.Load() < 1 {
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel()
+	}()
+
+	err := bus.deliverWithRetry(ctx, Subscriber{URL: server.URL, Retries: 5, Timeout: time.Second}, "evt", []byte("{}"))
+	if err == nil {
+		t.Error("cancelled context during retry should return error")
+	}
+}
+
+func TestDeliverOnceBadURL(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	// "\x00" makes http.NewRequestWithContext return an error (invalid URL byte).
+	err := bus.deliverOnce(context.Background(), Subscriber{URL: "http://host\x00bad"}, "evt", []byte("{}"))
+	if err == nil {
+		t.Error("invalid URL byte should cause deliverOnce to return error")
+	}
+}
+
+func TestNewBusCheckRedirectBlocksSSRF(t *testing.T) {
+	// Set up a server that redirects to itself (loopback) — CheckRedirect should fire and block.
+	var redirectTarget string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if redirectTarget != "" {
+			http.Redirect(w, r, redirectTarget, http.StatusFound)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+	redirectTarget = server.URL + "/redirected"
+
+	// Secure bus (AllowPrivateTargets=false): redirect to loopback must be blocked.
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	// The initial URL is not subject to CheckRedirect (it goes through validateOutboundURL
+	// in deliverOnce). The CheckRedirect is exercised only when the HTTP client follows
+	// a 30x. Since the initial URL is loopback, deliverOnce will block it before the
+	// request even goes out — so directly call the redirect checker:
+	parsedURL, _ := url.Parse(server.URL + "/loop")
+	err := bus.HTTP.CheckRedirect(&http.Request{URL: parsedURL}, nil)
+	if err == nil {
+		t.Error("CheckRedirect to loopback should return ErrBlockedTarget")
+	}
+	if !errors.Is(err, ErrBlockedTarget) {
+		t.Errorf("want ErrBlockedTarget, got: %v", err)
+	}
+}

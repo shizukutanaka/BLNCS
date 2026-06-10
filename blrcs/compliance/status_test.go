@@ -175,6 +175,52 @@ func TestCheckRevokedTokenBadToken(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// extractStatus edge cases — status_list not a map, missing idx/uri
+// ============================================================================
+
+func TestExtractStatusStatusListNotMap(t *testing.T) {
+	// status is a map but status_list is not a map (it's a string)
+	payload := map[string]any{
+		"status": map[string]any{
+			"status_list": "not-a-map",
+		},
+	}
+	if got := extractStatus(payload); got != nil {
+		t.Errorf("non-map status_list: want nil, got %+v", got)
+	}
+}
+
+func TestExtractStatusEmptyURI(t *testing.T) {
+	// status_list is a map but uri is empty
+	payload := map[string]any{
+		"status": map[string]any{
+			"status_list": map[string]any{
+				"uri": "",
+				"idx": float64(5),
+			},
+		},
+	}
+	if got := extractStatus(payload); got != nil {
+		t.Errorf("empty URI: want nil, got %+v", got)
+	}
+}
+
+func TestExtractStatusMissingIdx(t *testing.T) {
+	// status_list has a uri but no idx field
+	payload := map[string]any{
+		"status": map[string]any{
+			"status_list": map[string]any{
+				"uri": "https://issuer.example/status/1",
+				// no idx
+			},
+		},
+	}
+	if got := extractStatus(payload); got != nil {
+		t.Errorf("missing idx: want nil, got %+v", got)
+	}
+}
+
 // TestCheckRevokedTokenNilVC — nil vc and nil Status must return (false, nil).
 func TestCheckRevokedTokenNilVC(t *testing.T) {
 	_, statusPriv, _ := ed25519.GenerateKey(rand.Reader)
