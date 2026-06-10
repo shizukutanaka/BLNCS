@@ -48,6 +48,23 @@ type TokenMeta struct {
 	TTL      int64
 }
 
+// IsStale reports whether a verifier holding a cached copy of this token should
+// refresh it, per draft-ietf-oauth-status-list: the `ttl` claim is the maximum
+// number of seconds the status list may be cached after issuance. Returns false
+// when no TTL was advertised (caller falls back to `exp` / its own policy).
+func (m *TokenMeta) IsStale() bool {
+	return m.IsStaleAt(time.Now())
+}
+
+// IsStaleAt is IsStale with an injectable clock (deterministic tests).
+func (m *TokenMeta) IsStaleAt(now time.Time) bool {
+	if m.TTL <= 0 {
+		return false
+	}
+	freshUntil := time.Unix(m.IssuedAt, 0).Add(time.Duration(m.TTL) * time.Second)
+	return now.After(freshUntil)
+}
+
 // IssueToken — この status list を署名付き Status List Token として発行。
 //
 // sub は配布 URI (credential の status.uri と一致させる)。ttl>0 で exp を付与。

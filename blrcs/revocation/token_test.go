@@ -118,3 +118,47 @@ func TestVerifyStatusListTokenRejectsBadBits(t *testing.T) {
 		t.Error("wrong key should fail")
 	}
 }
+
+// ============================================================================
+// TokenMeta.IsStale — TTL freshness (draft-ietf-oauth-status-list)
+// ============================================================================
+
+func TestTokenMetaIsStale(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	// Issued now, TTL=3600s → fresh at +30min, stale at +61min.
+	m := &TokenMeta{IssuedAt: now.Unix(), TTL: 3600}
+	if m.IsStaleAt(now.Add(30 * time.Minute)) {
+		t.Error("token within TTL window must not be stale")
+	}
+	if !m.IsStaleAt(now.Add(61 * time.Minute)) {
+		t.Error("token past TTL window must be stale")
+	}
+}
+
+func TestTokenMetaIsStaleNoTTL(t *testing.T) {
+	// No TTL advertised → never reported stale (caller falls back to exp/policy).
+	m := &TokenMeta{IssuedAt: time.Now().Add(-100 * time.Hour).Unix(), TTL: 0}
+	if m.IsStale() {
+		t.Error("token without TTL must not be reported stale")
+	}
+}
+
+func TestVerifyStatusListTokenPopulatesTTL(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	tok, err := list.IssueToken("did:web:issuer", "https://issuer/status/1", priv, 2*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, meta, err := VerifyStatusListToken(tok, pub, PurposeRevocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.TTL != int64((2 * time.Hour).Seconds()) {
+		t.Errorf("TTL not propagated: %d", meta.TTL)
+	}
+	if meta.IsStale() {
+		t.Error("freshly issued token must not be stale")
+	}
+}

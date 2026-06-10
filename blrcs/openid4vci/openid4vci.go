@@ -90,7 +90,7 @@ type preAuthEntry struct {
 //	Credential:  POST {IssuerURL}/credential
 type Issuer struct {
 	URL          string
-	RequireProof bool // OpenID4VCI Draft 15 §5.1.2: Proof-of-Possession を必須化
+	RequireProof bool               // OpenID4VCI Draft 15 §5.1.2: Proof-of-Possession を必須化
 	signer       *compliance.Issuer // 既存の compliance.Issuer を再利用 (DRY)
 	configs      map[string]CredentialConfiguration
 	preAuthTTL   time.Duration

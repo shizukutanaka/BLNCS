@@ -43,13 +43,13 @@ type Disclosure struct {
 
 // VerifiedClaims — SD-JWT 検証結果
 type VerifiedClaims struct {
-	Issuer     string         `json:"iss"`
-	Subject    string         `json:"sub"`
-	VCT        string         `json:"vct"` // SD-JWT VC type (draft-ietf-oauth-sd-jwt-vc)
-	IssuedAt   int64          `json:"iat"`
-	Expires    int64          `json:"exp"`
-	NotBefore  int64          `json:"nbf,omitempty"` // RFC 9901: not-before (optional)
-	Claims     map[string]any `json:"claims"`
+	Issuer    string         `json:"iss"`
+	Subject   string         `json:"sub"`
+	VCT       string         `json:"vct"` // SD-JWT VC type (draft-ietf-oauth-sd-jwt-vc)
+	IssuedAt  int64          `json:"iat"`
+	Expires   int64          `json:"exp"`
+	NotBefore int64          `json:"nbf,omitempty"` // RFC 9901: not-before (optional)
+	Claims    map[string]any `json:"claims"`
 
 	// HolderKey — cnf.jwk から復元した holder 公開鍵 (発行時にバインドされていれば non-nil)。
 	HolderKey ed25519.PublicKey `json:"-"`

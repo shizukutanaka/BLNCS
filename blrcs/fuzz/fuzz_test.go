@@ -35,6 +35,8 @@ import (
 	"blrcs/jsonschema"
 	"blrcs/mdoc"
 	"blrcs/multiformats"
+	"blrcs/openid4vp"
+	"blrcs/revocation"
 	"blrcs/scitt"
 	"blrcs/types"
 )
@@ -494,5 +496,61 @@ func FuzzDIDWebVH(f *testing.F) {
 		}
 		// 絶対条件: いかなる入力でも panic しない
 		_, _ = didwebvh.Verify(log)
+	})
+}
+
+// ============================================================================
+// FuzzDCQL — 任意バイト列を DCQL query として解析、パニック禁止
+// ============================================================================
+
+func FuzzDCQL(f *testing.F) {
+	f.Add([]byte(`{"credentials":[{"id":"a","format":"dc+sd-jwt"}]}`))
+	f.Add([]byte(`{"credentials":[{"id":"a","format":"dc+sd-jwt","claims":[{"path":["address","country"],"values":["DE"]}]}]}`))
+	f.Add([]byte(`{"credentials":[]}`))
+	f.Add([]byte(`{}`))
+	f.Add([]byte(`not json`))
+	f.Add([]byte{})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// 絶対条件: いかなる入力でも panic しない
+		q, err := openid4vp.ParseDCQL(data)
+		if err != nil {
+			return
+		}
+		// 成功 parse は MatchClaims が任意の presented で panic しないこと
+		for i := range q.Credentials {
+			_ = q.Credentials[i].MatchClaims(map[string]any{
+				"x":       "y",
+				"address": map[string]any{"country": "DE"},
+			})
+		}
+	})
+}
+
+// ============================================================================
+// FuzzBitstringStatusList — 任意文字列を encoded status list として復号、パニック禁止
+// ============================================================================
+
+func FuzzBitstringStatusList(f *testing.F) {
+	// 正規 corpus: 実際の encoded list を生成して seed にする。
+	bsl := revocation.NewBitstringStatusList(revocation.PurposeRevocation, revocation.MinBitstringSize)
+	_ = bsl.SetStatus(42, true)
+	if enc, err := bsl.EncodedList(); err == nil {
+		f.Add(enc)
+	}
+	f.Add("")
+	f.Add("!!!not-base64!!!")
+	f.Add("aGVsbG8=") // valid base64, invalid gzip
+
+	f.Fuzz(func(t *testing.T, encoded string) {
+		// 絶対条件: いかなる入力でも panic しない (gzip 爆弾も上限で防ぐ)
+		bsl, err := revocation.DecodeBitstringStatusList(revocation.PurposeRevocation, encoded)
+		if err != nil {
+			return
+		}
+		// 成功 decode は GetStatus が範囲内/外で panic しないこと
+		_, _ = bsl.GetStatus(0)
+		_, _ = bsl.GetStatus(-1)
+		_, _ = bsl.GetStatus(1 << 30)
 	})
 }

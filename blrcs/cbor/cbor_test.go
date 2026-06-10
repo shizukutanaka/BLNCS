@@ -488,9 +488,9 @@ func TestUnmarshalDuplicateMapKey(t *testing.T) {
 func TestUnmarshalDuplicateStringKey(t *testing.T) {
 	// {"foo": 1, "foo": 2}
 	data := []byte{
-		0xa2,                               // map(2)
-		0x63, 'f', 'o', 'o', 0x01,         // "foo" => 1
-		0x63, 'f', 'o', 'o', 0x02,         // "foo" => 2  (duplicate!)
+		0xa2,                      // map(2)
+		0x63, 'f', 'o', 'o', 0x01, // "foo" => 1
+		0x63, 'f', 'o', 'o', 0x02, // "foo" => 2  (duplicate!)
 	}
 	if _, err := Unmarshal(data); err == nil {
 		t.Fatal("duplicate CBOR string map key must be rejected per RFC 8949 §5.4")

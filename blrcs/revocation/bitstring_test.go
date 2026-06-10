@@ -175,7 +175,7 @@ func TestBitstringAllRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, idx := range []int{0, 1, cap/2 - 1, cap/2, cap - 1} {
+	for _, idx := range []int{0, 1, cap/2 - 1, cap / 2, cap - 1} {
 		on, err := decoded.GetStatus(idx)
 		if err != nil {
 			t.Fatalf("GetStatus(%d): %v", idx, err)
