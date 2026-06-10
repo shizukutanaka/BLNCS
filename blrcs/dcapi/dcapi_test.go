@@ -218,3 +218,35 @@ func TestBuildForVerifierDCQLNoResponseURI(t *testing.T) {
 		t.Error("empty responseURI should be omitted")
 	}
 }
+
+func TestContainsAny(t *testing.T) {
+	// covered via DetectUserAgent, but directly exercise edge cases
+	if containsAny("") {
+		t.Error("empty string should not contain anything")
+	}
+	if containsAny("hello", "") {
+		t.Error("empty sub should be skipped")
+	}
+	if !containsAny("Chrome/90", "Chrome") {
+		t.Error("should contain Chrome")
+	}
+	if containsAny("Firefox", "Chrome", "Safari") {
+		t.Error("Firefox should not contain Chrome or Safari")
+	}
+}
+
+func TestExtractNonceAtEnd(t *testing.T) {
+	// nonce is last param — no trailing &
+	url := "openid4vp://authorize?response_type=vp_token&nonce=abc123"
+	nonce := extractNonce(url)
+	if nonce != "abc123" {
+		t.Errorf("extractNonce: %q", nonce)
+	}
+}
+
+func TestExtractNonceMissing(t *testing.T) {
+	nonce := extractNonce("openid4vp://authorize?response_type=vp_token")
+	if nonce != "" {
+		t.Errorf("missing nonce should return empty: %q", nonce)
+	}
+}

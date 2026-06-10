@@ -292,3 +292,75 @@ func TestMultibaseBase58RoundTrip(t *testing.T) {
 		t.Error("missing 'z' prefix should fail")
 	}
 }
+
+// ============================================================================
+// JCS — JSON Canonicalization Scheme
+// ============================================================================
+
+func TestCanonicalizeJSONRoundTrip(t *testing.T) {
+	// Standard JCS: keys sorted, no whitespace.
+	input := `{"z": 3, "a": 1, "m": 2}`
+	out, err := CanonicalizeJSON([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"a":1,"m":2,"z":3}`
+	if string(out) != want {
+		t.Errorf("canonicalize: got %q want %q", out, want)
+	}
+}
+
+func TestCanonicalizeFloat(t *testing.T) {
+	// Float numbers should go through writeJCSNumber's non-integer path.
+	input := `{"x": 1.5, "y": -0.5}`
+	out, err := CanonicalizeJSON([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) == "" {
+		t.Error("empty output")
+	}
+}
+
+func TestCanonicalizeJSONStringEscapes(t *testing.T) {
+	// JSON with actual control characters represented as escape sequences
+	input := []byte(`{"key": "hello\nworld"}`)
+	out, err := CanonicalizeJSON(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) == 0 {
+		t.Error("empty output for string with escapes")
+	}
+}
+
+func TestCanonicalizeJSONSurrogatePair(t *testing.T) {
+	// Emoji (non-BMP rune) → should produce surrogate pair in JCS string
+	input := `{"emoji": "😀"}`
+	out, err := CanonicalizeJSON([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) == 0 {
+		t.Error("empty output for emoji")
+	}
+}
+
+func TestCanonicalizeJSONInvalid(t *testing.T) {
+	_, err := CanonicalizeJSON([]byte(`{not json`))
+	if err == nil {
+		t.Error("invalid JSON should fail")
+	}
+}
+
+func TestCanonicalizeJSONArray(t *testing.T) {
+	input := `[3, 1, 2]`
+	out, err := CanonicalizeJSON([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Arrays preserve order
+	if string(out) != `[3,1,2]` {
+		t.Errorf("array: %q", out)
+	}
+}

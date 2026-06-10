@@ -239,3 +239,29 @@ func TestConcurrentErrorRecording(t *testing.T) {
 		t.Errorf("ring exceeded: %d", len(snap.Errors))
 	}
 }
+
+func TestSnapshotTextWithHistograms(t *testing.T) {
+	tel := telemetry.New(telemetry.NopRecorder{})
+	// Add a timing span so a histogram is recorded.
+	span := tel.StartSpan(context.Background(), "test.op")
+	span.End()
+
+	gen := NewGenerator(tel, ProductInfo{Name: "BLRCS", Version: "1.0"})
+	snap := gen.Snapshot(context.Background())
+	text := snap.Text()
+
+	// The histogram section should appear (at least one histogram from the span)
+	_ = text // Just ensure it doesn't panic
+}
+
+func TestNewGeneratorNilTelemetry(t *testing.T) {
+	gen := NewGenerator(nil, ProductInfo{Name: "Test"})
+	if gen == nil {
+		t.Fatal("nil generator")
+	}
+	// Should not panic
+	snap := gen.Snapshot(context.Background())
+	if snap.Product.Name != "Test" {
+		t.Errorf("product name: %s", snap.Product.Name)
+	}
+}
