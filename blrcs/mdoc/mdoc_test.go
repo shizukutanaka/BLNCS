@@ -539,3 +539,218 @@ func TestItemElementIDErrors(t *testing.T) {
 		t.Error("non-map inner CBOR should fail")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: equalBytes len-mismatch, verifyItem non-bstr tag content,
+// Present error paths, Verify namespace error paths
+// ============================================================================
+
+func TestEqualBytesLengthMismatch(t *testing.T) {
+	if equalBytes([]byte{1, 2, 3}, []byte{1, 2}) {
+		t.Error("different-length slices should not be equal")
+	}
+}
+
+func TestVerifyItemNonBstrTag24Content(t *testing.T) {
+	// Tag 24 whose content is a string, not bstr → ErrMalformed
+	_, _, _, err := verifyItem(cbor.Tag{Number: tagEncodedCBOR, Content: "not-bstr"}, nil)
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for non-bstr tag-24 content, got %v", err)
+	}
+}
+
+func TestPresentMalformedInput(t *testing.T) {
+	_, err := Present([]byte{0xff, 0xfe}, map[string][]string{})
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for bad CBOR, got %v", err)
+	}
+}
+
+func TestPresentNotAMap(t *testing.T) {
+	b, _ := cbor.Marshal("not-a-map")
+	_, err := Present(b, map[string][]string{})
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for non-map top, got %v", err)
+	}
+}
+
+func TestPresentMissingIssuerAuth(t *testing.T) {
+	b, _ := cbor.Marshal(map[string]any{"other": "field"})
+	_, err := Present(b, map[string][]string{})
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for missing issuerAuth, got %v", err)
+	}
+}
+
+func TestPresentNamespacesNotAMap(t *testing.T) {
+	// Valid credential with nameSpaces replaced by a string
+	issuerPriv, _ := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+
+	top, _ := cbor.Unmarshal(cred)
+	topMap := top.(map[any]any)
+	topMap[isNameSpaces] = "not-a-map"
+	b, _ := cbor.Marshal(topMap)
+	_, err := Present(b, map[string][]string{"org.iso.18013.5.1": {"family_name"}})
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for non-map nameSpaces, got %v", err)
+	}
+}
+
+func TestPresentNoItemsKept(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+	// Request a namespace that exists but ask for element IDs that don't exist
+	// → kept will be empty → that namespace is not added to filteredNS
+	result, err := Present(cred, map[string][]string{
+		"org.iso.18013.5.1": {"nonexistent_element"},
+	})
+	if err != nil {
+		t.Fatalf("Present with no matching items: %v", err)
+	}
+	doc, err := Verify(result, issuerPub, time.Now())
+	if err != nil {
+		t.Fatalf("Verify after empty disclose: %v", err)
+	}
+	if len(doc.NameSpaces) != 0 {
+		t.Errorf("expected no namespaces disclosed, got %v", doc.NameSpaces)
+	}
+}
+
+func TestVerifyNamespacesNotAMap(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+	top, _ := cbor.Unmarshal(cred)
+	topMap := top.(map[any]any)
+	topMap[isNameSpaces] = "not-a-map"
+	b, _ := cbor.Marshal(topMap)
+	_, err := Verify(b, issuerPub, time.Now())
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for non-map nameSpaces in Verify, got %v", err)
+	}
+}
+
+func TestVerifyNamespaceKeyNotText(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+	top, _ := cbor.Unmarshal(cred)
+	topMap := top.(map[any]any)
+	nsMap, _ := topMap[isNameSpaces].(map[any]any)
+	// Copy all entries to a new map with an integer key
+	newNS := make(map[any]any)
+	for k, v := range nsMap {
+		newNS[k] = v
+	}
+	newNS[uint64(999)] = []any{} // non-string key
+	topMap[isNameSpaces] = newNS
+	b, _ := cbor.Marshal(topMap)
+	_, err := Verify(b, issuerPub, time.Now())
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for non-string namespace key, got %v", err)
+	}
+}
+
+func TestVerifyNamespaceNotArray(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	p := sampleParams(issuerPriv, nil)
+	cred, _ := Issue(p)
+	top, _ := cbor.Unmarshal(cred)
+	topMap := top.(map[any]any)
+	nsMap := make(map[any]any)
+	nsMap["org.iso.18013.5.1"] = "not-an-array"
+	topMap[isNameSpaces] = nsMap
+	b, _ := cbor.Marshal(topMap)
+	_, err := Verify(b, issuerPub, time.Now())
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for non-array namespace value, got %v", err)
+	}
+}
+
+func TestVerifyNamespaceNotInMSO(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+	top, _ := cbor.Unmarshal(cred)
+	topMap := top.(map[any]any)
+	nsMap, _ := topMap[isNameSpaces].(map[any]any)
+	nsMap["nonexistent.ns"] = []any{} // namespace not in MSO's valueDigests
+	topMap[isNameSpaces] = nsMap
+	b, _ := cbor.Marshal(topMap)
+	_, err := Verify(b, issuerPub, time.Now())
+	if !errors.Is(err, ErrUnknownDigestID) {
+		t.Errorf("want ErrUnknownDigestID for namespace not in MSO, got %v", err)
+	}
+}
+
+func TestDecodeTagged24BadCBOR(t *testing.T) {
+	// 0xff is an invalid CBOR start byte (break code outside indefinite encoding)
+	_, err := decodeTagged24([]byte{0xff})
+	if err == nil {
+		t.Error("invalid CBOR should fail decodeTagged24")
+	}
+}
+
+func TestDecodeTagged24ContentNotBstr(t *testing.T) {
+	// Tag 24 wrapping a CBOR text string instead of bstr
+	b, _ := cbor.Marshal(cbor.Tag{Number: tagEncodedCBOR, Content: "text-not-bstr"})
+	_, err := decodeTagged24(b)
+	if err == nil {
+		t.Error("non-bstr tag-24 content should fail decodeTagged24")
+	}
+}
+
+func TestVerifyItemInvalidCBORContent(t *testing.T) {
+	// Tag 24 with bstr content that is not valid CBOR
+	badContent := []byte{0xff, 0xfe}
+	_, _, _, err := verifyItem(cbor.Tag{Number: tagEncodedCBOR, Content: badContent}, nil)
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("invalid CBOR content: want ErrMalformed, got %v", err)
+	}
+}
+
+func TestVerifyItemContentNotAMap(t *testing.T) {
+	// Tag 24 with bstr containing a CBOR string (not a map)
+	strBytes, _ := cbor.Marshal("not-a-map")
+	_, _, _, err := verifyItem(cbor.Tag{Number: tagEncodedCBOR, Content: strBytes}, nil)
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("non-map item: want ErrMalformed, got %v", err)
+	}
+}
+
+func TestVerifyItemMissingDigestID(t *testing.T) {
+	// Tag 24 with bstr containing a map that has no digestID key
+	mapBytes, _ := cbor.Marshal(map[string]any{"elementIdentifier": "id", "elementValue": "val"})
+	_, _, _, err := verifyItem(cbor.Tag{Number: tagEncodedCBOR, Content: mapBytes}, nil)
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("missing digestID: want ErrMalformed, got %v", err)
+	}
+}
+
+func TestParseDeviceKeyWrongCurve(t *testing.T) {
+	// deviceKeyInfo with kty=OKP but wrong crv
+	wrongCurveKey := map[any]any{
+		int64(coseKeyKty):   int64(ktyOKP),
+		int64(coseKeyCrv):   int64(99), // not Ed25519
+		int64(coseKeyXCoor): make([]byte, 32),
+	}
+	devKeyInfo := map[any]any{
+		msoDeviceKey: wrongCurveKey,
+	}
+	if k := parseDeviceKey(devKeyInfo); k != nil {
+		t.Error("wrong curve should return nil device key")
+	}
+}
+
+func TestParseDeviceKeyShortX(t *testing.T) {
+	// deviceKeyInfo with correct kty+crv but x coordinate too short
+	shortXKey := map[any]any{
+		int64(coseKeyKty):   int64(ktyOKP),
+		int64(coseKeyCrv):   int64(crvEd25519),
+		int64(coseKeyXCoor): make([]byte, 16), // should be 32
+	}
+	devKeyInfo := map[any]any{
+		msoDeviceKey: shortXKey,
+	}
+	if k := parseDeviceKey(devKeyInfo); k != nil {
+		t.Error("short x coordinate should return nil device key")
+	}
+}

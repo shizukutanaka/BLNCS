@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+
+	"blrcs/cbor"
+	"blrcs/storage"
 )
 
 func mustIssuer(t *testing.T, id string) (ed25519.PrivateKey, ed25519.PublicKey) {
@@ -331,5 +334,228 @@ func TestCachedRootEmptyTree(t *testing.T) {
 	// empty tree root = SHA-256 of empty input
 	if len(root) != 32 {
 		t.Errorf("empty root len: %d", len(root))
+	}
+}
+
+// ============================================================================
+// Coverage uplift: error paths in NewLedgerWithStorage, VerifyReceipt,
+// VerifyCheckpoint, Cosign, VerifyCosignature, IssueCOSEReceipt,
+// decodeReceiptPayload, equalBytes
+// ============================================================================
+
+// errLoadKPStore wraps MemoryStorage and returns an error from LoadKeyPair.
+type errLoadKPStore struct {
+	*storage.MemoryStorage
+}
+
+func (e *errLoadKPStore) LoadKeyPair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
+	return nil, nil, errors.New("simulated keypair load error")
+}
+
+func TestNewLedgerWithStorageEmptyID(t *testing.T) {
+	_, err := NewLedgerWithStorage("", storage.NewMemoryStorage())
+	if err == nil {
+		t.Error("empty tsID should fail NewLedgerWithStorage")
+	}
+}
+
+func TestNewLedgerWithStorageLoadKeyPairError(t *testing.T) {
+	_, err := NewLedgerWithStorage("ts-x", &errLoadKPStore{storage.NewMemoryStorage()})
+	if err == nil {
+		t.Error("LoadKeyPair error should propagate from NewLedgerWithStorage")
+	}
+}
+
+func TestEqualBytesLengthMismatch(t *testing.T) {
+	if equalBytes([]byte{1, 2, 3}, []byte{1, 2}) {
+		t.Error("different-length slices should not be equal")
+	}
+}
+
+func TestVerifyReceiptBadRootHashHex(t *testing.T) {
+	ledger, _ := NewLedger("ts")
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("p"))
+	receipt, _ := ledger.Register(stmt)
+	bad := *receipt
+	bad.RootHash = "not-valid-hex!!"
+	if err := VerifyReceipt(&bad, stmt, ledger.PublicKey()); err != ErrBadReceipt {
+		t.Errorf("bad root hash hex: want ErrBadReceipt, got %v", err)
+	}
+}
+
+func TestVerifyReceiptBadAuditPathHex(t *testing.T) {
+	// Register 3 entries so leaf 0 has a non-empty audit path.
+	ledger, _ := NewLedger("ts-ap")
+	priv, _ := mustIssuer(t, "iss")
+	var s0 Statement
+	for i := 0; i < 3; i++ {
+		s, _ := SignStatement(priv, "iss", fmt.Sprintf("s%d", i), "c", []byte(fmt.Sprintf("p%d", i)))
+		ledger.Register(s)
+		if i == 0 {
+			s0 = s
+		}
+	}
+	_, receipt, _ := ledger.Get(0)
+	bad := *receipt
+	if len(bad.AuditPath) == 0 {
+		t.Skip("audit path is empty (only 1 leaf)")
+	}
+	bad.AuditPath = append([]string{}, bad.AuditPath...)
+	bad.AuditPath[0] = "!!"
+	if err := VerifyReceipt(&bad, s0, ledger.PublicKey()); err != ErrBadReceipt {
+		t.Errorf("bad audit path hex: want ErrBadReceipt, got %v", err)
+	}
+}
+
+func TestVerifyCheckpointBadBase64Sig(t *testing.T) {
+	cp := Checkpoint{Signature: "!!not-base64!!"}
+	if err := VerifyCheckpoint(cp, make(ed25519.PublicKey, ed25519.PublicKeySize)); err != ErrCheckpointSig {
+		t.Errorf("bad base64 sig: want ErrCheckpointSig, got %v", err)
+	}
+}
+
+func TestVerifyCheckpointShortPubKey(t *testing.T) {
+	ledger, _ := NewLedger("ts-spk")
+	growLedger(t, ledger, 1)
+	cp := ledger.SignedCheckpoint()
+	shortKey := ed25519.PublicKey(make([]byte, 16)) // 16 bytes, not 32
+	if err := VerifyCheckpoint(cp, shortKey); err != ErrCheckpointSig {
+		t.Errorf("short pub key: want ErrCheckpointSig, got %v", err)
+	}
+}
+
+func TestCosignVerifyCheckpointFails(t *testing.T) {
+	_, wPriv, _ := ed25519.GenerateKey(rand.Reader)
+	w := NewWitness("witness", wPriv)
+	// A checkpoint with bad base64 signature fails VerifyCheckpoint before any
+	// witness state is consulted.
+	bad := Checkpoint{Signature: "!!bad!!"}
+	if _, err := w.Cosign(bad, make(ed25519.PublicKey, ed25519.PublicKeySize), nil); err == nil {
+		t.Error("Cosign with invalid checkpoint should fail")
+	}
+}
+
+func TestCosignSameSizeDifferentRoot(t *testing.T) {
+	_, tsPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, wPriv, _ := ed25519.GenerateKey(rand.Reader)
+	w := NewWitness("witness", wPriv)
+
+	// Build a first valid checkpoint at tree size 5 with root "aaaa..."
+	cp1 := Checkpoint{TreeSize: 5, RootHash: "aabbccdd", TSID: "ts-split"}
+	cp1.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(tsPriv, checkpointSigPayload(cp1)))
+	tsPub := tsPriv.Public().(ed25519.PublicKey)
+	if _, err := w.Cosign(cp1, tsPub, nil); err != nil {
+		t.Fatalf("first cosign: %v", err)
+	}
+
+	// Second checkpoint: SAME tree size but DIFFERENT root → split view.
+	cp2 := Checkpoint{TreeSize: 5, RootHash: "11223344", TSID: "ts-split"}
+	cp2.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(tsPriv, checkpointSigPayload(cp2)))
+	if _, err := w.Cosign(cp2, tsPub, nil); err != ErrSplitView {
+		t.Errorf("same size different root: want ErrSplitView, got %v", err)
+	}
+}
+
+func TestVerifyCosignatureBadBase64(t *testing.T) {
+	cp := Checkpoint{TreeSize: 1, RootHash: "aabb", TSID: "ts"}
+	cs := Cosignature{Signature: "!!bad-base64!!"}
+	if err := VerifyCosignature(cp, cs, make(ed25519.PublicKey, ed25519.PublicKeySize)); err != ErrCheckpointSig {
+		t.Errorf("bad base64: want ErrCheckpointSig, got %v", err)
+	}
+}
+
+func TestIssueCOSEReceiptBadRootHash(t *testing.T) {
+	ledger, _ := NewLedger("ts")
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("p"))
+	receipt, _ := ledger.Register(stmt)
+	bad := *receipt
+	bad.RootHash = "!!"
+	if _, err := IssueCOSEReceipt(&bad, ledger.tsPriv, ledger.tsID); err == nil {
+		t.Error("bad root hash should fail IssueCOSEReceipt")
+	}
+}
+
+func TestIssueCOSEReceiptBadAuditPath(t *testing.T) {
+	ledger, _ := NewLedger("ts-ap2")
+	priv, _ := mustIssuer(t, "iss")
+	for i := 0; i < 3; i++ {
+		s, _ := SignStatement(priv, "iss", fmt.Sprintf("s%d", i), "c", []byte("p"))
+		ledger.Register(s)
+	}
+	_, receipt, _ := ledger.Get(0)
+	if len(receipt.AuditPath) == 0 {
+		t.Skip("no audit path to corrupt")
+	}
+	bad := *receipt
+	bad.AuditPath = append([]string{}, bad.AuditPath...)
+	bad.AuditPath[0] = "!!"
+	if _, err := IssueCOSEReceipt(&bad, ledger.tsPriv, ledger.tsID); err == nil {
+		t.Error("bad audit path entry should fail IssueCOSEReceipt")
+	}
+}
+
+func TestDecodeReceiptPayloadNotMap(t *testing.T) {
+	b, _ := cbor.Marshal("not-a-map")
+	if _, err := decodeReceiptPayload(b); err == nil {
+		t.Error("non-map payload should fail")
+	}
+}
+
+func TestDecodeReceiptPayloadMissingLeafIndex(t *testing.T) {
+	b, _ := cbor.Marshal(map[int]any{})
+	if _, err := decodeReceiptPayload(b); err == nil {
+		t.Error("missing leaf_index should fail")
+	}
+}
+
+func TestDecodeReceiptPayloadMissingTreeSize(t *testing.T) {
+	b, _ := cbor.Marshal(map[int]any{cbrLeafIndex: uint64(0)})
+	if _, err := decodeReceiptPayload(b); err == nil {
+		t.Error("missing tree_size should fail")
+	}
+}
+
+func TestDecodeReceiptPayloadMissingRootHash(t *testing.T) {
+	b, _ := cbor.Marshal(map[int]any{cbrLeafIndex: uint64(0), cbrTreeSize: uint64(1)})
+	if _, err := decodeReceiptPayload(b); err == nil {
+		t.Error("missing root_hash should fail")
+	}
+}
+
+func TestDecodeReceiptPayloadMissingAuditPath(t *testing.T) {
+	b, _ := cbor.Marshal(map[int]any{
+		cbrLeafIndex: uint64(0),
+		cbrTreeSize:  uint64(1),
+		cbrRootHash:  make([]byte, 32),
+	})
+	if _, err := decodeReceiptPayload(b); err == nil {
+		t.Error("missing audit_path should fail")
+	}
+}
+
+func TestDecodeReceiptPayloadBadAuditPathElem(t *testing.T) {
+	b, _ := cbor.Marshal(map[int]any{
+		cbrLeafIndex: uint64(0),
+		cbrTreeSize:  uint64(2),
+		cbrRootHash:  make([]byte, 32),
+		cbrAuditPath: []any{"not-bstr"},
+	})
+	if _, err := decodeReceiptPayload(b); err == nil {
+		t.Error("non-bstr audit_path elem should fail")
+	}
+}
+
+func TestVerifyStatementBadBase64Sig(t *testing.T) {
+	s := Statement{
+		IssuerKey: base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize)),
+		Signature: "!!not-base64!!",
+	}
+	if err := VerifyStatement(&s); err == nil {
+		t.Error("bad base64 signature should fail VerifyStatement")
 	}
 }

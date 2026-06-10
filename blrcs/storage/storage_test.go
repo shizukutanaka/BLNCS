@@ -3,6 +3,7 @@ package storage
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -350,5 +351,69 @@ func TestFileStorage_CloseIdempotent(t *testing.T) {
 	// Second Close must return nil (idempotent).
 	if err := s.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// ============================================================================
+// Coverage uplift: MemoryStorage closed path, iterate callback error,
+// syncDir error, FileStorage iterate bad-frame paths
+// ============================================================================
+
+func TestMemoryStorage_AfterClose(t *testing.T) {
+	s := NewMemoryStorage()
+	s.Close()
+	if _, err := s.AppendStatement([]byte(`{"x":1}`)); err != ErrAlreadyClosed {
+		t.Fatalf("want ErrAlreadyClosed after Close, got %v", err)
+	}
+}
+
+func TestMemoryStorage_IterateCallbackError(t *testing.T) {
+	s := NewMemoryStorage()
+	s.AppendStatement([]byte(`{"a":1}`))
+	s.AppendStatement([]byte(`{"b":2}`))
+	boom := errors.New("boom")
+	err := s.IterateStatements(func(_ uint64, _ StatementBlob) error { return boom })
+	if !errors.Is(err, boom) {
+		t.Fatalf("callback error not propagated, got %v", err)
+	}
+}
+
+func TestSyncDirNonExistent(t *testing.T) {
+	err := syncDir("/nonexistent-dir-blrcs-test-xyzzy")
+	if err == nil {
+		t.Error("syncDir on non-existent path should fail")
+	}
+}
+
+func TestFileStorage_IterateBadFrameSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-iterfs-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	s.AppendStatement([]byte(`{"ok":true}`))
+	// Write a zero-size frame header directly into the open file.
+	var badHeader [frameHeaderSize]byte // all zeros = size 0
+	if _, err := s.file.Write(badHeader[:]); err != nil {
+		t.Fatalf("write bad header: %v", err)
+	}
+	err := s.IterateStatements(func(_ uint64, _ StatementBlob) error { return nil })
+	if err == nil {
+		t.Fatal("bad frame size (0) should cause IterateStatements to return error")
+	}
+}
+
+func TestFileStorage_IterateTruncatedPayload(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-itertrunc-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	s.AppendStatement([]byte(`{"ok":true}`))
+	// Write a header claiming 100 bytes but write no payload bytes.
+	var header [frameHeaderSize]byte
+	binary.BigEndian.PutUint32(header[:], 100)
+	if _, err := s.file.Write(header[:]); err != nil {
+		t.Fatalf("write truncated header: %v", err)
+	}
+	err := s.IterateStatements(func(_ uint64, _ StatementBlob) error { return nil })
+	if err == nil {
+		t.Fatal("truncated payload should cause IterateStatements to return error")
 	}
 }
