@@ -19,6 +19,7 @@
 package openid4vci
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -592,9 +593,19 @@ func NewWalletClient(baseURL string) *WalletClient {
 //
 // Apple式: 複雑なOAuth/OIDCフローを1メソッドで隠蔽
 func (c *WalletClient) FetchCredential(preAuthCode string) (string, error) {
+	return c.FetchCredentialCtx(context.Background(), preAuthCode)
+}
+
+// FetchCredentialCtx is FetchCredential with caller-supplied context for timeout/cancellation.
+func (c *WalletClient) FetchCredentialCtx(ctx context.Context, preAuthCode string) (string, error) {
 	// token endpoint
 	form := strings.NewReader("grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code&pre-authorized_code=" + preAuthCode)
-	resp, err := c.HTTP.Post(c.BaseURL+"/token", "application/x-www-form-urlencoded", form)
+	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/token", form)
+	if err != nil {
+		return "", fmt.Errorf("wallet: token request: %w", err)
+	}
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := c.HTTP.Do(tokenReq)
 	if err != nil {
 		return "", fmt.Errorf("wallet: token request: %w", err)
 	}
@@ -609,7 +620,10 @@ func (c *WalletClient) FetchCredential(preAuthCode string) (string, error) {
 	}
 	// credential endpoint
 	body, _ := json.Marshal(CredentialRequest{Format: "vc+sd-jwt"})
-	req, _ := http.NewRequest(http.MethodPost, c.BaseURL+"/credential", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/credential", strings.NewReader(string(body)))
+	if err != nil {
+		return "", fmt.Errorf("wallet: credential request: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp2, err := c.HTTP.Do(req)
@@ -630,7 +644,16 @@ func (c *WalletClient) FetchCredential(preAuthCode string) (string, error) {
 
 // FetchMetadata — discovery endpoint helper
 func (c *WalletClient) FetchMetadata() (map[string]any, error) {
-	resp, err := c.HTTP.Get(c.BaseURL + "/.well-known/openid-credential-issuer")
+	return c.FetchMetadataCtx(context.Background())
+}
+
+// FetchMetadataCtx is FetchMetadata with caller-supplied context.
+func (c *WalletClient) FetchMetadataCtx(ctx context.Context) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/.well-known/openid-credential-issuer", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +667,16 @@ func (c *WalletClient) FetchMetadata() (map[string]any, error) {
 
 // FetchJWKS — public key fetch for verifier
 func (c *WalletClient) FetchJWKS() (ed25519.PublicKey, error) {
-	resp, err := c.HTTP.Get(c.BaseURL + "/.well-known/jwks.json")
+	return c.FetchJWKSCtx(context.Background())
+}
+
+// FetchJWKSCtx is FetchJWKS with caller-supplied context.
+func (c *WalletClient) FetchJWKSCtx(ctx context.Context) (ed25519.PublicKey, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/.well-known/jwks.json", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
 	}

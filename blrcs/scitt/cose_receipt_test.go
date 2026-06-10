@@ -24,7 +24,7 @@ func TestCOSEReceiptRoundtrip(t *testing.T) {
 	}
 
 	// Issue a COSE_Sign1 receipt
-	tsPriv := ed25519.PrivateKey(ledger.tsPriv) // access via exported PublicKey
+	tsPriv := ledger.tsPriv
 	coseData, err := IssueCOSEReceipt(receipt, tsPriv, ledger.tsID)
 	if err != nil {
 		t.Fatalf("IssueCOSEReceipt: %v", err)

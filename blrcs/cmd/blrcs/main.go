@@ -1,3 +1,10 @@
+// blrcs — BLRCS command-line interface
+//
+// Usage:
+//
+//	blrcs doctor     — self-check: verify build, key material, and connectivity
+//	blrcs version    — print version information
+//	blrcs completion — generate shell completion (bash/zsh/fish)
 package main
 
 import (

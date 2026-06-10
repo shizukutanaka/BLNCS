@@ -1,3 +1,6 @@
+// Package integration contains end-to-end integration tests that verify
+// cross-package behaviour and Apple Engineering Principles (structured errors,
+// context propagation, deterministic outputs).
 package integration
 
 import (

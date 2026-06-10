@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"blrcs/compliance"
+	"blrcs/healthprobe"
 	"blrcs/httpmw"
 	"blrcs/mcp"
 	"blrcs/metrics"
@@ -98,19 +99,29 @@ func main() {
 	telemetry.SetDefault(tel)
 	exp := metrics.NewExporter(tel, map[string]string{"service": "blrcs-mcpd"})
 
+	// Structured health probes (Kubernetes liveness / readiness)
+	probe := healthprobe.New()
+	// Liveness: the process is running and not deadlocked.
+	probe.AddLiveness("process", healthprobe.AlwaysOK())
+	// Readiness: ledger is accessible and (when persistent) storage is open.
+	probe.AddReadiness("ledger", healthprobe.Closure(func() error {
+		_ = srv.Ledger().Size() // panics only if ledger is nil
+		return nil
+	}))
+	if store != nil {
+		probe.AddReadiness("storage", healthprobe.Closure(func() error {
+			_, err := store.Size()
+			return err
+		}))
+	}
+
 	// Routes
 	mux := http.NewServeMux()
 	// Wrap MCP handler with panic recovery so a tool panic cannot crash the daemon.
 	mux.Handle("/mcp", httpmw.Recovery(mcp.NewHTTPHandler(srv, auth, limiter)))
 	mux.Handle("/metrics", exp)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "ledger_size=%d", srv.Ledger().Size())
-	})
+	mux.Handle("/healthz", probe.Liveness())
+	mux.Handle("/readyz", probe.Readiness())
 
 	httpSrv := &http.Server{
 		Addr:              listen,

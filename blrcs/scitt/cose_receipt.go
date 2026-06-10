@@ -59,8 +59,8 @@ func IssueCOSEReceipt(r *Receipt, tsPriv ed25519.PrivateKey, tsID string) ([]byt
 	}
 
 	payload, err := cbor.Marshal(map[int]any{
-		cbrLeafIndex:  uint64(r.LeafIndex),
-		cbrTreeSize:   uint64(r.TreeSize),
+		cbrLeafIndex:  r.LeafIndex,
+		cbrTreeSize:   r.TreeSize,
 		cbrRootHash:   rootBytes,
 		cbrAuditPath:  pathAny,
 		cbrTSID:       tsID,

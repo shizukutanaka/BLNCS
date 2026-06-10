@@ -1,6 +1,9 @@
 package scitt
 
-import "errors"
+import (
+	"errors"
+	"math/bits"
+)
 
 // Consistency proof — RFC 6962 §2.1.2 / COSE Receipts proof-of-consistency。
 //
@@ -39,7 +42,7 @@ func subProof(m uint64, d [][]byte, b bool) [][]byte {
 		}
 		return [][]byte{merkleRoot(d)}
 	}
-	k := uint64(largestPow2Below(int(n)))
+	k := uint64(1) << (bits.Len64(n-1) - 1) // largest power of 2 strictly below n
 	if m <= k {
 		// 左部分木に降りる; 右部分木の root を path に追加
 		path := subProof(m, d[:k], b)

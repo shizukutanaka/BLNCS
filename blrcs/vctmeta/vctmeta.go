@@ -159,7 +159,7 @@ func ValidateClaimsWithSchema(schema json.RawMessage, claims map[string]any) err
 	if err != nil {
 		return fmt.Errorf("vctmeta: compile schema: %w", err)
 	}
-	return s.Validate(map[string]any(claims))
+	return s.Validate(claims)
 }
 
 // ResolveSchema returns the JSON Schema document for this Type Metadata,

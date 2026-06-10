@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"blrcs/multiformats"
 )
@@ -247,11 +246,5 @@ func sha256Hex(b []byte) string {
 }
 
 var _ = sha256Hex // retained for diagnostic use
-
-// versionTimeValid checks RFC 3339 parseability (monotonicity enforced in Verify).
-func versionTimeValid(s string) bool {
-	_, err := time.Parse(time.RFC3339, s)
-	return err == nil
-}
 
 var _ = ed25519.PublicKeySize

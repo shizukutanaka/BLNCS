@@ -47,6 +47,19 @@ builds:
       - -s -w
       - -X main.version={{.Version}}
 
+  - id: blrcs-mcp
+    main: ./cmd/blrcs-mcp
+    binary: blrcs-mcp
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+
 archives:
   - id: default
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
@@ -123,6 +136,7 @@ release:
     ```bash
     go install github.com/shizukutanaka/blrcs/cmd/blrcs@{{ .Tag }}
     go install github.com/shizukutanaka/blrcs/cmd/blrcs-mcpd@{{ .Tag }}
+    go install github.com/shizukutanaka/blrcs/cmd/blrcs-mcp@{{ .Tag }}
     ```
 
     ### Verification
