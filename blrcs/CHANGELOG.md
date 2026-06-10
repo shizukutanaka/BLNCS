@@ -235,6 +235,30 @@ explicit opt-outs for legitimate local/bearer flows. `go test -race ./...` clean
   (`epcis`, `jwe`, `lifecycle`, `benchmark`, `examples/factory_e2e`) and pointed the
   end-to-end example at the real `integration/` suite.
 
+### Improved
+- **healthprobe wired into `blrcs-mcpd`.** `/healthz` and `/readyz` now return
+  structured JSON reports (per-check status, duration, timestamp) via `healthprobe.Probe`
+  instead of plain-text stubs. `/readyz` includes ledger reachability and, when
+  persistence is enabled, storage read checks.
+- **OpenID4VCI wallet client: context-aware methods.** `FetchCredentialCtx`,
+  `FetchMetadataCtx`, and `FetchJWKSCtx` accept a `context.Context` for timeout and
+  cancellation. All HTTP response bodies are now bounded with `io.LimitReader` (4 MiB)
+  to guard against unbounded responses from untrusted issuers.
+- **`blrcs-mcp` stdio binary added to GoReleaser builds.** The stdio MCP transport is
+  now released alongside `blrcs` and `blrcs-mcpd`, with `go install` instructions in the
+  release footer.
+- **SCITT `subProof`: integer cast eliminated.** `largestPow2Below(int(n))` round-trip
+  replaced with a direct `math/bits.Len64` computation, removing a theoretical
+  `uint64→int` truncation on very large trees.
+- **`types` package coverage 69% → 91%.** Added tests for `GTIN.UnmarshalJSON`,
+  `CountryCode.MarshalJSON`/`UnmarshalJSON`, `MustCountryCode`,
+  `CarbonFootprint.String`, `Percent.Value`/`IsZero`/`String`/`UnmarshalJSON`,
+  and `Duration.IsZero`.
+- **README stats updated:** 1000+ tests, 17 fuzz targets (was 15).
+- **golangci-lint clean (6 issues fixed):** unused `versionTimeValid` (didwebvh),
+  unnecessary type casts in `scitt/cose_receipt` and `vctmeta`, De Morgan
+  simplification in `httpchain`, unused `time` import in `didwebvh`.
+
 ## [0.1.0] - 2026-06-03
 
 Initial public release. EU Digital Product Passport (ESPR) and Battery Passport

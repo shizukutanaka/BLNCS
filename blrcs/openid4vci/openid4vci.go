@@ -575,6 +575,10 @@ func urlEscape(s string) string {
 // WalletClient simulates the wallet pulling the credential.
 // ============================================================================
 
+// walletMaxResponseBytes caps HTTP response body reads to guard against
+// a malicious or misconfigured issuer sending unbounded data.
+const walletMaxResponseBytes = 4 << 20 // 4 MiB
+
 // WalletClient — wallet 実装向けの薄いクライアント
 type WalletClient struct {
 	HTTP    *http.Client
@@ -611,11 +615,11 @@ func (c *WalletClient) FetchCredentialCtx(ctx context.Context, preAuthCode strin
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, walletMaxResponseBytes))
 		return "", fmt.Errorf("wallet: token %d: %s", resp.StatusCode, b)
 	}
 	var tr TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, walletMaxResponseBytes)).Decode(&tr); err != nil {
 		return "", fmt.Errorf("wallet: token decode: %w", err)
 	}
 	// credential endpoint
@@ -632,11 +636,11 @@ func (c *WalletClient) FetchCredentialCtx(ctx context.Context, preAuthCode strin
 	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode != 200 {
-		b, _ := io.ReadAll(resp2.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp2.Body, walletMaxResponseBytes))
 		return "", fmt.Errorf("wallet: credential %d: %s", resp2.StatusCode, b)
 	}
 	var cr CredentialResponse
-	if err := json.NewDecoder(resp2.Body).Decode(&cr); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp2.Body, walletMaxResponseBytes)).Decode(&cr); err != nil {
 		return "", fmt.Errorf("wallet: credential decode: %w", err)
 	}
 	return cr.Credential, nil
@@ -659,7 +663,7 @@ func (c *WalletClient) FetchMetadataCtx(ctx context.Context) (map[string]any, er
 	}
 	defer resp.Body.Close()
 	var out map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, walletMaxResponseBytes)).Decode(&out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -688,7 +692,7 @@ func (c *WalletClient) FetchJWKSCtx(ctx context.Context) (ed25519.PublicKey, err
 			X   string `json:"x"`
 		} `json:"keys"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, walletMaxResponseBytes)).Decode(&jwks); err != nil {
 		return nil, err
 	}
 	for _, k := range jwks.Keys {

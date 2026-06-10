@@ -276,3 +276,114 @@ func TestZeroValues(t *testing.T) {
 		t.Error("zero Country")
 	}
 }
+
+// ============================================================================
+// Additional coverage: UnmarshalJSON, String, accessors
+// ============================================================================
+
+func TestGTINUnmarshalJSON(t *testing.T) {
+	var g GTIN
+	if err := json.Unmarshal([]byte(`"04012345678901"`), &g); err != nil {
+		t.Fatal(err)
+	}
+	if g.String() != "04012345678901" {
+		t.Errorf("got %q", g.String())
+	}
+	// invalid value
+	if err := json.Unmarshal([]byte(`"notvalid"`), &g); err == nil {
+		t.Error("should reject invalid GTIN")
+	}
+	// not a string
+	if err := json.Unmarshal([]byte(`123`), &g); err == nil {
+		t.Error("should reject non-string")
+	}
+}
+
+func TestCountryCodeJSON(t *testing.T) {
+	cc := MustCountryCode("DE")
+	b, err := json.Marshal(cc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `"DE"` {
+		t.Errorf("marshal: %s", b)
+	}
+	var got CountryCode
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "DE" {
+		t.Errorf("roundtrip: %s", got.String())
+	}
+	// invalid country
+	if err := json.Unmarshal([]byte(`"XX"`), &got); err == nil {
+		t.Error("should reject unknown country")
+	}
+	// not a string
+	if err := json.Unmarshal([]byte(`123`), &got); err == nil {
+		t.Error("should reject non-string")
+	}
+}
+
+func TestCarbonFootprintString(t *testing.T) {
+	c := MustCarbonFootprint(12.5)
+	s := c.String()
+	if s == "" {
+		t.Error("String should not be empty")
+	}
+	// zero IsZero
+	z := MustCarbonFootprint(0)
+	if !z.IsZero() {
+		t.Error("0 carbon should be IsZero")
+	}
+}
+
+func TestPercentAccessors(t *testing.T) {
+	p := MustPercent(42.5)
+	if p.Value() != 42.5 {
+		t.Errorf("Value: %f", p.Value())
+	}
+	if p.IsZero() {
+		t.Error("42.5%% should not be IsZero")
+	}
+	if p.String() == "" {
+		t.Error("String should not be empty")
+	}
+	// Unmarshal round-trip
+	b, _ := json.Marshal(p)
+	var got Percent
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Value() != 42.5 {
+		t.Errorf("unmarshal roundtrip: %f", got.Value())
+	}
+	// zero
+	z := MustPercent(0)
+	if !z.IsZero() {
+		t.Error("0%% should be IsZero")
+	}
+	// invalid JSON
+	var p2 Percent
+	if err := json.Unmarshal([]byte(`"not-a-number"`), &p2); err == nil {
+		t.Error("should reject non-numeric string")
+	}
+	// out of range
+	if err := json.Unmarshal([]byte(`-1`), &p2); err == nil {
+		t.Error("should reject negative percent")
+	}
+}
+
+func TestDurationIsZero(t *testing.T) {
+	z, err := NewDuration(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !z.IsZero() {
+		t.Error("zero duration should be IsZero")
+	}
+	nz, _ := NewDuration(time.Second)
+	if nz.IsZero() {
+		t.Error("non-zero duration should not be IsZero")
+	}
+}
