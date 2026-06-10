@@ -2,6 +2,7 @@ package tlsharden
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"testing"
 )
 
@@ -164,5 +165,23 @@ func TestStrictPrefersX25519(t *testing.T) {
 	cfg := Strict()
 	if cfg.CurvePreferences[0] != tls.X25519 {
 		t.Errorf("Strict should prefer X25519, got %v", cfg.CurvePreferences[0])
+	}
+}
+
+func TestMutualTLS(t *testing.T) {
+	pool := x509.NewCertPool()
+	cfg := MutualTLS(pool)
+	if cfg == nil {
+		t.Fatal("MutualTLS returned nil")
+	}
+	if cfg.ClientAuth != tls.RequireAndVerifyClientCert {
+		t.Errorf("ClientAuth: got %v", cfg.ClientAuth)
+	}
+	if cfg.ClientCAs != pool {
+		t.Error("ClientCAs not set")
+	}
+	// Must inherit Modern()'s min version
+	if cfg.MinVersion < tls.VersionTLS12 {
+		t.Errorf("MinVersion too low: %d", cfg.MinVersion)
 	}
 }

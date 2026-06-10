@@ -428,3 +428,11 @@ func TestProofInvalidDetected(t *testing.T) {
 		t.Fatalf("missing proof: want ErrProofInvalid, got %v", err)
 	}
 }
+
+func TestSHA256Hex(t *testing.T) {
+	// sha256Hex is a debugging helper; this test ensures it stays reachable.
+	h := sha256Hex([]byte("hello"))
+	if len(h) != 64 {
+		t.Errorf("sha256Hex: expected 64 hex chars, got %d", len(h))
+	}
+}
