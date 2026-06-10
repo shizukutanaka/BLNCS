@@ -1074,3 +1074,104 @@ func TestRunVCBadIssuerDID(t *testing.T) {
 		t.Error("empty issuerDID for vc should fail")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: mismatch branches in each category runner
+// ============================================================================
+
+func TestRunGTINValidityMismatch(t *testing.T) {
+	// Valid GTIN but expected invalid → gotValid != want.Valid fires.
+	r := runOneVector("gtin",
+		map[string]any{"gtin": "04012345678901"},
+		map[string]any{"valid": false})
+	if r.Passed {
+		t.Error("validity mismatch should fail")
+	}
+	if !strings.Contains(r.Reason, "valid") {
+		t.Errorf("reason: %s", r.Reason)
+	}
+}
+
+func TestRunDIDValidityMismatch(t *testing.T) {
+	// Valid DID but expected invalid → gotValid != want.Valid fires.
+	r := runOneVector("did",
+		map[string]any{"did": "did:web:example.com"},
+		map[string]any{"valid": false})
+	if r.Passed {
+		t.Error("DID validity mismatch should fail")
+	}
+}
+
+func TestRunVCIssueError(t *testing.T) {
+	// Empty productID → compliance.Issuer.Issue returns ErrEmptyProductID.
+	seed := make([]byte, 32)
+	r := runOneVector("vc", map[string]any{
+		"issuerSeedHex": hex.EncodeToString(seed),
+		"issuerDID":     "did:web:test",
+		"productID":     "",
+	}, map[string]any{"hasV2Context": true, "hasValidFrom": true, "verifyOK": true})
+	if r.Passed {
+		t.Error("empty productID should cause Issue to fail")
+	}
+}
+
+func TestRunDCQLValidQueryMismatch(t *testing.T) {
+	// Valid query but expected invalid → validQuery != want.ValidQuery fires.
+	r := runOneVector("dcql",
+		map[string]any{"query": map[string]any{
+			"credentials": []any{map[string]any{"id": "x", "format": "dc+sd-jwt"}},
+		}},
+		map[string]any{"validQuery": false})
+	if r.Passed {
+		t.Error("validQuery mismatch should fail")
+	}
+}
+
+func TestRunDCQLMatchesMismatch(t *testing.T) {
+	// Valid query + claims that DO match, but expected matches=false → mismatch fires.
+	r := runOneVector("dcql",
+		map[string]any{
+			"query": map[string]any{
+				"credentials": []any{map[string]any{
+					"id":     "x",
+					"format": "dc+sd-jwt",
+					"claims": []any{map[string]any{"path": []string{"carbon"}}},
+				}},
+			},
+			"claims": map[string]any{"carbon": 1.5},
+		},
+		map[string]any{"validQuery": true, "matches": false})
+	if r.Passed {
+		t.Error("matches mismatch should fail")
+	}
+}
+
+func TestRunTierClearCountMismatch(t *testing.T) {
+	// Correct visibleCount but wrong clearCount → clearCount mismatch fires.
+	r := runOneVector("tier",
+		map[string]any{
+			"claims":     map[string]any{"carbon": map[string]any{"value": 1.0, "tier": "public"}},
+			"viewerTier": "public",
+		},
+		map[string]any{"visibleCount": 1, "clearCount": 99, "sdCount": 0})
+	if r.Passed {
+		t.Error("clearCount mismatch should fail")
+	}
+}
+
+func TestRunSDJWTVerifySucceedsUnexpectedly(t *testing.T) {
+	// Valid SD-JWT issued and verified successfully, but expected verifyOK=false.
+	seed := make([]byte, 32)
+	r := runOneVector("sdjwt", map[string]any{
+		"issuerSeedHex": hex.EncodeToString(seed),
+		"issuerDID":     "did:web:test",
+		"subject":       "s",
+		"sdClaims":      map[string]any{"x": 1},
+	}, map[string]any{"verifyOK": false})
+	if r.Passed {
+		t.Error("verify unexpectedly succeeded should fail")
+	}
+	if !strings.Contains(r.Reason, "unexpectedly succeeded") {
+		t.Errorf("unexpected reason: %s", r.Reason)
+	}
+}

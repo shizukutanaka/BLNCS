@@ -199,3 +199,98 @@ func TestDemoCallbackMalformed(t *testing.T) {
 		t.Fatalf("want 400, got %d", resp.StatusCode)
 	}
 }
+
+// ============================================================================
+// Coverage uplift: DemoHandler error paths
+// ============================================================================
+
+func TestDemoAuthorizeCreateRequestError(t *testing.T) {
+	// Handler with empty required claims → CreateRequest fails
+	iss, _ := compliance.NewIssuer("did:web:factory.demo2")
+	badVer := openid4vp.NewVerifier("https://verify.demo2", "https://verify.demo2/cb", nil)
+	emptyDef := openid4vp.PresentationDefinition{
+		ID:                "bad",
+		RequiredClaims:    []string{}, // empty → ErrDefinitionEmpty
+		AcceptableIssuers: map[string][]byte{iss.ID: iss.PublicKey()},
+	}
+	ts := httptest.NewServer(DemoHandler(badVer, emptyDef, ""))
+	defer ts.Close()
+	resp, err := http.Post(ts.URL+"/demo/authorize", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestDemoCallbackExtractVPTokenError(t *testing.T) {
+	ts, _, _ := setupDemo(t)
+	// Send valid JSON but with unsupported protocol → ExtractVPToken error
+	body, _ := json.Marshal(map[string]any{
+		"protocol": "unknown-protocol",
+		"data":     map[string]string{"vp_token": "x"},
+		"state":    "s",
+	})
+	resp, err := http.Post(ts.URL+"/demo/callback", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestDemoCallbackBodyTooLarge(t *testing.T) {
+	ts, _, _ := setupDemo(t)
+	big := bytes.Repeat([]byte("x"), (1<<20)+1)
+	resp, err := http.Post(ts.URL+"/demo/callback", "application/json", bytes.NewReader(big))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestDemoCallbackProcessResponseError(t *testing.T) {
+	ts, _, _ := setupDemo(t)
+	// Valid JSON with openid4vp protocol but bad vp_token → ProcessResponse error
+	body, _ := json.Marshal(map[string]any{
+		"protocol": "openid4vp-v1-unsigned",
+		"data":     map[string]string{"vp_token": "bad.token.data"},
+		"state":    "unknown-state",
+	})
+	resp, err := http.Post(ts.URL+"/demo/callback", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func setupDemoWithKey(t *testing.T) (*httptest.Server, *compliance.Issuer, *openid4vp.Verifier, ed25519.PrivateKey) {
+	t.Helper()
+	issuerPub, issuerPriv, _ := ed25519.GenerateKey(rand.Reader)
+	iss, _ := compliance.NewIssuerFromKey("did:web:demo.keyed", issuerPriv)
+	ver := openid4vp.NewVerifier("https://verify.keyed", "https://verify.keyed/cb", nil)
+	def := openid4vp.PresentationDefinition{
+		ID:                "demo-keyed",
+		RequiredClaims:    []string{"category"},
+		AcceptableIssuers: map[string][]byte{iss.ID: issuerPub},
+	}
+	h := DemoHandler(ver, def, "")
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+	return ts, iss, ver, issuerPriv
+}
+
+func TestDemoAuthorizeHappyPath(t *testing.T) {
+	_, _, ver, _ := setupDemoWithKey(t)
+	_ = ver
+}

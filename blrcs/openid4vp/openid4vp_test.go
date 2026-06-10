@@ -1,9 +1,13 @@
 package openid4vp
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -331,5 +335,122 @@ func TestStripTrailingTilde(t *testing.T) {
 	}
 	if got := StripTrailingTilde(""); got != "" {
 		t.Errorf("empty string: %q", got)
+	}
+}
+
+// ============================================================================
+// Coverage uplift: peekIssuer, HTTP handlers (body-too-large, CreateRequest
+// error), CreateRequestDCQL, BuildCredentialOfferURL, wallet Present edge cases
+// ============================================================================
+
+func TestPeekIssuerEdgeCases(t *testing.T) {
+	// Too few parts (no dot separator)
+	if _, ok := peekIssuer("notajwt"); ok {
+		t.Error("single part should fail")
+	}
+	// Bad base64 payload
+	if _, ok := peekIssuer("header.!!!bad-base64.sig"); ok {
+		t.Error("bad base64 payload should fail")
+	}
+	// Valid base64, invalid JSON
+	bad := base64.RawURLEncoding.EncodeToString([]byte("not-json"))
+	if _, ok := peekIssuer("header." + bad + ".sig"); ok {
+		t.Error("invalid JSON payload should fail")
+	}
+	// Valid base64, valid JSON, but iss missing
+	noIss := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"x"}`))
+	if _, ok := peekIssuer("header." + noIss + ".sig"); ok {
+		t.Error("JSON without iss should fail")
+	}
+	// With SD-JWT disclosure suffix (~ separator should be stripped first)
+	withIss := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"did:web:test"}`))
+	token := "header." + withIss + ".sig~disc1~disc2~"
+	if gotIss, ok := peekIssuer(token); !ok || gotIss != "did:web:test" {
+		t.Errorf("peekIssuer with disclosures: ok=%v iss=%q", ok, gotIss)
+	}
+}
+
+func TestAuthorizeHandlerCreateRequestError(t *testing.T) {
+	ver, _ := setupFlow(t)
+	h := ver.AuthorizeHandler()
+	// Empty definition triggers ErrDefinitionEmpty
+	body, _ := json.Marshal(PresentationDefinition{ID: "empty"})
+	req := httptest.NewRequest(http.MethodPost, "/openid4vp/authorize", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rr.Code)
+	}
+}
+
+func TestAuthorizeHandlerBodyTooLarge(t *testing.T) {
+	ver, _ := setupFlow(t)
+	h := ver.AuthorizeHandler()
+	big := bytes.Repeat([]byte("x"), (1<<20)+1)
+	req := httptest.NewRequest(http.MethodPost, "/openid4vp/authorize", bytes.NewReader(big))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rr.Code)
+	}
+}
+
+func TestCreateRequestDCQLBadClientID(t *testing.T) {
+	ver := NewVerifier(" bad-client-id", "https://example.com/cb", nil)
+	q := DCQLQuery{Credentials: []CredentialQuery{{ID: "c1", Format: "sd-jwt"}}}
+	_, _, err := ver.CreateRequestDCQL(q)
+	if err != ErrClientIDInvalid {
+		t.Fatalf("want ErrClientIDInvalid, got %v", err)
+	}
+}
+
+func TestCreateRequestDCQLInvalidQuery(t *testing.T) {
+	ver, _ := setupFlow(t)
+	// Empty credentials → Validate fails
+	q := DCQLQuery{}
+	_, _, err := ver.CreateRequestDCQL(q)
+	if err == nil {
+		t.Fatal("empty DCQL query should fail")
+	}
+}
+
+func TestCreateRequestDCQLHappyPath(t *testing.T) {
+	ver, _ := setupFlow(t)
+	q := DCQLQuery{Credentials: []CredentialQuery{{ID: "c1", Format: "sd-jwt"}}}
+	reqURL, state, err := ver.CreateRequestDCQL(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == "" {
+		t.Error("state should not be empty")
+	}
+	if !strings.HasPrefix(reqURL, "openid4vp://authorize?") {
+		t.Errorf("bad URL: %s", reqURL)
+	}
+	u, _ := url.Parse(reqURL)
+	if u.Query().Get("dcql_query") == "" {
+		t.Error("dcql_query missing from URL")
+	}
+}
+
+func TestBuildCredentialOfferURLMissingConfigIDs(t *testing.T) {
+	_, err := BuildCredentialOfferURL(CredentialOffer{
+		CredentialIssuer: "did:web:factory.example",
+	})
+	if err == nil {
+		t.Error("missing credential_configuration_ids should fail")
+	}
+}
+
+func TestWalletPresentMissingPD(t *testing.T) {
+	w := NewMockWallet("did:web:holder.example")
+	// A DCQL request URL (no presentation_definition)
+	ver, _ := setupFlow(t)
+	q := DCQLQuery{Credentials: []CredentialQuery{{ID: "c1", Format: "sd-jwt"}}}
+	reqURL, _, _ := ver.CreateRequestDCQL(q)
+	_, err := w.Present(reqURL)
+	if err == nil {
+		t.Error("wallet Present with DCQL URL (no PD) should fail")
 	}
 }

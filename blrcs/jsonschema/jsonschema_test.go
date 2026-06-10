@@ -425,6 +425,173 @@ func TestValidationErrorMessage(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Coverage uplift: Compile bad JSON, toFloat, deepEqual, resolvePointer,
+// followRef depth, remote ref, checkArray items:false/tuple, checkFormat,
+// isHostname/isUUID edge cases
+// ============================================================================
+
+func TestCompileBadJSON(t *testing.T) {
+	_, err := Compile([]byte("{invalid json"))
+	if err == nil {
+		t.Error("invalid JSON should fail Compile")
+	}
+}
+
+func TestToFloatBadNumber(t *testing.T) {
+	_, ok := toFloat(json.Number("abc"))
+	if ok {
+		t.Error("toFloat should fail for non-numeric json.Number")
+	}
+}
+
+func TestDeepEqualNumericVsNonNumeric(t *testing.T) {
+	if deepEqual(float64(1), "1") {
+		t.Error("numeric 1 should not equal string '1'")
+	}
+}
+
+func TestDeepEqualArrayLengthMismatch(t *testing.T) {
+	if deepEqual([]any{1, 2}, []any{1}) {
+		t.Error("arrays of different length should not be equal")
+	}
+}
+
+func TestDeepEqualMapLengthMismatch(t *testing.T) {
+	a := map[string]any{"a": 1, "b": 2}
+	b := map[string]any{"a": 1}
+	if deepEqual(a, b) {
+		t.Error("maps of different length should not be equal")
+	}
+}
+
+func TestResolvePointerNilRoot(t *testing.T) {
+	_, ok := resolvePointer(nil, "/anything")
+	if ok {
+		t.Error("nil root should return false")
+	}
+}
+
+func TestResolvePointerArrayIndex(t *testing.T) {
+	// $ref "#/allOf/0" exercises the []any case in resolvePointer.
+	s := compile(t, `{
+		"$ref": "#/allOf/0",
+		"allOf": [{"type":"string"}]
+	}`)
+	mustValid(t, s, "hello")
+	mustInvalid(t, s, 42.0)
+}
+
+func TestResolvePointerBadArrayIndex(t *testing.T) {
+	// Out-of-bounds array index → $ref unresolvable → invalid.
+	s := compile(t, `{
+		"$ref": "#/allOf/99",
+		"allOf": [{"type":"string"}]
+	}`)
+	mustInvalid(t, s, "hello")
+}
+
+func TestResolvePointerEmptyPointer(t *testing.T) {
+	// Empty pointer returns the root itself.
+	root := map[string]any{"type": "string"}
+	got, ok := resolvePointer(root, "")
+	if !ok {
+		t.Fatal("empty pointer should resolve to root")
+	}
+	if got == nil {
+		t.Error("got nil for empty pointer")
+	}
+}
+
+func TestFollowRefMaxDepth(t *testing.T) {
+	// A self-referencing schema cycles until maxRefDepth and reports an error.
+	s := compile(t, `{
+		"$ref": "#/self",
+		"self": {"$ref": "#/self"}
+	}`)
+	mustInvalid(t, s, "anything")
+}
+
+func TestFollowRefRemoteSkipped(t *testing.T) {
+	// Remote $ref is silently skipped (lenient); instance passes.
+	s := compile(t, `{"$ref": "https://example.com/schema.json"}`)
+	mustValid(t, s, "anything")
+}
+
+func TestCheckArrayItemsFalse(t *testing.T) {
+	// items:false means no items allowed.
+	s := compile(t, `{"type":"array","items":false}`)
+	mustValid(t, s, instance(t, `[]`))
+	mustInvalid(t, s, instance(t, `[1]`))
+}
+
+func TestCheckArrayTupleItems(t *testing.T) {
+	// items as array (draft-07 tuple form).
+	s := compile(t, `{"type":"array","items":[{"type":"string"},{"type":"number"}]}`)
+	mustValid(t, s, instance(t, `["hello",42]`))
+	mustInvalid(t, s, instance(t, `[1,"notanumber"]`))
+}
+
+func TestCheckFormatTime(t *testing.T) {
+	s := compile(t, `{"format":"time"}`)
+	mustValid(t, s, "12:30:00")
+	mustValid(t, s, "12:30:00Z")
+	mustInvalid(t, s, "not-a-time")
+}
+
+func TestCheckFormatURIReference(t *testing.T) {
+	s := compile(t, `{"format":"uri-reference"}`)
+	mustValid(t, s, "/relative/path")
+	mustValid(t, s, "https://example.com/abs")
+}
+
+func TestIsHostnameEdgeCases(t *testing.T) {
+	// Empty label from leading dot.
+	if isHostname(".foo.com") {
+		t.Error(".foo.com should be invalid hostname")
+	}
+	// Non-alnum, non-hyphen character.
+	if isHostname("foo*.com") {
+		t.Error("foo*.com should be invalid hostname")
+	}
+	// Label too long (>63 chars).
+	long := strings.Repeat("a", 64) + ".com"
+	if isHostname(long) {
+		t.Errorf("label >63 chars should be invalid: %s", long)
+	}
+}
+
+func TestToFloatIntTypes(t *testing.T) {
+	// int case
+	f, ok := toFloat(int(7))
+	if !ok || f != 7 {
+		t.Errorf("toFloat(int(7)): %v %v", f, ok)
+	}
+	// int64 case
+	f, ok = toFloat(int64(42))
+	if !ok || f != 42 {
+		t.Errorf("toFloat(int64(42)): %v %v", f, ok)
+	}
+}
+
+func TestDeepEqualUnknownType(t *testing.T) {
+	// int8 is not handled by toFloat or the type switch → returns false.
+	if deepEqual(int8(1), int8(1)) {
+		t.Error("deepEqual should return false for unhandled types")
+	}
+}
+
+func TestIsUUIDEdgeCases(t *testing.T) {
+	// Hyphen at wrong position.
+	if isUUID("1-23e4567-e89b-12d3-a456-426614174000") {
+		t.Error("hyphen at position 1 should be invalid UUID")
+	}
+	// Non-hex character at data position.
+	if isUUID("123e4567-e89b-12d3-a456-42661417400z") {
+		t.Error("non-hex char should be invalid UUID")
+	}
+}
+
 func mustDecodeJSON(t *testing.T, raw string) any {
 	t.Helper()
 	var v any

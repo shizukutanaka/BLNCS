@@ -250,3 +250,46 @@ func TestExtractNonceMissing(t *testing.T) {
 		t.Errorf("missing nonce should return empty: %q", nonce)
 	}
 }
+
+// ============================================================================
+// Coverage uplift: ExtractVPToken mdoc parse error, ExtractVPToken signed path
+// ============================================================================
+
+func TestExtractVPTokenMdocBadData(t *testing.T) {
+	// ProtocolISOmDoc with a JSON object (not a string) → parse error
+	r := &DCAPIResponse{
+		Protocol: ProtocolISOmDoc,
+		Data:     json.RawMessage(`{}`),
+	}
+	_, _, err := r.ExtractVPToken()
+	if err == nil {
+		t.Fatal("non-string mdoc data should fail")
+	}
+}
+
+func TestExtractVPTokenOpenID4VPBadData(t *testing.T) {
+	// Bad JSON in openid4vp payload → parse error
+	r := &DCAPIResponse{
+		Protocol: ProtocolOpenID4VPUnsigned,
+		Data:     json.RawMessage(`{bad json`),
+	}
+	_, _, err := r.ExtractVPToken()
+	if err == nil {
+		t.Fatal("bad JSON payload should fail")
+	}
+}
+
+func TestExtractVPTokenMultisigned(t *testing.T) {
+	// openid4vp-v1-multisigned → same code path as unsigned
+	r := &DCAPIResponse{
+		Protocol: "openid4vp-v1-multisigned",
+		Data:     json.RawMessage(`{"vp_token":"tok","state":"s"}`),
+	}
+	vp, state, err := r.ExtractVPToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vp != "tok" || state != "s" {
+		t.Errorf("vp=%q state=%q", vp, state)
+	}
+}

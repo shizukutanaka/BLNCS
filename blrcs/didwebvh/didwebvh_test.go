@@ -521,3 +521,90 @@ func TestSubstituteSCIDPassthrough(t *testing.T) {
 		t.Error("empty from → no substitution")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: parseVersionID, containsPlaceholder, substituteSCID,
+// deriveSCID error paths, verifyEntryProof ErrNoUpdateKeys
+// ============================================================================
+
+func TestParseVersionIDErrors(t *testing.T) {
+	// No dash → bad format
+	if _, _, err := parseVersionID("nodash"); err == nil {
+		t.Error("no dash should fail")
+	}
+	// Dash at position 0 → bad (dash <= 0)
+	if _, _, err := parseVersionID("-hash"); err == nil {
+		t.Error("dash at position 0 should fail")
+	}
+	// Dash at last position → empty hash (dash == len-1)
+	if _, _, err := parseVersionID("1-"); err == nil {
+		t.Error("trailing dash should fail")
+	}
+	// Non-numeric version number
+	if _, _, err := parseVersionID("abc-hash"); err == nil {
+		t.Error("non-numeric version should fail")
+	}
+	// Version < 1 (zero)
+	if _, _, err := parseVersionID("0-hash"); err == nil {
+		t.Error("version 0 should fail")
+	}
+	// Valid version
+	num, hash, err := parseVersionID("3-entryhash")
+	if err != nil {
+		t.Fatalf("valid versionId: %v", err)
+	}
+	if num != 3 || hash != "entryhash" {
+		t.Errorf("got num=%d hash=%q", num, hash)
+	}
+}
+
+func TestSubstituteSCIDRecursion(t *testing.T) {
+	// Array recursion
+	result := substituteSCID([]any{"old", "old", 42}, "old", "new")
+	arr, ok := result.([]any)
+	if !ok || arr[0] != "new" || arr[1] != "new" || arr[2] != 42 {
+		t.Errorf("array recursion: %v", result)
+	}
+	// Map recursion
+	m := map[string]any{"a": "old", "b": "keep"}
+	result = substituteSCID(m, "old", "new")
+	mm, ok := result.(map[string]any)
+	if !ok || mm["a"] != "new" || mm["b"] != "keep" {
+		t.Errorf("map recursion: %v", result)
+	}
+}
+
+func TestDeriveSCIDShortSCID(t *testing.T) {
+	entry := &LogEntry{
+		Parameters: Parameters{SCID: "short"}, // < 8 chars
+		State:      map[string]any{"id": "did:webvh:xxx"},
+	}
+	_, err := deriveSCID(entry)
+	if err == nil {
+		t.Fatal("short SCID should fail")
+	}
+}
+
+func TestDeriveSCIDPlaceholderInState(t *testing.T) {
+	entry := &LogEntry{
+		Parameters: Parameters{SCID: "z6Mkabcdefghijklmno"}, // >= 8 chars
+		State:      map[string]any{"id": "did:webvh:" + SCIDPlaceholder},
+	}
+	_, err := deriveSCID(entry)
+	if err == nil {
+		t.Fatal("state with SCID placeholder should fail")
+	}
+}
+
+func TestVerifyEntryProofNoUpdateKeys(t *testing.T) {
+	updateKey, _ := genKey(t)
+	entry, _, _ := Create(CreateParams{
+		DIDPath:   "example.com:dids:nokeys",
+		UpdateKey: updateKey,
+	})
+	// Replace authorized keys with all-malformed entries → ErrNoUpdateKeys
+	_, err := verifyEntryProof(entry, SCIDPlaceholder, []string{"not-a-multikey"})
+	if err != ErrNoUpdateKeys {
+		t.Fatalf("want ErrNoUpdateKeys, got %v", err)
+	}
+}

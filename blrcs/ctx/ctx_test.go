@@ -497,3 +497,58 @@ func TestAttestRangeWithTelemetry(t *testing.T) {
 		t.Error("100% should be out of [10,90]")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: nil-telemetry paths for VerifyPassport, IssueSDJWT,
+// VerifySDJWT, AttestRange (exercises "tel = telemetry.Default()" branch)
+// ============================================================================
+
+func TestVerifyPassportNilTelemetry(t *testing.T) {
+	iss := makeIssuer(t)
+	cred, _ := iss.Issue(compliance.PassportClaim{ProductID: "P1"}, time.Hour)
+	// nil telemetry with non-cancelled context → covers tel = telemetry.Default()
+	if err := VerifyPassport(context.Background(), nil, cred, iss.PublicKey()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIssueSDJWTNilTelemetry(t *testing.T) {
+	iss := makeIssuer(t)
+	// nil telemetry with non-cancelled context → covers tel = telemetry.Default()
+	sdjwt, _, err := IssueSDJWT(context.Background(), nil, iss, "s",
+		map[string]any{"x": 1}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sdjwt == "" {
+		t.Error("empty sdjwt")
+	}
+}
+
+func TestVerifySDJWTNilTelemetry(t *testing.T) {
+	iss := makeIssuer(t)
+	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"x": 1}, nil, time.Hour)
+	// nil telemetry with non-cancelled context → covers tel = telemetry.Default()
+	vc, err := VerifySDJWT(context.Background(), nil, sdjwt, iss.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vc.Subject != "s" {
+		t.Errorf("subject: %s", vc.Subject)
+	}
+}
+
+func TestAttestRangeNilTelemetry(t *testing.T) {
+	attester, _ := compliance.NewSensorAttester("did:device:nil-tel")
+	salt := make([]byte, 32)
+	rand.Read(salt)
+	stmt := compliance.RangeStatement{Min: 0, Max: 100, Unit: "c", Name: "t"}
+	// nil telemetry with non-cancelled context → covers tel = telemetry.Default()
+	proof, err := AttestRange(context.Background(), nil, attester, 50.0, salt, stmt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !proof.InRange {
+		t.Error("50 should be in [0,100]")
+	}
+}
