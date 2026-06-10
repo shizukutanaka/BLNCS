@@ -649,3 +649,124 @@ func TestDefaultHTTPFetchBadURL(t *testing.T) {
 		t.Fatal("bad URL should return error")
 	}
 }
+
+// ============================================================================
+// InvalidateCache
+// ============================================================================
+
+func TestInvalidateCacheEvictsEntry(t *testing.T) {
+	r := New()
+	hit := 0
+	r.HTTPFetcher = func(ctx context.Context, url string) ([]byte, error) {
+		hit++
+		return []byte(`{"id":"did:web:evict.example","@context":["https://www.w3.org/ns/did/v1"],"verificationMethod":[{"id":"did:web:evict.example#key-1","type":"JsonWebKey2020","controller":"did:web:evict.example","publicKeyJwk":{"kty":"OKP","crv":"Ed25519","x":"` + testEd25519X(t) + `"}}]}`), nil
+	}
+	ctx := context.Background()
+	if _, err := r.Resolve(ctx, "did:web:evict.example"); err != nil {
+		t.Fatal(err)
+	}
+	if hit != 1 {
+		t.Fatalf("expected 1 fetch, got %d", hit)
+	}
+	// Second resolve should hit cache (no additional fetch)
+	if _, err := r.Resolve(ctx, "did:web:evict.example"); err != nil {
+		t.Fatal(err)
+	}
+	if hit != 1 {
+		t.Fatalf("expected still 1 fetch (cached), got %d", hit)
+	}
+	// Invalidate and resolve again — must re-fetch
+	r.InvalidateCache("did:web:evict.example")
+	if _, err := r.Resolve(ctx, "did:web:evict.example"); err != nil {
+		t.Fatal(err)
+	}
+	if hit != 2 {
+		t.Fatalf("expected 2 fetches after invalidation, got %d", hit)
+	}
+}
+
+// testEd25519X generates a valid base64url-encoded Ed25519 public key for use in DID documents.
+func testEd25519X(t *testing.T) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(pub)
+}
+
+// ============================================================================
+// TrustAnchor
+// ============================================================================
+
+func TestTrustAnchorAddDIDNew(t *testing.T) {
+	ta := NewTrustAnchor()
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	ta.AddDID("did:web:trusted2.example")
+	if !ta.IsTrusted("did:web:trusted2.example", pub) {
+		t.Error("AddDID: registered DID should be trusted")
+	}
+	if ta.IsTrusted("did:web:other2.example", pub) {
+		t.Error("unregistered DID should not be trusted")
+	}
+}
+
+func TestTrustAnchorAddKeyNew(t *testing.T) {
+	ta := NewTrustAnchor()
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	ta.AddKey(pub)
+	if !ta.IsTrusted("did:web:any2.example", pub) {
+		t.Error("AddKey: registered key should be trusted for any DID")
+	}
+	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	if ta.IsTrusted("did:web:any2.example", otherPub) {
+		t.Error("unregistered key should not be trusted")
+	}
+}
+
+func TestTrustAnchorAllowAllNew(t *testing.T) {
+	ta := NewTrustAnchor()
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	ta.AllowAll()
+	if !ta.IsTrusted("did:web:random2.example", pub) {
+		t.Error("AllowAll: any DID/key combination should be trusted")
+	}
+}
+
+func TestTrustAnchorEmptyNew(t *testing.T) {
+	ta := NewTrustAnchor()
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	if ta.IsTrusted("did:web:any3.example", pub) {
+		t.Error("empty TrustAnchor should not trust any DID/key")
+	}
+}
+
+func TestResolveAndVerifyUntrustedNew(t *testing.T) {
+	r := New()
+	xB64 := testEd25519X(t)
+	r.HTTPFetcher = func(ctx context.Context, url string) ([]byte, error) {
+		return []byte(`{"id":"did:web:untrusted2.example","@context":["https://www.w3.org/ns/did/v1"],"verificationMethod":[{"id":"did:web:untrusted2.example#key-1","type":"JsonWebKey2020","controller":"did:web:untrusted2.example","publicKeyJwk":{"kty":"OKP","crv":"Ed25519","x":"` + xB64 + `"}}]}`), nil
+	}
+	ta := NewTrustAnchor() // empty — nothing trusted
+	_, err := ResolveAndVerify(context.Background(), r, ta, "did:web:untrusted2.example")
+	if !errors.Is(err, ErrNotTrusted) {
+		t.Errorf("untrusted DID: want ErrNotTrusted, got %v", err)
+	}
+}
+
+func TestResolveAndVerifyTrustedNew(t *testing.T) {
+	r := New()
+	ta := NewTrustAnchor()
+	ta.AllowAll()
+	xB64 := testEd25519X(t)
+	r.HTTPFetcher = func(ctx context.Context, url string) ([]byte, error) {
+		return []byte(`{"id":"did:web:ok2.example","@context":["https://www.w3.org/ns/did/v1"],"verificationMethod":[{"id":"did:web:ok2.example#key-1","type":"JsonWebKey2020","controller":"did:web:ok2.example","publicKeyJwk":{"kty":"OKP","crv":"Ed25519","x":"` + xB64 + `"}}]}`), nil
+	}
+	pub, err := ResolveAndVerify(context.Background(), r, ta, "did:web:ok2.example")
+	if err != nil {
+		t.Fatalf("AllowAll trust anchor: %v", err)
+	}
+	if len(pub) != ed25519.PublicKeySize {
+		t.Errorf("pub key size: %d", len(pub))
+	}
+}
