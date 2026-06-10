@@ -450,3 +450,39 @@ func equalSlices(a, b []string) bool {
 
 // Ensure time import remains used
 var _ = time.Now
+
+func TestSagaSteps(t *testing.T) {
+	s := New("test-saga")
+	s.Step("step1", func(ctx context.Context, st *State) error { return nil }, nil)
+	s.Step("step2", func(ctx context.Context, st *State) error { return nil }, nil)
+	steps := s.Steps()
+	if len(steps) != 2 {
+		t.Fatalf("want 2 steps, got %d", len(steps))
+	}
+	if steps[0].Name != "step1" {
+		t.Errorf("step 0 name: %s", steps[0].Name)
+	}
+	if steps[1].Name != "step2" {
+		t.Errorf("step 1 name: %s", steps[1].Name)
+	}
+	// Mutating the returned slice must not affect the saga
+	steps[0].Name = "mutated"
+	if s.Steps()[0].Name != "step1" {
+		t.Error("Steps() should return a copy")
+	}
+}
+
+func TestStateString(t *testing.T) {
+	st := NewState(map[string]any{"key": "hello", "num": 42})
+	if got := st.String("key"); got != "hello" {
+		t.Errorf("String: %q", got)
+	}
+	// Non-string value → fmt.Sprintf("%v", v)
+	if got := st.String("num"); got != "42" {
+		t.Errorf("String(non-string): %q", got)
+	}
+	// Missing key → ""
+	if got := st.String("missing"); got != "" {
+		t.Errorf("String(missing): %q", got)
+	}
+}

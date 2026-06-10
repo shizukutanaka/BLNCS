@@ -406,3 +406,67 @@ func TestFormatValidators(t *testing.T) {
 		}
 	}
 }
+
+func TestValidationErrorMessage(t *testing.T) {
+	// Single error
+	e1 := &ValidationError{Errors: []string{"field required"}}
+	if !strings.Contains(e1.Error(), "field required") {
+		t.Errorf("single error: %s", e1.Error())
+	}
+
+	// Multiple errors
+	e2 := &ValidationError{Errors: []string{"foo", "bar", "baz"}}
+	msg := e2.Error()
+	if !strings.Contains(msg, "3 validation errors") {
+		t.Errorf("multi error count: %s", msg)
+	}
+	if !strings.Contains(msg, "foo") || !strings.Contains(msg, "bar") {
+		t.Errorf("multi error content: %s", msg)
+	}
+}
+
+func mustDecodeJSON(t *testing.T, raw string) any {
+	t.Helper()
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		t.Fatalf("json.Unmarshal(%q): %v", raw, err)
+	}
+	return v
+}
+
+func TestSchemaValidateDeepEqual(t *testing.T) {
+	// Test enum with various value types to exercise deepEqual paths.
+	schema := []byte(`{"enum": [1, "hello", true, null, [1,2], {"a":1}]}`)
+	s, err := Compile(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Integer 1 should match numeric 1 (float64 in JSON)
+	if err := s.Validate(mustDecodeJSON(t, `1`)); err != nil {
+		t.Errorf("int enum: %v", err)
+	}
+	// String match
+	if err := s.Validate(mustDecodeJSON(t, `"hello"`)); err != nil {
+		t.Errorf("string enum: %v", err)
+	}
+	// Boolean match
+	if err := s.Validate(mustDecodeJSON(t, `true`)); err != nil {
+		t.Errorf("bool enum: %v", err)
+	}
+	// Null match
+	if err := s.Validate(mustDecodeJSON(t, `null`)); err != nil {
+		t.Errorf("null enum: %v", err)
+	}
+	// Array match
+	if err := s.Validate(mustDecodeJSON(t, `[1,2]`)); err != nil {
+		t.Errorf("array enum: %v", err)
+	}
+	// Object match
+	if err := s.Validate(mustDecodeJSON(t, `{"a":1}`)); err != nil {
+		t.Errorf("object enum: %v", err)
+	}
+	// No match
+	if err := s.Validate(mustDecodeJSON(t, `99`)); err == nil {
+		t.Error("99 should not match enum [1,...]")
+	}
+}
