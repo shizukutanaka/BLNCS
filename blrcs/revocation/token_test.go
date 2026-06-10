@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -160,5 +162,91 @@ func TestVerifyStatusListTokenPopulatesTTL(t *testing.T) {
 	}
 	if meta.IsStale() {
 		t.Error("freshly issued token must not be stale")
+	}
+}
+
+// ============================================================================
+// LiveTokenHandler
+// ============================================================================
+
+func TestLiveTokenHandlerServesValidJWT(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	list.SetStatus(42, true)
+
+	h := LiveTokenHandler(list, "did:web:issuer", "https://issuer.example/status/1", priv, time.Hour, 5*time.Minute)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("want 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/statuslist+jwt" {
+		t.Errorf("wrong Content-Type: %q", ct)
+	}
+	if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age=") {
+		t.Errorf("expected max-age in Cache-Control: %q", cc)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	verified, _, err := VerifyStatusListToken(string(body), pub, PurposeRevocation)
+	if err != nil {
+		t.Fatalf("verify live token: %v", err)
+	}
+	if on, _ := verified.GetStatus(42); !on {
+		t.Error("bit 42 should be set after round-trip through LiveTokenHandler")
+	}
+}
+
+func TestLiveTokenHandlerNoRefreshInterval(t *testing.T) {
+	// refreshInterval=0 → no-store, re-issued every request
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+
+	h := LiveTokenHandler(list, "did:web:issuer", "https://issuer.example/status/2", priv, time.Hour, 0)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("want 200, got %d", resp.StatusCode)
+	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("expected no-store: %q", cc)
+	}
+}
+
+func TestLiveTokenHandlerCachesToken(t *testing.T) {
+	// With a long refresh interval, two requests should return the same token bytes.
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+
+	h := LiveTokenHandler(list, "did:web:issuer", "https://issuer.example/status/3", priv, time.Hour, time.Hour)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	get := func() string {
+		resp, err := http.Get(ts.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return string(b)
+	}
+
+	tok1 := get()
+	tok2 := get()
+	if tok1 != tok2 {
+		t.Error("expected cached token to be identical across two requests within refresh interval")
 	}
 }

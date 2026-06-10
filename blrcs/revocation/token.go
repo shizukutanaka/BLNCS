@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -161,5 +162,50 @@ func TokenHandler(token string, maxAge time.Duration) http.HandlerFunc {
 			w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(maxAge.Seconds())))
 		}
 		_, _ = w.Write([]byte(token))
+	}
+}
+
+// LiveTokenHandler — キャッシュ付き動的 Status List Token ハンドラ。
+//
+// 毎リクエストで list をその場署名する代わりに、refreshInterval ごとに
+// 再発行し、内部でキャッシュする (refreshInterval <= ttl を推奨)。
+// refreshInterval が 0 の場合は毎リクエストで再発行する。
+//
+// ttl は発行する Token の有効期限 (exp claim)。
+// Cache-Control: public, max-age は refreshInterval で設定する。
+func LiveTokenHandler(list *BitstringStatusList, issuer, sub string, priv ed25519.PrivateKey, ttl, refreshInterval time.Duration) http.HandlerFunc {
+	var (
+		mu          sync.Mutex
+		cached      string
+		cachedUntil time.Time
+	)
+	issue := func() (string, error) {
+		return list.IssueToken(issuer, sub, priv, ttl)
+	}
+	return func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		now := time.Now()
+		if cached == "" || (refreshInterval > 0 && now.After(cachedUntil)) {
+			tok, err := issue()
+			if err != nil {
+				mu.Unlock()
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			cached = tok
+			if refreshInterval > 0 {
+				cachedUntil = now.Add(refreshInterval)
+			}
+		}
+		tok := cached
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/statuslist+jwt")
+		if refreshInterval > 0 {
+			w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(refreshInterval.Seconds())))
+		} else {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		_, _ = w.Write([]byte(tok))
 	}
 }

@@ -14,6 +14,9 @@
 //	register_scitt     — 透明性ログ登録
 //	get_scitt_receipt  — 受領証取得
 //	ledger_checkpoint  — 署名済みtree head
+//	issue_sdjwt        — SD-JWT VC発行 (選択開示)
+//	verify_sdjwt       — SD-JWT VC検証 (exp/KB-JWT込み)
+//	check_revocation   — W3C Bitstring Status List 失効確認
 package mcp
 
 import (
@@ -29,6 +32,7 @@ import (
 	"time"
 
 	"blrcs/compliance"
+	"blrcs/revocation"
 	"blrcs/scitt"
 	"blrcs/storage"
 )
@@ -284,6 +288,21 @@ func toolDefs() []tool {
 			Description: "Signed tree head for gossip/monitoring. Proves current ledger state.",
 			InputSchema: rawJSON(`{"type":"object","properties":{}}`),
 		},
+		{
+			Name:        "issue_sdjwt",
+			Description: "Issue an SD-JWT VC with selective disclosure. sdClaims become selectively disclosable; clearClaims are always visible. Returns the full SD-JWT token and a list of disclosures.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"subject":{"type":"string"},"sdClaims":{"type":"object","description":"Claims to make selectively disclosable"},"clearClaims":{"type":"object","description":"Claims always visible in the JWT"},"validForDays":{"type":"integer","default":365}},"required":["issuerId","subject","sdClaims"]}`),
+		},
+		{
+			Name:        "verify_sdjwt",
+			Description: "Verify an SD-JWT VC signature, expiry, and (if present) KB-JWT holder binding. Returns the verified claims.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"sdjwt":{"type":"string","description":"Full SD-JWT presentation string (header.payload.sig~disc...~[kb-jwt])"},"issuerPublicKeyB64":{"type":"string","description":"Base64-encoded Ed25519 issuer public key"},"expectedNonce":{"type":"string","description":"Expected KB-JWT nonce (for OpenID4VP)"},"expectedAudience":{"type":"string","description":"Expected KB-JWT audience"}},"required":["sdjwt","issuerPublicKeyB64"]}`),
+		},
+		{
+			Name:        "check_revocation",
+			Description: "Check whether a credential is revoked using a W3C Bitstring Status List token. Returns {revoked:bool}.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"statusListTokenJWT":{"type":"string","description":"Status list token (application/statuslist+jwt)"},"statusListIssuerKeyB64":{"type":"string","description":"Base64-encoded Ed25519 public key of status list issuer"},"statusIndex":{"type":"integer","minimum":0,"description":"Bit index of the credential in the status list"}},"required":["statusListTokenJWT","statusListIssuerKeyB64","statusIndex"]}`),
+		},
 	}
 }
 
@@ -325,6 +344,7 @@ var auditableTool = map[string]bool{
 	"issue_passport": true,
 	"attest_range":   true,
 	"register_scitt": true,
+	"issue_sdjwt":    true,
 }
 
 func (s *Server) auditToolCall(name string, args json.RawMessage) {
@@ -362,6 +382,12 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolGetSCITTReceipt(args)
 	case "ledger_checkpoint":
 		return s.toolCheckpoint(args)
+	case "issue_sdjwt":
+		return s.toolIssueSDJWT(args)
+	case "verify_sdjwt":
+		return s.toolVerifySDJWT(args)
+	case "check_revocation":
+		return s.toolCheckRevocation(args)
 	}
 	return "", fmt.Errorf("unknown tool: %s", name)
 }
@@ -563,5 +589,116 @@ func (s *Server) toolGetSCITTReceipt(args json.RawMessage) (string, error) {
 func (s *Server) toolCheckpoint(_ json.RawMessage) (string, error) {
 	cp := s.ledger.SignedCheckpoint()
 	b, _ := json.Marshal(cp)
+	return string(b), nil
+}
+
+// ============================================================================
+// SD-JWT tools
+// ============================================================================
+
+func (s *Server) toolIssueSDJWT(args json.RawMessage) (string, error) {
+	var in struct {
+		IssuerID     string         `json:"issuerId"`
+		Subject      string         `json:"subject"`
+		SDClaims     map[string]any `json:"sdClaims"`
+		ClearClaims  map[string]any `json:"clearClaims"`
+		ValidForDays int            `json:"validForDays"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.Subject == "" {
+		return "", errors.New("mcp: subject is required")
+	}
+	s.mu.RLock()
+	iss, ok := s.issuers[in.IssuerID]
+	s.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("unknown issuer: %s", in.IssuerID)
+	}
+	validFor := time.Duration(in.ValidForDays) * 24 * time.Hour
+	if in.ValidForDays == 0 {
+		validFor = 365 * 24 * time.Hour
+	}
+	if in.SDClaims == nil {
+		in.SDClaims = map[string]any{}
+	}
+	if in.ClearClaims == nil {
+		in.ClearClaims = map[string]any{}
+	}
+	sdjwt, discs, err := iss.IssueSDJWT(in.Subject, in.SDClaims, in.ClearClaims, validFor)
+	if err != nil {
+		return "", err
+	}
+	discNames := make([]string, len(discs))
+	for i, d := range discs {
+		discNames[i] = d.Name
+	}
+	b, _ := json.Marshal(map[string]any{
+		"sdjwt":             sdjwt,
+		"disclosableFields": discNames,
+	})
+	return string(b), nil
+}
+
+func (s *Server) toolVerifySDJWT(args json.RawMessage) (string, error) {
+	var in struct {
+		SDJWT              string `json:"sdjwt"`
+		IssuerPublicKeyB64 string `json:"issuerPublicKeyB64"`
+		ExpectedNonce      string `json:"expectedNonce"`
+		ExpectedAudience   string `json:"expectedAudience"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	pub, err := base64.StdEncoding.DecodeString(in.IssuerPublicKeyB64)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return "", errors.New("bad issuer public key")
+	}
+	opts := compliance.VerifyOptions{
+		ExpectedNonce:    in.ExpectedNonce,
+		ExpectedAudience: in.ExpectedAudience,
+	}
+	vc, err := compliance.VerifySDJWTWithBinding(in.SDJWT, ed25519.PublicKey(pub), opts)
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	b, _ := json.Marshal(map[string]any{
+		"valid":     true,
+		"issuer":    vc.Issuer,
+		"subject":   vc.Subject,
+		"claims":    vc.Claims,
+		"keyBound":  vc.KeyBound,
+		"issuedAt":  vc.IssuedAt,
+		"expires":   vc.Expires,
+	})
+	return string(b), nil
+}
+
+func (s *Server) toolCheckRevocation(args json.RawMessage) (string, error) {
+	var in struct {
+		StatusListTokenJWT    string `json:"statusListTokenJWT"`
+		StatusListIssuerKeyB64 string `json:"statusListIssuerKeyB64"`
+		StatusIndex           int    `json:"statusIndex"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	pub, err := base64.StdEncoding.DecodeString(in.StatusListIssuerKeyB64)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return "", errors.New("bad status list issuer key")
+	}
+	if in.StatusIndex < 0 {
+		return "", errors.New("mcp: statusIndex must be non-negative")
+	}
+	list, _, err := revocation.VerifyStatusListToken(in.StatusListTokenJWT, ed25519.PublicKey(pub), revocation.PurposeRevocation)
+	if err != nil {
+		return "", fmt.Errorf("status list token invalid: %w", err)
+	}
+	revoked, err := list.GetStatus(in.StatusIndex)
+	if err != nil {
+		return "", fmt.Errorf("status index out of range: %w", err)
+	}
+	b, _ := json.Marshal(map[string]bool{"revoked": revoked})
 	return string(b), nil
 }
