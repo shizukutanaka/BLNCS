@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 )
@@ -385,5 +386,106 @@ func TestDurationIsZero(t *testing.T) {
 	nz, _ := NewDuration(time.Second)
 	if nz.IsZero() {
 		t.Error("non-zero duration should not be IsZero")
+	}
+}
+
+// ============================================================================
+// Coverage uplift: Must* panic paths, zero-DID method/identifier,
+// UnmarshalJSON non-string inputs, NaN/Inf in NewPercent/NewCarbonFootprint
+// ============================================================================
+
+func mustPanic(t *testing.T, name string, fn func()) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("%s: expected panic, got none", name)
+		}
+	}()
+	fn()
+}
+
+func TestMustDIDPanics(t *testing.T) {
+	mustPanic(t, "MustDID(empty)", func() { MustDID("") })
+}
+
+func TestMustGTINPanics(t *testing.T) {
+	mustPanic(t, "MustGTIN(invalid)", func() { MustGTIN("abc") })
+}
+
+func TestMustCountryCodePanics(t *testing.T) {
+	mustPanic(t, "MustCountryCode(ZZ)", func() { MustCountryCode("ZZ") })
+}
+
+func TestMustCarbonFootprintPanics(t *testing.T) {
+	mustPanic(t, "MustCarbonFootprint(-1)", func() { MustCarbonFootprint(-1) })
+}
+
+func TestMustPercentPanics(t *testing.T) {
+	mustPanic(t, "MustPercent(-1)", func() { MustPercent(-1) })
+}
+
+// TestDIDZeroValueMethodIdentifier covers the len(parts) < 3 return "" branch.
+func TestDIDZeroValueMethodIdentifier(t *testing.T) {
+	var d DID // zero value, d.value == ""
+	if m := d.Method(); m != "" {
+		t.Errorf("zero DID Method: %q", m)
+	}
+	if id := d.Identifier(); id != "" {
+		t.Errorf("zero DID Identifier: %q", id)
+	}
+}
+
+// TestDIDUnmarshalJSONNonString covers the non-string JSON value path.
+func TestDIDUnmarshalJSONNonString(t *testing.T) {
+	var d DID
+	if err := json.Unmarshal([]byte("42"), &d); err == nil {
+		t.Error("non-string JSON should fail DID unmarshal")
+	}
+}
+
+// TestNewPercentNaN covers the NaN/Inf guard in NewPercent.
+func TestNewPercentNaN(t *testing.T) {
+	if _, err := NewPercent(math.NaN()); err == nil {
+		t.Error("NaN percent should fail")
+	}
+	if _, err := NewPercent(math.Inf(1)); err == nil {
+		t.Error("Inf percent should fail")
+	}
+}
+
+// TestNewCarbonFootprintNaN covers the NaN/Inf guard in NewCarbonFootprint.
+func TestNewCarbonFootprintNaN(t *testing.T) {
+	if _, err := NewCarbonFootprint(math.NaN()); err == nil {
+		t.Error("NaN carbon should fail")
+	}
+	if _, err := NewCarbonFootprint(math.Inf(1)); err == nil {
+		t.Error("Inf carbon should fail")
+	}
+}
+
+// TestCarbonFootprintUnmarshalJSONBadFloat covers the ParseFloat error path.
+func TestCarbonFootprintUnmarshalJSONBadFloat(t *testing.T) {
+	var c CarbonFootprint
+	if err := json.Unmarshal([]byte(`"not-a-float"`), &c); err == nil {
+		t.Error("non-numeric JSON should fail CarbonFootprint unmarshal")
+	}
+}
+
+// TestGTINPaddingAndVerifyMod10 covers the padding loop and verifyMod10 wrong-length path.
+func TestGTINPaddingAndVerifyMod10(t *testing.T) {
+	// 8-digit GTIN (GTIN-8): requires 6 padding zeros.
+	// Valid GTIN-8: 04678946 (check digit computed for test)
+	// Actually find a known valid 8-digit GTIN: "04678946"
+	// A known GTIN-8 from GS1: "73513537"
+	g, err := NewGTIN("73513537")
+	if err != nil {
+		t.Fatalf("valid 8-digit GTIN should succeed: %v", err)
+	}
+	if len(g.String()) != 14 {
+		t.Errorf("padded GTIN not 14 digits: %s", g.String())
+	}
+	// verifyMod10 wrong-length guard (direct call, same package).
+	if verifyMod10("short") {
+		t.Error("verifyMod10 should return false for non-14-length input")
 	}
 }

@@ -306,3 +306,88 @@ func TestHashString(t *testing.T) {
 		t.Errorf("fmt.Sprintf: %q vs %q", got, s)
 	}
 }
+
+// ============================================================================
+// Coverage uplift: Record collision remapping + LookupByID store error
+// ============================================================================
+
+// failOnGetStore wraps MemoryStore but returns an error for Get calls.
+type failOnGetStore struct {
+	*MemoryStore
+}
+
+func (f *failOnGetStore) Get(_ Hash) ([]byte, error) {
+	return nil, fmt.Errorf("simulated store failure")
+}
+
+// TestProvenanceRecordCollisionRemapping verifies that recording the same
+// externalID with a different payload removes the stale reverse-lookup entry.
+func TestProvenanceRecordCollisionRemapping(t *testing.T) {
+	prov := NewProvenance(NewMemoryStore())
+
+	h1, _ := prov.Record("id-1", []byte("payload-a"))
+	// Same ID, different payload → remapping
+	h2, _ := prov.Record("id-1", []byte("payload-b"))
+	if h1 == h2 {
+		t.Fatal("different payloads should produce different hashes")
+	}
+	// Old hash should no longer list id-1
+	oldIDs := prov.LookupIDs(h1)
+	for _, id := range oldIDs {
+		if id == "id-1" {
+			t.Error("stale id-1 should have been removed from old hash's list")
+		}
+	}
+	// New hash should list id-1
+	newIDs := prov.LookupIDs(h2)
+	found := false
+	for _, id := range newIDs {
+		if id == "id-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("id-1 should be in new hash's list after remapping")
+	}
+}
+
+// TestProvenanceRecordStoreError exercises the store.Put error path.
+func TestProvenanceRecordStoreError(t *testing.T) {
+	errStore := &failPutStore{}
+	prov := NewProvenance(errStore)
+	_, err := prov.Record("x", []byte("data"))
+	if err == nil {
+		t.Fatal("store.Put failure should propagate from Record")
+	}
+}
+
+// TestProvenanceLookupByIDStoreError exercises the store.Get error path.
+func TestProvenanceLookupByIDStoreError(t *testing.T) {
+	inner := NewMemoryStore()
+	prov := NewProvenance(inner)
+	// Record via inner store directly so we have a mapping.
+	prov.Record("my-id", []byte("data"))
+	// Now switch to a store that fails Get.
+	failProv := NewProvenance(&failOnGetStore{inner})
+	// Manually copy the idToHash mapping into failProv.
+	failProv.mu.Lock()
+	for k, v := range prov.idToHash {
+		failProv.idToHash[k] = v
+	}
+	failProv.mu.Unlock()
+	_, _, err := failProv.LookupByID("my-id")
+	if err == nil {
+		t.Fatal("store.Get failure should propagate from LookupByID")
+	}
+}
+
+// failPutStore always returns an error from Put.
+type failPutStore struct{}
+
+func (f *failPutStore) Put(_ []byte) (Hash, error) { return "", fmt.Errorf("put failed") }
+func (f *failPutStore) Get(_ Hash) ([]byte, error) { return nil, fmt.Errorf("get failed") }
+func (f *failPutStore) Has(_ Hash) bool            { return false }
+func (f *failPutStore) Size() int                  { return 0 }
+func (f *failPutStore) Iterate(_ func(h Hash) error) error {
+	return nil
+}
