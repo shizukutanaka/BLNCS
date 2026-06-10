@@ -552,3 +552,78 @@ func TestAnyKeyMapRoundtrip(t *testing.T) {
 		t.Errorf("len: %d", len(gm))
 	}
 }
+
+// ============================================================================
+// Coverage uplift: uncovered decoder / encoder paths
+// ============================================================================
+
+// TestHashableKeyUnhashable decodes a CBOR map with a bstr key, which is
+// not a valid Go map key and must be rejected.
+func TestHashableKeyUnhashable(t *testing.T) {
+	// map(1) { bstr("x") : uint(5) }
+	data := []byte{0xa1, 0x41, 'x', 0x05}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("bstr map key must be rejected (not hashable)")
+	}
+}
+
+// TestDecodeReservedAddInfo feeds a byte with reserved additional-info bits.
+func TestDecodeReservedAddInfo(t *testing.T) {
+	// major 0 (uint), additional 28 → 0b00011100 = 0x1c
+	if _, err := Unmarshal([]byte{0x1c}); err == nil {
+		t.Fatal("reserved additional info should error")
+	}
+}
+
+// TestDecodeUnsupportedSimple feeds major-7 with a simple value we don't handle.
+func TestDecodeUnsupportedSimple(t *testing.T) {
+	// major 7 (simple), additional 0 → 0b11100000 = 0xe0, simple value 0
+	if _, err := Unmarshal([]byte{0xe0}); err == nil {
+		t.Fatal("unsupported simple value should error")
+	}
+}
+
+// TestDecodeNegOverflow exercises the negative-integer overflow guard.
+func TestDecodeNegOverflow(t *testing.T) {
+	// major 1 (negative), 8-byte argument = 0x8000000000000000 = 2^63 > MaxInt64
+	data := []byte{0x3b, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("negative integer overflow should error")
+	}
+}
+
+// TestUnmarshalFirstError exercises UnmarshalFirst on malformed CBOR.
+func TestUnmarshalFirstError(t *testing.T) {
+	// Truncated bstr: claims 5 bytes but empty.
+	if _, _, err := UnmarshalFirst([]byte{0x45}); err == nil {
+		t.Fatal("malformed CBOR should error")
+	}
+}
+
+// TestAppendArrayError verifies appendArray propagates a value-encoding error.
+func TestAppendArrayError(t *testing.T) {
+	if _, err := Marshal([]any{struct{ X int }{1}}); err == nil {
+		t.Fatal("unsupported element type in array should error")
+	}
+}
+
+// TestAppendIntKeyMapError verifies appendIntKeyMap propagates a value error.
+func TestAppendIntKeyMapError(t *testing.T) {
+	if _, err := Marshal(map[int]any{1: struct{ X int }{}}); err == nil {
+		t.Fatal("unsupported value type in int-key map should error")
+	}
+}
+
+// TestAppendStrKeyMapError verifies appendStrKeyMap propagates a value error.
+func TestAppendStrKeyMapError(t *testing.T) {
+	if _, err := Marshal(map[string]any{"k": make(chan int)}); err == nil {
+		t.Fatal("unsupported value type in str-key map should error")
+	}
+}
+
+// TestAppendAnyKeyMapKeyError verifies appendAnyKeyMap propagates a key-encoding error.
+func TestAppendAnyKeyMapKeyError(t *testing.T) {
+	if _, err := Marshal(map[any]any{struct{}{}: "value"}); err == nil {
+		t.Fatal("unsupported key type in any-key map should error")
+	}
+}

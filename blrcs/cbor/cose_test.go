@@ -283,3 +283,103 @@ func TestCopyHeader(t *testing.T) {
 		t.Error("copy mutation leaked into original")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: uncovered COSE paths
+// ============================================================================
+
+// TestVerify1WrongPubKeyLength exercises the short-pub guard in verifyEdDSA.
+func TestVerify1WrongPubKeyLength(t *testing.T) {
+	priv, _ := genKey(t)
+	data, _ := Sign1(Header{HeaderAlg: AlgEdDSA}, nil, []byte("payload"), nil, priv)
+	shortPub := ed25519.PublicKey(make([]byte, 16)) // 16 bytes, not 32
+	_, err := Verify1(data, shortPub, nil)
+	if err != ErrCOSESigFailed {
+		t.Errorf("wrong pub key length: want ErrCOSESigFailed, got %v", err)
+	}
+}
+
+// TestEncodedHeaderNil exercises the nil-header branch in encodedHeader.
+func TestEncodedHeaderNil(t *testing.T) {
+	b, err := encodedHeader(nil)
+	if err != nil {
+		t.Fatalf("encodedHeader(nil): %v", err)
+	}
+	// Should encode as an empty CBOR map: 0xa0
+	if len(b) != 1 || b[0] != 0xa0 {
+		t.Errorf("unexpected encoding: %x", b)
+	}
+}
+
+// TestParseHeaderEmpty exercises the empty-bytes fast-path in parseHeader.
+func TestParseHeaderEmpty(t *testing.T) {
+	h, err := parseHeader([]byte{})
+	if err != nil {
+		t.Fatalf("parseHeader empty: %v", err)
+	}
+	if len(h) != 0 {
+		t.Errorf("expected empty header, got %v", h)
+	}
+}
+
+// TestParseHeaderNotMap exercises the non-map CBOR error in parseHeader.
+func TestParseHeaderNotMap(t *testing.T) {
+	// CBOR uint 42 — not a map.
+	b, _ := Marshal(uint64(42))
+	if _, err := parseHeader(b); err == nil {
+		t.Fatal("non-map CBOR should fail parseHeader")
+	}
+}
+
+// TestSign1InjectsAlg exercises the missing-alg injection branch in Sign1.
+func TestSign1InjectsAlg(t *testing.T) {
+	priv, pub := genKey(t)
+	// Pass empty header — Sign1 must inject AlgEdDSA.
+	data, err := Sign1(Header{}, nil, []byte("x"), nil, priv)
+	if err != nil {
+		t.Fatalf("Sign1 with empty header: %v", err)
+	}
+	res, err := Verify1(data, pub, nil)
+	if err != nil {
+		t.Fatalf("Verify1: %v", err)
+	}
+	alg, ok := GetInt(res.Protected[HeaderAlg])
+	if !ok || alg != AlgEdDSA {
+		t.Errorf("injected alg: %v", res.Protected[HeaderAlg])
+	}
+}
+
+// TestVerify1NonBstrProtected exercises the non-bstr protected branch.
+func TestVerify1NonBstrProtected(t *testing.T) {
+	b, _ := Marshal(Tag{
+		Number: TagCOSESign1,
+		Content: []any{uint64(99), map[int]any{}, []byte("pay"), []byte("sig")},
+	})
+	if _, err := Verify1(b, ed25519.PublicKey(make([]byte, 32)), nil); err == nil {
+		t.Fatal("non-bstr protected should fail")
+	}
+}
+
+// TestVerify1NonBstrSig exercises the non-bstr signature branch.
+func TestVerify1NonBstrSig(t *testing.T) {
+	prot, _ := encodedHeader(Header{HeaderAlg: AlgEdDSA})
+	b, _ := Marshal(Tag{
+		Number: TagCOSESign1,
+		Content: []any{prot, map[int]any{}, []byte("pay"), "not-a-bstr-sig"},
+	})
+	if _, err := Verify1(b, ed25519.PublicKey(make([]byte, 32)), nil); err == nil {
+		t.Fatal("non-bstr sig should fail")
+	}
+}
+
+// TestVerify1NonBstrPayload exercises the non-nil/non-bstr payload branch.
+func TestVerify1NonBstrPayload(t *testing.T) {
+	prot, _ := encodedHeader(Header{HeaderAlg: AlgEdDSA})
+	b, _ := Marshal(Tag{
+		Number: TagCOSESign1,
+		Content: []any{prot, map[int]any{}, uint64(42), []byte("sig")},
+	})
+	if _, err := Verify1(b, ed25519.PublicKey(make([]byte, 32)), nil); err == nil {
+		t.Fatal("non-bstr payload should fail")
+	}
+}

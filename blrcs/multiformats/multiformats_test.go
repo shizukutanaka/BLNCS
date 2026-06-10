@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -362,5 +363,140 @@ func TestCanonicalizeJSONArray(t *testing.T) {
 	// Arrays preserve order
 	if string(out) != `[3,1,2]` {
 		t.Errorf("array: %q", out)
+	}
+}
+
+// ============================================================================
+// Coverage uplift: int/int64/default canonicalValue branches, writeJCSString
+// special control chars, writeJCSNumber bad float, isIntegerLiteral edge case,
+// utf16Units surrogate pair, DecodeEd25519Multikey error paths
+// ============================================================================
+
+// TestCanonicalizeIntTypes covers the int, int64, and default branches of
+// canonicalValue, and the error return path of Canonicalize.
+func TestCanonicalizeIntTypes(t *testing.T) {
+	b, err := Canonicalize(int(42))
+	if err != nil || string(b) != "42" {
+		t.Errorf("int(42): %q %v", b, err)
+	}
+	b, err = Canonicalize(int64(-7))
+	if err != nil || string(b) != "-7" {
+		t.Errorf("int64(-7): %q %v", b, err)
+	}
+	// default/unsupported — also covers Canonicalize's error return path
+	if _, err := Canonicalize(make(chan int)); err == nil {
+		t.Error("chan should return ErrJCSUnsupported")
+	}
+}
+
+// TestWriteJCSStringSpecialControls covers the \b, \f, \r, \t switch cases.
+func TestWriteJCSStringSpecialControls(t *testing.T) {
+	b, err := Canonicalize("a\bb\fc\rd\te")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, seq := range []string{`\b`, `\f`, `\r`, `\t`} {
+		if !strings.Contains(s, seq) {
+			t.Errorf("expected %s in %q", seq, s)
+		}
+	}
+}
+
+// TestWriteJCSNumberAndIsIntegerLiteral uses json.Number values to cover:
+//   - writeJCSNumber ParseFloat error path (json.Number("1.bad"))
+//   - isIntegerLiteral "i >= len(s)" path (json.Number("-"))
+func TestWriteJCSNumberAndIsIntegerLiteral(t *testing.T) {
+	// "-" alone: isIntegerLiteral returns false, then ParseFloat("-") errors.
+	if _, err := Canonicalize(json.Number("-")); err == nil {
+		t.Error(`Canonicalize(json.Number("-")) should fail`)
+	}
+	// "1.bad": isIntegerLiteral returns false, then ParseFloat("1.bad") errors.
+	if _, err := Canonicalize(json.Number("1.bad")); err == nil {
+		t.Error(`Canonicalize(json.Number("1.bad")) should fail`)
+	}
+}
+
+// TestUTF16SupplementaryKey covers the utf16Units surrogate-pair path by using a
+// supplementary-plane rune as a JSON object *key*, forcing lessUTF16 (via
+// sort.Slice in canonicalObject) to call utf16Units with a rune ≥ 0x10000.
+func TestUTF16SupplementaryKey(t *testing.T) {
+	input := []byte(`{"😀":1,"a":2}`)
+	out, err := CanonicalizeJSON(input)
+	if err != nil {
+		t.Fatalf("CanonicalizeJSON with emoji key: %v", err)
+	}
+	if len(out) == 0 {
+		t.Error("empty output")
+	}
+}
+
+// TestDecodeEd25519MultikeyBadBase58 covers the Base58Decode error path.
+func TestDecodeEd25519MultikeyBadBase58(t *testing.T) {
+	// '0' is not in the base58btc alphabet → ErrInvalidBase58.
+	if _, err := DecodeEd25519Multikey("z0invalid"); err == nil {
+		t.Error("invalid base58 char should fail")
+	}
+}
+
+// TestDecodeEd25519MultikeyWrongPrefix covers the wrong-prefix guard.
+func TestDecodeEd25519MultikeyWrongPrefix(t *testing.T) {
+	// 34 bytes total, correct length, but wrong codec prefix (0x00,0x01 ≠ 0xed,0x01).
+	raw := make([]byte, 2+ed25519.PublicKeySize)
+	raw[0] = 0x00
+	raw[1] = 0x01
+	if _, err := DecodeEd25519Multikey("z" + Base58Encode(raw)); err == nil {
+		t.Error("wrong multikey prefix should fail")
+	}
+}
+
+// TestCanonicalizeFloat64 covers the float64 case in canonicalValue (distinct
+// from json.Number — only triggered via Canonicalize, not CanonicalizeJSON).
+func TestCanonicalizeFloat64(t *testing.T) {
+	b, err := Canonicalize(float64(1.5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "1.5" {
+		t.Errorf("float64(1.5): got %q", b)
+	}
+}
+
+// TestCanonicalizeObjectValueError covers the error propagation path inside
+// canonicalObject when a map value cannot be canonicalized.
+func TestCanonicalizeObjectValueError(t *testing.T) {
+	if _, err := Canonicalize(map[string]any{"k": make(chan int)}); err == nil {
+		t.Error("unsupported value in map should fail")
+	}
+}
+
+// TestLessUTF16CommonPrefix covers the i++/j++ branch (equal runes) and the
+// "return len(ar) < len(br)" branch by using keys with a shared prefix.
+func TestLessUTF16CommonPrefix(t *testing.T) {
+	// "ab" and "ac" share 'a' → inner loop increments i/j after first equal rune.
+	// "a" and "ab" → outer loop ends when shorter string exhausted → uses final return.
+	for _, input := range []string{`{"ab":1,"ac":2}`, `{"a":1,"ab":2}`} {
+		out, err := CanonicalizeJSON([]byte(input))
+		if err != nil {
+			t.Fatalf("CanonicalizeJSON(%s): %v", input, err)
+		}
+		if len(out) == 0 {
+			t.Errorf("empty output for %s", input)
+		}
+	}
+}
+
+// TestCanonicalizeArrayError covers the error-propagation path in the []any branch.
+func TestCanonicalizeArrayError(t *testing.T) {
+	if _, err := Canonicalize([]any{make(chan int)}); err == nil {
+		t.Error("unsupported value in array should fail")
+	}
+}
+
+// TestIsIntegerLiteralEmptyString covers the early-return for empty string.
+func TestIsIntegerLiteralEmptyString(t *testing.T) {
+	// json.Number("") → isIntegerLiteral("") returns false → ParseFloat("") errors.
+	if _, err := Canonicalize(json.Number("")); err == nil {
+		t.Error("empty json.Number should fail")
 	}
 }

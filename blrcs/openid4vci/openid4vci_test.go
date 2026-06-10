@@ -588,3 +588,369 @@ func TestFetchJWKSCtxCancelled(t *testing.T) {
 		t.Fatal("cancelled context should produce error")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: verifyProofJWT error paths
+// ============================================================================
+
+// buildBadProofJWT creates a proof JWT with controllable field values for
+// negative testing of verifyProofJWT.
+func buildCustomProofJWT(t *testing.T, holderPriv ed25519.PrivateKey, alg, typ, nonce, aud string, iatOffset time.Duration) string {
+	t.Helper()
+	pub := holderPriv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := `{"alg":"` + alg + `","typ":"` + typ + `","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`
+	iat := time.Now().Add(iatOffset).Unix()
+	pl := `{"nonce":"` + nonce + `","aud":"` + aud + `","iat":` + strconv.FormatInt(iat, 10) + `}`
+	h := base64.RawURLEncoding.EncodeToString([]byte(hdr))
+	p := base64.RawURLEncoding.EncodeToString([]byte(pl))
+	sig := ed25519.Sign(holderPriv, []byte(h+"."+p))
+	return h + "." + p + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func mustGetToken(t *testing.T, iss *Issuer) *TokenResponse {
+	t.Helper()
+	_, code, err := iss.CreateOffer(
+		"eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 2.0}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tr
+}
+
+func TestVerifyProofJWTWrongAud(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	jwt := buildCustomProofJWT(t, holderPriv, "EdDSA", "openid4vci-proof+jwt", tr.CNonce, "https://wrong.aud", 0)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("wrong aud: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTStaleIat(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	// iat = 10 minutes ago — outside the ±5 min window
+	jwt := buildCustomProofJWT(t, holderPriv, "EdDSA", "openid4vci-proof+jwt", tr.CNonce, iss.URL, -10*time.Minute)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("stale iat: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTFutureIat(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	// iat = 10 minutes in the future
+	jwt := buildCustomProofJWT(t, holderPriv, "EdDSA", "openid4vci-proof+jwt", tr.CNonce, iss.URL, 10*time.Minute)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("future iat: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadAlg(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	jwt := buildCustomProofJWT(t, holderPriv, "RS256", "openid4vci-proof+jwt", tr.CNonce, iss.URL, 0)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad alg: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadTyp(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	jwt := buildCustomProofJWT(t, holderPriv, "EdDSA", "JWT", tr.CNonce, iss.URL, 0)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad typ: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadHeaderBase64(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	proofJSON, _ := json.Marshal(map[string]string{
+		"proof_type": "jwt",
+		"jwt":        "!!!.validpayload.validsig",
+	})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad header base64: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadSigBase64(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	pub := (ed25519.PublicKey)(make([]byte, ed25519.PublicKeySize))
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"x","aud":"y","iat":1}`))
+	proofJSON, _ := json.Marshal(map[string]string{
+		"proof_type": "jwt",
+		"jwt":        hdr + "." + pl + ".!!!invalid-sig-base64",
+	})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad sig base64: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTTruncatedSig(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	pub := (ed25519.PublicKey)(make([]byte, ed25519.PublicKeySize))
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"x","aud":"y","iat":1}`))
+	// Only 16 bytes of sig, not 64
+	shortSig := base64.RawURLEncoding.EncodeToString(make([]byte, 16))
+	proofJSON, _ := json.Marshal(map[string]string{
+		"proof_type": "jwt",
+		"jwt":        hdr + "." + pl + "." + shortSig,
+	})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("truncated sig: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestIssueCredentialWithProofBadProofJSON(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	// proof field is invalid JSON
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{
+		Proof: []byte(`{"proof_type": "not-jwt", "jwt": ""}`),
+	})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad proof_type: want ErrInvalidProof, got %v", err)
+	}
+}
+
+// ============================================================================
+// Coverage uplift: handleCredential bad JSON body
+// ============================================================================
+
+func TestHTTPCredentialBadJSONBody(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	// Get a valid token first
+	tr := mustGetToken(t, iss)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", strings.NewReader("{bad json}"))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad JSON body: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// Coverage uplift: FetchCredentialCtx / FetchMetadataCtx / FetchJWKSCtx
+// non-200 and decode-error paths
+// ============================================================================
+
+func TestFetchCredentialCtxTokenNon200(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("unauthorized"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Fatal("non-200 token response should error")
+	}
+}
+
+func TestFetchCredentialCtxTokenBadJSON(t *testing.T) {
+	var callCount int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json")) // token endpoint returns garbage
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Fatal("bad token JSON should error")
+	}
+}
+
+func TestFetchCredentialCtxCredentialNon200(t *testing.T) {
+	var callCount int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// Return valid token response
+			json.NewEncoder(w).Encode(TokenResponse{
+				AccessToken: "tok",
+				TokenType:   "Bearer",
+				ExpiresIn:   300,
+			})
+			return
+		}
+		// Credential endpoint returns 500
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("error"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Fatal("non-200 credential response should error")
+	}
+}
+
+func TestFetchCredentialCtxCredentialBadJSON(t *testing.T) {
+	var callCount int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			json.NewEncoder(w).Encode(TokenResponse{
+				AccessToken: "tok",
+				TokenType:   "Bearer",
+				ExpiresIn:   300,
+			})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json credential"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Fatal("bad credential JSON should error")
+	}
+}
+
+func TestFetchMetadataCtxNon200(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("not found"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchMetadataCtx(context.Background())
+	if err == nil {
+		t.Fatal("non-200 metadata response should error")
+	}
+}
+
+func TestFetchMetadataCtxBadJSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchMetadataCtx(context.Background())
+	if err == nil {
+		t.Fatal("bad JSON metadata should error")
+	}
+}
+
+func TestFetchJWKSCtxNon200(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("unavailable"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchJWKSCtx(context.Background())
+	if err == nil {
+		t.Fatal("non-200 JWKS response should error")
+	}
+}
+
+func TestFetchJWKSCtxBadJSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchJWKSCtx(context.Background())
+	if err == nil {
+		t.Fatal("bad JWKS JSON should error")
+	}
+}
+
+// ============================================================================
+// Coverage uplift: verifyProofJWT — remaining error branches
+// These call verifyProofJWT directly (same package).
+// ============================================================================
+
+func TestVerifyProofJWTNotThreeParts(t *testing.T) {
+	_, err := verifyProofJWT("no-dots-in-jwt", "n", "a")
+	if err != ErrInvalidProof {
+		t.Fatalf("want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadJWKKty(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"RSA","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"n","aud":"a","iat":1}`))
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	_, err := verifyProofJWT(hdr+"."+pl+"."+sig, "n", "a")
+	if err != ErrInvalidProof {
+		t.Fatalf("bad JWK kty: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadPayloadBase64(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := "!!!" // invalid base64 — verifyProofJWT signs over it literally
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	_, err := verifyProofJWT(hdr+"."+pl+"."+sig, "n", "a")
+	if err != ErrInvalidProof {
+		t.Fatalf("bad payload base64: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadPayloadJSON(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte("not-json-payload"))
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	_, err := verifyProofJWT(hdr+"."+pl+"."+sig, "n", "a")
+	if err != ErrInvalidProof {
+		t.Fatalf("bad payload JSON: want ErrInvalidProof, got %v", err)
+	}
+}
