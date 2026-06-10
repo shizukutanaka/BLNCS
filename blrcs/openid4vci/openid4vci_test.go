@@ -416,6 +416,49 @@ func TestIssueCredentialRequireProof(t *testing.T) {
 	}
 }
 
+func TestHTTPMethodNotAllowed(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	// GET on credential endpoint (requires POST)
+	resp, err := ts.Client().Get(ts.URL + "/credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 405 {
+		t.Fatalf("credential GET: want 405, got %d", resp.StatusCode)
+	}
+
+	// POST on metadata endpoint (requires GET)
+	resp2, err := ts.Client().Post(ts.URL+"/.well-known/openid-credential-issuer", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != 405 {
+		t.Fatalf("metadata POST: want 405, got %d", resp2.StatusCode)
+	}
+
+	// POST on JWKS endpoint (requires GET)
+	resp3, err := ts.Client().Post(ts.URL+"/.well-known/jwks.json", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3.Body.Close()
+	if resp3.StatusCode != 405 {
+		t.Fatalf("jwks POST: want 405, got %d", resp3.StatusCode)
+	}
+}
+
+func TestSigner(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	if iss.Signer() == nil {
+		t.Error("Signer() must not be nil")
+	}
+}
+
 func TestIssueCredentialProofBadSignature(t *testing.T) {
 	iss, _ := setupIssuer(t)
 	_, code, _ := iss.CreateOffer(

@@ -165,3 +165,35 @@ func TestCodeOfWrappedTwice(t *testing.T) {
 		t.Errorf("deeply wrapped Code: %s", CodeOf(outer))
 	}
 }
+
+func TestErrorConstructors(t *testing.T) {
+	// Verify each code-specific constructor creates an error with the right code.
+	pairs := []struct {
+		err  error
+		code Code
+	}{
+		{Forbidden(), CodeForbidden},
+		{InvalidInput(), CodeInvalidInput},
+		{Conflict(), CodeConflict},
+		{RateLimited(), CodeRateLimited},
+		{Integrity(), CodeIntegrity},
+		{Security(), CodeSecurity},
+		{Timeout(), CodeTimeout},
+		{Internal(), CodeInternal},
+		{NotFound(), CodeNotFound},
+		{Unauthorized(), CodeUnauthorized},
+	}
+	for _, p := range pairs {
+		if CodeOf(p.err) != p.code {
+			t.Errorf("%v: want %s, got %s", p.err, p.code, CodeOf(p.err))
+		}
+	}
+}
+
+func TestPublicErrorNilWrapped(t *testing.T) {
+	e := E(OpDPPIssue, CodeInternal, "internal error", nil)
+	pub := e.PublicError()
+	if pub == "" {
+		t.Error("PublicError should not be empty")
+	}
+}
