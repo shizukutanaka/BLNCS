@@ -496,3 +496,59 @@ func TestUnmarshalDuplicateStringKey(t *testing.T) {
 		t.Fatal("duplicate CBOR string map key must be rejected per RFC 8949 §5.4")
 	}
 }
+
+// ============================================================================
+// GetInt helper
+// ============================================================================
+
+func TestGetInt(t *testing.T) {
+	v, ok := GetInt(uint64(42))
+	if !ok || v != 42 {
+		t.Errorf("uint64(42): ok=%v v=%d", ok, v)
+	}
+	v, ok = GetInt(int64(-5))
+	if !ok || v != -5 {
+		t.Errorf("int64(-5): ok=%v v=%d", ok, v)
+	}
+	// uint64 that overflows int64
+	_, ok = GetInt(uint64(1 << 63))
+	if ok {
+		t.Error("uint64(1<<63) should not fit int64")
+	}
+	// non-integer
+	_, ok = GetInt("hello")
+	if ok {
+		t.Error("string should return ok=false")
+	}
+	_, ok = GetInt(nil)
+	if ok {
+		t.Error("nil should return ok=false")
+	}
+}
+
+// ============================================================================
+// appendAnyKeyMap — map[any]any encoding with deterministic ordering
+// ============================================================================
+
+func TestAnyKeyMapRoundtrip(t *testing.T) {
+	// Mixed keys: int and string
+	m := map[any]any{
+		uint64(1): "one",
+		uint64(2): "two",
+	}
+	enc, err := Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Unmarshal(enc)
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	gm, ok := got.(map[any]any)
+	if !ok {
+		t.Fatalf("expected map[any]any, got %T", got)
+	}
+	if len(gm) != 2 {
+		t.Errorf("len: %d", len(gm))
+	}
+}

@@ -2,6 +2,8 @@ package vctmeta
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -312,5 +314,62 @@ func TestResolveChainCycle(t *testing.T) {
 	_, err := ResolveChain(context.Background(), a, "", fetch)
 	if err != ErrExtendsCycle {
 		t.Fatalf("want ErrExtendsCycle, got %v", err)
+	}
+}
+
+// ============================================================================
+// ValidateClaimsWithSchema — invalid schema compile path
+// ============================================================================
+
+func TestValidateClaimsWithSchemaBadSchema(t *testing.T) {
+	badSchema := json.RawMessage(`{"type": "invalid-not-a-real-type"}`)
+	// JSON Schema compile should either fail or produce a validator that rejects claims.
+	// Either outcome is acceptable; what we verify is: no panic.
+	_ = ValidateClaimsWithSchema(badSchema, map[string]any{"foo": "bar"})
+}
+
+func TestValidateClaimsWithSchemaInvalidJSON(t *testing.T) {
+	malformed := json.RawMessage(`{not valid json`)
+	if err := ValidateClaimsWithSchema(malformed, map[string]any{}); err == nil {
+		t.Error("expected error for malformed JSON schema")
+	}
+}
+
+// ============================================================================
+// ResolveAndValidate — one-call happy path and error path
+// ============================================================================
+
+func TestResolveAndValidateHappy(t *testing.T) {
+	schema := `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`
+	tm := &TypeMetadata{
+		VCT:    vctURL,
+		Schema: json.RawMessage(schema),
+	}
+	if err := tm.ResolveAndValidate(context.Background(), map[string]any{"name": "Battery"}, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveAndValidateSchemaError(t *testing.T) {
+	// No schema configured → ResolveSchema returns ErrNoSchema
+	tm := &TypeMetadata{VCT: vctURL}
+	if err := tm.ResolveAndValidate(context.Background(), map[string]any{}, nil); err != ErrNoSchema {
+		t.Errorf("want ErrNoSchema, got %v", err)
+	}
+}
+
+// ============================================================================
+// HTTPFetcher — smoke test: constructs without panic, nil client gets default
+// ============================================================================
+
+func TestHTTPFetcherConstructor(t *testing.T) {
+	f := HTTPFetcher(nil) // should not panic
+	if f == nil {
+		t.Error("HTTPFetcher(nil) returned nil")
+	}
+	// non-nil client
+	f2 := HTTPFetcher(&http.Client{})
+	if f2 == nil {
+		t.Error("HTTPFetcher(client) returned nil")
 	}
 }
