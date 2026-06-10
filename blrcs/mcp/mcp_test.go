@@ -251,6 +251,74 @@ func TestInvalidIssuer(t *testing.T) {
 	}
 }
 
+func TestVerifyPassportFailure(t *testing.T) {
+	srv, _, _ := setupServer(t)
+
+	// Issue a valid credential using the demo issuer DID.
+	issueResp := callRaw(t, srv, `{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"issue_passport","arguments":{"issuerId":"did:web:factory.example","productId":"VERIFY-FAIL-TEST"}}}`)
+	content := issueResp["result"].(map[string]any)["content"].([]any)
+	credJson := content[0].(map[string]any)["text"].(string)
+
+	// Use a *different* public key for verification → verification must fail
+	// with {"valid":false,...} not an error (key is valid size, wrong content).
+	wrongPub, _, _ := ed25519.GenerateKey(nil)
+	wrongPubB64 := base64.StdEncoding.EncodeToString([]byte(wrongPub))
+	req := map[string]any{
+		"jsonrpc": "2.0", "id": 21, "method": "tools/call",
+		"params": map[string]any{
+			"name": "verify_passport",
+			"arguments": map[string]any{
+				"credentialJson":     credJson,
+				"issuerPublicKeyB64": wrongPubB64,
+			},
+		},
+	}
+	reqB, _ := json.Marshal(req)
+	resp := callRaw(t, srv, string(reqB))
+	result := resp["result"].(map[string]any)
+	if result["isError"].(bool) {
+		t.Fatal("verify failure should be a structured result, not an MCP error")
+	}
+	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	if !strings.Contains(text, `"valid":false`) {
+		t.Fatalf("expected valid:false, got: %s", text)
+	}
+}
+
+func TestVerifyRangeFailure(t *testing.T) {
+	srv, _, att := setupServer(t)
+
+	// Attest a value.
+	attestReq := `{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"attest_range","arguments":{"attesterId":"did:device:sensor-001","value":5.5,"min":2.0,"max":8.0,"unit":"celsius","name":"temp"}}}`
+	attestResp := callRaw(t, srv, attestReq)
+	proofJson := attestResp["result"].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string)
+
+	// Use wrong attester key → verify_range must return valid:false.
+	wrongPub, _, _ := ed25519.GenerateKey(nil)
+	wrongPubB64 := base64.StdEncoding.EncodeToString([]byte(wrongPub))
+	_ = att
+	req := map[string]any{
+		"jsonrpc": "2.0", "id": 23, "method": "tools/call",
+		"params": map[string]any{
+			"name": "verify_range",
+			"arguments": map[string]any{
+				"proofJson":            proofJson,
+				"attesterPublicKeyB64": wrongPubB64,
+			},
+		},
+	}
+	reqB, _ := json.Marshal(req)
+	resp := callRaw(t, srv, string(reqB))
+	result := resp["result"].(map[string]any)
+	if result["isError"].(bool) {
+		t.Fatal("verify_range failure should be structured result, not MCP error")
+	}
+	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	if !strings.Contains(text, `"valid":false`) {
+		t.Fatalf("expected valid:false, got: %s", text)
+	}
+}
+
 // itoa — avoid strconv import for simplicity
 func itoa(n int) string {
 	if n == 0 {
