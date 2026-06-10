@@ -552,3 +552,4 @@ func TestAttestRangeNilTelemetry(t *testing.T) {
 		t.Error("50 should be in [0,100]")
 	}
 }
+

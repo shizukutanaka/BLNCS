@@ -296,6 +296,14 @@ func TestConcurrentRevocations(t *testing.T) {
 	}
 }
 
+// TestUnmarshalSignedListBadJSON covers the json.Unmarshal error path.
+func TestUnmarshalSignedListBadJSON(t *testing.T) {
+	_, err := UnmarshalSignedList([]byte("not valid json {{{"))
+	if err == nil {
+		t.Fatal("invalid JSON should return an error from UnmarshalSignedList")
+	}
+}
+
 // ============================================================================
 // helpers
 // ============================================================================

@@ -442,3 +442,51 @@ func TestIsLowerHexCoverage(t *testing.T) {
 		t.Error("single 'a' should be valid lower hex")
 	}
 }
+
+// TestNewNilTelemetry covers the nil-telemetry branch in New: passing nil
+// causes New to use the package default rather than crashing.
+func TestNewNilTelemetry(t *testing.T) {
+	c := New(nil)
+	if c == nil {
+		t.Fatal("New(nil) returned nil Chain")
+	}
+	// Build a simple handler through the chain to confirm it works.
+	called := false
+	h := c.Then(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(200)
+	}))
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if !called {
+		t.Error("handler was not called")
+	}
+}
+
+// TestWriteBeforeWriteHeaderSetsStatus200 covers the statusCapturingWriter.Write
+// path where Write is called before WriteHeader (implicit 200).
+func TestWriteBeforeWriteHeaderSetsStatus200(t *testing.T) {
+	c := New(nil).WithRequestLogging()
+	h := c.Then(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Write without calling WriteHeader first — this triggers the
+		// "if s.statusCode == 0" branch inside statusCapturingWriter.Write.
+		w.Write([]byte("hello")) //nolint:errcheck
+	}))
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != 200 {
+		t.Errorf("implicit write should yield 200, got %d", resp.StatusCode)
+	}
+}

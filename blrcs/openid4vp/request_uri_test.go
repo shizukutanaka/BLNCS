@@ -217,6 +217,28 @@ func TestRequestHandlerMethodNotAllowed(t *testing.T) {
 }
 
 // ============================================================================
+// CreateRequestByRef / CreateRequestDCQLByRef — error propagation
+// ============================================================================
+
+func TestCreateRequestByRefInvalidDefinition(t *testing.T) {
+	ver, _ := setupFlow(t)
+	// Empty RequiredClaims causes CreateRequest to return ErrDefinitionEmpty.
+	_, _, err := ver.CreateRequestByRef(PresentationDefinition{ID: "empty"}, "https://v.example/req")
+	if err == nil {
+		t.Fatal("empty RequiredClaims should propagate error from CreateRequest")
+	}
+}
+
+func TestCreateRequestDCQLByRefInvalidQuery(t *testing.T) {
+	ver, _ := setupFlow(t)
+	// Empty Credentials slice → CreateRequestDCQL should return an error.
+	_, _, err := ver.CreateRequestDCQLByRef(DCQLQuery{}, "https://v.example/req")
+	if err == nil {
+		t.Fatal("empty DCQLQuery should propagate error from CreateRequestDCQL")
+	}
+}
+
+// ============================================================================
 // RequestHandler — request is re-fetchable (not consumed on GET)
 // ============================================================================
 

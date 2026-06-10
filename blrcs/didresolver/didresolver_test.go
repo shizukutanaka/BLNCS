@@ -770,3 +770,60 @@ func TestResolveAndVerifyTrustedNew(t *testing.T) {
 		t.Errorf("pub key size: %d", len(pub))
 	}
 }
+
+// ============================================================================
+// multibaseToEd25519 — 'm' multibase base64 path (previously uncovered)
+// ============================================================================
+
+func TestMultibaseToEd25519Variants(t *testing.T) {
+	// Generate a real Ed25519 public key for use in tests.
+	rawPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 'm' prefix with bare 32-byte base64 key (RawStdEncoding).
+	mBase64 := "m" + base64.RawStdEncoding.EncodeToString([]byte(rawPub))
+	got, err := multibaseToEd25519(mBase64)
+	if err != nil {
+		t.Fatalf("'m' prefix base64: %v", err)
+	}
+	if !got.Equal(rawPub) {
+		t.Error("'m' base64: decoded key mismatch")
+	}
+
+	// 'm' prefix with multicodec ed25519-pub header (0xed 0x01) prepended.
+	withPrefix := append([]byte{0xed, 0x01}, []byte(rawPub)...)
+	mWithPrefix := "m" + base64.RawStdEncoding.EncodeToString(withPrefix)
+	got2, err := multibaseToEd25519(mWithPrefix)
+	if err != nil {
+		t.Fatalf("'m' with multicodec prefix: %v", err)
+	}
+	if !got2.Equal(rawPub) {
+		t.Error("'m' with multicodec prefix: decoded key mismatch")
+	}
+
+	// 'm' prefix with invalid base64 — must fail.
+	if _, err := multibaseToEd25519("m!!!"); err == nil {
+		t.Error("invalid base64 after 'm' should fail")
+	}
+
+	// 'm' prefix with wrong-length key (too short).
+	short := "m" + base64.RawStdEncoding.EncodeToString([]byte{1, 2, 3})
+	if _, err := multibaseToEd25519(short); err == nil {
+		t.Error("short key after 'm' should fail")
+	}
+
+	// Too-short string (len < 2) — must fail.
+	if _, err := multibaseToEd25519("x"); err == nil {
+		t.Error("single-char string should fail")
+	}
+	if _, err := multibaseToEd25519(""); err == nil {
+		t.Error("empty string should fail")
+	}
+
+	// Unsupported multibase prefix.
+	if _, err := multibaseToEd25519("Xunsupported"); err == nil {
+		t.Error("unsupported multibase prefix should fail")
+	}
+}
