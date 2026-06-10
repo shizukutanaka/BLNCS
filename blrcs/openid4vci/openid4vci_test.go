@@ -1100,3 +1100,117 @@ func TestIssueCredentialWithProofRequireProofMissing(t *testing.T) {
 		t.Errorf("RequireProof without proof: want ErrInvalidProof, got %v", err)
 	}
 }
+
+// ============================================================================
+// ExchangeCode — defensive guard: entry still in preAuths but accessToken set
+// ============================================================================
+
+func TestExchangeCodeAlreadyHasToken(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	// Manually insert a pre-auth entry with accessToken already set.
+	// This guard is defensive; the normal code path deletes the entry on exchange.
+	iss.mu.Lock()
+	iss.preAuths["phantom-code"] = &preAuthEntry{
+		code:        "phantom-code",
+		configID:    "eu-battery-passport-v1",
+		expiresAt:   time.Now().Add(5 * time.Minute),
+		accessToken: "already-set",
+	}
+	iss.mu.Unlock()
+	_, err := iss.ExchangeCode("phantom-code")
+	if err != ErrBadPreAuthCode {
+		t.Fatalf("entry with accessToken set: want ErrBadPreAuthCode, got %v", err)
+	}
+}
+
+// ============================================================================
+// handleToken — ExchangeCode failure (invalid pre-authorized_code over HTTP)
+// ============================================================================
+
+func TestHandleTokenInvalidCode(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.PostForm(ts.URL+"/token", map[string][]string{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {"this-code-was-never-issued"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid code: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// handleCredential — body exceeds MaxBytesReader limit (1 MiB)
+// ============================================================================
+
+func TestHandleCredentialBodyTooLarge(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer("eu-battery-passport-v1", "big-body",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 10.0},
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 50.0})
+	tr, _ := iss.ExchangeCode(code)
+
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	// Body is just over 1 MiB — triggers http.MaxBytesReader error.
+	bigBody := strings.Repeat("A", (1<<20)+1)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", strings.NewReader(bigBody))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("oversized body: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// IssueCredentialWithProof — ErrUnknownConfig when config deleted after code issued
+// ============================================================================
+
+func TestIssueCredentialUnknownConfig(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	tr, _ := iss.ExchangeCode(code)
+
+	// Delete the config that this token refers to.
+	iss.mu.Lock()
+	delete(iss.configs, "eu-battery-passport-v1")
+	iss.mu.Unlock()
+
+	_, err := iss.IssueCredential(tr.AccessToken)
+	if err != ErrUnknownConfig {
+		t.Fatalf("want ErrUnknownConfig, got %v", err)
+	}
+}
+
+// ============================================================================
+// FetchJWKSCtx — no Ed25519 key present in the JWKS response
+// ============================================================================
+
+func TestFetchJWKSCtxNoEd25519Key(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"keys": []map[string]any{
+				{"kty": "RSA", "crv": "", "x": ""},
+			},
+		})
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchJWKSCtx(context.Background())
+	if err == nil {
+		t.Fatal("JWKS with no Ed25519 key should error")
+	}
+}

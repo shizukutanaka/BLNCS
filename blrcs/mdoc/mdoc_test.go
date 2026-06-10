@@ -754,3 +754,51 @@ func TestParseDeviceKeyShortX(t *testing.T) {
 		t.Error("short x coordinate should return nil device key")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: parseValidity missing viSigned, parseValueDigests non-bstr
+// digest value, verifyItem digest mismatch
+// ============================================================================
+
+func TestParseValidityMissingSignedDate(t *testing.T) {
+	// Map with validFrom and validUntil but NO viSigned — parseTDate(nil) for
+	// viSigned must fail, covering the error branch after signed = parseTDate(…).
+	goodTDate := cbor.Tag{Number: tagDateTime, Content: "2024-01-01T00:00:00Z"}
+	m := map[any]any{
+		viValidFrom:  goodTDate,
+		viValidUntil: goodTDate,
+		// viSigned intentionally omitted
+	}
+	if _, err := parseValidity(m); err == nil {
+		t.Error("missing viSigned should fail parseValidity")
+	}
+}
+
+func TestParseValueDigestsNonBstrValue(t *testing.T) {
+	// Valid int digestID but digest value is a string, not bstr.
+	m := map[any]any{
+		"ns": map[any]any{
+			uint64(1): "not-bytes", // digestID 1, value is string not []byte
+		},
+	}
+	if _, err := parseValueDigests(m); err == nil {
+		t.Error("non-bstr digest value should fail parseValueDigests")
+	}
+}
+
+func TestVerifyItemDigestMismatch(t *testing.T) {
+	// Craft a valid IssuerSignedItem with digestID 42, then provide the wrong hash
+	// in nsDigests → verifyItem must return ErrDigestMismatch.
+	mapBytes, _ := cbor.Marshal(map[any]any{
+		isiDigestID:   uint64(42),
+		isiElementID:  "testElement",
+		isiElementVal: "testValue",
+	})
+	tag := cbor.Tag{Number: tagEncodedCBOR, Content: mapBytes}
+	// nsDigests[42] contains all-zero hash — does not match the real sha256 of the item.
+	nsDigests := map[int][]byte{42: make([]byte, 32)}
+	_, _, _, err := verifyItem(tag, nsDigests)
+	if !errors.Is(err, ErrDigestMismatch) {
+		t.Errorf("tampered digest: want ErrDigestMismatch, got %v", err)
+	}
+}

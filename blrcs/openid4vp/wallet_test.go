@@ -177,3 +177,21 @@ func TestMockWalletMalformedRequest(t *testing.T) {
 		t.Fatal("missing pd should fail")
 	}
 }
+
+func TestWalletPresentMissingState(t *testing.T) {
+	wallet := NewMockWallet("did:web:holder.example")
+	// URL with presentation_definition but no state parameter.
+	_, err := wallet.Present("openid4vp://authorize?presentation_definition=%7B%22id%22%3A%22x%22%7D")
+	if err == nil {
+		t.Fatal("missing state should fail")
+	}
+}
+
+func TestWalletPresentBadPDJSON(t *testing.T) {
+	wallet := NewMockWallet("did:web:holder.example")
+	// URL has state and presentation_definition, but PD is not valid JSON.
+	_, err := wallet.Present("openid4vp://authorize?state=abc&presentation_definition=%7Bnot+valid+json")
+	if err == nil {
+		t.Fatal("invalid PD JSON should fail")
+	}
+}

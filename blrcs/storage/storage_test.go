@@ -523,3 +523,58 @@ func TestFileStorage_IterateTruncatedPayload(t *testing.T) {
 		t.Fatal("truncated payload should cause IterateStatements to return error")
 	}
 }
+
+// ============================================================================
+// rescanSize — invalid frame size and truncated payload paths
+// ============================================================================
+
+// TestFileStorage_RescanInvalidFrameSize verifies that rescanSize (called at
+// open time) rejects a frame whose header declares size 0.
+func TestFileStorage_RescanInvalidFrameSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-rescanfs-*")
+	defer os.RemoveAll(dir)
+
+	// Write a valid entry, then close.
+	s, _ := NewFileStorage(dir)
+	s.AppendStatement([]byte(`{"ok":true}`))
+	s.Close()
+
+	// Manually append a zero-size frame header — rescanSize rejects n==0.
+	p := filepath.Join(dir, ledgerFileName)
+	f, _ := os.OpenFile(p, os.O_WRONLY|os.O_APPEND, 0o600)
+	var badHeader [frameHeaderSize]byte // all zeros → size 0
+	f.Write(badHeader[:])
+	f.Close()
+
+	// Reopen — rescanSize must fail.
+	_, err := NewFileStorage(dir)
+	if err == nil {
+		t.Fatal("zero frame size in ledger should cause NewFileStorage to fail")
+	}
+}
+
+// TestFileStorage_RescanTruncatedPayload verifies that rescanSize rejects a
+// frame whose header declares a payload larger than the remaining file bytes.
+func TestFileStorage_RescanTruncatedPayload(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-rescantrunc-*")
+	defer os.RemoveAll(dir)
+
+	// Write a valid entry, then close.
+	s, _ := NewFileStorage(dir)
+	s.AppendStatement([]byte(`{"ok":true}`))
+	s.Close()
+
+	// Append a header claiming 100-byte payload but write no payload bytes.
+	p := filepath.Join(dir, ledgerFileName)
+	f, _ := os.OpenFile(p, os.O_WRONLY|os.O_APPEND, 0o600)
+	var hdr [frameHeaderSize]byte
+	binary.BigEndian.PutUint32(hdr[:], 100)
+	f.Write(hdr[:])
+	f.Close()
+
+	// Reopen — rescanSize must fail with a truncated-payload error.
+	_, err := NewFileStorage(dir)
+	if err == nil {
+		t.Fatal("truncated payload frame should cause NewFileStorage to fail")
+	}
+}

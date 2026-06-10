@@ -418,3 +418,33 @@ func TestExternalSignerCloseInvokesCloser(t *testing.T) {
 		t.Error("sign after close should error")
 	}
 }
+
+// ============================================================================
+// FileSigner — additional coverage
+// ============================================================================
+
+// TestFileSignerEmptyID ensures the empty-ID guard in NewFileSigner is tested
+// (separate from the MemorySigner empty-ID test and the empty-path test).
+func TestFileSignerEmptyID(t *testing.T) {
+	dir := t.TempDir()
+	_, err := NewFileSigner("", filepath.Join(dir, "key.bin"))
+	if err == nil {
+		t.Fatal("empty ID should fail NewFileSigner")
+	}
+}
+
+// TestFileSignerSignAfterClose covers FileSigner.Sign returning the
+// "signer closed" error after Close() zeroes the private key.
+func TestFileSignerSignAfterClose(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewFileSigner("did:web:kms.test", filepath.Join(dir, "key.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Sign([]byte("payload")); err == nil {
+		t.Fatal("FileSigner.Sign after Close should return an error")
+	}
+}

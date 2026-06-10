@@ -205,6 +205,23 @@ func TestCallbackHandlerMethodReject(t *testing.T) {
 	}
 }
 
+func TestCallbackHandlerBodyTooLarge(t *testing.T) {
+	ver, _ := setupFlow(t)
+	ts := httptest.NewServer(ver.CallbackHandler(nil))
+	defer ts.Close()
+
+	// Body just over 4 MiB — triggers http.MaxBytesReader in CallbackHandler.
+	bigBody := strings.Repeat("A", (4<<20)+1)
+	resp, err := http.Post(ts.URL, "application/x-www-form-urlencoded", strings.NewReader(bigBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("body too large: want 400, got %d", resp.StatusCode)
+	}
+}
+
 // ============================================================================
 // Public-key helper (base64) — for caller convenience
 // ============================================================================
