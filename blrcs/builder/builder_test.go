@@ -330,3 +330,26 @@ func TestBatteryBuilderDateOfManufacture(t *testing.T) {
 		t.Fatalf("battery date/health/cycle: %v", err)
 	}
 }
+
+func TestBatteryBuilderOptionalFields(t *testing.T) {
+	iss := mustIssuer(t)
+	cf, _ := types.NewCarbonFootprint(25.0)
+	_, err := NewBattery().
+		BatteryID("BAT-OPT-001").
+		Category(compliance.BatteryCategoryEV).
+		DueDiligenceReport("https://example.com/dd.pdf").
+		Chemistry(compliance.ChemistryLFP).
+		CapacityKWh(60.0).
+		CarbonIntensity(cf).
+		CarbonClass("A").
+		RecycledContent(0.25, 0.08, 0.10, 0.02).
+		EUDeclarationOfConformity("https://example.com/doc.pdf").
+		RenewableContent(0.85).
+		ExpectedLifetime(12.5).
+		SeparateCollection(true).
+		ValidFor(8 * 365 * 24 * time.Hour).
+		Build(iss)
+	if err != nil {
+		t.Fatalf("optional fields build: %v", err)
+	}
+}

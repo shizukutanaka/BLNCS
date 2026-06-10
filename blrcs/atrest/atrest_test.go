@@ -302,3 +302,15 @@ func TestEncryptEmptyPlaintext(t *testing.T) {
 		t.Errorf("empty roundtrip: %v", dec)
 	}
 }
+
+func TestCipherKeyID(t *testing.T) {
+	key, _ := GenerateKey()
+	id := KeyIDFromUint32(0xDEADBEEF)
+	c, err := NewCipher(id, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.KeyID() != id {
+		t.Errorf("KeyID: got %x want %x", c.KeyID(), id)
+	}
+}

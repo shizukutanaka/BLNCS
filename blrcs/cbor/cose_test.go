@@ -266,3 +266,20 @@ func TestSigStructureFormat(t *testing.T) {
 		t.Errorf("context string: got %q", string(s[2:12]))
 	}
 }
+
+func TestCopyHeader(t *testing.T) {
+	orig := Header{1: int64(-7), 4: []byte("key-id")}
+	cp := copyHeader(orig)
+	// Same entries
+	if cp[1] != orig[1] {
+		t.Errorf("alg: %v", cp[1])
+	}
+	if string(cp[4].([]byte)) != "key-id" {
+		t.Errorf("kid: %v", cp[4])
+	}
+	// Mutations to the copy must not affect the original.
+	cp[99] = "extra"
+	if _, ok := orig[99]; ok {
+		t.Error("copy mutation leaked into original")
+	}
+}

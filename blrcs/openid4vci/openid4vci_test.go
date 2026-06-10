@@ -1,10 +1,12 @@
 package openid4vci
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -481,5 +483,108 @@ func TestIssueCredentialProofBadSignature(t *testing.T) {
 	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
 	if err != ErrInvalidProof {
 		t.Fatalf("bad sig: want ErrInvalidProof, got %v", err)
+	}
+}
+
+// ============================================================================
+// Token endpoint edge cases (handleToken coverage)
+// ============================================================================
+
+func TestHTTPTokenUnsupportedGrantType(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	form := strings.NewReader("grant_type=authorization_code&code=xyz")
+	resp, err := ts.Client().Post(ts.URL+"/token", "application/x-www-form-urlencoded", form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestHTTPTokenMissingCode(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	form := strings.NewReader("grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code")
+	resp, err := ts.Client().Post(ts.URL+"/token", "application/x-www-form-urlencoded", form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestRegisterConfigurationDefaults(t *testing.T) {
+	signer, _ := compliance.NewIssuer("did:web:config.test")
+	iss := NewIssuer("https://config.test", signer)
+	// Empty format and zero ValidForDays → should get defaults
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:             "test-cred",
+		CredentialType: "TestType",
+	})
+	iss.mu.Lock()
+	cfg, ok := iss.configs["test-cred"]
+	iss.mu.Unlock()
+	if !ok {
+		t.Fatal("config not registered")
+	}
+	if cfg.Format != "vc+sd-jwt" {
+		t.Errorf("default format: %s", cfg.Format)
+	}
+	if cfg.ValidForDays != 365 {
+		t.Errorf("default validForDays: %d", cfg.ValidForDays)
+	}
+}
+
+func TestFetchCredentialCtxCancelledBeforeRequest(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	client := NewWalletClient(ts.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	_, err := client.FetchCredentialCtx(ctx, "some-code")
+	if err == nil {
+		t.Fatal("cancelled context should produce error")
+	}
+}
+
+func TestFetchMetadataCtxCancelled(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	client := NewWalletClient(ts.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := client.FetchMetadataCtx(ctx)
+	if err == nil {
+		t.Fatal("cancelled context should produce error")
+	}
+}
+
+func TestFetchJWKSCtxCancelled(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	client := NewWalletClient(ts.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := client.FetchJWKSCtx(ctx)
+	if err == nil {
+		t.Fatal("cancelled context should produce error")
 	}
 }

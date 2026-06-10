@@ -153,3 +153,19 @@ func TestDeclareStable(t *testing.T) {
 		t.Errorf("kind: %s", got.Kind)
 	}
 }
+
+func TestDeclareBeta(t *testing.T) {
+	Reset()
+	defer Reset()
+	DeclareBeta("pkg", "BetaFn", "func", "1.1.0", "experimental range proof API")
+	got, ok := Default().Get("pkg.BetaFn")
+	if !ok {
+		t.Fatal("beta symbol not registered")
+	}
+	if got.Stability != Beta {
+		t.Errorf("stability: %s", got.Stability)
+	}
+	if got.Notes != "experimental range proof API" {
+		t.Errorf("notes: %s", got.Notes)
+	}
+}

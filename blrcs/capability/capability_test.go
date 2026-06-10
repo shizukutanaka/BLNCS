@@ -283,3 +283,19 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 	// no panic = success
 }
+
+func TestDetectorPersistence(t *testing.T) {
+	ctx := context.Background()
+
+	// empty dir → false
+	d := DetectorPersistence("")
+	if d(ctx) {
+		t.Error("empty dir should return false")
+	}
+
+	// non-empty dir → true
+	d2 := DetectorPersistence("/tmp")
+	if !d2(ctx) {
+		t.Error("non-empty dir should return true")
+	}
+}

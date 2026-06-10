@@ -491,3 +491,43 @@ func TestSDJWTVCTSurvivesSelectiveDisclosure(t *testing.T) {
 		t.Error("secret should not be disclosed")
 	}
 }
+
+func TestIssueSDJWTTieredBound(t *testing.T) {
+	iss, err := NewIssuer("did:web:tiered.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	holderPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tc := NewTieredClaims()
+	tc.Set("batteryCategory", "ev", TierPublic)
+	tc.Set("supplierSecret", "acme", TierRestricted)
+
+	sdjwt, disclosures, err := iss.IssueSDJWTTieredBound("battery-1", tc, holderPub, time.Hour)
+	if err != nil {
+		t.Fatalf("IssueSDJWTTieredBound: %v", err)
+	}
+	if sdjwt == "" {
+		t.Error("empty sdjwt")
+	}
+	if len(disclosures) == 0 {
+		t.Error("expected disclosures for restricted tier claims")
+	}
+}
+
+func TestIssueSDJWTReservedClearClaim(t *testing.T) {
+	iss, err := NewIssuer("did:web:reserved.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "iss" is a reserved claim — must be rejected
+	_, _, err = iss.IssueSDJWT("sub", nil, map[string]any{"iss": "evil"}, time.Hour)
+	if err == nil {
+		t.Fatal("reserved clearClaim 'iss' should be rejected")
+	}
+	if !strings.Contains(err.Error(), "reserved") {
+		t.Errorf("error should mention 'reserved': %v", err)
+	}
+}

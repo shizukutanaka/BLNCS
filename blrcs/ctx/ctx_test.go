@@ -451,6 +451,29 @@ func TestRegisterSCITTDeadlineExceeded(t *testing.T) {
 	}
 }
 
+func TestSignAndRegisterEmptyPayloadError(t *testing.T) {
+	ledger := makeLedger(t)
+	iss := makeIssuer(t)
+	tel, _ := makeTel()
+	// SignStatement returns ErrEmptyStmt on empty payload → exercises error branch
+	_, _, err := SignAndRegister(context.Background(), tel, ledger,
+		iss.PrivateKey(), iss.ID, "subj", "text/plain", []byte{})
+	if err == nil {
+		t.Fatal("empty payload should produce error")
+	}
+}
+
+func TestIssueSDJWTReservedClaimError(t *testing.T) {
+	iss := makeIssuer(t)
+	tel, _ := makeTel()
+	// Pass reserved claim "iss" in clearClaims → triggers error path in IssueSDJWT
+	_, _, err := IssueSDJWT(context.Background(), tel, iss, "sub",
+		nil, map[string]any{"iss": "evil"}, time.Hour)
+	if err == nil {
+		t.Fatal("reserved clearClaim should produce error")
+	}
+}
+
 func TestAttestRangeWithTelemetry(t *testing.T) {
 	attester, _ := compliance.NewSensorAttester("did:device:bench")
 	tel, _ := makeTel()

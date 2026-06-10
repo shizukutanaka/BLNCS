@@ -290,3 +290,19 @@ func TestHashBytesRoundTrip(t *testing.T) {
 		t.Errorf("bytes length: %d", len(b))
 	}
 }
+
+func TestHashString(t *testing.T) {
+	h := ComputeHash([]byte("hello"))
+	s := h.String()
+	if s == "" {
+		t.Error("Hash.String() returned empty string")
+	}
+	// String() must equal the underlying Hash value
+	if s != string(h) {
+		t.Errorf("String() mismatch: got %q want %q", s, string(h))
+	}
+	// fmt.Stringer compliance
+	if got := fmt.Sprintf("%s", h); got != s {
+		t.Errorf("fmt.Sprintf: %q vs %q", got, s)
+	}
+}
