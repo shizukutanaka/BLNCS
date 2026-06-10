@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
@@ -398,6 +399,111 @@ func TestFileStorage_IterateBadFrameSize(t *testing.T) {
 	err := s.IterateStatements(func(_ uint64, _ StatementBlob) error { return nil })
 	if err == nil {
 		t.Fatal("bad frame size (0) should cause IterateStatements to return error")
+	}
+}
+
+// ============================================================================
+// SaveKeyPair / LoadKeyPair — keypair lifecycle tests
+// ============================================================================
+
+func TestFileStorage_SaveAndLoadKeyPair(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kp-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	pub1, priv1, _ := ed25519.GenerateKey(rand.Reader)
+	if err := s.SaveKeyPair(pub1, priv1); err != nil {
+		t.Fatalf("SaveKeyPair: %v", err)
+	}
+	pub2, priv2, err := s.LoadKeyPair()
+	if err != nil {
+		t.Fatalf("LoadKeyPair: %v", err)
+	}
+	if !bytes.Equal(pub1, pub2) {
+		t.Error("public key round-trip mismatch")
+	}
+	if !bytes.Equal(priv1, priv2) {
+		t.Error("private key round-trip mismatch")
+	}
+}
+
+func TestFileStorage_LoadKeyPairNotFound(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpnf-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+
+	_, _, err := s.LoadKeyPair()
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing keypair: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestFileStorage_SaveKeyPairWrongSizeNew(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpwsn-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+
+	// Public key too short
+	err := s.SaveKeyPair([]byte("short"), make(ed25519.PrivateKey, ed25519.PrivateKeySize))
+	if err == nil {
+		t.Error("too-short public key should fail")
+	}
+	// Private key too short
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	err = s.SaveKeyPair(pub, []byte("short"))
+	if err == nil {
+		t.Error("too-short private key should fail")
+	}
+}
+
+func TestFileStorage_SaveKeyPairIdempotent(t *testing.T) {
+	// SaveKeyPair should overwrite previous keypair (atomic write).
+	dir, _ := os.MkdirTemp("", "blrcs-kpi-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+
+	pub1, priv1, _ := ed25519.GenerateKey(rand.Reader)
+	pub2, priv2, _ := ed25519.GenerateKey(rand.Reader)
+	if err := s.SaveKeyPair(pub1, priv1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveKeyPair(pub2, priv2); err != nil {
+		t.Fatal(err)
+	}
+	gotPub, gotPriv, err := s.LoadKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should return the second key pair
+	if !bytes.Equal(gotPub, pub2) {
+		t.Error("second SaveKeyPair should overwrite first")
+	}
+	if !bytes.Equal(gotPriv, priv2) {
+		t.Error("private key not updated")
+	}
+}
+
+func TestFileStorage_LoadKeyPairCorrupted(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpcorr-*")
+	defer os.RemoveAll(dir)
+	// Write a keypair file with wrong size
+	p := filepath.Join(dir, "keypair.bin")
+	if err := os.WriteFile(p, []byte("tooshort"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+
+	_, _, err := s.LoadKeyPair()
+	if !errors.Is(err, ErrCorrupted) {
+		t.Errorf("corrupted keypair file: want ErrCorrupted, got %v", err)
 	}
 }
 
