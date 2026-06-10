@@ -3,6 +3,9 @@ package compliance
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -205,5 +208,111 @@ func TestKeyBindingAudienceArray(t *testing.T) {
 	}
 	if !audienceMatches("https://verifier.example", "https://verifier.example") {
 		t.Error("string aud should still match")
+	}
+}
+
+// TestKeyBindingMaxKBAge — a KB-JWT whose iat is older than MaxKBAge must be rejected.
+func TestKeyBindingMaxKBAge(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("h", map[string]any{"a": 1}, nil, holderPub, time.Hour)
+	// KB-JWT signed at time T (time.Time{} → time.Now() inside PresentWithKeyBinding).
+	presentedAt := time.Now()
+	pres, _ := PresentWithKeyBinding(sdjwt, []string{"a"}, holderPriv, "n", "aud", presentedAt)
+	// Verifier checks an hour later with MaxKBAge of 30 seconds → iat too old.
+	if _, err := VerifySDJWTWithBinding(pres, iss.PublicKey(), VerifyOptions{
+		ExpectedNonce:    "n",
+		ExpectedAudience: "aud",
+		Now:              presentedAt.Add(1 * time.Hour),
+		MaxKBAge:         30 * time.Second,
+	}); err != ErrKeyBindingInvalid {
+		t.Fatalf("want ErrKeyBindingInvalid (MaxKBAge exceeded), got %v", err)
+	}
+}
+
+// craftKBJWT builds a KB-JWT segment for testing edge-cases in verifyKBJWT.
+func craftKBJWT(t *testing.T, holderPriv ed25519.PrivateKey, payload map[string]any) string {
+	t.Helper()
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"kb+jwt"}`))
+	plBytes, _ := json.Marshal(payload)
+	pl := base64.RawURLEncoding.EncodeToString(plBytes)
+	sig := ed25519.Sign(holderPriv, []byte(hdr+"."+pl))
+	return hdr + "." + pl + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+// sdHashFor computes the sd_hash that verifyKBJWT expects for a given base presentation.
+// base must end with '~' (output of Present).
+func sdHashFor(base string) string {
+	h := sha256.Sum256([]byte(base))
+	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// TestKeyBindingFutureIat — a KB-JWT whose iat is far in the future (beyond leeway) is rejected.
+func TestKeyBindingFutureIat(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("h", map[string]any{"a": 1}, nil, holderPub, time.Hour)
+	base, _ := Present(sdjwt, []string{"a"})
+	now := time.Now()
+	kb := craftKBJWT(t, holderPriv, map[string]any{
+		"iat":     float64(now.Add(10 * time.Minute).Unix()), // 10 min in future
+		"nonce":   "n",
+		"aud":     "aud",
+		"sd_hash": sdHashFor(base),
+	})
+	pres := base + kb
+	if _, err := VerifySDJWTWithBinding(pres, iss.PublicKey(), VerifyOptions{
+		ExpectedNonce:    "n",
+		ExpectedAudience: "aud",
+		Now:              now,
+		Leeway:           60 * time.Second, // only 60s allowed → 10min iat is future
+	}); err != ErrKeyBindingInvalid {
+		t.Fatalf("want ErrKeyBindingInvalid (future iat), got %v", err)
+	}
+}
+
+// TestKeyBindingBadKBJWTFormat — various malformed KB-JWT formats must be rejected.
+func TestKeyBindingBadKBJWTFormat(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	holderPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("h", map[string]any{"a": 1}, nil, holderPub, time.Hour)
+	base, _ := Present(sdjwt, []string{"a"})
+
+	// Attach a KB-JWT with too few segments (only 2 parts).
+	pres1 := base + "onlytwo.parts"
+	if _, err := VerifySDJWTWithBinding(pres1, iss.PublicKey(), VerifyOptions{}); err != ErrKeyBindingInvalid {
+		t.Fatalf("two-segment KB-JWT: want ErrKeyBindingInvalid, got %v", err)
+	}
+	// Attach a KB-JWT whose header is invalid base64.
+	pres2 := base + "!!!.payload.sig"
+	if _, err := VerifySDJWTWithBinding(pres2, iss.PublicKey(), VerifyOptions{}); err != ErrKeyBindingInvalid {
+		t.Fatalf("bad-base64 header: want ErrKeyBindingInvalid, got %v", err)
+	}
+	// Attach a KB-JWT with a valid base64 header but wrong typ.
+	wrongTypHdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT"}`))
+	pres3 := base + wrongTypHdr + ".payload.sig"
+	if _, err := VerifySDJWTWithBinding(pres3, iss.PublicKey(), VerifyOptions{}); err != ErrKeyBindingInvalid {
+		t.Fatalf("wrong typ: want ErrKeyBindingInvalid, got %v", err)
+	}
+}
+
+// TestKeyBindingMissingIat — a KB-JWT without iat must be rejected.
+func TestKeyBindingMissingIat(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("h", map[string]any{"a": 1}, nil, holderPub, time.Hour)
+	base, _ := Present(sdjwt, []string{"a"})
+	kb := craftKBJWT(t, holderPriv, map[string]any{
+		"nonce":   "n",
+		"aud":     "aud",
+		"sd_hash": sdHashFor(base),
+		// no "iat" — must be rejected
+	})
+	pres := base + kb
+	if _, err := VerifySDJWTWithBinding(pres, iss.PublicKey(), VerifyOptions{
+		ExpectedNonce:    "n",
+		ExpectedAudience: "aud",
+	}); err != ErrKeyBindingInvalid {
+		t.Fatalf("want ErrKeyBindingInvalid (missing iat), got %v", err)
 	}
 }

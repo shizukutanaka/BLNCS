@@ -161,3 +161,32 @@ func TestCheckRevokedMissingList(t *testing.T) {
 		t.Fatalf("want ErrStatusListRequired, got %v", err)
 	}
 }
+
+// TestCheckRevokedTokenBadToken — a malformed status list token must propagate the error.
+func TestCheckRevokedTokenBadToken(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	_, statusPriv, _ := ed25519.GenerateKey(rand.Reader)
+	statusPub := statusPriv.Public().(ed25519.PublicKey)
+	ref := &StatusRef{URI: "https://issuer.example/s/1", Index: 0}
+	sdjwt, _, _ := iss.IssueSDJWTStatus("s", map[string]any{"a": 1}, nil, ref, time.Hour)
+	vc, _ := VerifySDJWT(sdjwt, iss.PublicKey())
+	if _, err := CheckRevokedToken(vc, "not-a-valid-token", statusPub); err == nil {
+		t.Error("invalid token should return an error")
+	}
+}
+
+// TestCheckRevokedTokenNilVC — nil vc and nil Status must return (false, nil).
+func TestCheckRevokedTokenNilVC(t *testing.T) {
+	_, statusPriv, _ := ed25519.GenerateKey(rand.Reader)
+	statusPub := statusPriv.Public().(ed25519.PublicKey)
+	list := revocation.NewBitstringStatusList(revocation.PurposeRevocation, revocation.MinBitstringSize)
+	token, _ := list.IssueToken("did:web:iss", "https://issuer.example/status/1", statusPriv, time.Hour)
+
+	if revoked, err := CheckRevokedToken(nil, token, statusPub); revoked || err != nil {
+		t.Errorf("nil vc: want (false,nil), got (%v,%v)", revoked, err)
+	}
+	noStatus := &VerifiedClaims{}
+	if revoked, err := CheckRevokedToken(noStatus, token, statusPub); revoked || err != nil {
+		t.Errorf("nil status: want (false,nil), got (%v,%v)", revoked, err)
+	}
+}

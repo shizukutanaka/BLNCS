@@ -100,3 +100,12 @@ func TestParseLinksetMissingAnchor(t *testing.T) {
 		t.Error("missing anchor should error")
 	}
 }
+
+// TestLinksetAddNilMap — Add on a zero-value Linkset (nil links map) must not panic.
+func TestLinksetAddNilMap(t *testing.T) {
+	ls := &Linkset{Anchor: "https://id.example/01/04012345678901"}
+	ls.Add(LinkTypeDPP, Link{Href: "https://dpp.example/p/1"})
+	if got := ls.Get(LinkTypeDPP); len(got) != 1 {
+		t.Errorf("expected 1 link after Add on nil-map Linkset, got %d", len(got))
+	}
+}

@@ -70,3 +70,13 @@ func TestEdDSAStillDefault(t *testing.T) {
 		t.Fatalf("built-in EdDSA must verify: %v", err)
 	}
 }
+
+func TestRegisterJWSVerifierNilGuard(t *testing.T) {
+	// Empty alg and nil verifier must be silently ignored (no panic, no side-effect).
+	RegisterJWSVerifier("", func(pub, msg, sig []byte) bool { return true })
+	RegisterJWSVerifier("custom-alg-guard-test", nil)
+	// The empty-alg registration must not have added anything.
+	if _, ok := lookupJWSVerifier(""); ok {
+		t.Error("empty alg must not be registered")
+	}
+}
