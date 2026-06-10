@@ -314,3 +314,36 @@ func TestCipherKeyID(t *testing.T) {
 		t.Errorf("KeyID: got %x want %x", c.KeyID(), id)
 	}
 }
+
+// ============================================================================
+// ActiveKeyID on empty keyring
+// ============================================================================
+
+func TestActiveKeyIDEmptyKeyring(t *testing.T) {
+	kr := NewKeyring()
+	id := kr.ActiveKeyID()
+	// Active key on empty keyring should be the zero value.
+	var zero [keyIDSize]byte
+	if id != zero {
+		t.Errorf("empty keyring ActiveKeyID: want zero, got %x", id)
+	}
+}
+
+// ============================================================================
+// NewCipher — Encrypt path: bad reader is untestable, but cover the path
+// where the nonce is written properly (already tested) vs. nil active cipher.
+// The coverage gap is in GenerateKey I/O failure — untestable in unit tests
+// without replacing rand.Reader. Accept the gap and add a simple functional check.
+// ============================================================================
+
+func TestNewCipherValidKey(t *testing.T) {
+	id := KeyIDFromUint32(7)
+	key := make([]byte, KeySize)
+	c, err := NewCipher(id, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.KeyID() != id {
+		t.Errorf("KeyID: %x", c.KeyID())
+	}
+}

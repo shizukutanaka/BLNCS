@@ -954,3 +954,149 @@ func TestVerifyProofJWTBadPayloadJSON(t *testing.T) {
 		t.Fatalf("bad payload JSON: want ErrInvalidProof, got %v", err)
 	}
 }
+
+// ============================================================================
+// handleToken — uncovered HTTP paths
+// ============================================================================
+
+func TestHandleTokenMethodNotAllowed(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET /token: want 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleTokenMissingPreAuthCode(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.PostForm(ts.URL+"/token", map[string][]string{
+		"grant_type": {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		// pre-authorized_code intentionally omitted
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing code: want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleTokenUnsupportedGrantType(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.PostForm(ts.URL+"/token", map[string][]string{
+		"grant_type": {"authorization_code"},
+		"code":       {"abc"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("wrong grant_type: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// handleCredential — uncovered HTTP paths
+// ============================================================================
+
+func TestHandleCredentialMethodNotAllowed(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET /credential: want 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleCredentialMissingBearer(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/credential", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	// No Authorization header
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("missing Bearer: want 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleCredentialBadJSON(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, err := iss.CreateOffer("eu-battery-passport-v1", "bat-bad-json",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 10.0},
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 50.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/credential", strings.NewReader(`{bad json`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad JSON body: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// IssueCredentialWithProof — RequireProof without proof in request
+// ============================================================================
+
+func TestIssueCredentialWithProofRequireProofMissing(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.RequireProof = true
+
+	_, code, err := iss.CreateOffer("eu-battery-passport-v1", "bat-require-proof",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 10.0},
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 50.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{})
+	if err != ErrInvalidProof {
+		t.Errorf("RequireProof without proof: want ErrInvalidProof, got %v", err)
+	}
+}

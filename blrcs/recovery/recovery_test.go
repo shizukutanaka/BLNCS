@@ -313,3 +313,56 @@ func TestWrap500OnPanicBeforeWrite(t *testing.T) {
 		t.Errorf("status got %d, want 500", rec.Code)
 	}
 }
+
+// ============================================================================
+// statusWriter.Flush — forwards to underlying Flusher when supported
+// ============================================================================
+
+// flusherRecorder wraps httptest.ResponseRecorder and records Flush calls.
+type flusherRecorder struct {
+	*httptest.ResponseRecorder
+	flushed int
+}
+
+func (f *flusherRecorder) Flush() {
+	f.flushed++
+	f.ResponseRecorder.Flush()
+}
+
+func TestStatusWriterFlushForwards(t *testing.T) {
+	// statusWriter should forward Flush() to the underlying ResponseWriter
+	// when it implements http.Flusher.
+	tel := telemetry.New(telemetry.NopRecorder{})
+	var sw *statusWriter
+	h := Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw = w.(*statusWriter)
+		// Flush via the wrapper — should reach the underlying Flusher
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		} else {
+			t.Error("wrapped writer should expose http.Flusher")
+		}
+	}), tel)
+
+	underlying := &flusherRecorder{ResponseRecorder: httptest.NewRecorder()}
+	h.ServeHTTP(underlying, httptest.NewRequest("GET", "/flush", nil))
+
+	if sw == nil {
+		t.Fatal("statusWriter not captured")
+	}
+	if underlying.flushed != 1 {
+		t.Errorf("Flush not forwarded: flushed=%d", underlying.flushed)
+	}
+}
+
+func TestStatusWriterFlushNoFlusher(t *testing.T) {
+	// When underlying ResponseWriter does NOT implement Flusher, Flush() must
+	// not panic.
+	sw := &statusWriter{ResponseWriter: httptest.NewRecorder()}
+	// Should be a no-op (httptest.ResponseRecorder DOES implement Flusher,
+	// so use a plain non-Flusher wrapper to exercise the nil-interface path).
+	type noFlusher struct{ http.ResponseWriter }
+	sw2 := &statusWriter{ResponseWriter: noFlusher{httptest.NewRecorder()}}
+	sw2.Flush() // must not panic
+	_ = sw
+}

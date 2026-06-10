@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -604,5 +606,46 @@ func TestResolveServicesCancelled(t *testing.T) {
 	_, err := r.ResolveServices(ctx, "did:web:x.example")
 	if err != context.Canceled {
 		t.Errorf("cancelled context should return Canceled, got %v", err)
+	}
+}
+
+// ============================================================================
+// defaultHTTPFetch — coverage for the real HTTP fetcher paths
+// ============================================================================
+
+func TestDefaultHTTPFetchNon200(t *testing.T) {
+	// Use a real httptest server returning 404 to exercise the HTTP != 200 path.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	_, err := defaultHTTPFetch(context.Background(), ts.URL+"/did.json")
+	if err == nil {
+		t.Fatal("non-200 response should return error")
+	}
+}
+
+func TestDefaultHTTPFetchSuccess(t *testing.T) {
+	body := `{"@context":["https://www.w3.org/ns/did/v1"],"id":"did:web:example.com"}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/did+json")
+		w.Write([]byte(body))
+	}))
+	defer ts.Close()
+
+	got, err := defaultHTTPFetch(context.Background(), ts.URL+"/did.json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("body mismatch: %q", got)
+	}
+}
+
+func TestDefaultHTTPFetchBadURL(t *testing.T) {
+	_, err := defaultHTTPFetch(context.Background(), "://not-a-valid-url")
+	if err == nil {
+		t.Fatal("bad URL should return error")
 	}
 }
