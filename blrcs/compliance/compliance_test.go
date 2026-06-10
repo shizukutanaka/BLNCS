@@ -4,6 +4,7 @@ package compliance
 
 import (
 	"crypto/rand"
+	"errors"
 	"testing"
 	"time"
 )
@@ -298,5 +299,34 @@ func TestIssueWithStatusValidation(t *testing.T) {
 	// Negative index
 	if _, err := iss.IssueWithStatus(PassportClaim{ProductID: "P1"}, time.Hour, "https://x", -1, "revocation"); err == nil {
 		t.Error("negative index should error")
+	}
+}
+
+// ============================================================================
+// Verify — uncovered error paths
+// ============================================================================
+
+func TestVerifyNilProof(t *testing.T) {
+	iss, _ := NewIssuer("did:web:v.test")
+	cred, _ := iss.Issue(PassportClaim{ProductID: "P1"}, time.Hour)
+	cred.Proof = nil
+	if err := Verify(cred, iss.PublicKey()); !errors.Is(err, ErrNoProof) {
+		t.Errorf("nil proof: want ErrNoProof, got %v", err)
+	}
+}
+
+func TestVerifyBadProofValueBase64(t *testing.T) {
+	iss, _ := NewIssuer("did:web:v2.test")
+	cred, _ := iss.Issue(PassportClaim{ProductID: "P2"}, time.Hour)
+	cred.Proof.ProofValue = "!!not-valid-base64!!"
+	if err := Verify(cred, iss.PublicKey()); err == nil {
+		t.Error("bad base64 ProofValue should fail")
+	}
+}
+
+func TestNewIssuerEmptyID(t *testing.T) {
+	_, err := NewIssuer("")
+	if err == nil {
+		t.Error("empty issuer ID should fail")
 	}
 }
