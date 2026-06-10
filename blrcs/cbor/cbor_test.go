@@ -627,3 +627,47 @@ func TestAppendAnyKeyMapKeyError(t *testing.T) {
 		t.Fatal("unsupported key type in any-key map should error")
 	}
 }
+
+// TestAppendAnyKeyMapValueError verifies appendAnyKeyMap propagates a value-encoding error.
+func TestAppendAnyKeyMapValueError(t *testing.T) {
+	if _, err := Marshal(map[any]any{uint64(1): struct{ X int }{42}}); err == nil {
+		t.Fatal("unsupported value type in any-key map should error")
+	}
+}
+
+// TestDecodeHeadTruncated25 exercises the readN(2) error path in decodeHead case 25.
+func TestDecodeHeadTruncated25(t *testing.T) {
+	// 0x19 = major 0 (uint), add=25 → expects 2-byte argument, but no bytes follow
+	if _, err := Unmarshal([]byte{0x19}); err == nil {
+		t.Fatal("truncated 2-byte uint arg should error")
+	}
+}
+
+// TestDecodeHeadTruncated26 exercises the readN(4) error path in decodeHead case 26.
+func TestDecodeHeadTruncated26(t *testing.T) {
+	// 0x1a = major 0 (uint), add=26 → expects 4-byte argument, but no bytes follow
+	if _, err := Unmarshal([]byte{0x1a}); err == nil {
+		t.Fatal("truncated 4-byte uint arg should error")
+	}
+}
+
+// TestDecodeHeadTruncated27 exercises the readN(8) error path in decodeHead case 27.
+func TestDecodeHeadTruncated27(t *testing.T) {
+	// 0x1b = major 0 (uint), add=27 → expects 8-byte argument, but no bytes follow
+	if _, err := Unmarshal([]byte{0x1b}); err == nil {
+		t.Fatal("truncated 8-byte uint arg should error")
+	}
+}
+
+// TestDecodeTextTooLarge exercises the majorText size guard in decode.
+func TestDecodeTextTooLarge(t *testing.T) {
+	// 0x7b = major 3 (text), add=27 → 8-byte length follows.
+	// Encode length 0x0000000001000001 = 16777217 > maxItems (16777216).
+	data := []byte{
+		0x7b,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("oversized text string should error")
+	}
+}

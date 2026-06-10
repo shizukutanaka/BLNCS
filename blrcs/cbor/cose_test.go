@@ -267,6 +267,58 @@ func TestSigStructureFormat(t *testing.T) {
 	}
 }
 
+// TestParseHeaderBadCBOR exercises the Unmarshal error path in parseHeader.
+func TestParseHeaderBadCBOR(t *testing.T) {
+	// 0xff is the CBOR "break" byte — invalid outside indefinite-length encoding.
+	if _, err := parseHeader([]byte{0xff}); err == nil {
+		t.Fatal("invalid CBOR should fail Unmarshal in parseHeader")
+	}
+}
+
+// TestHeaderAlgNonInteger exercises the non-integer alg path in headerAlg.
+func TestHeaderAlgNonInteger(t *testing.T) {
+	h := Header{HeaderAlg: "EdDSA"} // string value, not integer
+	if _, err := headerAlg(h); err == nil {
+		t.Fatal("string alg value should fail headerAlg")
+	}
+}
+
+// TestVerify1ParseHeaderNotMap exercises the parseHeader error path in Verify1.
+// The protected bytes decode to an integer (not a map), so parseHeader fails.
+func TestVerify1ParseHeaderNotMap(t *testing.T) {
+	intCBOR, _ := Marshal(uint64(99))
+	b, _ := Marshal(Tag{
+		Number:  TagCOSESign1,
+		Content: []any{intCBOR, map[int]any{}, []byte("pay"), []byte("sig")},
+	})
+	if _, err := Verify1(b, ed25519.PublicKey(make([]byte, 32)), nil); err == nil {
+		t.Fatal("non-map protected bytes should fail parseHeader inside Verify1")
+	}
+}
+
+// TestVerify1AlgNotInteger exercises headerAlg's non-integer-alg error via Verify1.
+func TestVerify1AlgNotInteger(t *testing.T) {
+	// Protected header map with integer key 1 but string value "EdDSA".
+	protBytes, _ := Marshal(map[int]any{HeaderAlg: "EdDSA"})
+	b, _ := Marshal(Tag{
+		Number:  TagCOSESign1,
+		Content: []any{protBytes, map[int]any{}, []byte("pay"), []byte("sig")},
+	})
+	if _, err := Verify1(b, ed25519.PublicKey(make([]byte, 32)), nil); err == nil {
+		t.Fatal("string alg value should fail headerAlg inside Verify1")
+	}
+}
+
+// TestSign1EncodedHeaderError exercises the encodedHeader error path in Sign1.
+// A header with an unencodable value triggers Marshal failure.
+func TestSign1EncodedHeaderError(t *testing.T) {
+	priv, _ := genKey(t)
+	protected := Header{HeaderAlg: struct{ X int }{42}} // Marshal cannot encode struct
+	if _, err := Sign1(protected, nil, []byte("x"), nil, priv); err == nil {
+		t.Fatal("unencodable protected header should fail encodedHeader inside Sign1")
+	}
+}
+
 func TestCopyHeader(t *testing.T) {
 	orig := Header{1: int64(-7), 4: []byte("key-id")}
 	cp := copyHeader(orig)

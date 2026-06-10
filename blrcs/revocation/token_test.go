@@ -347,3 +347,48 @@ func TestVerifyStatusListTokenBadSigBase64(t *testing.T) {
 		t.Fatalf("want ErrTokenMalformed (bad sig base64), got %v", err)
 	}
 }
+
+// ============================================================================
+// Additional coverage: bad payload base64, bad payload JSON, bad IssueToken key
+// ============================================================================
+
+func craftValidSigToken(t *testing.T, priv ed25519.PrivateKey, hdrJSON, payloadSeg string) string {
+	t.Helper()
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(hdrJSON))
+	sig := ed25519.Sign(priv, []byte(hdr+"."+payloadSeg))
+	return hdr + "." + payloadSeg + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func TestVerifyStatusListTokenBadPayloadBase64(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	// Payload segment is not valid base64url — signature is valid for this token.
+	tok := craftValidSigToken(t, priv, `{"alg":"EdDSA","typ":"statuslist+jwt"}`, "!!!")
+	if _, _, err := VerifyStatusListToken(tok, pub, PurposeRevocation); err != ErrTokenMalformed {
+		t.Errorf("bad payload base64: want ErrTokenMalformed, got %v", err)
+	}
+}
+
+func TestVerifyStatusListTokenBadPayloadJSON(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	// Payload is valid base64 but decodes to non-JSON bytes.
+	pl := base64.RawURLEncoding.EncodeToString([]byte("not-valid-json{{{"))
+	tok := craftValidSigToken(t, priv, `{"alg":"EdDSA","typ":"statuslist+jwt"}`, pl)
+	if _, _, err := VerifyStatusListToken(tok, pub, PurposeRevocation); err != ErrTokenMalformed {
+		t.Errorf("bad payload JSON: want ErrTokenMalformed, got %v", err)
+	}
+}
+
+func TestIssueTokenInvalidPrivKey(t *testing.T) {
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	if _, err := list.IssueToken("iss", "uri", []byte("short"), time.Hour); err == nil {
+		t.Error("invalid private key should fail IssueToken")
+	}
+}
+
+func TestDecodeBitstringNotGzip(t *testing.T) {
+	// Valid base64url but decodes to non-gzip bytes → gzip.NewReader fails.
+	notGzip := base64.RawURLEncoding.EncodeToString([]byte("definitely-not-gzip-data"))
+	if _, err := DecodeBitstringStatusList(PurposeRevocation, notGzip); err == nil {
+		t.Error("non-gzip payload should fail DecodeBitstringStatusList")
+	}
+}

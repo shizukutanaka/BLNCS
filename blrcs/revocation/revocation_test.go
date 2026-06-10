@@ -296,6 +296,27 @@ func TestConcurrentRevocations(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Sign / Verify — invalid key guard paths
+// ============================================================================
+
+func TestSignInvalidPrivKey(t *testing.T) {
+	l := New("did:web:issuer.test")
+	if _, err := l.Sign([]byte("tooshort")); err == nil {
+		t.Error("invalid private key should fail Sign")
+	}
+}
+
+func TestVerifyInvalidPubKey(t *testing.T) {
+	_, priv := makeKeyPair(t)
+	l := New("did:web:issuer.test")
+	l.Revoke("cred-1", ReasonRecall, "")
+	signed, _ := l.Sign(priv)
+	if err := Verify(signed, []byte("tooshort")); err == nil {
+		t.Error("invalid public key should fail Verify")
+	}
+}
+
 // TestUnmarshalSignedListBadJSON covers the json.Unmarshal error path.
 func TestUnmarshalSignedListBadJSON(t *testing.T) {
 	_, err := UnmarshalSignedList([]byte("not valid json {{{"))
