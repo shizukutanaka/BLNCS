@@ -436,3 +436,88 @@ func TestSHA256Hex(t *testing.T) {
 		t.Errorf("sha256Hex: expected 64 hex chars, got %d", len(h))
 	}
 }
+
+// ============================================================================
+// Internal helper coverage
+// ============================================================================
+
+func TestContainsPlaceholderVariants(t *testing.T) {
+	// string with placeholder
+	if !containsPlaceholder(SCIDPlaceholder) {
+		t.Error("placeholder string should match")
+	}
+	// []any slice containing placeholder
+	if !containsPlaceholder([]any{"other", SCIDPlaceholder}) {
+		t.Error("slice containing placeholder should match")
+	}
+	// []any slice without placeholder
+	if containsPlaceholder([]any{"no", "placeholder"}) {
+		t.Error("slice without placeholder should not match")
+	}
+	// map[string]any containing placeholder value
+	if !containsPlaceholder(map[string]any{"k": SCIDPlaceholder}) {
+		t.Error("map with placeholder value should match")
+	}
+	// map[string]any without placeholder
+	if containsPlaceholder(map[string]any{"k": "safe"}) {
+		t.Error("map without placeholder should not match")
+	}
+	// non-string/slice/map type
+	if containsPlaceholder(42) {
+		t.Error("integer should not match")
+	}
+}
+
+func TestProofNamesKeyVariants(t *testing.T) {
+	mk := "z6Mk1234"
+	// Exact match
+	if !proofNamesKey(mk, mk) {
+		t.Error("exact match should return true")
+	}
+	// DID#multikey form
+	if !proofNamesKey("did:webvh:example#"+mk, mk) {
+		t.Error("did#multikey form should match")
+	}
+	// No hash in VM at all → fragment extraction fails → false
+	if proofNamesKey("did:webvh:example", mk) {
+		t.Error("VM with no fragment should not match")
+	}
+	// Wrong multikey after #
+	if proofNamesKey("did:webvh:example#wrongkey", mk) {
+		t.Error("wrong multikey should not match")
+	}
+}
+
+func TestLastHashVariants(t *testing.T) {
+	if lastHash("a#b#c") != 3 {
+		t.Error("last # should be at index 3")
+	}
+	if lastHash("nohash") != -1 {
+		t.Error("no # should return -1")
+	}
+}
+
+func TestEffectiveSCIDEmptyLog(t *testing.T) {
+	if s := effectiveSCID(nil); s != "" {
+		t.Errorf("empty log: want empty SCID, got %q", s)
+	}
+}
+
+func TestDIDFromStateNil(t *testing.T) {
+	if s := didFromState(nil); s != "" {
+		t.Errorf("nil state: want empty, got %q", s)
+	}
+}
+
+func TestSubstituteSCIDPassthrough(t *testing.T) {
+	// integer → pass through unchanged
+	result := substituteSCID(42, "from", "to")
+	if result != 42 {
+		t.Error("non-string/slice/map should pass through")
+	}
+	// empty from → string value unchanged
+	result = substituteSCID("hello", "", "to")
+	if result != "hello" {
+		t.Error("empty from → no substitution")
+	}
+}

@@ -258,3 +258,37 @@ func TestRunCancelledMid(t *testing.T) {
 		t.Error("cancelled context should produce skipped or failed checks")
 	}
 }
+
+// TestPrintToSkipMark — ensure the "—" skip mark is rendered in PrintTo output.
+func TestPrintToSkipMark(t *testing.T) {
+	// Inject a pre-cancelled context so the second check is skipped.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before Run so all checks are skipped
+	checks := []Check{
+		{Name: "skip-me", Fn: func(ctx context.Context) error { return nil }},
+	}
+	report := Run(ctx, checks)
+	var buf bytes.Buffer
+	report.PrintTo(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "—") && !strings.Contains(out, "skipped") {
+		t.Errorf("PrintTo should show skip mark or 'skipped': %s", out)
+	}
+}
+
+// TestPrintToSkippedCount — skipped count appears in footer when > 0.
+func TestPrintToSkippedCount(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel before first check runs → all checks skipped.
+	cancel()
+	report := Run(ctx, []Check{
+		{Name: "a", Fn: func(_ context.Context) error { return nil }},
+		{Name: "b", Fn: func(_ context.Context) error { return nil }},
+	})
+	var buf bytes.Buffer
+	report.PrintTo(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "skipped") {
+		t.Errorf("should mention skipped count in summary: %s", out)
+	}
+}

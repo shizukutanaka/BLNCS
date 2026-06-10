@@ -425,3 +425,117 @@ func TestPresentUnknownNamespace(t *testing.T) {
 	// Verify that the result still verifies correctly for existing items.
 	_ = result
 }
+
+// ============================================================================
+// Internal helper coverage: parseTDate, parseValidity, decodeTagged24,
+// parseValueDigests, parseDeviceKey, itemElementID
+// ============================================================================
+
+func TestParseTDateErrors(t *testing.T) {
+	// Not a tag at all → error
+	if _, err := parseTDate("plain string"); err == nil {
+		t.Error("non-tag should fail parseTDate")
+	}
+	// Tag with wrong number (not 0)
+	if _, err := parseTDate(cbor.Tag{Number: 1, Content: "2024-01-01T00:00:00Z"}); err == nil {
+		t.Error("wrong tag number should fail")
+	}
+	// Correct tag number but non-string content
+	if _, err := parseTDate(cbor.Tag{Number: tagDateTime, Content: 42}); err == nil {
+		t.Error("non-string content should fail")
+	}
+	// Correct tag number and string but not RFC3339
+	if _, err := parseTDate(cbor.Tag{Number: tagDateTime, Content: "not-a-date"}); err == nil {
+		t.Error("invalid date string should fail")
+	}
+}
+
+func TestParseValidityErrors(t *testing.T) {
+	// Non-map input → error
+	if _, err := parseValidity("string"); err == nil {
+		t.Error("non-map should fail parseValidity")
+	}
+	goodTDate := cbor.Tag{Number: tagDateTime, Content: "2024-01-01T00:00:00Z"}
+	// Missing validFrom key → parseTDate fails on nil
+	m := map[any]any{viSigned: goodTDate}
+	if _, err := parseValidity(m); err == nil {
+		t.Error("missing validFrom should fail")
+	}
+	// Missing validUntil
+	m2 := map[any]any{viSigned: goodTDate, viValidFrom: goodTDate}
+	if _, err := parseValidity(m2); err == nil {
+		t.Error("missing validUntil should fail")
+	}
+}
+
+func TestDecodeTagged24Errors(t *testing.T) {
+	// Not a tag → error
+	notTagBytes, _ := cbor.Marshal("plain string")
+	if _, err := decodeTagged24(notTagBytes); err == nil {
+		t.Error("non-tag input should fail")
+	}
+	// Tag with wrong number (not 24) - encode a CBOR tag 0 with a string
+	// Tag 24 expects bstr content; we can't easily craft wrong-tag CBOR without
+	// the encoder. Instead test via cbor.Marshal of a cbor.Tag.
+	wrongTagBytes, _ := cbor.Marshal(cbor.Tag{Number: 99, Content: []byte{0x01}})
+	if _, err := decodeTagged24(wrongTagBytes); err == nil {
+		t.Error("wrong tag number should fail decodeTagged24")
+	}
+}
+
+func TestParseValueDigestsErrors(t *testing.T) {
+	// Non-map → error
+	if _, err := parseValueDigests("string"); err == nil {
+		t.Error("non-map should fail")
+	}
+	// Map with non-string namespace key
+	m := map[any]any{42: map[any]any{}}
+	if _, err := parseValueDigests(m); err == nil {
+		t.Error("non-string ns key should fail")
+	}
+	// Map with namespace having non-map digest value
+	m2 := map[any]any{"ns": "not-a-map"}
+	if _, err := parseValueDigests(m2); err == nil {
+		t.Error("non-map digest value should fail")
+	}
+	// Map with non-int digest ID
+	m3 := map[any]any{"ns": map[any]any{"badid": []byte{0x01}}}
+	if _, err := parseValueDigests(m3); err == nil {
+		t.Error("non-int digest ID should fail")
+	}
+}
+
+func TestParseDeviceKeyMissing(t *testing.T) {
+	// Non-map → nil key
+	if k := parseDeviceKey("string"); k != nil {
+		t.Error("non-map should return nil")
+	}
+	// Map without deviceKey → nil
+	if k := parseDeviceKey(map[any]any{}); k != nil {
+		t.Error("missing deviceKey should return nil")
+	}
+	// deviceKey not a map → nil
+	if k := parseDeviceKey(map[any]any{"deviceKey": "bad"}); k != nil {
+		t.Error("non-map deviceKey should return nil")
+	}
+}
+
+func TestItemElementIDErrors(t *testing.T) {
+	// Not a tag → error
+	if _, err := itemElementID("plain"); err == nil {
+		t.Error("non-tag should fail itemElementID")
+	}
+	// Tag with wrong number
+	if _, err := itemElementID(cbor.Tag{Number: 99, Content: []byte{0x01}}); err == nil {
+		t.Error("wrong tag number should fail")
+	}
+	// Correct tag but non-bstr content
+	if _, err := itemElementID(cbor.Tag{Number: tagEncodedCBOR, Content: "string"}); err == nil {
+		t.Error("non-bstr tag content should fail")
+	}
+	// bstr that decodes to a non-map CBOR value
+	strBytes, _ := cbor.Marshal("just a string")
+	if _, err := itemElementID(cbor.Tag{Number: tagEncodedCBOR, Content: strBytes}); err == nil {
+		t.Error("non-map inner CBOR should fail")
+	}
+}

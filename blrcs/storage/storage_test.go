@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -246,4 +247,108 @@ func bytesEqual(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// ============================================================================
+// Additional coverage: keypair, bad blob size, second Close, callback error
+// ============================================================================
+
+func TestFileStorage_KeyPairRoundTrip(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kp-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Before any key is stored, LoadKeyPair must return ErrNotFound.
+	if _, _, err := s.LoadKeyPair(); err != ErrNotFound {
+		t.Fatalf("want ErrNotFound before save, got %v", err)
+	}
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	if err := s.SaveKeyPair(pub, priv); err != nil {
+		t.Fatal(err)
+	}
+	// Reload and verify round-trip.
+	gotPub, gotPriv, err := s.LoadKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytesEqual(pub, gotPub) || !bytesEqual(priv, gotPriv) {
+		t.Error("keypair round-trip mismatch")
+	}
+}
+
+func TestFileStorage_SaveKeyPairWrongSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpbad-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	if err := s.SaveKeyPair([]byte("short"), []byte("short")); err == nil {
+		t.Error("wrong-size keypair should fail")
+	}
+}
+
+func TestFileStorage_LoadKeyPairBadSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpbad2-*")
+	defer os.RemoveAll(dir)
+	// Write a keypair file with wrong length.
+	p := filepath.Join(dir, "keypair.bin")
+	if err := os.WriteFile(p, []byte("too short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	if _, _, err := s.LoadKeyPair(); err == nil {
+		t.Error("bad-size keypair file should fail")
+	}
+}
+
+func TestFileStorage_AppendBadBlobSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-badblob-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	// Empty blob → error.
+	if _, err := s.AppendStatement([]byte{}); err == nil {
+		t.Error("empty blob should fail")
+	}
+	// Oversized blob > 16 MiB → error.
+	big := make([]byte, 16*1024*1024+1)
+	if _, err := s.AppendStatement(big); err == nil {
+		t.Error("oversized blob should fail")
+	}
+}
+
+func TestFileStorage_IterateCallbackError(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-iter-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	s.AppendStatement([]byte(`{"a":1}`))
+	s.AppendStatement([]byte(`{"b":2}`))
+	boom := errors.New("callback boom")
+	err := s.IterateStatements(func(idx uint64, _ StatementBlob) error {
+		if idx == 0 {
+			return boom
+		}
+		return nil
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("want callback error propagated, got %v", err)
+	}
+}
+
+func TestFileStorage_CloseIdempotent(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-close2-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Second Close must return nil (idempotent).
+	if err := s.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
 }
