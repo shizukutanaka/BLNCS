@@ -608,3 +608,98 @@ func TestVerifyEntryProofNoUpdateKeys(t *testing.T) {
 		t.Fatalf("want ErrNoUpdateKeys, got %v", err)
 	}
 }
+
+// ============================================================================
+// Guard-clause paths: Create/Update nil-key, Update empty log, Verify no SCID
+// ============================================================================
+
+func TestCreateNilUpdateKey(t *testing.T) {
+	_, _, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: nil})
+	if err == nil {
+		t.Fatal("Create with nil UpdateKey should return an error")
+	}
+}
+
+func TestUpdateEmptyLog(t *testing.T) {
+	updateKey, _ := genKey(t)
+	_, err := Update(UpdateParams{Log: nil, SignKey: updateKey})
+	if !errors.Is(err, ErrEmptyLog) {
+		t.Fatalf("Update with empty log: want ErrEmptyLog, got %v", err)
+	}
+}
+
+func TestUpdateNilSignKey(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, _, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Update(UpdateParams{Log: []LogEntry{*genesis}, SignKey: nil})
+	if err == nil {
+		t.Fatal("Update with nil SignKey should return an error")
+	}
+}
+
+func TestVerifyGenesisNoSCID(t *testing.T) {
+	entry := LogEntry{
+		VersionID:   "1-somehash",
+		VersionTime: time.Now().UTC().Format(time.RFC3339),
+		Parameters:  Parameters{SCID: ""}, // empty SCID
+		State:       map[string]any{"id": "did:webvh:x:example.com"},
+	}
+	_, err := Verify([]LogEntry{entry})
+	if !errors.Is(err, ErrMalformedEntry) {
+		t.Fatalf("genesis with empty SCID: want ErrMalformedEntry, got %v", err)
+	}
+}
+
+func TestVerifyProofTamperedValue(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, did, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Tamper the proof value so it becomes invalid base58/signature.
+	genesis.Proof[0].ProofValue = "zBADBADBADBADBADBADBAD"
+	log := []LogEntry{*genesis}
+	upd, _ := Update(UpdateParams{
+		Log:         log,
+		SignKey:     updateKey,
+		NewState:    map[string]any{"id": did},
+		VersionTime: time.Now().Add(time.Second),
+	})
+	// Build a fresh log with the tampered genesis; the hash chain is already broken.
+	if _, err := Verify([]LogEntry{*genesis, *upd}); err == nil {
+		t.Fatal("tampered proof value should fail Verify")
+	}
+}
+
+func TestUpdateWithNoUpdateKeysParam(t *testing.T) {
+	updateKey, updateMK := genKey(t)
+	genesis, did, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := []LogEntry{*genesis}
+	// UpdateKeys nil → should inherit effective keys from log.
+	upd, err := Update(UpdateParams{
+		Log:         log,
+		SignKey:     updateKey,
+		NewState:    map[string]any{"id": did, "v": "2"},
+		UpdateKeys:  nil, // back-fill from log
+		VersionTime: time.Now().Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("Update with nil UpdateKeys should back-fill: %v", err)
+	}
+	log = append(log, *upd)
+	res, err := Verify(log)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	// The inherited key must still be in effect.
+	if len(res.Document) == 0 {
+		t.Error("document should be resolved")
+	}
+	_ = updateMK
+}

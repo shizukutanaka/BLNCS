@@ -417,3 +417,28 @@ func TestFullChainIntegration(t *testing.T) {
 		t.Errorf("traceID: %s", seenTraceID)
 	}
 }
+
+// TestIsLowerHexCoverage exercises all branches of the internal isLowerHex
+// helper, covering the empty-string and invalid-character return paths which
+// are never reached via the traceparent middleware tests alone.
+func TestIsLowerHexCoverage(t *testing.T) {
+	// Empty string → false
+	if isLowerHex("") {
+		t.Error("empty string should not be lower hex")
+	}
+	// Non-hex character → false
+	if isLowerHex("ABCDEF") { // uppercase is not lowercase hex
+		t.Error("uppercase ABCDEF should not be lower hex")
+	}
+	if isLowerHex("xyz") {
+		t.Error("xyz should not be lower hex")
+	}
+	// Valid lowercase hex → true
+	if !isLowerHex("0123456789abcdef") {
+		t.Error("0123456789abcdef should be valid lower hex")
+	}
+	// Single digit
+	if !isLowerHex("a") {
+		t.Error("single 'a' should be valid lower hex")
+	}
+}

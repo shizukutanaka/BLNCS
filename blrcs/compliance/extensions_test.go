@@ -599,3 +599,31 @@ func TestVerifySDJWTWithBindingCNFBadX(t *testing.T) {
 		t.Errorf("wrong issuer key: want ErrSDJWTSigFailed, got %v", err)
 	}
 }
+
+// TestExtractHolderKeyEdgeCases covers the internal extractHolderKey branches
+// that aren't exercised by the indirect tests above.
+func TestExtractHolderKeyEdgeCases(t *testing.T) {
+	// cnf is a map but has no "jwk" key → nil
+	noJWK := map[string]any{"cnf": map[string]any{"other": "value"}}
+	if k := extractHolderKey(noJWK); k != nil {
+		t.Error("cnf without jwk should return nil")
+	}
+
+	// cnf is a map, jwk is a non-map value → nil
+	badJWK := map[string]any{"cnf": map[string]any{"jwk": "not-a-map"}}
+	if k := extractHolderKey(badJWK); k != nil {
+		t.Error("cnf with non-map jwk should return nil")
+	}
+
+	// cnf.jwk present but "x" is not a string → nil
+	noX := map[string]any{"cnf": map[string]any{"jwk": map[string]any{"kty": "OKP"}}}
+	if k := extractHolderKey(noX); k != nil {
+		t.Error("jwk without x should return nil")
+	}
+
+	// cnf.jwk.x is valid base64url but wrong length → nil
+	shortX := map[string]any{"cnf": map[string]any{"jwk": map[string]any{"x": "dG9vc2hvcnQ"}}} // "tooshort"
+	if k := extractHolderKey(shortX); k != nil {
+		t.Error("jwk.x with wrong length should return nil")
+	}
+}

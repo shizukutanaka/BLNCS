@@ -250,3 +250,100 @@ func TestLiveTokenHandlerCachesToken(t *testing.T) {
 		t.Error("expected cached token to be identical across two requests within refresh interval")
 	}
 }
+
+// ============================================================================
+// VerifyStatusListToken — error path coverage
+// ============================================================================
+
+func TestVerifyStatusListTokenBadKeyLength(t *testing.T) {
+	// Key shorter than ed25519.PublicKeySize → immediate ErrTokenSigFailed
+	_, _, err := VerifyStatusListToken("x.y.z", []byte("tooshort"), PurposeRevocation)
+	if err != ErrTokenSigFailed {
+		t.Fatalf("want ErrTokenSigFailed, got %v", err)
+	}
+}
+
+func TestVerifyStatusListTokenBadFormat(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	// Not enough dots → not 3 segments
+	_, _, err := VerifyStatusListToken("only-one-segment", pub, PurposeRevocation)
+	if err != ErrTokenMalformed {
+		t.Fatalf("want ErrTokenMalformed (bad format), got %v", err)
+	}
+}
+
+func TestVerifyStatusListTokenBadHeaderBase64(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	// Segment 0 is not valid base64url
+	_, _, err := VerifyStatusListToken("!!!.payload.sig", pub, PurposeRevocation)
+	if err != ErrTokenMalformed {
+		t.Fatalf("want ErrTokenMalformed (bad header base64), got %v", err)
+	}
+}
+
+func TestVerifyStatusListTokenBadHeaderJSON(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	// Header is valid base64url but not valid JSON
+	hdr := base64.RawURLEncoding.EncodeToString([]byte("not json"))
+	_, _, err := VerifyStatusListToken(hdr+".payload.sig", pub, PurposeRevocation)
+	if err != ErrTokenMalformed {
+		t.Fatalf("want ErrTokenMalformed (bad header JSON), got %v", err)
+	}
+}
+
+func TestVerifyStatusListTokenWrongAlg(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	// Header has wrong Alg
+	hdrJSON, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "statuslist+jwt"})
+	hdr := base64.RawURLEncoding.EncodeToString(hdrJSON)
+	_, _, err := VerifyStatusListToken(hdr+".payload.sig", pub, PurposeRevocation)
+	if err != ErrTokenMalformed {
+		t.Fatalf("want ErrTokenMalformed (wrong alg), got %v", err)
+	}
+}
+
+func TestVerifyStatusListTokenExpired(t *testing.T) {
+	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	enc, _ := list.EncodedList()
+
+	// Craft a JWT with exp 200s in the past (well past the 60s leeway).
+	expiredExp := time.Now().Add(-200 * time.Second).Unix()
+	claims := map[string]any{
+		"sub": "https://issuer/status/1",
+		"iss": "did:web:issuer",
+		"iat": time.Now().Unix(),
+		"exp": expiredExp,
+		"status_list": map[string]any{"bits": 1, "lst": enc},
+	}
+	hdrJSON := `{"alg":"EdDSA","typ":"statuslist+jwt"}`
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(hdrJSON))
+	plBytes, _ := json.Marshal(claims)
+	pl := base64.RawURLEncoding.EncodeToString(plBytes)
+	sig := ed25519.Sign(privKey, []byte(hdr+"."+pl))
+	tok := hdr + "." + pl + "." + base64.RawURLEncoding.EncodeToString(sig)
+
+	_, _, err = VerifyStatusListToken(tok, pubKey, PurposeRevocation)
+	if err != ErrTokenExpired {
+		t.Fatalf("want ErrTokenExpired, got %v", err)
+	}
+}
+
+func TestVerifyStatusListTokenBadSigBase64(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	tok, err := list.IssueToken("did:web:issuer", "https://issuer/status/1", priv, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt the signature segment
+	parts := strings.SplitN(tok, ".", 3)
+	corrupted := parts[0] + "." + parts[1] + ".!!!"
+	_, _, err = VerifyStatusListToken(corrupted, pub, PurposeRevocation)
+	if err != ErrTokenMalformed {
+		t.Fatalf("want ErrTokenMalformed (bad sig base64), got %v", err)
+	}
+}

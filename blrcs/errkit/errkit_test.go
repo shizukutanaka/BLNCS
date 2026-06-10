@@ -256,3 +256,13 @@ func TestErrorWithDetail(t *testing.T) {
 		t.Errorf("missing wrapped cause in Error(): %s", msg)
 	}
 }
+
+// TestPublicErrorFallsBackToCode covers the branch where PublicMessage is empty
+// and PublicError() falls back to returning string(e.Code).
+func TestPublicErrorFallsBackToCode(t *testing.T) {
+	e := &Error{Code: CodeNotFound} // no PublicMessage
+	pub := e.PublicError()
+	if pub != string(CodeNotFound) {
+		t.Errorf("PublicError fallback: want %q, got %q", string(CodeNotFound), pub)
+	}
+}

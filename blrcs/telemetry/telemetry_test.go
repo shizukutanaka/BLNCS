@@ -321,3 +321,32 @@ func TestSetDefault(t *testing.T) {
 		t.Error("SetDefault did not take effect")
 	}
 }
+
+// TestNewNilRecorderFallback covers the nil-recorder path in New: when a nil
+// Recorder is passed, New must substitute a NopRecorder so later calls don't
+// panic.
+func TestNewNilRecorderFallback(t *testing.T) {
+	tel := New(nil)
+	if tel == nil {
+		t.Fatal("New(nil) returned nil Telemetry")
+	}
+	// Verify it works — no panic
+	tel.Info("nop.event")
+}
+
+// TestSpanRecordErrorNil covers the "if err == nil { return }" guard in
+// RecordError so a nil error is a no-op and does not affect the span's error
+// state.
+func TestSpanRecordErrorNil(t *testing.T) {
+	rec := &captureRecorder{}
+	tel := New(rec)
+	span := tel.StartSpan(context.Background(), "Op.NilErr")
+	span.RecordError(nil) // must be a no-op
+	span.End()
+	// No error recorded → End should emit "<name>.end", not "<name>.error"
+	names := rec.names()
+	last := names[len(names)-1]
+	if last != "Op.NilErr.end" {
+		t.Errorf("nil RecordError should leave span clean; got event %q", last)
+	}
+}

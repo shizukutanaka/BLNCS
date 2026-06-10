@@ -72,6 +72,7 @@ const (
 	errInvalidRequest = -32600
 	errMethodNotFound = -32601
 	errInvalidParams  = -32602
+	errRateLimit      = -32000 // server-defined: rate limit exceeded
 )
 
 // ============================================================================
@@ -132,6 +133,7 @@ type Server struct {
 	attesters  map[string]*compliance.SensorAttester
 	ledger     *scitt.Ledger
 	selfIssuer *compliance.Issuer
+	limiter    *ToolLimiter // per-tool rate limiter; nil = unlimited
 }
 
 func NewServer(tsID, serverDID string) (*Server, error) {
@@ -316,6 +318,12 @@ func (s *Server) handleToolCall(id json.RawMessage, params json.RawMessage) *rpc
 	var p toolCallParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return errorResp(id, errInvalidParams, "bad params", err.Error())
+	}
+	s.mu.RLock()
+	lim := s.limiter
+	s.mu.RUnlock()
+	if lim != nil && !lim.Allow(p.Name) {
+		return errorResp(id, errRateLimit, "rate limit exceeded for tool: "+p.Name, nil)
 	}
 	// Only mutating tools are audited to the transparency log. Read-only tools
 	// (verify_*, get_*, checkpoint) must not append a ledger leaf per call —
