@@ -197,3 +197,62 @@ func TestPublicErrorNilWrapped(t *testing.T) {
 		t.Error("PublicError should not be empty")
 	}
 }
+
+func TestErrorIsExtended(t *testing.T) {
+	e := E(OpDPPIssue, CodeNotFound, "not found", nil)
+	// Same code → Is returns true
+	if !e.Is(&Error{Code: CodeNotFound}) {
+		t.Error("same code should match")
+	}
+	// Different code → Is returns false
+	if e.Is(&Error{Code: CodeForbidden}) {
+		t.Error("different code should not match")
+	}
+	// Target is not *Error → Is returns false
+	if e.Is(errors.New("random error")) {
+		t.Error("non-Error target should not match")
+	}
+	// Same Op → match
+	if !e.Is(&Error{Op: OpDPPIssue}) {
+		t.Error("same op should match")
+	}
+	// Different Op → no match
+	if e.Is(&Error{Op: OpDPPVerify}) {
+		t.Error("different op should not match")
+	}
+}
+
+func TestIsRetryable(t *testing.T) {
+	retryable := Retryable(OpScittRegister, CodeInternal, "try again", nil)
+	if !IsRetryable(retryable) {
+		t.Error("retryable error should be retryable")
+	}
+	notRetryable := E(OpDPPIssue, CodeNotFound, "missing", nil)
+	if IsRetryable(notRetryable) {
+		t.Error("non-retryable error should not be retryable")
+	}
+	// nil → not retryable
+	if IsRetryable(nil) {
+		t.Error("nil error should not be retryable")
+	}
+}
+
+func TestErrorWithDetail(t *testing.T) {
+	e := &Error{
+		Op:            OpDPPIssue,
+		Code:          CodeInvalidInput,
+		PublicMessage: "bad request",
+		Detail:        "field x is required",
+		Wrapped:       errors.New("inner"),
+	}
+	msg := e.Error()
+	if !strings.Contains(msg, "bad request") {
+		t.Errorf("missing PublicMessage in Error(): %s", msg)
+	}
+	if !strings.Contains(msg, "field x is required") {
+		t.Errorf("missing Detail in Error(): %s", msg)
+	}
+	if !strings.Contains(msg, "inner") {
+		t.Errorf("missing wrapped cause in Error(): %s", msg)
+	}
+}

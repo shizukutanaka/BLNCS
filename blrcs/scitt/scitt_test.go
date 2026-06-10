@@ -286,3 +286,50 @@ func TestWitnessID(t *testing.T) {
 		t.Errorf("Witness.PublicKey: len=%d", len(w.PublicKey()))
 	}
 }
+
+// ============================================================================
+// Internal helpers — hexDecode / hexChar / cachedRoot(0)
+// ============================================================================
+
+func TestHexDecodeValid(t *testing.T) {
+	b, err := hexDecode("deadbeef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != 4 || b[0] != 0xDE || b[3] != 0xEF {
+		t.Errorf("hexDecode: %x", b)
+	}
+}
+
+func TestHexDecodeUppercase(t *testing.T) {
+	b, err := hexDecode("DEADBEEF")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != 4 {
+		t.Errorf("hexDecode uppercase: %x", b)
+	}
+}
+
+func TestHexDecodeOddLength(t *testing.T) {
+	_, err := hexDecode("abc")
+	if err == nil {
+		t.Error("odd-length hex should fail")
+	}
+}
+
+func TestHexDecodeInvalidChar(t *testing.T) {
+	_, err := hexDecode("zz")
+	if err == nil {
+		t.Error("invalid hex char should fail")
+	}
+}
+
+func TestCachedRootEmptyTree(t *testing.T) {
+	l := &Ledger{}
+	root := l.cachedRoot(0)
+	// empty tree root = SHA-256 of empty input
+	if len(root) != 32 {
+		t.Errorf("empty root len: %d", len(root))
+	}
+}

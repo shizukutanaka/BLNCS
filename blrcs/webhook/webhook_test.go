@@ -340,3 +340,26 @@ func TestSSRFGuardBlocksLoopback(t *testing.T) {
 		t.Fatalf("file:// want ErrBlockedTarget, got %v", err)
 	}
 }
+
+func TestRandomEventID(t *testing.T) {
+	id := randomEventID()
+	// UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+	if len(id) != 36 {
+		t.Errorf("randomEventID length: %d", len(id))
+	}
+	if id[14] != '4' {
+		t.Errorf("version nibble: %c", id[14])
+	}
+	// Multiple IDs should be different
+	id2 := randomEventID()
+	if id == id2 {
+		t.Error("randomEventID should produce different values")
+	}
+}
+
+func TestNewBusNilTelemetry(t *testing.T) {
+	bus := NewBus(nil)
+	if bus == nil {
+		t.Fatal("nil bus")
+	}
+}
