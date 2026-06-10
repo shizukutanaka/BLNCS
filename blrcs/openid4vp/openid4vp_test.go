@@ -321,3 +321,15 @@ func TestParseResponseFormMissingFields(t *testing.T) {
 		t.Fatal("malformed form should fail")
 	}
 }
+
+func TestStripTrailingTilde(t *testing.T) {
+	if got := StripTrailingTilde("jwt~disc1~disc2~"); got != "jwt~disc1~disc2" {
+		t.Errorf("trailing tilde: %q", got)
+	}
+	if got := StripTrailingTilde("jwt~disc1~disc2"); got != "jwt~disc1~disc2" {
+		t.Errorf("no trailing tilde: %q", got)
+	}
+	if got := StripTrailingTilde(""); got != "" {
+		t.Errorf("empty string: %q", got)
+	}
+}

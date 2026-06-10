@@ -247,3 +247,42 @@ func TestCachedMerkleMatchesReference(t *testing.T) {
 		}
 	}
 }
+
+func TestExportedMerkleHelpers(t *testing.T) {
+	leaf := HashLeaf([]byte("data"))
+	if len(leaf) != 32 {
+		t.Errorf("HashLeaf: len=%d", len(leaf))
+	}
+	node := HashNode(leaf, leaf)
+	if len(node) != 32 {
+		t.Errorf("HashNode: len=%d", len(node))
+	}
+	root := MerkleRootForTest([][]byte{leaf, leaf})
+	if len(root) == 0 {
+		t.Error("MerkleRootForTest: empty root")
+	}
+}
+
+func TestLedgerTSID(t *testing.T) {
+	l, err := NewLedger("did:web:ts.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.TSID() != "did:web:ts.example" {
+		t.Errorf("TSID: %q", l.TSID())
+	}
+	if len(l.PublicKey()) != ed25519.PublicKeySize {
+		t.Errorf("PublicKey: len=%d", len(l.PublicKey()))
+	}
+}
+
+func TestWitnessID(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	w := NewWitness("did:web:witness.example", priv)
+	if w.ID() != "did:web:witness.example" {
+		t.Errorf("Witness.ID: %q", w.ID())
+	}
+	if len(w.PublicKey()) != ed25519.PublicKeySize {
+		t.Errorf("Witness.PublicKey: len=%d", len(w.PublicKey()))
+	}
+}

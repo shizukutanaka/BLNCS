@@ -258,6 +258,14 @@ func TestMatchClaimsNestedPathMissing(t *testing.T) {
 	}
 }
 
+func TestMarshalDCQLInvalidQuery(t *testing.T) {
+	// Empty credentials → Validate() should fail → MarshalDCQL returns error
+	_, err := MarshalDCQL(DCQLQuery{})
+	if err == nil {
+		t.Error("MarshalDCQL(empty) should return error")
+	}
+}
+
 func TestMatchClaimsNestedValues(t *testing.T) {
 	cq := CredentialQuery{
 		ID:     "q",
