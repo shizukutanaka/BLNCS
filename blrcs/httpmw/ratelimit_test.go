@@ -92,3 +92,24 @@ func TestRateLimiterGC(t *testing.T) {
 		t.Error("stale bucket should have been GC'd")
 	}
 }
+
+func TestStartGC(t *testing.T) {
+	rl := NewRateLimiter(100, 200)
+	stop := rl.StartGC(50*time.Millisecond, 10*time.Millisecond)
+	if stop == nil {
+		t.Fatal("StartGC returned nil stop func")
+	}
+	// Let the GC goroutine fire at least once.
+	time.Sleep(100 * time.Millisecond)
+	stop() // must not deadlock or panic
+}
+
+func TestStartGCDisabled(t *testing.T) {
+	// Zero interval → returns no-op immediately
+	rl := NewRateLimiter(100, 200)
+	stop := rl.StartGC(0, time.Minute)
+	if stop == nil {
+		t.Fatal("StartGC(0) returned nil")
+	}
+	stop() // must not panic
+}
