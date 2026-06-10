@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -361,5 +362,63 @@ func TestNewBusNilTelemetry(t *testing.T) {
 	bus := NewBus(nil)
 	if bus == nil {
 		t.Fatal("nil bus")
+	}
+}
+
+func TestVerifyRequestEmptySecret(t *testing.T) {
+	now := time.Now()
+	ts := strconv.FormatInt(now.Unix(), 10)
+	headers := map[string]string{
+		"X-BLRCS-Timestamp": ts,
+		"X-BLRCS-Signature": "v1=abc",
+	}
+	if err := VerifyRequest([]byte{}, headers, []byte("{}"), 5*time.Minute, now); err == nil {
+		t.Error("empty secret should fail")
+	}
+}
+
+func TestVerifyRequestBadTimestamp(t *testing.T) {
+	now := time.Now()
+	headers := map[string]string{
+		"X-BLRCS-Timestamp": "not-a-number",
+		"X-BLRCS-Signature": "v1=abc",
+	}
+	if err := VerifyRequest([]byte("secret"), headers, []byte("{}"), 5*time.Minute, now); err == nil {
+		t.Error("bad timestamp should fail")
+	}
+}
+
+func TestVerifyRequestCaseInsensitiveHeaders(t *testing.T) {
+	secret := []byte("secret")
+	body := []byte("{}")
+	now := time.Now()
+	ts := strconv.FormatInt(now.Unix(), 10)
+	sig := signPayload(secret, ts, body)
+	// Use lowercase header variants
+	headers := map[string]string{
+		"X-Blrcs-Timestamp": ts,
+		"X-Blrcs-Signature": "v1=" + sig,
+	}
+	if err := VerifyRequest(secret, headers, body, 5*time.Minute, now); err != nil {
+		t.Fatalf("lowercase headers should still verify: %v", err)
+	}
+}
+
+func TestValidateOutboundURLEmptyHost(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	// http:// with no host → blocked
+	u, _ := url.Parse("http://")
+	if err := bus.validateOutboundURL(u); err == nil {
+		t.Error("empty host should be blocked")
+	}
+}
+
+func TestValidateOutboundURLUnresolvable(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	// Hostname that can't be resolved (no such domain)
+	u, _ := url.Parse("https://this-host-does-not-exist-blrcs-test.invalid")
+	err := bus.validateOutboundURL(u)
+	if err == nil {
+		t.Error("unresolvable host should be blocked")
 	}
 }
