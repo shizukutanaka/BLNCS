@@ -3,6 +3,7 @@ package vctmeta
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,6 +15,25 @@ var sampleMeta = []byte(`{"vct":"https://schema.europa.eu/dpp/sd-jwt-vc/v1","nam
 
 func memFetcher(data []byte) FetchFunc {
 	return func(_ context.Context, _ string) ([]byte, error) { return data, nil }
+}
+
+func errFetcher(err error) FetchFunc {
+	return func(_ context.Context, _ string) ([]byte, error) { return nil, err }
+}
+
+// TestResolveFetchError propagates a fetch transport error.
+func TestResolveFetchError(t *testing.T) {
+	want := errors.New("network down")
+	if _, err := Resolve(context.Background(), vctURL, "", errFetcher(want)); err != want {
+		t.Errorf("fetch error not propagated: got %v", err)
+	}
+}
+
+// TestResolveBadJSON exercises the json.Unmarshal error path in Resolve.
+func TestResolveBadJSON(t *testing.T) {
+	if _, err := Resolve(context.Background(), vctURL, "", memFetcher([]byte("{not json"))); err == nil {
+		t.Error("malformed metadata JSON should error")
+	}
 }
 
 func TestIntegrityRoundTrip(t *testing.T) {

@@ -219,6 +219,21 @@ func TestIssueNoElements(t *testing.T) {
 	}
 }
 
+// TestIssueNonEncodableValue exercises the cbor.Marshal error path in Issue
+// when an Element.Value is not CBOR-encodable.
+func TestIssueNonEncodableValue(t *testing.T) {
+	issuerPriv, _ := testKeys(t)
+	p := sampleParams(issuerPriv, nil)
+	p.NameSpaces = map[string][]Element{
+		"org.iso.18013.5.1": {
+			{Identifier: "bad", Value: make(chan int)}, // channels are not CBOR-encodable
+		},
+	}
+	if _, err := Issue(p); err == nil {
+		t.Error("non-encodable Element.Value should fail Issue")
+	}
+}
+
 func TestIssueNoDeviceKey(t *testing.T) {
 	issuerPriv, issuerPub := testKeys(t)
 	cred, err := Issue(sampleParams(issuerPriv, nil))
@@ -579,6 +594,34 @@ func TestPresentMissingIssuerAuth(t *testing.T) {
 	_, err := Present(b, map[string][]string{})
 	if !errors.Is(err, ErrMalformed) {
 		t.Errorf("want ErrMalformed for missing issuerAuth, got %v", err)
+	}
+}
+
+// TestPresentNameSpacesNotMap exercises the nameSpaces-not-a-map guard in
+// Present: a valid issuerAuth is present, but nameSpaces is a string.
+func TestPresentNameSpacesNotMap(t *testing.T) {
+	b, _ := cbor.Marshal(map[string]any{
+		isIssuerAuth: []byte("dummy-issuer-auth"),
+		isNameSpaces: "not-a-map",
+	})
+	_, err := Present(b, map[string][]string{"ns": {"id"}})
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for non-map nameSpaces, got %v", err)
+	}
+}
+
+// TestPresentItemNotTag24 exercises the itemElementID error path: a requested
+// namespace contains an item that is not a tag-24 IssuerSignedItem.
+func TestPresentItemNotTag24(t *testing.T) {
+	b, _ := cbor.Marshal(map[string]any{
+		isIssuerAuth: []byte("dummy-issuer-auth"),
+		isNameSpaces: map[string]any{
+			"org.iso.18013.5.1": []any{"not-a-tag-24-item"},
+		},
+	})
+	_, err := Present(b, map[string][]string{"org.iso.18013.5.1": {"id"}})
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("want ErrMalformed for non-tag-24 item, got %v", err)
 	}
 }
 
