@@ -222,6 +222,28 @@ func TestCallbackHandlerBodyTooLarge(t *testing.T) {
 	}
 }
 
+// TestCallbackHandlerMalformedJSON exercises the parse-error branch when the
+// body is invalid JSON under a JSON content-type.
+func TestCallbackHandlerMalformedJSON(t *testing.T) {
+	ver, _ := setupFlow(t)
+	ts := httptest.NewServer(ver.CallbackHandler(nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL, "application/json", strings.NewReader("{not valid json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("malformed JSON: want 400, got %d", resp.StatusCode)
+	}
+	var out map[string]string
+	json.NewDecoder(resp.Body).Decode(&out)
+	if !strings.Contains(out["error"], "parse") {
+		t.Errorf("expected parse error hint, got: %s", out["error"])
+	}
+}
+
 // ============================================================================
 // Public-key helper (base64) — for caller convenience
 // ============================================================================

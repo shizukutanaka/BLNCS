@@ -454,3 +454,60 @@ func TestWalletPresentMissingPD(t *testing.T) {
 		t.Error("wallet Present with DCQL URL (no PD) should fail")
 	}
 }
+
+// ============================================================================
+// Store.Save failure propagation + AcceptableDIDs auto-generation
+// ============================================================================
+
+// failSaveStore is a SessionStore whose Save always fails, to exercise the
+// error-propagation path in CreateRequest / CreateRequestDCQL.
+type failSaveStore struct{}
+
+func (failSaveStore) Save(string, *AuthorizationRequest, time.Duration) error {
+	return errSaveFailed
+}
+func (failSaveStore) Load(string) (*AuthorizationRequest, error) { return nil, ErrStateNotFound }
+func (failSaveStore) Consume(string) error                       { return nil }
+
+var errSaveFailed = &saveErr{}
+
+type saveErr struct{}
+
+func (*saveErr) Error() string { return "save failed" }
+
+func TestCreateRequestStoreSaveError(t *testing.T) {
+	ver := NewVerifier("https://verify.example", "https://verify.example/cb", failSaveStore{})
+	def := PresentationDefinition{RequiredClaims: []string{"x"}}
+	if _, _, err := ver.CreateRequest(def); err != errSaveFailed {
+		t.Fatalf("want errSaveFailed, got %v", err)
+	}
+}
+
+func TestCreateRequestDCQLStoreSaveError(t *testing.T) {
+	ver := NewVerifier("https://verify.example", "https://verify.example/cb", failSaveStore{})
+	q := DCQLQuery{Credentials: []CredentialQuery{{ID: "c1", Format: "sd-jwt"}}}
+	if _, _, err := ver.CreateRequestDCQL(q); err != errSaveFailed {
+		t.Fatalf("want errSaveFailed, got %v", err)
+	}
+}
+
+// TestCreateRequestAutoGenAcceptableDIDs verifies that AcceptableDIDs is
+// derived from AcceptableIssuers when the former is empty (wire-format
+// population for the wallet's issuer matching).
+func TestCreateRequestAutoGenAcceptableDIDs(t *testing.T) {
+	ver, iss := setupFlow(t)
+	def := PresentationDefinition{
+		RequiredClaims:    []string{"x"},
+		AcceptableIssuers: map[string][]byte{iss.ID: iss.PublicKey()},
+		// AcceptableDIDs intentionally left empty → auto-generated.
+	}
+	reqURL, _, err := ver.CreateRequest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(reqURL)
+	pdJSON := u.Query().Get("presentation_definition")
+	if !strings.Contains(pdJSON, iss.ID) {
+		t.Errorf("AcceptableDIDs not auto-generated into wire PD: %s", pdJSON)
+	}
+}

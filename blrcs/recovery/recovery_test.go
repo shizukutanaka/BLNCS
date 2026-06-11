@@ -355,6 +355,31 @@ func TestStatusWriterFlushForwards(t *testing.T) {
 	}
 }
 
+// TestGoNilTelemetry exercises the nil-telemetry branch in Go (uses Default()).
+func TestGoNilTelemetry(t *testing.T) {
+	done := make(chan struct{})
+	Go(context.Background(), nil, "nil-tel-test", func() {
+		close(done)
+	})
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("goroutine hung with nil telemetry")
+	}
+}
+
+// TestSafeNilTelemetryWithPanic exercises the nil-telemetry branch in Safe.
+func TestSafeNilTelemetryWithPanic(t *testing.T) {
+	var err error
+	func() {
+		defer Safe(nil, "nil-tel-safe", &err)
+		panic("panic with nil telemetry")
+	}()
+	if err == nil {
+		t.Fatal("panic should be converted to error even with nil telemetry")
+	}
+}
+
 func TestStatusWriterFlushNoFlusher(t *testing.T) {
 	// When underlying ResponseWriter does NOT implement Flusher, Flush() must
 	// not panic.

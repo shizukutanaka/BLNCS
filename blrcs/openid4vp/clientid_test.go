@@ -31,7 +31,10 @@ func TestValidateClientID(t *testing.T) {
 		"decentralized_identifier:did:",    // empty DID body
 		"x509_san_dns:has/slash",           // DNS name with path
 		"x509_san_dns:",                    // empty DNS
+		"x509_hash:",                       // empty hash
 		"verifier_attestation:",            // empty attestation
+		"openid_federation:not-a-url",      // federation not absolute https
+		"redirect_uri:https://%zz",         // invalid percent-encoding → url.Parse error
 	}
 	for _, c := range invalid {
 		if err := ValidateClientID(c); err != ErrClientIDInvalid {

@@ -142,6 +142,22 @@ func TestCredentialQueryMatchClaims(t *testing.T) {
 	}
 }
 
+// TestMatchClaimsEmptyPathSkipped verifies that a claim with an empty Path is
+// skipped (treated as a non-constraint) rather than failing the match.
+func TestMatchClaimsEmptyPathSkipped(t *testing.T) {
+	cq := CredentialQuery{
+		ID:     "c",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{
+			{Path: nil},                       // empty path → skipped
+			{Path: []string{"present_claim"}}, // real constraint
+		},
+	}
+	if !cq.MatchClaims(map[string]any{"present_claim": "ok"}) {
+		t.Error("empty-path claim should be skipped; match should succeed")
+	}
+}
+
 func TestDCQLMarshalRoundTrip(t *testing.T) {
 	q := DCQLQuery{
 		Credentials: []CredentialQuery{{
