@@ -92,6 +92,36 @@ func TestResolveDIDJWKBadAlgorithm(t *testing.T) {
 	}
 }
 
+// TestResolveDIDJWKBadXBase64 exercises jwkToEd25519's base64-decode error on "x".
+func TestResolveDIDJWKBadXBase64(t *testing.T) {
+	jwk := map[string]interface{}{
+		"kty": "OKP",
+		"crv": "Ed25519",
+		"x":   "!!!not-base64!!!",
+	}
+	jwkBytes, _ := json.Marshal(jwk)
+	did := "did:jwk:" + base64.RawURLEncoding.EncodeToString(jwkBytes)
+	r := New()
+	if _, err := r.Resolve(context.Background(), did); err == nil {
+		t.Error("bad base64 in x should fail jwkToEd25519")
+	}
+}
+
+// TestResolveDIDJWKWrongKeySize exercises jwkToEd25519's wrong-size guard.
+func TestResolveDIDJWKWrongKeySize(t *testing.T) {
+	jwk := map[string]interface{}{
+		"kty": "OKP",
+		"crv": "Ed25519",
+		"x":   base64.RawURLEncoding.EncodeToString([]byte("too-short")), // not 32 bytes
+	}
+	jwkBytes, _ := json.Marshal(jwk)
+	did := "did:jwk:" + base64.RawURLEncoding.EncodeToString(jwkBytes)
+	r := New()
+	if _, err := r.Resolve(context.Background(), did); err == nil {
+		t.Error("wrong-size Ed25519 x should fail jwkToEd25519")
+	}
+}
+
 // ============================================================================
 // did:web with mock HTTP
 // ============================================================================
@@ -470,6 +500,21 @@ func TestBase58Ed25519DecodeWithMulticodec(t *testing.T) {
 	}
 	if !equalKeys(got, pub) {
 		t.Error("multicodec roundtrip")
+	}
+}
+
+// TestBase58Ed25519DecodeWrongLength exercises the unexpected-length error.
+func TestBase58Ed25519DecodeWrongLength(t *testing.T) {
+	encoded := base58Encode([]byte("ten-bytes!")) // 10 bytes, neither 32 nor 34
+	if _, err := base58Ed25519Decode(encoded); err == nil {
+		t.Error("unexpected decoded length should error")
+	}
+}
+
+// TestBase58Ed25519DecodeBadInput exercises the base58Decode error path.
+func TestBase58Ed25519DecodeBadInput(t *testing.T) {
+	if _, err := base58Ed25519Decode("0OIl"); err == nil { // 0, O, I, l not in base58 alphabet
+		t.Error("invalid base58 should error")
 	}
 }
 

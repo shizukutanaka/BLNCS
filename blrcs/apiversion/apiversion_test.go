@@ -220,6 +220,24 @@ func TestChangelog(t *testing.T) {
 	}
 }
 
+// TestChangelogIncludesRemoved exercises the StabilityRemoved branch.
+func TestChangelogIncludesRemoved(t *testing.T) {
+	r := NewRegistry(nil)
+	r.Register(API{Path: "gone.D", IntroducedIn: "1.0.0", Stability: StabilityRemoved})
+	cl := r.Changelog("3.0.0")
+	if len(cl.Removed) != 1 || cl.Removed[0].Path != "gone.D" {
+		t.Errorf("removed: %+v", cl.Removed)
+	}
+}
+
+// TestUsageCountUnknownPath exercises the unknown-path (return 0) branch.
+func TestUsageCountUnknownPath(t *testing.T) {
+	r := NewRegistry(nil)
+	if c := r.UsageCount("never.registered"); c != 0 {
+		t.Errorf("unknown path usage: want 0, got %d", c)
+	}
+}
+
 // ============================================================================
 // MigrationReports — prioritized by usage
 // ============================================================================
