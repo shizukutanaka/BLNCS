@@ -265,3 +265,35 @@ func TestNewGeneratorNilTelemetry(t *testing.T) {
 		t.Errorf("product name: %s", snap.Product.Name)
 	}
 }
+
+// TestSnapshotTextZeroHistogram covers the `if h.Count == 0 { continue }` path
+// in Text: a histogram that was created but never observed appears in the snapshot
+// with Count==0 and must be skipped rather than printed.
+func TestSnapshotTextZeroHistogram(t *testing.T) {
+	tel := telemetry.New(telemetry.NopRecorder{})
+	// Create a histogram but never observe it → Count == 0 in snapshot.
+	tel.Histogram("unused.hist")
+	gen := NewGenerator(tel, ProductInfo{Name: "BLRCS", Version: "1.0"})
+	snap := gen.Snapshot(context.Background())
+	text := snap.Text()
+	// The zero-count histogram must not appear in the Histograms section.
+	if strings.Contains(text, "unused.hist") {
+		t.Error("zero-count histogram should be skipped in Text output")
+	}
+}
+
+// TestSnapshotTextWithCommit covers the `if s.Product.Commit != ""` branch in Text.
+func TestSnapshotTextWithCommit(t *testing.T) {
+	tel := telemetry.New(telemetry.NopRecorder{})
+	gen := NewGenerator(tel, ProductInfo{
+		Name:      "BLRCS",
+		Version:   "1.0",
+		Commit:    "abc1234",
+		BuildDate: "2026-06-01",
+	})
+	snap := gen.Snapshot(context.Background())
+	text := snap.Text()
+	if !strings.Contains(text, "abc1234") {
+		t.Error("commit hash should appear in Text output")
+	}
+}
