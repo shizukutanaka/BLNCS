@@ -140,6 +140,36 @@ func TestExchangeCodeNoTxCodeBackcompat(t *testing.T) {
 	}
 }
 
+// TestExchangeCodeTxCodeBruteForceLimit confirms the pre-authorized code is burned
+// after too many wrong tx_code attempts, preventing PIN brute-force.
+func TestExchangeCodeTxCodeBruteForceLimit(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.MaxTxCodeAttempts = 3
+	const pin = "1234"
+	_, code, err := iss.CreateOfferWithTxCode(
+		"eu-battery-passport-v1", "bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		nil, pin, &TxCodeSpec{InputMode: "numeric", Length: 4},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First (limit-1) wrong attempts return ErrBadTxCode and keep the code alive.
+	for i := 0; i < 2; i++ {
+		if _, err := iss.ExchangeCodeWithTxCode(code, "0000"); err != ErrBadTxCode {
+			t.Fatalf("attempt %d: want ErrBadTxCode, got %v", i, err)
+		}
+	}
+	// The attempt that reaches the limit still reports ErrBadTxCode but burns the code.
+	if _, err := iss.ExchangeCodeWithTxCode(code, "0000"); err != ErrBadTxCode {
+		t.Fatalf("limit attempt: want ErrBadTxCode, got %v", err)
+	}
+	// Even the CORRECT PIN now fails because the code was invalidated.
+	if _, err := iss.ExchangeCodeWithTxCode(code, pin); err != ErrBadPreAuthCode {
+		t.Fatalf("after limit, correct PIN: want ErrBadPreAuthCode, got %v", err)
+	}
+}
+
 func TestCreateOfferUnknownConfig(t *testing.T) {
 	iss, _ := setupIssuer(t)
 	_, _, err := iss.CreateOffer("unknown-config", "s", nil, nil)

@@ -17,6 +17,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `tx_code` form field. `CreateOffer`/`ExchangeCode` delegate with no tx_code, so
   existing flows are unchanged. Tests: required/wrong/correct PIN, retry-after-wrong,
   offer advertises metadata without leaking the PIN, and no-tx back-compat.
+- **`openid4vci` tx_code brute-force protection (Draft 15 §6.1).** A short numeric
+  PIN with no attempt limit is brute-forceable by anyone holding the pre-authorized
+  code. `Issuer.MaxTxCodeAttempts` (default 5) now caps wrong tx_code attempts;
+  exceeding it invalidates the pre-authorized code so even the correct PIN no longer
+  redeems it. Test covers the limit and post-burn rejection.
 
 ### Fixed
 - **`compliance.Verify` accepted future-dated (not-yet-valid) credentials.** The core

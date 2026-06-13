@@ -76,6 +76,7 @@ type preAuthEntry struct {
 	consumed       bool   // credentialエンドポイント使用済み
 	cNonce         string // Proof-of-Possession nonce (token交換時に発行)
 	txCode         string // 取引コード (PIN)。空なら不要。設定時は ExchangeCode で必須照合。
+	txCodeFails    int    // tx_code 失敗回数 (ブルートフォース防御)
 }
 
 // ============================================================================
@@ -99,11 +100,17 @@ type Issuer struct {
 	configs      map[string]CredentialConfiguration
 	preAuthTTL   time.Duration
 	tokenTTL     time.Duration
+	// MaxTxCodeAttempts — tx_code の許容失敗回数。超過で pre-authorized code を無効化し
+	// 短い PIN へのブルートフォースを防ぐ (Draft 15 §6.1 推奨)。0 は既定 (5) を使う。
+	MaxTxCodeAttempts int
 
 	mu       sync.Mutex
 	preAuths map[string]*preAuthEntry // code → entry
 	tokens   map[string]*preAuthEntry // access_token → same entry
 }
+
+// defaultMaxTxCodeAttempts — tx_code 失敗の既定上限。
+const defaultMaxTxCodeAttempts = 5
 
 // NewIssuer — Apple式の1行構築
 //
@@ -265,9 +272,19 @@ func (iss *Issuer) ExchangeCodeWithTxCode(code, txCode string) (*TokenResponse, 
 		return nil, ErrBadPreAuthCode
 	}
 	// tx_code (PIN) binding: when the offer set one, redemption must present the exact
-	// value. Constant-time compare avoids leaking the code via response timing.
+	// value. Constant-time compare avoids leaking the code via response timing. Failed
+	// attempts are counted; once the limit is exceeded the code is invalidated so a
+	// short PIN cannot be brute-forced (Draft 15 §6.1).
 	if entry.txCode != "" {
 		if subtle.ConstantTimeCompare([]byte(entry.txCode), []byte(txCode)) != 1 {
+			entry.txCodeFails++
+			limit := iss.MaxTxCodeAttempts
+			if limit <= 0 {
+				limit = defaultMaxTxCodeAttempts
+			}
+			if entry.txCodeFails >= limit {
+				delete(iss.preAuths, code) // burn the code; further attempts → ErrBadPreAuthCode
+			}
 			return nil, ErrBadTxCode
 		}
 	}
