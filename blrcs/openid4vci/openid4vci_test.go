@@ -1214,3 +1214,162 @@ func TestFetchJWKSCtxNoEd25519Key(t *testing.T) {
 		t.Fatal("JWKS with no Ed25519 key should error")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: IssueSDJWT failure (reserved claim), handleCredential error
+// path, WalletClient bad URL (NewRequestWithContext failures).
+// ============================================================================
+
+// TestIssueCredentialReservedClearClaim covers openid4vci.go:307-311: IssueSDJWT
+// returns an error when a clear claim uses a reserved JWT claim name ("iss").
+// The pre-auth code is un-consumed so a retry is possible.
+func TestIssueCredentialReservedClearClaim(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	// Register a config with no DisclosableClaims requirement so the offer
+	// creation passes, but with a clear claim that collides with "iss".
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:             "bad-clear-v1",
+		CredentialType: "BadClear",
+		Format:         "vc+sd-jwt",
+		ValidForDays:   1,
+	})
+	_, code, err := iss.CreateOffer("bad-clear-v1", "s",
+		nil,
+		map[string]any{"iss": "injected"}, // "iss" is reserved → IssueSDJWT fails
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := iss.ExchangeCode(code)
+	_, err = iss.IssueCredential(tr.AccessToken)
+	if err == nil {
+		t.Error("IssueSDJWT with reserved clear claim should fail")
+	}
+}
+
+// TestHandleCredentialBadProof covers openid4vci.go:525-527: handleCredential
+// calls IssueCredentialWithProof which returns ErrInvalidProof for a malformed
+// proof JWT, exercising the error branch in the HTTP handler.
+func TestHandleCredentialBadProof(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	tr, _ := iss.ExchangeCode(code)
+
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"format": "vc+sd-jwt",
+		"proof":  map[string]any{"proof_type": "jwt", "jwt": "invalid.proof.jwt"},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad proof JWT: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// TestFetchCredentialTokenOKCredentialFail covers openid4vci.go:634-635:
+// c.HTTP.Do fails for the credential endpoint after the token endpoint
+// succeeded — simulated by closing the connection on the credential request.
+func TestFetchCredentialTokenOKCredentialFail(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(TokenResponse{
+				AccessToken: "test-token",
+				TokenType:   "Bearer",
+				ExpiresIn:   3600,
+			})
+		default:
+			// Hijack and close the connection to force an HTTP client error.
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "no hijack", 500)
+				return
+			}
+			conn, _, _ := hj.Hijack()
+			conn.Close()
+		}
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "pre-auth-code")
+	if err == nil {
+		t.Error("credential endpoint connection reset should return error")
+	}
+}
+
+// TestWalletClientBadURLToken covers openid4vci.go:608-609:
+// http.NewRequestWithContext fails for the token endpoint when the base URL
+// contains a null byte.
+func TestWalletClientBadURLToken(t *testing.T) {
+	client := &WalletClient{
+		BaseURL: "http://host\x00bad",
+		HTTP:    &http.Client{},
+	}
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Error("null byte in base URL should fail NewRequestWithContext for token")
+	}
+}
+
+// TestWalletClientBadURLMetadata covers openid4vci.go:657-658:
+// http.NewRequestWithContext fails for the metadata endpoint.
+func TestWalletClientBadURLMetadata(t *testing.T) {
+	client := &WalletClient{
+		BaseURL: "http://host\x00bad",
+		HTTP:    &http.Client{},
+	}
+	_, err := client.FetchMetadataCtx(context.Background())
+	if err == nil {
+		t.Error("null byte in base URL should fail NewRequestWithContext for metadata")
+	}
+}
+
+// TestWalletClientBadURLJWKS covers openid4vci.go:680-681:
+// http.NewRequestWithContext fails for the JWKS endpoint.
+func TestWalletClientBadURLJWKS(t *testing.T) {
+	client := &WalletClient{
+		BaseURL: "http://host\x00bad",
+		HTTP:    &http.Client{},
+	}
+	_, err := client.FetchJWKSCtx(context.Background())
+	if err == nil {
+		t.Error("null byte in base URL should fail NewRequestWithContext for JWKS")
+	}
+}
+
+// TestVerifyProofJWTBadXCoord covers openid4vci.go:353-354: the JWK X field
+// decodes to fewer than 32 bytes (wrong length for Ed25519).
+func TestVerifyProofJWTBadXCoord(t *testing.T) {
+	// Build a proof JWT header with an OKP JWK whose X is only 16 bytes.
+	shortX := base64.RawURLEncoding.EncodeToString(make([]byte, 16)) // too short
+	hdr := map[string]any{
+		"alg": "EdDSA",
+		"typ": "openid4vci-proof+jwt",
+		"jwk": map[string]any{"kty": "OKP", "crv": "Ed25519", "x": shortX},
+	}
+	hdrBytes, _ := json.Marshal(hdr)
+	hdrB64 := base64.RawURLEncoding.EncodeToString(hdrBytes)
+	// Use a real Ed25519 key to sign so the split-by-dots works.
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	payload := base64.RawURLEncoding.EncodeToString([]byte("{}"))
+	sigInput := hdrB64 + "." + payload
+	sig := ed25519.Sign(priv, []byte(sigInput))
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
+	proofJWT := sigInput + "." + sigB64
+
+	_, err := verifyProofJWT(proofJWT, "nonce", "https://issuer.example")
+	if err != ErrInvalidProof {
+		t.Errorf("short X coordinate: want ErrInvalidProof, got %v", err)
+	}
+}
