@@ -486,3 +486,28 @@ func TestStateString(t *testing.T) {
 		t.Errorf("String(missing): %q", got)
 	}
 }
+
+// TestRunNilStateAutoCreated covers saga.go:185-187: when Run is called with
+// a nil *State, the saga must auto-create a new State so steps can use it.
+func TestRunNilStateAutoCreated(t *testing.T) {
+	s := New("nil-state-saga").Step("step1", func(ctx context.Context, st *State) error {
+		st.Set("key", "value")
+		return nil
+	}, nil)
+	report, err := s.Run(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Run with nil state failed: %v", err)
+	}
+	if v, ok := report.State.Get("key"); !ok || v != "value" {
+		t.Errorf("state not usable after nil auto-create: %v %v", v, ok)
+	}
+}
+
+// TestCompensateErrorSummaryNoErrors covers saga.go:252-254: CompensateErrorSummary
+// returns "" when there are no compensate errors.
+func TestCompensateErrorSummaryNoErrors(t *testing.T) {
+	r := &RunReport{CompensateErrors: make(map[string]error)}
+	if got := r.CompensateErrorSummary(); got != "" {
+		t.Errorf("CompensateErrorSummary with no errors should be empty, got %q", got)
+	}
+}

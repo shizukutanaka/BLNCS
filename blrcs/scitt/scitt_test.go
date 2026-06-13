@@ -1017,3 +1017,48 @@ func TestVerifyConsistencySnZeroInLoop(t *testing.T) {
 	}
 }
 
+// TestRegisterInvalidStatementRejected covers scitt.go:350-352: Register must
+// return an error (without modifying the ledger) when VerifyStatement fails.
+// A tampered Signature makes the statement's ed25519 signature invalid.
+func TestRegisterInvalidStatementRejected(t *testing.T) {
+	ledger, _ := NewLedger("ts")
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "sub", "text/plain", []byte("payload"))
+	// Tamper the signature so VerifyStatement rejects it.
+	stmt.Signature = "aW52YWxpZA" // base64 of "invalid" — wrong signature
+	if _, err := ledger.Register(stmt); err == nil {
+		t.Error("Register should reject statement with invalid signature")
+	}
+	// Ledger must remain empty.
+	if sz := ledger.Size(); sz != 0 {
+		t.Errorf("ledger size after rejected register: %d, want 0", sz)
+	}
+}
+
+// TestVerifyConsistencySnNonZeroAtEnd covers consistency.go:121-123: when the
+// consistency proof is shorter than expected (truncated), sn > 0 after the loop
+// but fr still matches oldRoot, triggering the final sn != 0 guard.
+//
+// With m=1 (power of 2), n=4: VerifyConsistency prepends oldRoot to proof
+// (proofArr=[oldRoot,p1,p2]).  If we pass only [p1] (no p2), after processing
+// p1 we have sn=1 ≠ 0.  Because fr stays as oldRoot (fn never reaches the
+// left-branch update), the first two checks pass and line 121 is what fires.
+func TestVerifyConsistencySnNonZeroAtEnd(t *testing.T) {
+	ledger, _ := NewLedger("ts")
+	priv, _ := mustIssuer(t, "iss")
+	for i := 0; i < 4; i++ {
+		stmt, _ := SignStatement(priv, "iss", fmt.Sprintf("s%d", i), "c", []byte{byte(i)})
+		ledger.Register(stmt) //nolint:errcheck
+	}
+	root1 := ledger.leafHashes[:1]
+	oldRoot := merkleRoot(root1)
+	newRoot := ledger.Root()
+	proof, _ := ledger.ConsistencyProof(1, 4) // 2-element proof for m=1 → n=4
+	// Drop the last element to make a 1-element (truncated) proof.
+	truncated := proof[:len(proof)-1]
+	err := VerifyConsistency(1, 4, oldRoot, newRoot, truncated)
+	if err == nil {
+		t.Error("truncated consistency proof should fail")
+	}
+}
+
