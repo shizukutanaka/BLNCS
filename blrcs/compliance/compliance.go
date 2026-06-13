@@ -33,6 +33,7 @@ var (
 	ErrOutOfRange     = errors.New("compliance: value out of declared range")
 	ErrEmptyProductID = errors.New("compliance: productID required")
 	ErrExpired        = errors.New("compliance: credential expired")
+	ErrNotYetValid    = errors.New("compliance: credential not yet valid (validFrom in the future)")
 )
 
 // ============================================================================
@@ -216,11 +217,23 @@ func (i *Issuer) IssueWithStatus(claim PassportClaim, validFor time.Duration, st
 
 // Verify — 発行者公開鍵で検証 (期限切れもチェック)
 func Verify(cred *Credential, pub ed25519.PublicKey) error {
+	return VerifyAt(cred, pub, time.Now().UTC())
+}
+
+// VerifyAt verifies the credential's proof and temporal validity at time `now`
+// (deterministic variant of Verify). It rejects expired credentials (validUntil
+// passed) and not-yet-valid credentials (validFrom more than a small leeway in the
+// future), mirroring the SD-JWT verification path so both credential formats treat
+// temporal bounds consistently.
+func VerifyAt(cred *Credential, pub ed25519.PublicKey, now time.Time) error {
 	if cred.Proof == nil {
 		return ErrNoProof
 	}
-	if cred.ValidUntil != nil && time.Now().UTC().After(*cred.ValidUntil) {
+	if cred.ValidUntil != nil && now.After(*cred.ValidUntil) {
 		return ErrExpired
+	}
+	if !cred.ValidFrom.IsZero() && cred.ValidFrom.After(now.Add(defaultLeeway)) {
+		return ErrNotYetValid
 	}
 	sig, err := base64.StdEncoding.DecodeString(cred.Proof.ProofValue)
 	if err != nil {

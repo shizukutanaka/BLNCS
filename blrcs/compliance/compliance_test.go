@@ -55,6 +55,44 @@ func TestDPPExpired(t *testing.T) {
 	}
 }
 
+// TestDPPNotYetValid covers the validFrom (not-yet-valid) check: a credential whose
+// validFrom is in the future must be rejected, mirroring the SD-JWT path.
+func TestDPPNotYetValid(t *testing.T) {
+	issuer, _ := NewIssuer("did:web:test")
+	cred, err := issuer.Issue(PassportClaim{ProductID: "P1"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Verify in the past, before the credential's validFrom (minus leeway).
+	past := cred.ValidFrom.Add(-10 * time.Minute)
+	if err := VerifyAt(cred, issuer.PublicKey(), past); err != ErrNotYetValid {
+		t.Fatalf("expected ErrNotYetValid, got %v", err)
+	}
+	// Within the leeway window it must still verify (clock-skew tolerance).
+	withinLeeway := cred.ValidFrom.Add(-30 * time.Second)
+	if err := VerifyAt(cred, issuer.PublicKey(), withinLeeway); err != nil {
+		t.Fatalf("within leeway should verify, got %v", err)
+	}
+}
+
+// TestVerifyAtExpiryAndValid covers VerifyAt's expiry branch and the happy path at
+// a fixed time.
+func TestVerifyAtExpiryAndValid(t *testing.T) {
+	issuer, _ := NewIssuer("did:web:test")
+	cred, err := issuer.Issue(PassportClaim{ProductID: "P1"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Valid right after validFrom.
+	if err := VerifyAt(cred, issuer.PublicKey(), cred.ValidFrom.Add(time.Minute)); err != nil {
+		t.Fatalf("mid-window should verify, got %v", err)
+	}
+	// Expired well after validUntil.
+	if err := VerifyAt(cred, issuer.PublicKey(), cred.ValidFrom.Add(2*time.Hour)); err != ErrExpired {
+		t.Fatalf("expected ErrExpired, got %v", err)
+	}
+}
+
 func TestEmptyProductID(t *testing.T) {
 	issuer, _ := NewIssuer("did:web:test")
 	if _, err := issuer.Issue(PassportClaim{}, 0); err != ErrEmptyProductID {

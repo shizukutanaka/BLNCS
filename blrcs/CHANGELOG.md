@@ -6,6 +6,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`compliance.Verify` accepted future-dated (not-yet-valid) credentials.** The core
+  W3C VC verify enforced `validUntil` (expiry) but never checked `validFrom`, so a
+  credential whose validity window had not started verified fine — asymmetric with
+  the SD-JWT path, which rejects both bounds. `Verify` now also rejects credentials
+  whose `validFrom` is more than a small clock-skew leeway in the future
+  (`ErrNotYetValid`), and a new `VerifyAt(cred, pub, now)` gives deterministic
+  time control (mirroring `VerifySDJWTAt`). Expiry behavior is unchanged (tight, no
+  leeway) so existing semantics hold. Tests cover not-yet-valid, the leeway window,
+  and fixed-time expiry.
+
 ### Added
 - **`mdoc` device authentication (ISO 18013-5 §9.1.3).** The package issued and
   verified `IssuerSigned` mdocs and committed a `deviceKey` in the MSO, but nothing
