@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **End-to-end hardened-pipeline integration test (`integration`).** A new
+  `TestHardenedTriangle_TxCodeProofBoundDCQLKeyBinding` exercises the full
+  secure-by-default path the per-package hardening built up — OpenID4VCI offer with
+  `tx_code` (PIN) → code+PIN exchange → proof-of-possession → holder-bound credential
+  (`cnf`) → OpenID4VP DCQL request → presentation with a KB-JWT bound to the request
+  nonce/audience → verification with `RequireKeyBinding=true`. It asserts the issued
+  credential is holder-bound, the privacy contract holds (undisclosed claims don't
+  leak), PIN-less redemption is rejected, and one-time state defeats replay — proving
+  all the hardened pieces compose without the permissive shortcuts.
 - **`openid4vci` transaction code (tx_code / PIN) for the pre-authorized flow
   (Draft 15 §4.1.1).** The pre-authorized code flow had no tx_code, so anyone who
   intercepted the pre-authorized code (e.g. a photographed QR offer) could redeem it
