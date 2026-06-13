@@ -350,3 +350,56 @@ func TestSpanRecordErrorNil(t *testing.T) {
 		t.Errorf("nil RecordError should leave span clean; got event %q", last)
 	}
 }
+
+// TestRecorderMethod covers the Recorder() accessor.
+func TestRecorderMethod(t *testing.T) {
+	rec := NopRecorder{}
+	tel := New(rec)
+	if tel.Recorder() == nil {
+		t.Error("Recorder() should return the configured recorder")
+	}
+}
+
+// TestSpanAddAttr covers the AddAttr path on an in-flight span.
+func TestSpanAddAttr(t *testing.T) {
+	tel := New(NopRecorder{})
+	span := tel.StartSpan(context.Background(), "Op.AddAttr")
+	span.AddAttr(slog.String("key", "value"))
+	span.End()
+}
+
+// TestHistogramEmptySnapshot covers the early-return when a histogram has no
+// observations (len(cp) == 0 path in Snapshot).
+func TestHistogramEmptySnapshot(t *testing.T) {
+	tel := New(NopRecorder{})
+	snap := tel.Histogram("empty.hist").Snapshot()
+	if snap.Count != 0 || snap.Sum != 0 {
+		t.Errorf("empty histogram snapshot should be zero-valued, got %+v", snap)
+	}
+}
+
+// TestHistogramSingleSamplePickCap covers the `idx = len(cp)-1` guard in pick
+// when p95/p99 would otherwise compute an out-of-bounds index (single sample).
+func TestHistogramSingleSamplePickCap(t *testing.T) {
+	tel := New(NopRecorder{})
+	h := tel.Histogram("single.hist")
+	h.Observe(42.0)
+	snap := h.Snapshot()
+	// With one sample P95 and P99 must cap to the only element.
+	if snap.P95 != 42.0 || snap.P99 != 42.0 {
+		t.Errorf("P95/P99 with single sample should equal 42.0, got P95=%v P99=%v", snap.P95, snap.P99)
+	}
+}
+
+// TestDefaultNilFallback covers the `return New(NopRecorder{})` branch in
+// Default() when no default has been set.
+func TestDefaultNilFallback(t *testing.T) {
+	original := defaultTel.Load()
+	defer defaultTel.Store(original)
+	defaultTel.Store(nil) // clear default
+	tel := Default()
+	if tel == nil {
+		t.Fatal("Default() should return a non-nil fallback when unset")
+	}
+	tel.Info("fallback.event") // must not panic
+}

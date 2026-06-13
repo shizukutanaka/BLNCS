@@ -845,3 +845,73 @@ func TestVerifyItemDigestMismatch(t *testing.T) {
 		t.Errorf("tampered digest: want ErrDigestMismatch, got %v", err)
 	}
 }
+
+// ============================================================================
+// Coverage uplift: verifyItem non-Tag24, Present with non-string namespace key,
+// Present with non-array items.
+// ============================================================================
+
+// TestVerifyItemNotTag24 covers the first guard in verifyItem: when the raw
+// item is not a cbor.Tag (or has the wrong tag number) ErrMalformed is returned.
+func TestVerifyItemNotTag24(t *testing.T) {
+	_, _, _, err := verifyItem("not-a-tag-at-all", nil)
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("non-Tag24 item: want ErrMalformed, got %v", err)
+	}
+}
+
+// TestPresentNonStringNamespaceKey covers the `continue` branch in Present
+// when a namespace key in the CBOR map is not a string (it is silently skipped).
+func TestPresentNonStringNamespaceKey(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+
+	// Replace nameSpaces with a map that has an integer key.
+	top, _ := cbor.Unmarshal(cred)
+	topMap := top.(map[any]any)
+	nsMap, _ := topMap[isNameSpaces].(map[any]any)
+	newNS := make(map[any]any)
+	for k, v := range nsMap {
+		newNS[k] = v
+	}
+	newNS[uint64(42)] = []any{} // non-string key → silently skipped in Present
+	topMap[isNameSpaces] = newNS
+	b, _ := cbor.Marshal(topMap)
+
+	// Present should succeed (the integer-key namespace is silently skipped).
+	result, err := Present(b, map[string][]string{"org.iso.18013.5.1": {"family_name"}})
+	if err != nil {
+		t.Fatalf("Present with non-string ns key should not fail: %v", err)
+	}
+	// Verify the result is still a valid credential.
+	if _, err := Verify(result, issuerPub, time.Now()); err != nil {
+		t.Fatalf("Verify after non-string ns key Present: %v", err)
+	}
+}
+
+// TestPresentNonArrayNamespaceItems covers the `continue` in Present when a
+// namespace's items value is not a []any (it is silently skipped).
+func TestPresentNonArrayNamespaceItems(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+
+	top, _ := cbor.Unmarshal(cred)
+	topMap := top.(map[any]any)
+	nsMap, _ := topMap[isNameSpaces].(map[any]any)
+	newNS := make(map[any]any)
+	for k, v := range nsMap {
+		newNS[k] = v
+	}
+	newNS["org.iso.bad.ns"] = "not-an-array" // items is a string, not []any
+	topMap[isNameSpaces] = newNS
+	b, _ := cbor.Marshal(topMap)
+
+	// Present should succeed — the bad namespace is silently skipped.
+	result, err := Present(b, map[string][]string{"org.iso.18013.5.1": {"family_name"}})
+	if err != nil {
+		t.Fatalf("Present with non-array items should not fail: %v", err)
+	}
+	if _, err := Verify(result, issuerPub, time.Now()); err != nil {
+		t.Fatalf("Verify after non-array items Present: %v", err)
+	}
+}

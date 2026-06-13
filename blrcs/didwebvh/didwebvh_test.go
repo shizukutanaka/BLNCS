@@ -703,3 +703,182 @@ func TestUpdateWithNoUpdateKeysParam(t *testing.T) {
 	}
 	_ = updateMK
 }
+
+// ============================================================================
+// Coverage uplift: StateExtra, zero VersionTime, verifyEntryProof wrong
+// cryptosuite, and Verify error branches.
+// ============================================================================
+
+func TestCreateStateExtra(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, _, err := Create(CreateParams{
+		DIDPath:   "example.com:p",
+		UpdateKey: updateKey,
+		StateExtra: map[string]any{"service": "did-endpoint"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if genesis.State["service"] != "did-endpoint" {
+		t.Errorf("StateExtra not merged into state: %v", genesis.State)
+	}
+	// The DID should still verify correctly.
+	if _, err := Verify([]LogEntry{*genesis}); err != nil {
+		t.Fatalf("genesis with StateExtra should verify: %v", err)
+	}
+}
+
+func TestUpdateZeroVersionTime(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, did, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// VersionTime zero → Update should default to time.Now().UTC()
+	upd, err := Update(UpdateParams{
+		Log:         []LogEntry{*genesis},
+		SignKey:     updateKey,
+		NewState:    map[string]any{"id": did, "v": "2"},
+		VersionTime: time.Time{},
+	})
+	if err != nil {
+		t.Fatalf("Update with zero VersionTime should succeed: %v", err)
+	}
+	if upd.VersionTime == "" {
+		t.Error("VersionTime should have been filled from time.Now()")
+	}
+}
+
+func TestVerifyEntryProofWrongCryptosuite(t *testing.T) {
+	updateKey, _ := genKey(t)
+	entry, _, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Prepend a proof with wrong cryptosuite; the real proof follows.
+	bogusProof := Proof{
+		Type:               "DataIntegrityProof",
+		Cryptosuite:        "wrong-suite",
+		VerificationMethod: entry.Proof[0].VerificationMethod,
+		ProofValue:         entry.Proof[0].ProofValue,
+		ProofPurpose:       "assertionMethod",
+	}
+	entry.Proof = append([]Proof{bogusProof}, entry.Proof...)
+	// verifyEntryProof should skip the bogus proof and accept the valid one.
+	if _, err := Verify([]LogEntry{*entry}); err != nil {
+		t.Fatalf("should skip wrong-cryptosuite proof: %v", err)
+	}
+}
+
+func TestVerifyEntryProofEmptyProofValue(t *testing.T) {
+	updateKey, _ := genKey(t)
+	entry, _, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Insert a proof with empty ProofValue; the real proof follows.
+	emptyProof := Proof{
+		Type:               "DataIntegrityProof",
+		Cryptosuite:        Cryptosuite,
+		VerificationMethod: entry.Proof[0].VerificationMethod,
+		ProofValue:         "",
+		ProofPurpose:       "assertionMethod",
+	}
+	entry.Proof = append([]Proof{emptyProof}, entry.Proof...)
+	if _, err := Verify([]LogEntry{*entry}); err != nil {
+		t.Fatalf("should skip empty-proofValue proof: %v", err)
+	}
+}
+
+func TestVerifyVersionSequenceError(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, did, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd, err := Update(UpdateParams{
+		Log:         []LogEntry{*genesis},
+		SignKey:     updateKey,
+		NewState:    map[string]any{"id": did, "v": "2"},
+		VersionTime: time.Now().Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Change version number to 3 while keeping the real hash → ErrVersionSequence.
+	parts := strings.SplitN(upd.VersionID, "-", 2)
+	upd.VersionID = "3-" + parts[1]
+	_, err = Verify([]LogEntry{*genesis, *upd})
+	if !errors.Is(err, ErrVersionSequence) {
+		t.Fatalf("wrong version sequence: want ErrVersionSequence, got %v", err)
+	}
+}
+
+func TestVerifyEntryHashMismatch(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, did, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd, err := Update(UpdateParams{
+		Log:         []LogEntry{*genesis},
+		SignKey:     updateKey,
+		NewState:    map[string]any{"id": did, "v": "2"},
+		VersionTime: time.Now().Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep version number correct but replace hash → ErrEntryHashMismatch.
+	parts := strings.SplitN(upd.VersionID, "-", 2)
+	_ = parts[1]
+	upd.VersionID = parts[0] + "-FAKEHASHFAKEHASHFAKEHASH"
+	_, err = Verify([]LogEntry{*genesis, *upd})
+	if !errors.Is(err, ErrEntryHashMismatch) {
+		t.Fatalf("hash mismatch: want ErrEntryHashMismatch, got %v", err)
+	}
+}
+
+func TestVerifyBadVersionTimeFormat(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, did, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd, err := Update(UpdateParams{
+		Log:         []LogEntry{*genesis},
+		SignKey:     updateKey,
+		NewState:    map[string]any{"id": did, "v": "2"},
+		VersionTime: time.Now().Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Set a malformed VersionTime and recompute the entryHash so the hash chain
+	// still validates — the ErrMalformedEntry check comes before proof verification.
+	upd.VersionTime = "not-a-valid-rfc3339-time"
+	newHash, err := computeEntryHash(upd, genesis.VersionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.SplitN(upd.VersionID, "-", 2)
+	upd.VersionID = parts[0] + "-" + newHash
+	_, err = Verify([]LogEntry{*genesis, *upd})
+	if !errors.Is(err, ErrMalformedEntry) {
+		t.Fatalf("bad versionTime format: want ErrMalformedEntry, got %v", err)
+	}
+}
+
+func TestVerifyBadVersionIDInLog(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, _, err := Create(CreateParams{DIDPath: "example.com:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Set a non-parseable VersionID on the genesis entry (after SCID derivation).
+	genesis.VersionID = "malformed"
+	_, err = Verify([]LogEntry{*genesis})
+	if err == nil {
+		t.Fatal("malformed versionId should cause Verify to fail")
+	}
+}

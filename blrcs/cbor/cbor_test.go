@@ -3,6 +3,7 @@ package cbor
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"testing"
 )
 
@@ -669,5 +670,58 @@ func TestDecodeTextTooLarge(t *testing.T) {
 	}
 	if _, err := Unmarshal(data); err == nil {
 		t.Fatal("oversized text string should error")
+	}
+}
+
+// TestDecodeBytesTooLarge exercises the majorBytes size guard in decode.
+func TestDecodeBytesTooLarge(t *testing.T) {
+	// 0x5b = major 2 (bytes), add=27 → 8-byte length follows.
+	// Length 0x0000000001000001 = 16777217 > maxItems (16777216).
+	data := []byte{
+		0x5b,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("oversized byte string should error")
+	}
+}
+
+// TestDecodeArrayTooLarge exercises the majorArray size guard in decode.
+func TestDecodeArrayTooLarge(t *testing.T) {
+	// 0x9b = major 4 (array), add=27 → 8-byte length follows.
+	// Length 0x0000000001000001 = 16777217 > maxItems.
+	data := []byte{
+		0x9b,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("oversized array should error")
+	}
+}
+
+// TestDecodeMapTooLarge exercises the majorMap size guard in decode.
+func TestDecodeMapTooLarge(t *testing.T) {
+	// 0xbb = major 5 (map), add=27 → 8-byte length follows.
+	// Length 0x0000000001000001 = 16777217 > maxItems.
+	data := []byte{
+		0xbb,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("oversized map should error")
+	}
+}
+
+// errMarshalCBOR is a Marshaler that always fails.
+type errMarshalCBOR struct{}
+
+func (errMarshalCBOR) MarshalCBOR() ([]byte, error) {
+	return nil, errors.New("marshal error")
+}
+
+// TestMarshalerInterfaceError exercises the MarshalCBOR error propagation path in appendValue.
+func TestMarshalerInterfaceError(t *testing.T) {
+	if _, err := Marshal(errMarshalCBOR{}); err == nil {
+		t.Fatal("MarshalCBOR error should propagate")
 	}
 }

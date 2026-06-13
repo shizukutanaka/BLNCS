@@ -506,3 +506,32 @@ func TestNewBusCheckRedirectBlocksSSRF(t *testing.T) {
 		t.Errorf("want ErrBlockedTarget, got: %v", err)
 	}
 }
+
+// TestPublishMarshalError covers the json.Marshal error branch in Publish when
+// data contains an un-marshallable value (channel).
+func TestPublishMarshalError(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	bus.Subscribe("test.evt", Subscriber{URL: "http://localhost:19999/ignored"})
+	_, _, err := bus.Publish(context.Background(), "test.evt", make(chan int))
+	if err == nil {
+		t.Error("un-marshallable event data should cause Publish to return an error")
+	}
+}
+
+// TestDeliverOnceZeroTimeout covers the s.Timeout == 0 branch in deliverOnce
+// where no context.WithTimeout is created (timeoutCtx stays as ctx).
+func TestDeliverOnceZeroTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	// Timeout=0 → no context.WithTimeout; deliverOnce should still succeed.
+	err := bus.deliverOnce(context.Background(), Subscriber{URL: server.URL, Timeout: 0}, "evt", []byte("{}"))
+	if err != nil {
+		t.Errorf("zero timeout deliverOnce should succeed: %v", err)
+	}
+}

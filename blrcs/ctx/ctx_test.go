@@ -553,3 +553,33 @@ func TestAttestRangeNilTelemetry(t *testing.T) {
 	}
 }
 
+// TestRegisterSCITTClosedLedger covers the span.RecordError path in RegisterSCITT:
+// when ledger.Register returns an error the span records it before returning.
+func TestRegisterSCITTClosedLedger(t *testing.T) {
+	iss := makeIssuer(t)
+	ledger := makeLedger(t)
+	ledger.Close() // close the underlying storage so Register will fail
+	tel, _ := makeTel()
+	stmt, err := scitt.SignStatement(iss.PrivateKey(), iss.ID, "s", "c", []byte("p"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = RegisterSCITT(context.Background(), tel, ledger, stmt)
+	if err == nil {
+		t.Fatal("RegisterSCITT on closed ledger should return an error")
+	}
+}
+
+// TestSignAndRegisterClosedLedger covers the second `return nil, nil, err` in
+// SignAndRegister (when RegisterSCITT fails after sign succeeds).
+func TestSignAndRegisterClosedLedger(t *testing.T) {
+	iss := makeIssuer(t)
+	ledger := makeLedger(t)
+	ledger.Close()
+	_, _, err := SignAndRegister(context.Background(), nil, ledger,
+		iss.PrivateKey(), iss.ID, "subj", "text/plain", []byte("payload"))
+	if err == nil {
+		t.Fatal("SignAndRegister on closed ledger should return an error")
+	}
+}
+

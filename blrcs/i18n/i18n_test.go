@@ -249,3 +249,58 @@ func TestBuiltinMessagesPresent(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Coverage uplift: uncovered branches in Translate, Locales, LocaleFromAcceptLanguage
+// ============================================================================
+
+// TestTranslatePrefixFallback covers the "ja-JP → ja" region-stripping path in
+// Translate when the exact locale isn't registered but the language prefix is.
+func TestTranslatePrefixFallback(t *testing.T) {
+	b := NewBundle(nil)
+	b.AddMessage("msg.hello", "ja", "こんにちは")
+	// "ja-JP" is not registered but "ja" is → prefix fallback
+	got := b.Translate("msg.hello", "ja-JP")
+	if got != "こんにちは" {
+		t.Errorf("prefix fallback: got %q, want こんにちは", got)
+	}
+}
+
+// TestTranslateAnyLocaleFallback covers the "for _, t := range locales" loop
+// in Translate when neither exact nor prefix match is found.
+func TestTranslateAnyLocaleFallback(t *testing.T) {
+	b := NewBundle(nil)
+	b.AddMessage("msg.any", "fr", "Bonjour")
+	// "de" is not registered and there's no "de-*" prefix → any-locale fallback
+	got := b.Translate("msg.any", "de")
+	if got != "Bonjour" {
+		t.Errorf("any-locale fallback: got %q, want Bonjour", got)
+	}
+}
+
+// TestTranslateEmptyTemplate covers `return key` when the matched template is "".
+func TestTranslateEmptyTemplate(t *testing.T) {
+	b := NewBundle(nil)
+	b.AddMessage("msg.empty", "en", "") // empty template
+	got := b.Translate("msg.empty", "en")
+	if got != "msg.empty" {
+		t.Errorf("empty template should return key, got %q", got)
+	}
+}
+
+// TestLocalesUnknownKey covers `return nil` in Locales when the key is missing.
+func TestLocalesUnknownKey(t *testing.T) {
+	b := NewBundle(nil)
+	if b.Locales("no.such.key") != nil {
+		t.Error("Locales for unknown key should return nil")
+	}
+}
+
+// TestLocaleFromAcceptLanguageEmptySupported covers `return "en"` when the
+// supported list is empty.
+func TestLocaleFromAcceptLanguageEmptySupported(t *testing.T) {
+	got := LocaleFromAcceptLanguage("fr,en;q=0.9", nil)
+	if got != "en" {
+		t.Errorf("empty supported should return en, got %q", got)
+	}
+}

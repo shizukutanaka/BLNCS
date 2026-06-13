@@ -347,3 +347,16 @@ func TestNewCipherValidKey(t *testing.T) {
 		t.Errorf("KeyID: %x", c.KeyID())
 	}
 }
+
+// TestKeyringDecryptInvalidEnvelope covers the validateEnvelope error path in
+// Keyring.Decrypt (too-short envelope is rejected before keyID lookup).
+func TestKeyringDecryptInvalidEnvelope(t *testing.T) {
+	kr := NewKeyring()
+	k, _ := GenerateKey()
+	c, _ := NewCipher(KeyIDFromUint32(1), k)
+	kr.Add(c)
+	_, err := kr.Decrypt([]byte("short"))
+	if err == nil {
+		t.Fatal("invalid envelope should be rejected by Keyring.Decrypt")
+	}
+}
