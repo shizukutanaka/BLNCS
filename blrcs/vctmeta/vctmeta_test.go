@@ -441,3 +441,47 @@ func TestHTTPFetcherCancelled(t *testing.T) {
 		t.Error("cancelled context should produce error")
 	}
 }
+
+// TestHTTPFetcherBadURL covers vctmeta.go:68-70: http.NewRequestWithContext
+// returns an error for URLs containing control characters such as null bytes.
+func TestHTTPFetcherBadURL(t *testing.T) {
+	f := HTTPFetcher(nil)
+	_, err := f(context.Background(), "http://host\x00bad/path")
+	if err == nil {
+		t.Error("URL with null byte should fail NewRequestWithContext")
+	}
+}
+
+// TestResolveSchemaFetchError covers vctmeta.go:183-185: fetch returns an
+// error when schema_uri is present but the remote fetch fails.
+func TestResolveSchemaFetchError(t *testing.T) {
+	tm := &TypeMetadata{SchemaURI: "https://schema.example.com/v1.json"}
+	want := errors.New("fetch failed")
+	_, err := tm.ResolveSchema(context.Background(), errFetcher(want))
+	if err != want {
+		t.Errorf("ResolveSchema fetch error not propagated: got %v", err)
+	}
+}
+
+// TestResolveChainFetchErrorOnExtends covers vctmeta.go:234-236: Resolve
+// returns an error mid-chain (first node resolved OK, parent fetch fails).
+func TestResolveChainFetchErrorOnExtends(t *testing.T) {
+	parent := "https://eu.example/parent"
+	child := "https://eu.example/child"
+	childDoc := []byte(`{"vct":"` + child + `","extends":"` + parent + `"}`)
+	fetchErr := errors.New("parent unreachable")
+	fetch := func(_ context.Context, url string) ([]byte, error) {
+		if url == child {
+			return childDoc, nil
+		}
+		return nil, fetchErr
+	}
+	_, err := ResolveChain(context.Background(), child, "", fetch)
+	if err == nil || err == fetchErr && err != fetchErr {
+		// either the wrapped or bare fetchErr is fine, but nil is not
+		t.Errorf("expected error propagating from Resolve on parent fetch, got nil")
+	}
+	if err == nil {
+		t.Error("ResolveChain should return error when parent fetch fails")
+	}
+}

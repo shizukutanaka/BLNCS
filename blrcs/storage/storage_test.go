@@ -578,3 +578,97 @@ func TestFileStorage_RescanTruncatedPayload(t *testing.T) {
 		t.Fatal("truncated payload frame should cause NewFileStorage to fail")
 	}
 }
+
+// TestNewFileStorageMkdirFails covers storage.go:156-157: os.MkdirAll returns
+// an error when the parent path is a regular file (not a directory).
+func TestNewFileStorageMkdirFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-mkdirfail-*")
+	defer os.RemoveAll(dir)
+	// Create a regular file; using it as a parent dir causes MkdirAll to fail.
+	blocker := filepath.Join(dir, "notadir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewFileStorage(filepath.Join(blocker, "subdir"))
+	if err == nil {
+		t.Error("NewFileStorage with file-as-parent should fail")
+	}
+}
+
+// TestNewFileStorageOpenFails covers storage.go:161-162: os.OpenFile fails
+// when the ledger path is occupied by a directory.
+func TestNewFileStorageOpenFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-openfail-*")
+	defer os.RemoveAll(dir)
+	// Place a directory where the ledger file would be created.
+	if err := os.MkdirAll(filepath.Join(dir, ledgerFileName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewFileStorage(dir)
+	if err == nil {
+		t.Error("NewFileStorage with ledger path occupied by directory should fail")
+	}
+}
+
+// TestAppendStatementWriteFails covers storage.go:244-245: the Write error path
+// in AppendStatement when the underlying file has been closed externally.
+func TestAppendStatementWriteFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-writefail-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Close the underlying *os.File without setting s.closed — bypasses the
+	// ErrAlreadyClosed guard so Write hits the underlying OS error.
+	s.file.Close()
+	_, werr := s.AppendStatement([]byte(`{"x":1}`))
+	if werr == nil {
+		t.Error("AppendStatement on externally-closed file should return error")
+	}
+	if errors.Is(werr, ErrAlreadyClosed) {
+		t.Error("error should be a write error, not ErrAlreadyClosed")
+	}
+}
+
+// TestIterateStatementsOpenFails covers storage.go:260-261: os.Open fails in
+// IterateStatements when the ledger file has been deleted.
+func TestIterateStatementsOpenFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-iterfail-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppendStatement([]byte(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	// Delete the ledger file — IterateStatements.os.Open will fail.
+	if err := os.Remove(filepath.Join(dir, ledgerFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.IterateStatements(func(_ uint64, _ StatementBlob) error { return nil }); err == nil {
+		t.Error("IterateStatements with deleted ledger file should return error")
+	}
+}
+
+// TestLoadKeyPairDirectoryError covers storage.go:305-306: LoadKeyPair returns
+// a non-ErrNotFound error when the keypair path is occupied by a directory.
+func TestLoadKeyPairDirectoryError(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-loadkpdir-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	// Create a directory at the keypair file path — os.ReadFile returns EISDIR,
+	// which is not os.IsNotExist, so line 305 is reached.
+	if err := os.MkdirAll(filepath.Join(dir, keypairFileName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := s.LoadKeyPair()
+	if err == nil {
+		t.Error("LoadKeyPair with dir at keypair path should return error")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Error("error should not be ErrNotFound")
+	}
+}

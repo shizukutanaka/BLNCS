@@ -915,3 +915,193 @@ func TestPresentNonArrayNamespaceItems(t *testing.T) {
 		t.Fatalf("Verify after non-array items Present: %v", err)
 	}
 }
+
+// ============================================================================
+// Coverage uplift: Issue Sign1 failure, Present non-array in reveal set,
+// itemElementID bad inner CBOR, Verify MSO shape and version errors.
+// ============================================================================
+
+// TestPresentNonArrayItemsWanted covers present.go:61: the `items, ok :=
+// itemsRaw.([]any)` fails when the namespace IS in the reveal map (wanted=true).
+func TestPresentNonArrayItemsWanted(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	cred, _ := Issue(sampleParams(issuerPriv, nil))
+
+	top, _ := cbor.Unmarshal(cred)
+	topMap := top.(map[any]any)
+	nsMap, _ := topMap[isNameSpaces].(map[any]any)
+	newNS := make(map[any]any)
+	for k, v := range nsMap {
+		newNS[k] = v
+	}
+	newNS["org.iso.bad.ns"] = "not-an-array"
+	topMap[isNameSpaces] = newNS
+	b, _ := cbor.Marshal(topMap)
+
+	// Include "org.iso.bad.ns" in reveal so wanted=true, triggering line 61.
+	result, err := Present(b, map[string][]string{
+		"org.iso.18013.5.1": {"family_name"},
+		"org.iso.bad.ns":    {"x"},
+	})
+	if err != nil {
+		t.Fatalf("Present with non-array items (wanted) should not fail: %v", err)
+	}
+	if _, err := Verify(result, issuerPub, time.Now()); err != nil {
+		t.Fatalf("Verify after non-array items (wanted) Present: %v", err)
+	}
+}
+
+// TestItemElementIDBadInnerCBOR covers present.go:97-99: cbor.Unmarshal fails
+// when the tag-24 bstr content is invalid CBOR.
+func TestItemElementIDBadInnerCBOR(t *testing.T) {
+	_, err := itemElementID(cbor.Tag{Number: tagEncodedCBOR, Content: []byte{0xff}})
+	if err == nil {
+		t.Error("invalid inner CBOR should fail itemElementID")
+	}
+}
+
+// signCustomMSO is a helper that encodes the given mso map as COSE_Sign1 and
+// returns raw IssuerSigned bytes suitable for Verify.
+func signCustomMSO(t *testing.T, issuerPriv ed25519.PrivateKey, mso map[any]any) []byte {
+	t.Helper()
+	msoBytes, err := cbor.Marshal(mso)
+	if err != nil {
+		t.Fatalf("marshal custom MSO: %v", err)
+	}
+	msoTagged, err := cbor.Marshal(cbor.Tag{Number: tagEncodedCBOR, Content: msoBytes})
+	if err != nil {
+		t.Fatalf("tag-24 wrap MSO: %v", err)
+	}
+	protected := cbor.Header{cbor.HeaderAlg: cbor.AlgEdDSA}
+	// cbor.Sign1 returns the COSE_Sign1 encoded bytes directly.
+	issuerAuth, err := cbor.Sign1(protected, nil, msoTagged, nil, issuerPriv)
+	if err != nil {
+		t.Fatalf("Sign1: %v", err)
+	}
+	cred, err := cbor.Marshal(map[string]any{
+		isNameSpaces: map[string]any{},
+		isIssuerAuth: rawCBOR(issuerAuth), // embed verbatim (same pattern as Issue)
+	})
+	if err != nil {
+		t.Fatalf("marshal issuerSigned: %v", err)
+	}
+	return cred
+}
+
+// TestVerifyMSOWrongVersion covers verify.go:65-66: ErrUnsupportedMSO when the
+// MSO "version" field is not "1.0".
+func TestVerifyMSOWrongVersion(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	mso := map[any]any{
+		msoVersion:   "2.0",
+		msoDigestAlg: DigestAlgSHA256,
+		msoDocType:   "org.iso.18013.5.1.mDL",
+	}
+	cred := signCustomMSO(t, issuerPriv, mso)
+	_, err := Verify(cred, issuerPub, time.Now())
+	if !errors.Is(err, ErrUnsupportedMSO) {
+		t.Errorf("wrong version: want ErrUnsupportedMSO, got %v", err)
+	}
+}
+
+// TestVerifyMSOWrongDigestAlg covers verify.go:68-69: ErrUnsupportedMSO when
+// the MSO "digestAlgorithm" field is not "SHA-256".
+func TestVerifyMSOWrongDigestAlg(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	mso := map[any]any{
+		msoVersion:   MSOVersion,
+		msoDigestAlg: "SHA-512",
+		msoDocType:   "org.iso.18013.5.1.mDL",
+	}
+	cred := signCustomMSO(t, issuerPriv, mso)
+	_, err := Verify(cred, issuerPub, time.Now())
+	if !errors.Is(err, ErrUnsupportedMSO) {
+		t.Errorf("wrong digest alg: want ErrUnsupportedMSO, got %v", err)
+	}
+}
+
+// TestVerifyMSOBadValidityInfo covers verify.go:76-77: parseValidity returns
+// an error when validityInfo is missing required fields.
+func TestVerifyMSOBadValidityInfo(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	mso := map[any]any{
+		msoVersion:      MSOVersion,
+		msoDigestAlg:    DigestAlgSHA256,
+		msoDocType:      "org.iso.18013.5.1.mDL",
+		msoValueDigests: map[any]any{},
+		msoValidityInfo: "not-a-map", // parseValidity expects map[any]any
+	}
+	cred := signCustomMSO(t, issuerPriv, mso)
+	_, err := Verify(cred, issuerPub, time.Now())
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("bad validityInfo: want ErrMalformed, got %v", err)
+	}
+}
+
+// TestVerifyMSOPayloadNotTag24 covers verify.go:57-58: decodeTagged24 fails
+// when the COSE_Sign1 payload is valid bytes but not tag-24 CBOR.
+func TestVerifyMSOPayloadNotTag24(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	// Sign a plain string as payload (not tag-24 encoded)
+	plainPayload := []byte("not-a-tag-24-mso-string-bytes-here")
+	protected := cbor.Header{cbor.HeaderAlg: cbor.AlgEdDSA}
+	issuerAuth, err := cbor.Sign1(protected, nil, plainPayload, nil, issuerPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, _ := cbor.Marshal(map[string]any{
+		isNameSpaces: map[string]any{},
+		isIssuerAuth: rawCBOR(issuerAuth),
+	})
+	_, err = Verify(cred, issuerPub, time.Now())
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("non-tag-24 payload: want ErrMalformed, got %v", err)
+	}
+}
+
+// TestVerifyMSONotMap covers verify.go:61-62: ErrMalformed when the tag-24
+// payload decodes successfully but the inner value is not a CBOR map.
+func TestVerifyMSONotMap(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	// Create tag-24 wrapping a CBOR string (not a map)
+	innerString, _ := cbor.Marshal("this-is-a-string-not-a-map")
+	msoTagged, _ := cbor.Marshal(cbor.Tag{Number: tagEncodedCBOR, Content: innerString})
+	protected := cbor.Header{cbor.HeaderAlg: cbor.AlgEdDSA}
+	issuerAuth, _ := cbor.Sign1(protected, nil, msoTagged, nil, issuerPriv)
+	cred, _ := cbor.Marshal(map[string]any{
+		isNameSpaces: map[string]any{},
+		isIssuerAuth: rawCBOR(issuerAuth),
+	})
+	_, err := Verify(cred, issuerPub, time.Now())
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("MSO not a map: want ErrMalformed, got %v", err)
+	}
+}
+
+// TestVerifyMSOBadValueDigests covers verify.go:88-89: parseValueDigests
+// returns an error when the valueDigests map has a non-string namespace key.
+func TestVerifyMSOBadValueDigests(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	now := time.Now().UTC()
+	tdate := func(t time.Time) cbor.Tag {
+		return cbor.Tag{Number: tagDateTime, Content: t.Format(time.RFC3339)}
+	}
+	mso := map[any]any{
+		msoVersion:   MSOVersion,
+		msoDigestAlg: DigestAlgSHA256,
+		msoDocType:   "org.iso.18013.5.1.mDL",
+		msoValidityInfo: map[any]any{
+			viSigned:     tdate(now),
+			viValidFrom:  tdate(now.Add(-time.Hour)),
+			viValidUntil: tdate(now.Add(time.Hour)),
+		},
+		msoValueDigests: map[any]any{
+			uint64(42): map[any]any{}, // non-string namespace key → parseValueDigests fails
+		},
+	}
+	cred := signCustomMSO(t, issuerPriv, mso)
+	_, err := Verify(cred, issuerPub, time.Now())
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("bad valueDigests namespace key: want ErrMalformed, got %v", err)
+	}
+}
