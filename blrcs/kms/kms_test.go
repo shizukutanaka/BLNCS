@@ -448,3 +448,31 @@ func TestFileSignerSignAfterClose(t *testing.T) {
 		t.Fatal("FileSigner.Sign after Close should return an error")
 	}
 }
+
+// TestFileSignerLoadFromDirectory covers the `if err := fs.load(); err != nil`
+// path in NewFileSigner when the key path resolves to a directory (ReadFile error).
+func TestFileSignerLoadFromDirectory(t *testing.T) {
+	dir := t.TempDir()
+	// Create a sub-directory at the keyfile path; os.ReadFile on a directory fails.
+	keyDir := filepath.Join(dir, "keyfile.dir")
+	if err := os.MkdirAll(keyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFileSigner("id", keyDir); err == nil {
+		t.Fatal("NewFileSigner with directory path should fail")
+	}
+}
+
+// TestFileSignerLoadBadSize covers the `len(b) != expected` guard in FileSigner.load.
+// (The file exists and is readable, but has wrong size.)
+func TestFileSignerLoadBadSize(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "bad.key")
+	// Write a file that is too short to hold a key pair.
+	if err := os.WriteFile(keyPath, []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFileSigner("id", keyPath); err == nil {
+		t.Fatal("FileSigner load with wrong size should fail")
+	}
+}

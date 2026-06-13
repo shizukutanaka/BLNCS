@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -655,6 +656,127 @@ func TestRegisterAppendFailure(t *testing.T) {
 	}
 }
 
+// wrongIdxStore always returns idx=99, causing a storage/memory desync in Register.
+type wrongIdxStore struct {
+	*storage.MemoryStorage
+}
+
+func (w *wrongIdxStore) AppendStatement(_ storage.StatementBlob) (uint64, error) {
+	return 99, nil
+}
+
+// TestRegisterDesyncDetected covers `return nil, fmt.Errorf("ledger: storage/memory desync …")`
+// in Register when AppendStatement returns an idx that doesn't match the in-memory leaf count.
+func TestRegisterDesyncDetected(t *testing.T) {
+	l, err := NewLedgerWithStorage("ts-desync", &wrongIdxStore{storage.NewMemoryStorage()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "subj", "c", []byte("payload"))
+	if _, err := l.Register(stmt); err == nil {
+		t.Error("desync should be detected and returned as error")
+	}
+}
+
+// failLoadKPStore returns a non-ErrNotFound error from LoadKeyPair.
+type failLoadKPStore struct {
+	*storage.MemoryStorage
+}
+
+func (f *failLoadKPStore) LoadKeyPair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
+	return nil, nil, errors.New("simulated load failure")
+}
+
+// TestNewLedgerLoadKeyPairFails covers `return nil, fmt.Errorf("load keypair: %w", err)`
+// in NewLedgerWithStorage when LoadKeyPair returns a non-ErrNotFound error.
+func TestNewLedgerLoadKeyPairFails(t *testing.T) {
+	_, err := NewLedgerWithStorage("ts-lkpfail", &failLoadKPStore{storage.NewMemoryStorage()})
+	if err == nil {
+		t.Fatal("LoadKeyPair failure should propagate from NewLedgerWithStorage")
+	}
+}
+
+// replayBadSigStore wraps MemoryStorage and serves a valid-JSON statement with a bad signature.
+type replayBadSigStore struct {
+	*storage.MemoryStorage
+	blob []byte
+}
+
+func (r *replayBadSigStore) IterateStatements(fn func(uint64, storage.StatementBlob) error) error {
+	return fn(0, storage.StatementBlob(r.blob))
+}
+
+// TestNewLedgerReplayBadSig covers `return fmt.Errorf("replay bad sig at idx %d")` in
+// NewLedgerWithStorage when a replayed statement has an invalid signature.
+func TestNewLedgerReplayBadSig(t *testing.T) {
+	priv, _ := mustIssuer(t, "iss-replay")
+	goodStmt, _ := SignStatement(priv, "iss-replay", "s", "c", []byte("payload"))
+
+	// Build a statement with a tampered signature so VerifyStatement fails.
+	badStmt := goodStmt
+	decoded, err := base64.StdEncoding.DecodeString(goodStmt.Signature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded[0] ^= 0xff
+	badStmt.Signature = base64.StdEncoding.EncodeToString(decoded)
+
+	blob, _ := json.Marshal(badStmt)
+
+	mem := storage.NewMemoryStorage()
+	// Pre-populate a key pair so LoadKeyPair succeeds.
+	pub, priv2, _ := ed25519.GenerateKey(rand.Reader)
+	if err := mem.SaveKeyPair(pub, priv2); err != nil {
+		t.Fatal(err)
+	}
+	store := &replayBadSigStore{MemoryStorage: mem, blob: blob}
+	_, err = NewLedgerWithStorage("ts-badsigreplay", store)
+	if err == nil {
+		t.Fatal("bad-sig replay should propagate from NewLedgerWithStorage")
+	}
+}
+
+// TestVerifyReceiptWrongTSKey covers `!ed25519.Verify → return ErrBadReceipt` in VerifyReceipt.
+func TestVerifyReceiptWrongTSKey(t *testing.T) {
+	ledger, _ := NewLedger("ts-wrongkey")
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("payload"))
+	receipt, _ := ledger.Register(stmt)
+	wrongPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	if err := VerifyReceipt(receipt, stmt, wrongPub); err != ErrBadReceipt {
+		t.Errorf("wrong TS key: want ErrBadReceipt, got %v", err)
+	}
+}
+
+// TestVerifyReceiptInvalidHexRootResigned covers the `hexDecode(r.RootHash) → return ErrBadReceipt`
+// path.  The receipt is re-signed with the actual tsPriv so signature verification passes,
+// but the root hash contains a non-hex character so hexDecode fails.
+func TestVerifyReceiptInvalidHexRootResigned(t *testing.T) {
+	ledger, _ := NewLedger("ts-hexroot")
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("p"))
+	receipt, _ := ledger.Register(stmt)
+
+	// Tamper the root hash to contain invalid hex, then re-sign so !Verify passes.
+	bad := *receipt
+	bad.RootHash = "GG" // "GG" has even length but 'G' is not a valid hex nibble
+	bad.TSSignature = base64.StdEncoding.EncodeToString(
+		ed25519.Sign(ledger.tsPriv, receiptSigPayload(&bad)),
+	)
+	if err := VerifyReceipt(&bad, stmt, ledger.PublicKey()); err != ErrBadReceipt {
+		t.Errorf("invalid hex root: want ErrBadReceipt, got %v", err)
+	}
+}
+
+// TestDecodeReceiptPayloadBadCBOR covers `return nil, err` when cbor.Unmarshal fails.
+func TestDecodeReceiptPayloadBadCBOR(t *testing.T) {
+	_, err := decodeReceiptPayload([]byte{0xff, 0xff, 0xff})
+	if err == nil {
+		t.Error("invalid CBOR should fail decodeReceiptPayload")
+	}
+}
+
 // ============================================================================
 // Cosign paths: hexDecode(prev.RootHash) error and hexDecode(cp.RootHash) error
 // ============================================================================
@@ -723,6 +845,175 @@ func TestVerifyCOSEReceiptBadPayload(t *testing.T) {
 	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("p"))
 	if err := VerifyCOSEReceipt(data, stmt, ledger.PublicKey()); err == nil {
 		t.Error("COSE receipt with bad payload should fail VerifyCOSEReceipt")
+	}
+}
+
+// ============================================================================
+// Coverage uplift: NewLedgerWithStorage error paths, VerifyConsistency inner
+// loop error paths
+// ============================================================================
+
+// failSaveKeyPairStore fails only on SaveKeyPair.
+type failSaveKeyPairStore struct {
+	*storage.MemoryStorage
+}
+
+func (f *failSaveKeyPairStore) SaveKeyPair(pub ed25519.PublicKey, priv ed25519.PrivateKey) error {
+	return errors.New("disk full")
+}
+
+// TestNewLedgerSaveKeyPairFails covers the `if err := store.SaveKeyPair(...); err != nil`
+// path in NewLedgerWithStorage (new key generated, then save fails).
+func TestNewLedgerSaveKeyPairFails(t *testing.T) {
+	_, err := NewLedgerWithStorage("ts-savefail", &failSaveKeyPairStore{storage.NewMemoryStorage()})
+	if err == nil {
+		t.Fatal("SaveKeyPair failure should propagate from NewLedgerWithStorage")
+	}
+}
+
+// replayBadJSONStore returns a valid key pair but serves corrupt JSON from IterateStatements.
+type replayBadJSONStore struct {
+	*storage.MemoryStorage
+}
+
+func (r *replayBadJSONStore) IterateStatements(fn func(uint64, storage.StatementBlob) error) error {
+	return fn(0, storage.StatementBlob("not-valid-json"))
+}
+
+// TestNewLedgerReplayUnmarshalError covers `fmt.Errorf("replay at idx %d: %w", ...)` in
+// NewLedgerWithStorage when IterateStatements returns malformed JSON.
+func TestNewLedgerReplayUnmarshalError(t *testing.T) {
+	mem := storage.NewMemoryStorage()
+	// Pre-populate a key pair so the load path succeeds.
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	if err := mem.SaveKeyPair(pub, priv); err != nil {
+		t.Fatal(err)
+	}
+	store := &replayBadJSONStore{mem}
+	_, err := NewLedgerWithStorage("ts-replay", store)
+	if err == nil {
+		t.Fatal("corrupt replay JSON should propagate from NewLedgerWithStorage")
+	}
+}
+
+// TestVerifyConsistencyCorruptedProof covers the `!equalBytes(fr, oldRoot)`,
+// `!equalBytes(sr, newRoot)`, and `sn != 0` paths in VerifyConsistency.
+// We build a real 5-entry ledger, obtain a valid proof, verify it (must pass),
+// then corrupt individual proof elements to hit each error path.
+func TestVerifyConsistencyCorruptedProof(t *testing.T) {
+	ledger, err := NewLedger("ts-consist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, _ := mustIssuer(t, "iss")
+
+	roots := make([][]byte, 0, 6)
+	roots = append(roots, nil) // placeholder for index 0 (no tree)
+	for i := 1; i <= 5; i++ {
+		s, _ := SignStatement(priv, "iss", fmt.Sprintf("s%d", i), "c", []byte(fmt.Sprintf("pay%d", i)))
+		r, err := ledger.Register(s)
+		if err != nil {
+			t.Fatalf("Register %d: %v", i, err)
+		}
+		b, err := hexDecodeString(r.RootHash)
+		if err != nil {
+			t.Fatalf("rootHash decode: %v", err)
+		}
+		roots = append(roots, b)
+	}
+
+	// Get a valid proof from m=3 to n=5.
+	proof, err := ledger.ConsistencyProof(3, 5)
+	if err != nil {
+		t.Fatalf("ConsistencyProof: %v", err)
+	}
+
+	// Happy path must pass.
+	if err := VerifyConsistency(3, 5, roots[3], roots[5], proof); err != nil {
+		t.Fatalf("valid consistency proof rejected: %v", err)
+	}
+
+	if len(proof) < 2 {
+		t.Skip("need at least 2 proof elements for corruption tests")
+	}
+
+	// Corrupt first proof element → wrong fr/sr seed → !equalBytes(fr, oldRoot)
+	corrupt := make([][]byte, len(proof))
+	copy(corrupt, proof)
+	bad := make([]byte, len(corrupt[0]))
+	copy(bad, corrupt[0])
+	bad[0] ^= 0xff
+	corrupt[0] = bad
+	if err := VerifyConsistency(3, 5, roots[3], roots[5], corrupt); err == nil {
+		t.Error("corrupted first element should fail VerifyConsistency")
+	}
+
+	// Corrupt last proof element → intermediate correct but final root wrong.
+	corrupt2 := make([][]byte, len(proof))
+	copy(corrupt2, proof)
+	bad2 := make([]byte, len(corrupt2[len(corrupt2)-1]))
+	copy(bad2, corrupt2[len(corrupt2)-1])
+	bad2[0] ^= 0xff
+	corrupt2[len(corrupt2)-1] = bad2
+	if err := VerifyConsistency(3, 5, roots[3], roots[5], corrupt2); err == nil {
+		t.Error("corrupted last element should fail VerifyConsistency")
+	}
+}
+
+// hexDecodeString is a helper for TestVerifyConsistencyCorruptedProof.
+func hexDecodeString(s string) ([]byte, error) {
+	b := make([]byte, len(s)/2)
+	for i := 0; i < len(s); i += 2 {
+		hi, err := hexChar(s[i])
+		if err != nil {
+			return nil, err
+		}
+		lo, err := hexChar(s[i+1])
+		if err != nil {
+			return nil, err
+		}
+		b[i/2] = hi<<4 | lo
+	}
+	return b, nil
+}
+
+// TestVerifyConsistencySnZeroInLoop covers `if sn == 0 { return ErrConsistency }`
+// inside the inner loop, triggered by appending an extra element to a valid proof
+// so that the loop continues when sn has already been reduced to zero.
+func TestVerifyConsistencySnZeroInLoop(t *testing.T) {
+	ledger, err := NewLedger("ts-sn0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, _ := mustIssuer(t, "iss")
+
+	roots := make([][]byte, 3)
+	for i := 1; i <= 2; i++ {
+		s, _ := SignStatement(priv, "iss", fmt.Sprintf("s%d", i), "c", []byte(fmt.Sprintf("p%d", i)))
+		r, err := ledger.Register(s)
+		if err != nil {
+			t.Fatalf("Register %d: %v", i, err)
+		}
+		b, err := hexDecodeString(r.RootHash)
+		if err != nil {
+			t.Fatalf("rootHash decode: %v", err)
+		}
+		roots[i] = b
+	}
+
+	// Valid proof for m=1 → n=2 has exactly 1 element.
+	proof, err := ledger.ConsistencyProof(1, 2)
+	if err != nil {
+		t.Fatalf("ConsistencyProof: %v", err)
+	}
+	if err := VerifyConsistency(1, 2, roots[1], roots[2], proof); err != nil {
+		t.Fatalf("valid proof rejected: %v", err)
+	}
+	// Append one extra element — after processing the real element sn reaches 0;
+	// the next iteration hits `if sn == 0 { return ErrConsistency }`.
+	extra := append(proof, HashLeaf([]byte("extra")))
+	if err := VerifyConsistency(1, 2, roots[1], roots[2], extra); err == nil {
+		t.Error("extended proof should fail with sn==0 guard")
 	}
 }
 

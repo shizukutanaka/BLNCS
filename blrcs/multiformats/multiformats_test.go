@@ -500,3 +500,33 @@ func TestIsIntegerLiteralEmptyString(t *testing.T) {
 		t.Error("empty json.Number should fail")
 	}
 }
+
+// TestCanonicalizeNilAndBool covers the nil and bool cases in canonicalValue.
+// CanonicalizeJSON with UseNumber() still decodes null→nil and true/false→bool,
+// so these branches are reachable from CanonicalizeJSON as well.
+func TestCanonicalizeNilAndBool(t *testing.T) {
+	b, err := Canonicalize(nil)
+	if err != nil || string(b) != "null" {
+		t.Errorf("nil: got %q %v", b, err)
+	}
+	b, err = Canonicalize(true)
+	if err != nil || string(b) != "true" {
+		t.Errorf("true: got %q %v", b, err)
+	}
+	b, err = Canonicalize(false)
+	if err != nil || string(b) != "false" {
+		t.Errorf("false: got %q %v", b, err)
+	}
+	// CanonicalizeJSON round-trip for null and booleans.
+	for _, tc := range []struct{ in, want string }{
+		{`null`, `null`},
+		{`true`, `true`},
+		{`false`, `false`},
+		{`{"f":false,"t":true,"n":null}`, `{"f":false,"n":null,"t":true}`},
+	} {
+		got, err := CanonicalizeJSON([]byte(tc.in))
+		if err != nil || string(got) != tc.want {
+			t.Errorf("CanonicalizeJSON(%s): got %q %v", tc.in, got, err)
+		}
+	}
+}

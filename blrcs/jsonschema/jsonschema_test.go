@@ -637,3 +637,96 @@ func TestSchemaValidateDeepEqual(t *testing.T) {
 		t.Error("99 should not match enum [1,...]")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: matchType unknown, jsonType non-standard, invalid pattern,
+// minProperties, maxProperties, deepEqual inner loops, prefixItems break,
+// resolvePointer default, isIPv4/isUUID edge cases
+// ============================================================================
+
+// TestMatchTypeUnknown covers the final `return false` in matchType when the
+// type name is not in the spec.
+func TestMatchTypeUnknown(t *testing.T) {
+	s := compile(t, `{"type": "unknowntype"}`)
+	// matchType("unknowntype", "hello") → falls through all cases → return false
+	mustInvalid(t, s, "hello")
+}
+
+// TestJsonTypeNonStandard covers the default arm in jsonType for non-JSON Go types.
+func TestJsonTypeNonStandard(t *testing.T) {
+	s := compile(t, `{"type": "string"}`)
+	// chan int is not a standard JSON type → jsonType returns fmt.Sprintf("%T", …)
+	if err := s.Validate(make(chan int)); err == nil {
+		t.Error("expected type error for chan int")
+	}
+}
+
+// TestCheckStringInvalidPattern covers `v.fail(…, "invalid pattern …")` in checkString.
+func TestCheckStringInvalidPattern(t *testing.T) {
+	s := compile(t, `{"type":"string","pattern":"[invalid"}`)
+	mustInvalid(t, s, "hello")
+}
+
+// TestMinPropertiesViolation covers `v.fail(…, "fewer than minProperties …")`.
+func TestMinPropertiesViolation(t *testing.T) {
+	s := compile(t, `{"type":"object","minProperties":3}`)
+	mustInvalid(t, s, instance(t, `{"a":1}`))
+}
+
+// TestMaxPropertiesViolation covers `v.fail(…, "more than maxProperties …")`.
+func TestMaxPropertiesViolation(t *testing.T) {
+	s := compile(t, `{"type":"object","maxProperties":1}`)
+	mustInvalid(t, s, instance(t, `{"a":1,"b":2}`))
+}
+
+// TestDeepEqualArrayElementMismatch covers `return false` inside the array loop.
+func TestDeepEqualArrayElementMismatch(t *testing.T) {
+	if deepEqual([]any{1.0, 2.0}, []any{1.0, 3.0}) {
+		t.Error("arrays with different elements should not be equal")
+	}
+}
+
+// TestDeepEqualMapValueMismatch covers `return false` inside the map loop (value differs).
+func TestDeepEqualMapValueMismatch(t *testing.T) {
+	if deepEqual(map[string]any{"k": 1.0}, map[string]any{"k": 2.0}) {
+		t.Error("maps with different values should not be equal")
+	}
+}
+
+// TestDeepEqualMapMissingKey covers `return false` when a key exists in a but not b.
+func TestDeepEqualMapMissingKey(t *testing.T) {
+	a := map[string]any{"k1": 1.0, "k2": 2.0}
+	b := map[string]any{"k1": 1.0, "k3": 3.0}
+	if deepEqual(a, b) {
+		t.Error("maps with different keys should not be equal")
+	}
+}
+
+// TestPrefixItemsShortArray covers the `break` inside the prefixItems loop
+// when the array has fewer elements than the number of prefix schemas.
+func TestPrefixItemsShortArray(t *testing.T) {
+	s := compile(t, `{"type":"array","prefixItems":[{"type":"string"},{"type":"number"},{"type":"boolean"}]}`)
+	// 1-element array → loop breaks at i=1 (1 >= len(arr))
+	mustValid(t, s, instance(t, `["hello"]`))
+}
+
+// TestResolvePointerDefaultCase covers the `return nil, false` default arm in
+// resolvePointer when traversal reaches a value that is neither a map nor an array.
+func TestResolvePointerDefaultCase(t *testing.T) {
+	// "#/type/foo": root["type"] is string "string"; trying to navigate into it → default
+	s := compile(t, `{"$ref": "#/type/foo", "type": "string"}`)
+	mustInvalid(t, s, "hello")
+}
+
+// TestIsIPv4LeadingZero covers the `n > 255 || (len(p) > 1 && p[0] == '0')` guard.
+func TestIsIPv4LeadingZero(t *testing.T) {
+	s := compile(t, `{"type":"string","format":"ipv4"}`)
+	mustInvalid(t, s, "192.168.01.1") // leading zero → isIPv4 returns false
+	mustInvalid(t, s, "192.168.1.256") // n > 255 → isIPv4 returns false
+}
+
+// TestIsUUIDNonHexChar covers `if !isHex { return false }` in isUUID.
+func TestIsUUIDNonHexChar(t *testing.T) {
+	s := compile(t, `{"type":"string","format":"uuid"}`)
+	mustInvalid(t, s, "123e4567-e89b-12d3-a456-42661417400z")
+}
