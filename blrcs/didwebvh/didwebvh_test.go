@@ -895,3 +895,122 @@ func TestUpdatePrevMalformedVersionID(t *testing.T) {
 		t.Fatal("malformed prev VersionID should fail")
 	}
 }
+
+// ============================================================================
+// Error-path coverage: non-serializable State triggers json/JCS failures
+// ============================================================================
+
+func TestComputeHashCanonicalizeError(t *testing.T) {
+	// Passing a value with an unsupported type (channel) → Canonicalize fails.
+	_, err := computeHash(map[string]any{"ch": make(chan int)})
+	if err == nil {
+		t.Error("computeHash with non-canonicalizable value must return error")
+	}
+}
+
+func TestEntryHashInputMarshalError(t *testing.T) {
+	// State containing a channel → json.Marshal fails inside entryHashInput.
+	entry := &LogEntry{
+		VersionTime: time.Now().UTC().Format(time.RFC3339),
+		Parameters:  Parameters{SCID: "QmFakeScid12345"},
+		State:       map[string]any{"bad": make(chan int)},
+	}
+	_, err := entryHashInput(entry, "prev")
+	if err == nil {
+		t.Error("entryHashInput with non-serializable state must return error")
+	}
+}
+
+func TestHashDataEntryHashInputError(t *testing.T) {
+	// hashData propagates entryHashInput failure when state is non-serializable.
+	entry := &LogEntry{
+		VersionTime: time.Now().UTC().Format(time.RFC3339),
+		Parameters:  Parameters{SCID: "QmFakeScid12345"},
+		State:       map[string]any{"bad": make(chan int)},
+	}
+	p := &Proof{
+		Type:               "DataIntegrityProof",
+		Cryptosuite:        Cryptosuite,
+		VerificationMethod: "did:webvh:x:ex#z6MkTest",
+		ProofPurpose:       "assertionMethod",
+	}
+	_, err := hashData(entry, "prev", p)
+	if err == nil {
+		t.Error("hashData with non-serializable entry state must return error")
+	}
+}
+
+func TestSignEntryHashDataError(t *testing.T) {
+	// signEntry propagates hashData failure.
+	updateKey, _ := genKey(t)
+	entry := &LogEntry{
+		VersionTime: time.Now().UTC().Format(time.RFC3339),
+		Parameters:  Parameters{SCID: "QmFakeScid12345"},
+		State:       map[string]any{"bad": make(chan int)},
+	}
+	_, err := signEntry(entry, "prev", updateKey, "did:webvh:x:ex#key", "")
+	if err == nil {
+		t.Error("signEntry with non-serializable entry state must return error")
+	}
+}
+
+func TestVerifyEntryProofHashDataError(t *testing.T) {
+	// verifyEntryProof propagates hashData failure when state is non-serializable.
+	updateKey, updateMK := genKey(t)
+	// Build a probe entry: proof fields are valid enough to pass the skip-checks
+	// (right cryptosuite, right-length ProofValue) so hashData is actually called.
+	entry := &LogEntry{
+		VersionTime: time.Now().UTC().Format(time.RFC3339),
+		Parameters:  Parameters{SCID: "QmFakeScid12345"},
+		State:       map[string]any{"bad": make(chan int)},
+		Proof: []Proof{{
+			Type:               "DataIntegrityProof",
+			Cryptosuite:        Cryptosuite,
+			VerificationMethod: "did:webvh:x:ex#" + updateMK,
+			ProofValue:         multiformats.EncodeMultibaseBase58(make([]byte, ed25519.SignatureSize)),
+			ProofPurpose:       "assertionMethod",
+		}},
+	}
+	_ = updateKey
+	_, err := verifyEntryProof(entry, "prev", []string{updateMK})
+	if err == nil {
+		t.Error("verifyEntryProof with non-serializable state must return error")
+	}
+}
+
+// TestVerifyGenesisEmptyUpdateKeys builds a structurally valid genesis entry
+// (valid SCID + entryHash) but with no UpdateKeys, so Verify reaches the
+// ErrNoUpdateKeys guard before proof verification.
+func TestVerifyGenesisEmptyUpdateKeys(t *testing.T) {
+	entry := &LogEntry{
+		VersionTime: time.Now().UTC().Format(time.RFC3339),
+		Parameters: Parameters{
+			Method:     "did:" + Method + ":1.0",
+			SCID:       SCIDPlaceholder,
+			UpdateKeys: nil, // intentionally empty
+		},
+		State: map[string]any{"id": "did:" + Method + ":" + SCIDPlaceholder + ":ex"},
+	}
+	// Compute SCID from the placeholder entry.
+	scidInput, err := entryHashInput(entry, SCIDPlaceholder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scid, err := computeHash(scidInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.Parameters.SCID = scid
+	entry.State = substituteSCID(entry.State, SCIDPlaceholder, scid).(map[string]any)
+	// Compute entryHash; predecessor for genesis is the SCID itself.
+	eh, err := computeEntryHash(entry, scid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.VersionID = "1-" + eh
+
+	_, err = Verify([]LogEntry{*entry})
+	if !errors.Is(err, ErrNoUpdateKeys) {
+		t.Fatalf("genesis with empty UpdateKeys: want ErrNoUpdateKeys, got %v", err)
+	}
+}

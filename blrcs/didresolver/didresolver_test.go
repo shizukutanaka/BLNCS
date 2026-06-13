@@ -820,6 +820,111 @@ func TestResolveAndVerifyTrustedNew(t *testing.T) {
 // multibaseToEd25519 — 'm' multibase base64 path (previously uncovered)
 // ============================================================================
 
+// ============================================================================
+// Targeted error-path coverage for uncovered branches
+// ============================================================================
+
+// TestResolveServicesDIDWebFetchError exercises the HTTPFetcher failure path
+// inside ResolveServices (distinct from the context-cancelled path).
+func TestResolveServicesDIDWebFetchError(t *testing.T) {
+	r := New()
+	fetchErr := errors.New("connection refused")
+	r.HTTPFetcher = func(_ context.Context, _ string) ([]byte, error) {
+		return nil, fetchErr
+	}
+	_, err := r.ResolveServices(context.Background(), "did:web:unreachable.example")
+	if !errors.Is(err, ErrFetchFailed) {
+		t.Errorf("fetcher error in ResolveServices: want ErrFetchFailed, got %v", err)
+	}
+}
+
+// TestResolveServicesInvalidJSON exercises the json.Unmarshal failure path
+// inside ResolveServices when the fetched body is not valid JSON.
+func TestResolveServicesInvalidJSON(t *testing.T) {
+	r := New()
+	r.HTTPFetcher = func(_ context.Context, _ string) ([]byte, error) {
+		return []byte("not-valid-json{{{"), nil
+	}
+	_, err := r.ResolveServices(context.Background(), "did:web:badjson.example")
+	if err == nil {
+		t.Error("invalid JSON body in ResolveServices must return error")
+	}
+}
+
+// TestParseDIDDocumentInvalidJSON exercises the json.Unmarshal failure inside
+// parseDIDDocument when called via resolveDIDWeb.
+func TestParseDIDDocumentInvalidJSON(t *testing.T) {
+	r := New()
+	r.HTTPFetcher = func(_ context.Context, _ string) ([]byte, error) {
+		return []byte("{bad json"), nil
+	}
+	_, err := r.Resolve(context.Background(), "did:web:badjson2.example")
+	if err == nil {
+		t.Error("invalid DID document JSON must return error")
+	}
+}
+
+// TestResolveDIDKeyBase58DecodeError exercises the base58Decode failure path in
+// resolveDIDKey. The character '0' (zero) is not in the base58btc alphabet, so
+// a did:key with 'z0...' causes base58Decode to return an error.
+func TestResolveDIDKeyBase58DecodeError(t *testing.T) {
+	// '0' is excluded from the base58 alphabet → decode error
+	r := New()
+	_, err := r.Resolve(context.Background(), "did:key:z0invalid")
+	if !errors.Is(err, ErrMalformedDID) {
+		t.Errorf("base58 decode error in did:key: want ErrMalformedDID, got %v", err)
+	}
+}
+
+// TestResolveDIDKeyTooShort exercises the "decoded payload too short" check in
+// resolveDIDKey. We encode a payload shorter than 2+ed25519.PublicKeySize bytes
+// that starts with the correct multicodec prefix (0xed 0x01).
+func TestResolveDIDKeyTooShort(t *testing.T) {
+	short := append([]byte{0xed, 0x01}, make([]byte, 8)...) // only 10 bytes (need 34)
+	did := "did:key:z" + base58Encode(short)
+	r := New()
+	_, err := r.Resolve(context.Background(), did)
+	if !errors.Is(err, ErrMalformedDID) {
+		t.Errorf("too-short did:key: want ErrMalformedDID, got %v", err)
+	}
+}
+
+// TestResolveDIDKeyWrongMulticodec exercises the multicodec-prefix check in
+// resolveDIDKey. We encode a 34-byte payload with a non-Ed25519 multicodec (0x00 0x00).
+func TestResolveDIDKeyWrongMulticodec(t *testing.T) {
+	payload := append([]byte{0x00, 0x00}, make([]byte, ed25519.PublicKeySize)...) // wrong prefix
+	did := "did:key:z" + base58Encode(payload)
+	r := New()
+	_, err := r.Resolve(context.Background(), did)
+	if !errors.Is(err, ErrMalformedDID) {
+		t.Errorf("wrong multicodec did:key: want ErrMalformedDID, got %v", err)
+	}
+}
+
+// TestResolveDIDJWKBadJSONBody exercises the json.Unmarshal failure inside
+// resolveDIDJWK: valid base64url that decodes to non-JSON bytes.
+func TestResolveDIDJWKBadJSONBody(t *testing.T) {
+	badJSON := base64.RawURLEncoding.EncodeToString([]byte("not-json-at-all"))
+	r := New()
+	_, err := r.Resolve(context.Background(), "did:jwk:"+badJSON)
+	if !errors.Is(err, ErrMalformedDID) {
+		t.Errorf("non-JSON JWK body: want ErrMalformedDID, got %v", err)
+	}
+}
+
+// TestResolveAndVerifyResolveFails exercises the r.Resolve error path inside
+// ResolveAndVerify (distinct from the "resolved but not trusted" path).
+func TestResolveAndVerifyResolveFails(t *testing.T) {
+	r := New()
+	ta := NewTrustAnchor()
+	ta.AllowAll()
+	// An unsupported DID method will make r.Resolve return an error.
+	_, err := ResolveAndVerify(context.Background(), r, ta, "did:unsupported:xyz")
+	if err == nil {
+		t.Error("Resolve failure in ResolveAndVerify must return error")
+	}
+}
+
 func TestMultibaseToEd25519Variants(t *testing.T) {
 	// Generate a real Ed25519 public key for use in tests.
 	rawPub, _, err := ed25519.GenerateKey(rand.Reader)

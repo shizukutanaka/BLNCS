@@ -576,3 +576,33 @@ func TestMockWalletPresentCompliancePresentError(t *testing.T) {
 		t.Error("Present with empty SDJWT should return error")
 	}
 }
+
+// TestProcessResponseNoAcceptableIssuers covers the guard at
+// openid4vp.go:339 that rejects sessions configured with no acceptable issuers.
+func TestProcessResponseNoAcceptableIssuers(t *testing.T) {
+	store := NewMemoryStore()
+	ver := NewVerifier("https://verify.example", "https://verify.example/cb", store)
+	// Inject a session with an empty AcceptableIssuers map directly into the store
+	// so we bypass CreateRequest validation (which doesn't require AcceptableIssuers).
+	state := "test-state-noissuer"
+	req := &AuthorizationRequest{
+		ClientID:    ver.ClientID,
+		ResponseURI: ver.ResponseURI,
+		Nonce:       "testnonce",
+		State:       state,
+		PresentationDefinition: PresentationDefinition{
+			RequiredClaims:    []string{"x"},
+			AcceptableIssuers: nil, // deliberately empty
+		},
+	}
+	if err := store.Save(state, req, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ver.ProcessResponse(&AuthorizationResponse{
+		State:   state,
+		VPToken: "header.payload.sig", // non-empty but irrelevant; check comes first
+	})
+	if err == nil || err.Error() == "" {
+		t.Fatalf("ProcessResponse with no AcceptableIssuers should fail, got %v", err)
+	}
+}
