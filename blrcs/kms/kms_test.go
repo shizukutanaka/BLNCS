@@ -476,3 +476,35 @@ func TestFileSignerLoadBadSize(t *testing.T) {
 		t.Fatal("FileSigner load with wrong size should fail")
 	}
 }
+
+// TestFileSignerMkdirFails covers the os.MkdirAll error branch in NewFileSigner.
+// Creating a regular file at the parent-dir path makes MkdirAll fail.
+func TestFileSignerMkdirFails(t *testing.T) {
+	dir := t.TempDir()
+	parentFile := filepath.Join(dir, "notadir")
+	if err := os.WriteFile(parentFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewFileSigner("id", filepath.Join(parentFile, "key.bin"))
+	if err == nil {
+		t.Fatal("NewFileSigner should fail when parent path is a file, not a directory")
+	}
+}
+
+// TestFileSignerSaveFails covers the fs.save() error branch in NewFileSigner and the
+// os.WriteFile error branch inside save(). A directory at the .tmp path causes WriteFile
+// to return EISDIR, which propagates back through NewFileSigner.
+func TestFileSignerSaveFails(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "my.key")
+	tmpPath := keyPath + ".tmp"
+	// Block WriteFile by pre-creating a directory at the .tmp path.
+	if err := os.MkdirAll(tmpPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// os.Stat(keyPath) → not found → generate key → save() → WriteFile(tmpPath) → EISDIR
+	_, err := NewFileSigner("id", keyPath)
+	if err == nil {
+		t.Fatal("NewFileSigner should fail when the .tmp path is a directory")
+	}
+}

@@ -879,7 +879,7 @@ func TestRunVCHasValidFromMismatch(t *testing.T) {
 		"issuerDID":     "did:web:test",
 		"productID":     "04012345678901",
 	}, map[string]any{
-		"hasV2Context": false,   // our impl always sets v2 context
+		"hasV2Context": false, // our impl always sets v2 context
 		"hasValidFrom": false,
 		"verifyOK":     true,
 	})

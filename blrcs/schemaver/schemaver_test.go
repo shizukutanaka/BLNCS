@@ -542,7 +542,7 @@ func TestMigrateMapExtractVersionError(t *testing.T) {
 // nil check stamps it with the current version.
 func TestMigrateMapSchemaVersionNilAfterNoOp(t *testing.T) {
 	reg := New("x")
-	reg.Register(1, nil) // only v1; no migrations needed
+	reg.Register(1, nil)                       // only v1; no migrations needed
 	data := map[string]any{"payload": "value"} // no schemaVersion key
 	result, err := reg.MigrateMap(data)
 	if err != nil {

@@ -712,8 +712,8 @@ func TestUpdateWithNoUpdateKeysParam(t *testing.T) {
 func TestCreateStateExtra(t *testing.T) {
 	updateKey, _ := genKey(t)
 	genesis, _, err := Create(CreateParams{
-		DIDPath:   "example.com:p",
-		UpdateKey: updateKey,
+		DIDPath:    "example.com:p",
+		UpdateKey:  updateKey,
 		StateExtra: map[string]any{"service": "did-endpoint"},
 	})
 	if err != nil {
@@ -887,7 +887,7 @@ func TestUpdatePrevMalformedVersionID(t *testing.T) {
 	// Update with a log whose last entry has a malformed VersionID → parseVersionID error.
 	updateKey, _ := genKey(t)
 	_, err := Update(UpdateParams{
-		Log:     []LogEntry{{VersionID: "bad-format-no-number"}},
+		Log:      []LogEntry{{VersionID: "bad-format-no-number"}},
 		SignKey:  updateKey,
 		NewState: map[string]any{"id": "did:webvh:x:example.com"},
 	})

@@ -693,7 +693,7 @@ func TestVerifySDJWTBadPayloadEncoding(t *testing.T) {
 	// We sign over the raw string so sig verify passes, then payload decode fails.
 	iss, _ := NewIssuer("did:web:badpayenc.test")
 	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"vc+sd-jwt"}`))
-	pay := "aGVsbG8="        // standard base64 of "hello" — has padding '='
+	pay := "aGVsbG8=" // standard base64 of "hello" — has padding '='
 	sig := ed25519.Sign(iss.privateKey, []byte(hdr+"."+pay))
 	badJWT := hdr + "." + pay + "." + base64.RawURLEncoding.EncodeToString(sig)
 	_, err := VerifySDJWTWithBinding(badJWT+"~", iss.PublicKey(), VerifyOptions{})
@@ -807,7 +807,7 @@ func TestVerifySDJWTDisclosureDuplicateClaim(t *testing.T) {
 	iss, _ := NewIssuer("did:web:dupname.test")
 	disc := base64.RawURLEncoding.EncodeToString([]byte(`["salt","foo","val2"]`))
 	payload := baseSDPayload(iss)
-	payload["foo"] = "val1"               // clear claim
+	payload["foo"] = "val1"                // clear claim
 	payload["_sd"] = []any{discHash(disc)} // also a disclosed claim with the same name
 	jwt := craftSignedJWT(iss.privateKey, payload)
 	sdjwt := jwt + "~" + disc + "~"

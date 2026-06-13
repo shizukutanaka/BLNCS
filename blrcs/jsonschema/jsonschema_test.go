@@ -721,7 +721,7 @@ func TestResolvePointerDefaultCase(t *testing.T) {
 // TestIsIPv4LeadingZero covers the `n > 255 || (len(p) > 1 && p[0] == '0')` guard.
 func TestIsIPv4LeadingZero(t *testing.T) {
 	s := compile(t, `{"type":"string","format":"ipv4"}`)
-	mustInvalid(t, s, "192.168.01.1") // leading zero → isIPv4 returns false
+	mustInvalid(t, s, "192.168.01.1")  // leading zero → isIPv4 returns false
 	mustInvalid(t, s, "192.168.1.256") // n > 255 → isIPv4 returns false
 }
 

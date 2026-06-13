@@ -672,22 +672,22 @@ func (s *Server) toolVerifySDJWT(args json.RawMessage) (string, error) {
 		return verifyResult(false, err.Error()), nil //nolint:nilerr
 	}
 	b, _ := json.Marshal(map[string]any{
-		"valid":     true,
-		"issuer":    vc.Issuer,
-		"subject":   vc.Subject,
-		"claims":    vc.Claims,
-		"keyBound":  vc.KeyBound,
-		"issuedAt":  vc.IssuedAt,
-		"expires":   vc.Expires,
+		"valid":    true,
+		"issuer":   vc.Issuer,
+		"subject":  vc.Subject,
+		"claims":   vc.Claims,
+		"keyBound": vc.KeyBound,
+		"issuedAt": vc.IssuedAt,
+		"expires":  vc.Expires,
 	})
 	return string(b), nil
 }
 
 func (s *Server) toolCheckRevocation(args json.RawMessage) (string, error) {
 	var in struct {
-		StatusListTokenJWT    string `json:"statusListTokenJWT"`
+		StatusListTokenJWT     string `json:"statusListTokenJWT"`
 		StatusListIssuerKeyB64 string `json:"statusListIssuerKeyB64"`
-		StatusIndex           int    `json:"statusIndex"`
+		StatusIndex            int    `json:"statusIndex"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err

@@ -404,7 +404,7 @@ func TestSign1InjectsAlg(t *testing.T) {
 // TestVerify1NonBstrProtected exercises the non-bstr protected branch.
 func TestVerify1NonBstrProtected(t *testing.T) {
 	b, _ := Marshal(Tag{
-		Number: TagCOSESign1,
+		Number:  TagCOSESign1,
 		Content: []any{uint64(99), map[int]any{}, []byte("pay"), []byte("sig")},
 	})
 	if _, err := Verify1(b, ed25519.PublicKey(make([]byte, 32)), nil); err == nil {
@@ -416,7 +416,7 @@ func TestVerify1NonBstrProtected(t *testing.T) {
 func TestVerify1NonBstrSig(t *testing.T) {
 	prot, _ := encodedHeader(Header{HeaderAlg: AlgEdDSA})
 	b, _ := Marshal(Tag{
-		Number: TagCOSESign1,
+		Number:  TagCOSESign1,
 		Content: []any{prot, map[int]any{}, []byte("pay"), "not-a-bstr-sig"},
 	})
 	if _, err := Verify1(b, ed25519.PublicKey(make([]byte, 32)), nil); err == nil {
@@ -428,7 +428,7 @@ func TestVerify1NonBstrSig(t *testing.T) {
 func TestVerify1NonBstrPayload(t *testing.T) {
 	prot, _ := encodedHeader(Header{HeaderAlg: AlgEdDSA})
 	b, _ := Marshal(Tag{
-		Number: TagCOSESign1,
+		Number:  TagCOSESign1,
 		Content: []any{prot, map[int]any{}, uint64(42), []byte("sig")},
 	})
 	if _, err := Verify1(b, ed25519.PublicKey(make([]byte, 32)), nil); err == nil {

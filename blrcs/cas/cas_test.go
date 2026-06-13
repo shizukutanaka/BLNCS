@@ -301,8 +301,8 @@ func TestHashString(t *testing.T) {
 	if s != string(h) {
 		t.Errorf("String() mismatch: got %q want %q", s, string(h))
 	}
-	// fmt.Stringer compliance
-	if got := fmt.Sprintf("%s", h); got != s {
+	// fmt.Stringer compliance — the %s verb must route through Hash.String().
+	if got := fmt.Sprintf("%s", h); got != s { //nolint:staticcheck // intentionally exercises the fmt.Stringer path
 		t.Errorf("fmt.Sprintf: %q vs %q", got, s)
 	}
 }

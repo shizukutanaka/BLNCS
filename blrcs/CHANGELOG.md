@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Test coverage & build hygiene
+- **`kms` 94.9% → 98.0%** — added `NewFileSigner` error-path tests: `os.MkdirAll`
+  failure (parent path is a regular file), and `save()`/`os.WriteFile` failure
+  (a directory occupies the `.tmp` path).
+- **`gofmt` regressions repaired** — re-aligned struct/map literals in `mcp/mcp.go`
+  and several `_test.go` files that had drifted out of `gofmt` compliance, restoring
+  the CI fmt gate to clean.
+- **`golangci-lint` clean (v2 schema)** — resolved a `staticcheck` S1025 finding in
+  `cas/cas_test.go` (the `%s`-verb Stringer-compliance assertion now carries an
+  explicit `//nolint` so the intentional verb test no longer trips the gate).
+- **`.gitignore`** — ignore ad-hoc `*.out` coverage profiles so `go test
+  -coverprofile=` artifacts no longer pollute `git status`.
+
 ### Security & robustness audit (per-category)
 A category-by-category audit of the whole product surfaced and fixed defects
 across credential formats, identity/trust, protocols/HTTP, and storage/infra.

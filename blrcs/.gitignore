@@ -13,6 +13,8 @@
 *.test
 coverage.out
 coverage.html
+# Ad-hoc coverage profiles (go test -coverprofile=...)
+*.out
 testdata/fuzz/*/corpus/
 
 # IDE

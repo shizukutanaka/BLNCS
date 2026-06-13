@@ -582,4 +582,3 @@ func TestSignAndRegisterClosedLedger(t *testing.T) {
 		t.Fatal("SignAndRegister on closed ledger should return an error")
 	}
 }
-

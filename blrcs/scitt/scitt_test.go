@@ -1061,4 +1061,3 @@ func TestVerifyConsistencySnNonZeroAtEnd(t *testing.T) {
 		t.Error("truncated consistency proof should fail")
 	}
 }
-

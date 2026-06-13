@@ -313,10 +313,10 @@ func TestVerifyStatusListTokenExpired(t *testing.T) {
 	// Craft a JWT with exp 200s in the past (well past the 60s leeway).
 	expiredExp := time.Now().Add(-200 * time.Second).Unix()
 	claims := map[string]any{
-		"sub": "https://issuer/status/1",
-		"iss": "did:web:issuer",
-		"iat": time.Now().Unix(),
-		"exp": expiredExp,
+		"sub":         "https://issuer/status/1",
+		"iss":         "did:web:issuer",
+		"iat":         time.Now().Unix(),
+		"exp":         expiredExp,
 		"status_list": map[string]any{"bits": 1, "lst": enc},
 	}
 	hdrJSON := `{"alg":"EdDSA","typ":"statuslist+jwt"}`
@@ -400,8 +400,8 @@ func TestVerifyStatusListTokenBitsFieldTwo(t *testing.T) {
 	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
 	enc, _ := list.EncodedList()
 	claims := map[string]any{
-		"sub": "https://issuer/status/1",
-		"iat": time.Now().Unix(),
+		"sub":         "https://issuer/status/1",
+		"iat":         time.Now().Unix(),
 		"status_list": map[string]any{"bits": 2, "lst": enc},
 	}
 	plBytes, _ := json.Marshal(claims)
@@ -417,8 +417,8 @@ func TestVerifyStatusListTokenBitsFieldTwo(t *testing.T) {
 func TestVerifyStatusListTokenBadLst(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	claims := map[string]any{
-		"sub": "https://issuer/status/1",
-		"iat": time.Now().Unix(),
+		"sub":         "https://issuer/status/1",
+		"iat":         time.Now().Unix(),
 		"status_list": map[string]any{"bits": 1, "lst": "not-valid-gzip-data"},
 	}
 	plBytes, _ := json.Marshal(claims)
