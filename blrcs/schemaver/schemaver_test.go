@@ -523,6 +523,36 @@ func TestExtractVersionAllTypes(t *testing.T) {
 	}
 }
 
+// TestMigrateMapExtractVersionError covers schemaver.go:137-139: MigrateMap
+// returns an error when extractVersion fails (schemaVersion is a non-numeric type).
+func TestMigrateMapExtractVersionError(t *testing.T) {
+	reg := New("x")
+	reg.Register(1, nil)
+	reg.Register(2, func(d map[string]any) (map[string]any, error) { return d, nil })
+	// string type — extractVersion returns ErrNoVersionField
+	data := map[string]any{"schemaVersion": "not-a-number"}
+	_, err := reg.MigrateMap(data)
+	if err == nil {
+		t.Fatal("non-numeric schemaVersion should return error from MigrateMap")
+	}
+}
+
+// TestMigrateMapSchemaVersionNilAfterNoOp covers schemaver.go:161-163: when
+// the data is already at the latest version and has no schemaVersion key, the
+// nil check stamps it with the current version.
+func TestMigrateMapSchemaVersionNilAfterNoOp(t *testing.T) {
+	reg := New("x")
+	reg.Register(1, nil) // only v1; no migrations needed
+	data := map[string]any{"payload": "value"} // no schemaVersion key
+	result, err := reg.MigrateMap(data)
+	if err != nil {
+		t.Fatalf("MigrateMap on already-latest data with no key: %v", err)
+	}
+	if result["schemaVersion"] == nil {
+		t.Error("MigrateMap should stamp schemaVersion when nil after no-op")
+	}
+}
+
 func TestMigrateMapNilFnAtVersion(t *testing.T) {
 	// Simulates gap where version key exists but fn is nil for a non-initial version
 	// which should not be directly reachable in normal use but covers the code path

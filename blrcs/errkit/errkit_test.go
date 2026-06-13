@@ -266,3 +266,22 @@ func TestPublicErrorFallsBackToCode(t *testing.T) {
 		t.Errorf("PublicError fallback: want %q, got %q", string(CodeNotFound), pub)
 	}
 }
+
+// TestErrorStringEmptyPublicMessage covers errkit.go:114-116: the else branch
+// of `if e.PublicMessage != ""` in Error.Error() falls back to string(e.Code).
+func TestErrorStringEmptyPublicMessage(t *testing.T) {
+	e := &Error{Code: CodeNotFound}
+	s := e.Error()
+	if !strings.Contains(s, string(CodeNotFound)) {
+		t.Errorf("Error() with empty PublicMessage should contain Code, got %q", s)
+	}
+}
+
+// TestHTTPStatusUnknownCode covers errkit.go:179: the default return 500 at the
+// end of HTTPStatus() when the Code doesn't match any known case.
+func TestHTTPStatusUnknownCode(t *testing.T) {
+	e := &Error{Code: Code("custom_unknown_code")}
+	if got := e.HTTPStatus(); got != 500 {
+		t.Errorf("unknown code HTTPStatus: want 500, got %d", got)
+	}
+}
