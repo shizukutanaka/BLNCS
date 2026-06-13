@@ -278,6 +278,7 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	iss.mu.Unlock()
 
 	// Proof-of-Possession validation (OpenID4VCI Draft 15 §5.1.2)
+	var holderKey ed25519.PublicKey
 	if len(req.Proof) > 0 {
 		var proofEnv struct {
 			ProofType string `json:"proof_type"`
@@ -289,12 +290,18 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 			iss.mu.Unlock()
 			return nil, ErrInvalidProof
 		}
-		if _, err := verifyProofJWT(proofEnv.JWT, cNonce, iss.URL); err != nil {
+		pub, err := verifyProofJWT(proofEnv.JWT, cNonce, iss.URL)
+		if err != nil {
 			iss.mu.Lock()
 			entry.consumed = false
 			iss.mu.Unlock()
 			return nil, err
 		}
+		// The wallet proved possession of this key; bind the credential to it so
+		// the holder can later produce a KB-JWT (cnf) in OpenID4VP. Discarding the
+		// key would yield a bearer credential that the secure-by-default VP verifier
+		// (RequireKeyBinding=true) rejects — defeating the proof-of-possession step.
+		holderKey = pub
 	} else if iss.RequireProof {
 		iss.mu.Lock()
 		entry.consumed = false
@@ -303,7 +310,13 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	}
 
 	validFor := time.Duration(validForDays) * 24 * time.Hour
-	sdjwt, _, err := iss.signer.IssueSDJWT(subject, sdClaims, clearClaims, validFor)
+	var sdjwt string
+	var err error
+	if holderKey != nil {
+		sdjwt, _, err = iss.signer.IssueSDJWTBound(subject, sdClaims, clearClaims, holderKey, validFor)
+	} else {
+		sdjwt, _, err = iss.signer.IssueSDJWT(subject, sdClaims, clearClaims, validFor)
+	}
 	if err != nil {
 		iss.mu.Lock()
 		entry.consumed = false

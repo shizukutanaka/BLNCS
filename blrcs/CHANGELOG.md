@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`openid4vci` discarded the proof-of-possession holder key (Draft 15 §5.1.2).**
+  `IssueCredentialWithProof` verified the wallet's proof JWT but threw away the
+  recovered holder public key and issued a plain `IssueSDJWT` — a *bearer*
+  credential with no `cnf`. The secure-by-default OpenID4VP verifier
+  (`RequireKeyBinding=true`) then rejects such a credential with
+  `ErrKeyBindingMissing`, so the VCI→VP pipeline was broken precisely for the
+  secure path the proof step exists to enable. Now, when a valid proof is present,
+  the credential is issued holder-bound (`IssueSDJWTBound`) against the proven key,
+  so the holder can produce a KB-JWT in OpenID4VP. The no-proof path is unchanged
+  (still a bearer SD-JWT) for backward compatibility. Regression tests assert the
+  proof-bound credential carries a `cnf` (plain verify → `ErrKeyBindingMissing`),
+  round-trips through `PresentWithKeyBinding`/`VerifySDJWTWithBinding` bound to the
+  proven key, and that the no-proof path stays bearer.
 - **`openid4vp` DCQL flow was unverifiable (OpenID4VP v1.0 §6).** Presentation
   Exchange was removed in v1.0, leaving DCQL (`dcql_query`) as the sole query
   language — yet `CreateRequestDCQL` produced a request that `ProcessResponse`

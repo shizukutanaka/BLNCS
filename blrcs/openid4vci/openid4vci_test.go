@@ -384,6 +384,80 @@ func TestIssueCredentialWithProofHappy(t *testing.T) {
 	}
 }
 
+// TestIssueCredentialWithProofBindsHolderKey is the regression test for the
+// proof-of-possession binding gap: a credential issued against a valid proof MUST
+// be holder-bound (carry a cnf), otherwise it is a bearer credential that the
+// secure-by-default OpenID4VP verifier (RequireKeyBinding=true) rejects, defeating
+// the whole point of the proof step.
+func TestIssueCredentialWithProofBindsHolderKey(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-bound",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, tr.CNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatalf("valid proof should succeed: %v", err)
+	}
+
+	// The credential must carry a cnf: plain (bearer) verification must now fail
+	// with ErrKeyBindingMissing because a KB-JWT is required.
+	if _, verr := compliance.VerifySDJWT(cr.Credential, signer.PublicKey()); verr != compliance.ErrKeyBindingMissing {
+		t.Fatalf("proof-bound credential should require KB-JWT, got %v", verr)
+	}
+
+	// And it must be presentable through the secure holder-binding path using the
+	// exact key the wallet proved possession of.
+	nonce, aud := "vp-nonce-123", "https://verify.example"
+	pres, err := compliance.PresentWithKeyBinding(cr.Credential, []string{"carbonKgCO2ePerKWh"}, holderPriv, nonce, aud, time.Time{})
+	if err != nil {
+		t.Fatalf("PresentWithKeyBinding: %v", err)
+	}
+	vc, err := compliance.VerifySDJWTWithBinding(pres, signer.PublicKey(), compliance.VerifyOptions{
+		ExpectedNonce: nonce, ExpectedAudience: aud, RequireKeyBinding: true,
+	})
+	if err != nil {
+		t.Fatalf("bound presentation should verify: %v", err)
+	}
+	if !vc.KeyBound {
+		t.Error("verified presentation should be KeyBound")
+	}
+	if !bytesEqualKeys(vc.HolderKey, holderPub) {
+		t.Error("credential bound to the wrong holder key")
+	}
+}
+
+// TestIssueCredentialNoProofStaysBearer confirms the no-proof path is unchanged:
+// when proof is not required and not supplied, a plain bearer SD-JWT is issued
+// (verifiable without a KB-JWT) — backward compatibility.
+func TestIssueCredentialNoProofStaysBearer(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-bearer",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := iss.IssueCredential(tr.AccessToken)
+	if err != nil {
+		t.Fatalf("no-proof issuance: %v", err)
+	}
+	// Bearer credential: plain verification succeeds (no cnf, no KB-JWT required).
+	if _, verr := compliance.VerifySDJWT(cr.Credential, signer.PublicKey()); verr != nil {
+		t.Fatalf("bearer credential should verify without KB-JWT, got %v", verr)
+	}
+}
+
 func TestIssueCredentialWithProofWrongNonce(t *testing.T) {
 	iss, _ := setupIssuer(t)
 	_, code, _ := iss.CreateOffer(
