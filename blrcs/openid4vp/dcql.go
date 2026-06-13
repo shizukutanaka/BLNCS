@@ -54,8 +54,23 @@ type ClaimQuery struct {
 type CredentialSetQuery struct {
 	// Options — 各要素は CredentialQuery.ID の集合。いずれか1つを満たせば良い。
 	Options [][]string `json:"options"`
-	// Required — false なら任意提示 (デフォルト true)。
+	// Required — false なら任意提示。§6.2 の既定値は true で、JSON に `required` が
+	// 無い場合は UnmarshalJSON が true を補う (spec default)。
 	Required bool `json:"required"`
+}
+
+// UnmarshalJSON applies the OpenID4VP §6.2 default for `required` (true when the
+// member is absent). A plain Go bool cannot distinguish "absent" from "false", so
+// without this an omitted `required` would wrongly be treated as optional and the
+// set would not be enforced.
+func (s *CredentialSetQuery) UnmarshalJSON(data []byte) error {
+	type alias CredentialSetQuery
+	tmp := alias{Required: true} // spec default
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*s = CredentialSetQuery(tmp)
+	return nil
 }
 
 // Validate — DCQL クエリの構造的妥当性を検査 (§6)。
@@ -153,24 +168,73 @@ func (cq *CredentialQuery) MatchClaims(presented map[string]any) bool {
 
 // enforceDCQLConstraints checks the single presented credential against a DCQL
 // query (OpenID4VP v1.0 §6). Because the BLRCS verifier accepts one vp_token per
-// response, the credential must satisfy at least one CredentialQuery: its vct must
-// be within that query's vct_values (when the query constrains them for dc+sd-jwt),
-// and every claim path the query requests must be disclosed with any value
-// constraints met. Returns ErrDCQLUnsatisfied if no credential query is satisfied.
+// response, a credential "satisfies" a CredentialQuery when its vct is within that
+// query's vct_values (dc+sd-jwt) and every requested claim path is disclosed with
+// any value constraints met.
+//
+//   - Without credential_sets (§6.1): the presentation must satisfy at least one
+//     credential query.
+//   - With credential_sets (§6.2): every *required* set must have at least one
+//     option all of whose referenced credential queries are satisfied. Optional
+//     sets (required:false) do not gate. The §6.2 default for `required` is true
+//     (see CredentialSetQuery.UnmarshalJSON).
+//
+// Returns ErrDCQLUnsatisfied when the presentation does not meet the query.
 func enforceDCQLConstraints(q *DCQLQuery, vc *compliance.VerifiedClaims) error {
+	satisfied := make(map[string]bool, len(q.Credentials))
+	anySatisfied := false
 	for i := range q.Credentials {
 		cq := &q.Credentials[i]
-		// vct_values gate (dc+sd-jwt): skip queries whose vct set excludes this credential.
-		if cq.Meta != nil && len(cq.Meta.VCTValues) > 0 {
-			if !containsString(cq.Meta.VCTValues, vc.VCT) {
-				continue
-			}
-		}
-		if cq.MatchClaims(vc.Claims) {
-			return nil
+		if credentialSatisfiesQuery(cq, vc) {
+			satisfied[cq.ID] = true
+			anySatisfied = true
 		}
 	}
-	return ErrDCQLUnsatisfied
+	if len(q.CredentialSets) == 0 {
+		if !anySatisfied {
+			return ErrDCQLUnsatisfied
+		}
+		return nil
+	}
+	for i := range q.CredentialSets {
+		set := &q.CredentialSets[i]
+		if !set.Required {
+			continue
+		}
+		if !optionSatisfied(set.Options, satisfied) {
+			return ErrDCQLUnsatisfied
+		}
+	}
+	return nil
+}
+
+// credentialSatisfiesQuery reports whether the presented credential meets a single
+// CredentialQuery (vct gate + claim/value match).
+func credentialSatisfiesQuery(cq *CredentialQuery, vc *compliance.VerifiedClaims) bool {
+	if cq.Meta != nil && len(cq.Meta.VCTValues) > 0 {
+		if !containsString(cq.Meta.VCTValues, vc.VCT) {
+			return false
+		}
+	}
+	return cq.MatchClaims(vc.Claims)
+}
+
+// optionSatisfied reports whether any option (a set of credential query IDs) is
+// fully covered by the satisfied-query-ID set.
+func optionSatisfied(options [][]string, satisfied map[string]bool) bool {
+	for _, opt := range options {
+		all := true
+		for _, id := range opt {
+			if !satisfied[id] {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
 }
 
 func containsString(haystack []string, needle string) bool {

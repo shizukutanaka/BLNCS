@@ -438,3 +438,66 @@ func TestEnforceDCQLConstraintsValueMatch(t *testing.T) {
 		t.Fatalf("non-matching value should fail: %v", err)
 	}
 }
+
+// ============================================================================
+// credential_sets enforcement (OpenID4VP v1.0 §6.2)
+// ============================================================================
+
+// TestEnforceDCQLCredentialSets exercises the §6.2 combination constraints against
+// a single presented credential that satisfies query "a" but not "b".
+func TestEnforceDCQLCredentialSets(t *testing.T) {
+	vc := &compliance.VerifiedClaims{
+		VCT:    compliance.VCTDigitalProductPassport,
+		Claims: map[string]any{"x": "1"},
+	}
+	base := []CredentialQuery{
+		{ID: "a", Format: "dc+sd-jwt", Claims: []ClaimQuery{{Path: []string{"x"}}}},
+		{ID: "b", Format: "dc+sd-jwt", Claims: []ClaimQuery{{Path: []string{"y"}}}},
+	}
+
+	cases := []struct {
+		name    string
+		sets    []CredentialSetQuery
+		wantErr bool
+	}{
+		{"required option {a} satisfied", []CredentialSetQuery{{Options: [][]string{{"a"}}, Required: true}}, false},
+		{"required option {b} unsatisfied", []CredentialSetQuery{{Options: [][]string{{"b"}}, Required: true}}, true},
+		{"optional set {b} does not gate", []CredentialSetQuery{{Options: [][]string{{"b"}}, Required: false}}, false},
+		{"alternative options {b} OR {a}", []CredentialSetQuery{{Options: [][]string{{"b"}, {"a"}}, Required: true}}, false},
+		{"required multi-id option {a,b} unsatisfiable by one cred", []CredentialSetQuery{{Options: [][]string{{"a", "b"}}, Required: true}}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			q := &DCQLQuery{Credentials: base, CredentialSets: c.sets}
+			err := enforceDCQLConstraints(q, vc)
+			if c.wantErr && !errors.Is(err, ErrDCQLUnsatisfied) {
+				t.Fatalf("want ErrDCQLUnsatisfied, got %v", err)
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("want satisfied, got %v", err)
+			}
+		})
+	}
+}
+
+// TestCredentialSetRequiredDefault verifies the §6.2 default for `required` is true
+// when the JSON member is absent, and that an explicit false is honored.
+func TestCredentialSetRequiredDefault(t *testing.T) {
+	absent := []byte(`{"credentials":[{"id":"a","format":"dc+sd-jwt"}],"credential_sets":[{"options":[["a"]]}]}`)
+	q, err := ParseDCQL(absent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !q.CredentialSets[0].Required {
+		t.Error("absent `required` must default to true (§6.2)")
+	}
+
+	explicit := []byte(`{"credentials":[{"id":"a","format":"dc+sd-jwt"}],"credential_sets":[{"options":[["a"]],"required":false}]}`)
+	q2, err := ParseDCQL(explicit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q2.CredentialSets[0].Required {
+		t.Error("explicit `required:false` must be honored")
+	}
+}

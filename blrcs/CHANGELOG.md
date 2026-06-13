@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`openid4vp` DCQL `credential_sets` were never enforced + `required` default bug
+  (OpenID4VP v1.0 §6.2).** A verifier could express combination constraints
+  (`credential_sets`, e.g. "present credential A OR B"); they passed `Validate()`
+  and shipped on the wire, but `ProcessResponse` ignored them entirely — and
+  `CredentialSetQuery.Required` was never read. The §6.2 default for `required` is
+  `true`, yet a plain Go bool unmarshals an omitted `required` to `false`, so an
+  absent member would have silently downgraded a required set to optional. Now:
+  `enforceDCQLConstraints` evaluates `credential_sets` (every *required* set must
+  have an option fully covered by the presentation; optional sets do not gate), and
+  a custom `CredentialSetQuery.UnmarshalJSON` restores the spec default
+  (absent `required` → `true`, explicit `false` honored). Tests cover satisfied /
+  unsatisfied / optional / alternative-option / multi-id sets and the default.
 - **`openid4vci` discarded the proof-of-possession holder key (Draft 15 §5.1.2).**
   `IssueCredentialWithProof` verified the wallet's proof JWT but threw away the
   recovered holder public key and issued a plain `IssueSDJWT` — a *bearer*
