@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`openid4vp` dropped the credential's revocation reference; revoked credentials
+  could not be rejected in-flow.** `ProcessResponse` verified signature, holder
+  binding, and claims but never surfaced or acted on the `status_list` reference, so
+  a revoked DPP/Battery passport verified successfully and the relying party had no
+  signal to check (the `status` claim was discarded at the openid4vp boundary). Now
+  `VerifiedPresentation.Status` exposes the reference for the caller, and an optional
+  `Verifier.RevocationChecker` callback (caller-supplied, keeping the verification
+  core network-free) makes `ProcessResponse` fail closed with `ErrCredentialRevoked`
+  when a presented credential is revoked. Checks run before state consumption so a
+  revoked attempt can be audited/retried; the checker is skipped for credentials
+  without a status. Tests cover exposure, revoked, checker-error propagation, and the
+  no-status no-op. Backward-compatible (new optional field/callback + sentinel).
 - **`openid4vp` DCQL `credential_sets` were never enforced + `required` default bug
   (OpenID4VP v1.0 §6.2).** A verifier could express combination constraints
   (`credential_sets`, e.g. "present credential A OR B"); they passed `Validate()`

@@ -45,6 +45,7 @@ var (
 	ErrDefinitionEmpty     = errors.New("openid4vp: presentation_definition requires >=1 input descriptor")
 	ErrClientIDInvalid     = errors.New("openid4vp: invalid client_id (scheme/format)")
 	ErrDCQLUnsatisfied     = errors.New("openid4vp: presented credential satisfies no dcql_query credential")
+	ErrCredentialRevoked   = errors.New("openid4vp: presented credential is revoked")
 )
 
 // ============================================================================
@@ -193,6 +194,14 @@ type Verifier struct {
 	// 使う。PresentationDefinition フローには影響しない (そちらは request 同梱の
 	// AcceptableIssuers を使う)。空のままだと DCQL 応答は検証できない。
 	TrustedIssuers map[string][]byte
+
+	// RevocationChecker — 任意。設定すると、status_list 参照を持つ credential の提示時に
+	// ProcessResponse がフロー内で失効確認する (fail-closed: revoked なら ErrCredentialRevoked)。
+	// status list token の取得 (HTTP GET) は呼び出し側の責務 — このコールバック内で行う
+	// ことで openid4vp の検証コアを network-free に保つ。典型実装は
+	// compliance.CheckRevokedToken を status issuer 鍵付きで包む。nil の場合は確認せず、
+	// VerifiedPresentation.Status を介して relying party が自分で確認できる。
+	RevocationChecker func(status *compliance.StatusRef) (revoked bool, err error)
 }
 
 // NewVerifier — Apple式の1行構築。secure-by-default で RequireKeyBinding=true。
@@ -324,6 +333,10 @@ type VerifiedPresentation struct {
 	Claims    map[string]any // 開示されたクレーム (SD-JWT)
 	IssuedAt  int64
 	ExpiresAt int64
+	// Status — credential が status_list 失効参照を持つ場合に non-nil。relying party
+	// はこれを使って revocation を確認できる (compliance.CheckRevokedToken)。verifier に
+	// RevocationChecker を設定すれば ProcessResponse がフロー内で確認する。
+	Status *compliance.StatusRef
 }
 
 // ProcessResponse — Wallet Authorization Response を検証
@@ -389,6 +402,19 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 			}
 		}
 	}
+	// 失効確認 (fail-closed)。RevocationChecker が設定されており credential が status
+	// 参照を持つ場合のみ実行する。state 消費前に確認し、revoked なら state を温存して
+	// 監査・再試行を可能にする。
+	if v.RevocationChecker != nil && verified.Status != nil {
+		revoked, rerr := v.RevocationChecker(verified.Status)
+		if rerr != nil {
+			return nil, fmt.Errorf("openid4vp: revocation check: %w", rerr)
+		}
+		if revoked {
+			return nil, ErrCredentialRevoked
+		}
+	}
+
 	// ワンタイム消費 (リプレイ防止)
 	_ = v.store.Consume(resp.State)
 
@@ -399,6 +425,7 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 		Claims:    verified.Claims,
 		IssuedAt:  verified.IssuedAt,
 		ExpiresAt: verified.Expires,
+		Status:    verified.Status,
 	}, nil
 }
 

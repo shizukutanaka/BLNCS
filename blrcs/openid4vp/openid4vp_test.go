@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -604,5 +605,94 @@ func TestProcessResponseNoAcceptableIssuers(t *testing.T) {
 	})
 	if err == nil || err.Error() == "" {
 		t.Fatalf("ProcessResponse with no AcceptableIssuers should fail, got %v", err)
+	}
+}
+
+// ============================================================================
+// Credential revocation (status_list) — exposed on result + optional fail-closed
+// in-flow check (draft-ietf-oauth-status-list)
+// ============================================================================
+
+func TestProcessResponseRevocation(t *testing.T) {
+	iss, err := compliance.NewIssuer("did:web:issuer.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := &compliance.StatusRef{URI: "https://status.example/list", Index: 7}
+	sdjwt, _, err := iss.IssueSDJWTStatus("subj", map[string]any{"foo": "bar"}, nil, status, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pres, err := compliance.Present(sdjwt, []string{"foo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := PresentationDefinition{
+		ID:                "x",
+		RequiredClaims:    []string{"foo"},
+		AcceptableIssuers: map[string][]byte{iss.ID: iss.PublicKey()},
+	}
+	// newVer returns a bearer-accepting verifier with a fresh session for `pres`.
+	newVer := func() (*Verifier, string) {
+		v := NewVerifier("https://verify.example", "https://verify.example/cb", nil)
+		v.RequireKeyBinding = false // status credential here is a bearer SD-JWT
+		_, state, cerr := v.CreateRequest(def)
+		if cerr != nil {
+			t.Fatal(cerr)
+		}
+		return v, state
+	}
+
+	// 1. No checker configured: verification succeeds and Status is exposed so the
+	//    relying party can check revocation itself.
+	v1, st1 := newVer()
+	vp, err := v1.ProcessResponse(&AuthorizationResponse{VPToken: pres, State: st1})
+	if err != nil {
+		t.Fatalf("no-checker verify: %v", err)
+	}
+	if vp.Status == nil || vp.Status.Index != 7 || vp.Status.URI != status.URI {
+		t.Fatalf("Status not exposed on result: %+v", vp.Status)
+	}
+
+	// 2. Checker reports revoked → ErrCredentialRevoked (fail-closed).
+	v2, st2 := newVer()
+	v2.RevocationChecker = func(s *compliance.StatusRef) (bool, error) {
+		if s.Index != 7 {
+			t.Errorf("checker got wrong status index: %d", s.Index)
+		}
+		return true, nil
+	}
+	if _, err := v2.ProcessResponse(&AuthorizationResponse{VPToken: pres, State: st2}); !errors.Is(err, ErrCredentialRevoked) {
+		t.Fatalf("want ErrCredentialRevoked, got %v", err)
+	}
+
+	// 3. Checker error is propagated (not swallowed as "not revoked").
+	v3, st3 := newVer()
+	sentinel := errors.New("status list fetch failed")
+	v3.RevocationChecker = func(_ *compliance.StatusRef) (bool, error) { return false, sentinel }
+	if _, err := v3.ProcessResponse(&AuthorizationResponse{VPToken: pres, State: st3}); !errors.Is(err, sentinel) {
+		t.Fatalf("want wrapped sentinel, got %v", err)
+	}
+
+	// 4. Checker NOT invoked for a credential without a status reference.
+	plain, _, err := iss.IssueSDJWT("subj", map[string]any{"foo": "bar"}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainPres, err := compliance.Present(plain, []string{"foo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v4, st4 := newVer()
+	v4.RevocationChecker = func(_ *compliance.StatusRef) (bool, error) {
+		t.Error("RevocationChecker must not run for a credential without a status")
+		return true, nil
+	}
+	vp4, err := v4.ProcessResponse(&AuthorizationResponse{VPToken: plainPres, State: st4})
+	if err != nil {
+		t.Fatalf("no-status verify: %v", err)
+	}
+	if vp4.Status != nil {
+		t.Errorf("Status should be nil for a credential without a status reference: %+v", vp4.Status)
 	}
 }
