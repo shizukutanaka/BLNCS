@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`openid4vp` DCQL flow was unverifiable (OpenID4VP v1.0 §6).** Presentation
+  Exchange was removed in v1.0, leaving DCQL (`dcql_query`) as the sole query
+  language — yet `CreateRequestDCQL` produced a request that `ProcessResponse`
+  could never complete: it looked for trust anchors only on
+  `PresentationDefinition.AcceptableIssuers` (always empty for a DCQL request), so
+  every DCQL response failed with "no acceptable issuers configured". Worse, the
+  DCQL `claims`/`vct_values` constraints were never enforced against the presented
+  credential — `MatchClaims` was reachable only from the conformance harness.
+  - Added `Verifier.TrustedIssuers` (optional DID→pubkey map) as the trust anchor
+    for the DCQL path; `ProcessResponse` falls back to it when the request carries a
+    `dcql_query`. PresentationDefinition flows are unchanged.
+  - `ProcessResponse` now enforces the DCQL query when present: the presented
+    credential must satisfy at least one `CredentialQuery` — its `vct` within the
+    query's `vct_values` (dc+sd-jwt) and every requested claim path disclosed with
+    any value constraints met — else `ErrDCQLUnsatisfied`.
+  - New e2e tests: full DCQL happy path, fail-closed without a trust anchor,
+    unsatisfied-claim rejection, and vct-mismatch rejection. Backward-compatible
+    (new optional field + sentinel; existing 805 tests unaffected).
+
 ### Test coverage & build hygiene
 - **`kms` 94.9% → 98.0%** — added `NewFileSigner` error-path tests: `os.MkdirAll`
   failure (parent path is a regular file), and `save()`/`os.WriteFile` failure

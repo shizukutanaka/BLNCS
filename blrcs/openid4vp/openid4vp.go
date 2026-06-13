@@ -44,6 +44,7 @@ var (
 	ErrClaimMissing        = errors.New("openid4vp: required claim not disclosed")
 	ErrDefinitionEmpty     = errors.New("openid4vp: presentation_definition requires >=1 input descriptor")
 	ErrClientIDInvalid     = errors.New("openid4vp: invalid client_id (scheme/format)")
+	ErrDCQLUnsatisfied     = errors.New("openid4vp: presented credential satisfies no dcql_query credential")
 )
 
 // ============================================================================
@@ -185,6 +186,13 @@ type Verifier struct {
 	// bearer credential を許容する場合のみ明示的に false を設定する
 	// (anti-replay はワンタイム state 消費のみに依存することになる)。
 	RequireKeyBinding bool
+
+	// TrustedIssuers — DCQL フロー用の DID→公開鍵マップ (JSON 非送信)。
+	// dcql_query は PresentationDefinition.AcceptableIssuers を持たないため、
+	// CreateRequestDCQL で発行した request の応答検証はこの集合を信頼アンカーとして
+	// 使う。PresentationDefinition フローには影響しない (そちらは request 同梱の
+	// AcceptableIssuers を使う)。空のままだと DCQL 応答は検証できない。
+	TrustedIssuers map[string][]byte
 }
 
 // NewVerifier — Apple式の1行構築。secure-by-default で RequireKeyBinding=true。
@@ -334,9 +342,15 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 	if err != nil {
 		return nil, err
 	}
-	// Issuer Public Key 決定
-	// PresentationDefinition.AcceptableIssuers に登録された発行者のいずれかで検証できれば OK
-	if len(req.PresentationDefinition.AcceptableIssuers) == 0 {
+	// Issuer Public Key 決定。
+	// PresentationDefinition フローは request 同梱の AcceptableIssuers を信頼アンカーに
+	// 使う。DCQL フロー (dcql_query は鍵を運ばない) は verifier-level の TrustedIssuers に
+	// フォールバックする。
+	acceptable := req.PresentationDefinition.AcceptableIssuers
+	if len(acceptable) == 0 && req.DCQLQuery != nil {
+		acceptable = v.TrustedIssuers
+	}
+	if len(acceptable) == 0 {
 		return nil, errors.New("openid4vp: no acceptable issuers configured")
 	}
 	// この Authorization Request の nonce / client_id に提示を暗号的にバインド。
@@ -352,7 +366,7 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 	// (O(issuers) Ed25519 verifies per token). The cryptographic check below is
 	// what establishes trust; iss is only used to select the key.
 	if claimedIss, ok := peekIssuer(resp.VPToken); ok {
-		if pubKey, known := req.PresentationDefinition.AcceptableIssuers[claimedIss]; known {
+		if pubKey, known := acceptable[claimedIss]; known {
 			if vc, verr := compliance.VerifySDJWTWithBinding(resp.VPToken, ed25519.PublicKey(pubKey), opts); verr == nil && vc.Issuer == claimedIss {
 				verified = vc
 				usedIssuer = claimedIss
@@ -362,10 +376,17 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 	if verified == nil {
 		return nil, errors.New("openid4vp: vp_token signature/issuer mismatch")
 	}
-	// 必須 claim 開示チェック
-	for _, req := range req.PresentationDefinition.RequiredClaims {
-		if _, ok := verified.Claims[req]; !ok {
-			return nil, fmt.Errorf("%w: %s", ErrClaimMissing, req)
+	// クレーム制約の充足チェック。dcql_query (v1.0) があればそちらを優先し、
+	// なければ従来の PresentationDefinition.RequiredClaims を使う。
+	if req.DCQLQuery != nil {
+		if err := enforceDCQLConstraints(req.DCQLQuery, verified); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, rc := range req.PresentationDefinition.RequiredClaims {
+			if _, ok := verified.Claims[rc]; !ok {
+				return nil, fmt.Errorf("%w: %s", ErrClaimMissing, rc)
+			}
 		}
 	}
 	// ワンタイム消費 (リプレイ防止)

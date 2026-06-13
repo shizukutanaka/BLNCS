@@ -10,6 +10,8 @@ package openid4vp
 import (
 	"encoding/json"
 	"errors"
+
+	"blrcs/compliance"
 )
 
 // DCQLQuery — dcql_query Authorization Request パラメータ (§6)。
@@ -147,6 +149,37 @@ func (cq *CredentialQuery) MatchClaims(presented map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// enforceDCQLConstraints checks the single presented credential against a DCQL
+// query (OpenID4VP v1.0 §6). Because the BLRCS verifier accepts one vp_token per
+// response, the credential must satisfy at least one CredentialQuery: its vct must
+// be within that query's vct_values (when the query constrains them for dc+sd-jwt),
+// and every claim path the query requests must be disclosed with any value
+// constraints met. Returns ErrDCQLUnsatisfied if no credential query is satisfied.
+func enforceDCQLConstraints(q *DCQLQuery, vc *compliance.VerifiedClaims) error {
+	for i := range q.Credentials {
+		cq := &q.Credentials[i]
+		// vct_values gate (dc+sd-jwt): skip queries whose vct set excludes this credential.
+		if cq.Meta != nil && len(cq.Meta.VCTValues) > 0 {
+			if !containsString(cq.Meta.VCTValues, vc.VCT) {
+				continue
+			}
+		}
+		if cq.MatchClaims(vc.Claims) {
+			return nil
+		}
+	}
+	return ErrDCQLUnsatisfied
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // walkPath navigates a nested map[string]any using the given path segments,

@@ -2,8 +2,11 @@ package openid4vp
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+
+	"blrcs/compliance"
 )
 
 func TestDCQLValidateHappy(t *testing.T) {
@@ -297,5 +300,141 @@ func TestMatchClaimsNestedValues(t *testing.T) {
 	}
 	if cq.MatchClaims(noMatch) {
 		t.Error("country=US should not match Values=[DE,FR]")
+	}
+}
+
+// ============================================================================
+// DCQL end-to-end verification (OpenID4VP v1.0 §6) — wired into ProcessResponse
+// ============================================================================
+
+// dcqlQuery builds a single dc+sd-jwt credential query requiring the given claims,
+// constrained to the default DPP vct.
+func dcqlQuery(id string, claims ...string) DCQLQuery {
+	cqs := make([]ClaimQuery, 0, len(claims))
+	for _, c := range claims {
+		cqs = append(cqs, ClaimQuery{Path: []string{c}})
+	}
+	return DCQLQuery{Credentials: []CredentialQuery{{
+		ID:     id,
+		Format: "dc+sd-jwt",
+		Meta:   &CredentialQueryMeta{VCTValues: []string{compliance.VCTDigitalProductPassport}},
+		Claims: cqs,
+	}}}
+}
+
+// TestE2EDCQLFlow proves that a DCQL-only Authorization Request (no
+// PresentationDefinition) can be completed end-to-end. Before TrustedIssuers +
+// enforceDCQLConstraints were wired in, ProcessResponse returned "no acceptable
+// issuers configured" for every DCQL flow, making the v1.0 query language unusable.
+func TestE2EDCQLFlow(t *testing.T) {
+	iss, err := compliance.NewIssuer("did:web:factory.blrcs.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ver := NewVerifier("https://verify.blrcs.example", "https://verify.blrcs.example/cb", nil)
+	ver.TrustedIssuers = map[string][]byte{iss.ID: iss.PublicKey()}
+
+	q := dcqlQuery("dpp", "batteryCategory", "carbonKgCO2ePerKWh")
+	reqURL, state, err := ver.CreateRequestDCQL(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sd := map[string]any{
+		"batteryCategory":    "ev",
+		"carbonKgCO2ePerKWh": 48.5,
+		"supplierName":       "SecretCobaltCorp",
+	}
+	presented := boundPresent(t, iss, reqURL, "battery-xyz", sd, nil,
+		[]string{"batteryCategory", "carbonKgCO2ePerKWh"})
+
+	vp, err := ver.ProcessResponse(&AuthorizationResponse{VPToken: presented, State: state})
+	if err != nil {
+		t.Fatalf("DCQL ProcessResponse: %v", err)
+	}
+	if vp.Issuer != iss.ID {
+		t.Errorf("issuer: %s", vp.Issuer)
+	}
+	if _, ok := vp.Claims["batteryCategory"]; !ok {
+		t.Error("required DCQL claim batteryCategory not disclosed")
+	}
+	if _, ok := vp.Claims["supplierName"]; ok {
+		t.Error("undisclosed claim supplierName leaked")
+	}
+}
+
+// TestDCQLFlowNoTrustAnchor confirms a DCQL request still fails closed when the
+// verifier has no TrustedIssuers configured.
+func TestDCQLFlowNoTrustAnchor(t *testing.T) {
+	iss, _ := compliance.NewIssuer("did:web:factory.blrcs.example")
+	ver := NewVerifier("https://verify.blrcs.example", "https://verify.blrcs.example/cb", nil)
+	// TrustedIssuers intentionally left nil.
+	q := dcqlQuery("dpp", "batteryCategory")
+	reqURL, state, _ := ver.CreateRequestDCQL(q)
+	presented := boundPresent(t, iss, reqURL, "s", map[string]any{"batteryCategory": "ev"}, nil,
+		[]string{"batteryCategory"})
+	_, err := ver.ProcessResponse(&AuthorizationResponse{VPToken: presented, State: state})
+	if err == nil || !strings.Contains(err.Error(), "no acceptable issuers") {
+		t.Fatalf("want no-acceptable-issuers error, got %v", err)
+	}
+}
+
+// TestDCQLConstraintUnsatisfied confirms that a presentation missing a DCQL-required
+// claim is rejected with ErrDCQLUnsatisfied (the constraint is now enforced, not
+// merely transmitted).
+func TestDCQLConstraintUnsatisfied(t *testing.T) {
+	iss, _ := compliance.NewIssuer("did:web:factory.blrcs.example")
+	ver := NewVerifier("https://verify.blrcs.example", "https://verify.blrcs.example/cb", nil)
+	ver.TrustedIssuers = map[string][]byte{iss.ID: iss.PublicKey()}
+
+	// Query requires two claims; holder discloses only one.
+	q := dcqlQuery("dpp", "batteryCategory", "criticalClaim")
+	reqURL, state, _ := ver.CreateRequestDCQL(q)
+	sd := map[string]any{"batteryCategory": "ev", "criticalClaim": "secret"}
+	presented := boundPresent(t, iss, reqURL, "s", sd, nil, []string{"batteryCategory"})
+	_, err := ver.ProcessResponse(&AuthorizationResponse{VPToken: presented, State: state})
+	if !errors.Is(err, ErrDCQLUnsatisfied) {
+		t.Fatalf("want ErrDCQLUnsatisfied, got %v", err)
+	}
+}
+
+// TestDCQLConstraintVCTMismatch confirms a credential whose vct is outside the
+// query's vct_values does not satisfy the credential query.
+func TestDCQLConstraintVCTMismatch(t *testing.T) {
+	iss, _ := compliance.NewIssuer("did:web:factory.blrcs.example")
+	ver := NewVerifier("https://verify.blrcs.example", "https://verify.blrcs.example/cb", nil)
+	ver.TrustedIssuers = map[string][]byte{iss.ID: iss.PublicKey()}
+
+	q := DCQLQuery{Credentials: []CredentialQuery{{
+		ID:     "dpp",
+		Format: "dc+sd-jwt",
+		Meta:   &CredentialQueryMeta{VCTValues: []string{"https://example.com/some-other-vct"}},
+		Claims: []ClaimQuery{{Path: []string{"batteryCategory"}}},
+	}}}
+	reqURL, state, _ := ver.CreateRequestDCQL(q)
+	// boundPresent issues with the default DPP vct, which is not in the query's set.
+	presented := boundPresent(t, iss, reqURL, "s", map[string]any{"batteryCategory": "ev"}, nil,
+		[]string{"batteryCategory"})
+	_, err := ver.ProcessResponse(&AuthorizationResponse{VPToken: presented, State: state})
+	if !errors.Is(err, ErrDCQLUnsatisfied) {
+		t.Fatalf("want ErrDCQLUnsatisfied for vct mismatch, got %v", err)
+	}
+}
+
+// TestEnforceDCQLConstraintsValueMatch directly exercises the value-constraint and
+// vct-gate branches of enforceDCQLConstraints.
+func TestEnforceDCQLConstraintsValueMatch(t *testing.T) {
+	q := &DCQLQuery{Credentials: []CredentialQuery{{
+		ID:     "dpp",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{{Path: []string{"batteryCategory"}, Values: []any{"ev"}}},
+	}}}
+	ok := &compliance.VerifiedClaims{VCT: compliance.VCTDigitalProductPassport, Claims: map[string]any{"batteryCategory": "ev"}}
+	if err := enforceDCQLConstraints(q, ok); err != nil {
+		t.Fatalf("matching value should satisfy: %v", err)
+	}
+	bad := &compliance.VerifiedClaims{VCT: compliance.VCTDigitalProductPassport, Claims: map[string]any{"batteryCategory": "industrial"}}
+	if err := enforceDCQLConstraints(q, bad); !errors.Is(err, ErrDCQLUnsatisfied) {
+		t.Fatalf("non-matching value should fail: %v", err)
 	}
 }
