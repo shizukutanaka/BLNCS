@@ -392,3 +392,53 @@ func TestDecodeBitstringNotGzip(t *testing.T) {
 		t.Error("non-gzip payload should fail DecodeBitstringStatusList")
 	}
 }
+
+// TestVerifyStatusListTokenBitsFieldTwo covers line 136-138: a claims.StatusList.Bits
+// value that is neither 0 nor 1 must be rejected as ErrTokenMalformed.
+func TestVerifyStatusListTokenBitsFieldTwo(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	enc, _ := list.EncodedList()
+	claims := map[string]any{
+		"sub": "https://issuer/status/1",
+		"iat": time.Now().Unix(),
+		"status_list": map[string]any{"bits": 2, "lst": enc},
+	}
+	plBytes, _ := json.Marshal(claims)
+	pl := base64.RawURLEncoding.EncodeToString(plBytes)
+	tok := craftValidSigToken(t, priv, `{"alg":"EdDSA","typ":"statuslist+jwt"}`, pl)
+	if _, _, err := VerifyStatusListToken(tok, pub, PurposeRevocation); err != ErrTokenMalformed {
+		t.Errorf("bits=2 should return ErrTokenMalformed, got %v", err)
+	}
+}
+
+// TestVerifyStatusListTokenBadLst covers line 143-145: a valid-sig token whose
+// lst field does not decode to a valid gzip list must return an error.
+func TestVerifyStatusListTokenBadLst(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	claims := map[string]any{
+		"sub": "https://issuer/status/1",
+		"iat": time.Now().Unix(),
+		"status_list": map[string]any{"bits": 1, "lst": "not-valid-gzip-data"},
+	}
+	plBytes, _ := json.Marshal(claims)
+	pl := base64.RawURLEncoding.EncodeToString(plBytes)
+	tok := craftValidSigToken(t, priv, `{"alg":"EdDSA","typ":"statuslist+jwt"}`, pl)
+	_, _, err := VerifyStatusListToken(tok, pub, PurposeRevocation)
+	if err == nil {
+		t.Error("bad lst should return error from DecodeBitstringStatusList")
+	}
+}
+
+// TestLiveTokenHandlerIssueError covers lines 190-194: when IssueToken returns
+// an error (here: bad private key), the handler must respond 500.
+func TestLiveTokenHandlerIssueError(t *testing.T) {
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	badPriv := ed25519.PrivateKey([]byte("too-short"))
+	h := LiveTokenHandler(list, "iss", "uri", badPriv, time.Hour, 0)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("want 500, got %d", rec.Code)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -521,6 +522,99 @@ func TestPublishMarshalError(t *testing.T) {
 
 // TestDeliverOnceZeroTimeout covers the s.Timeout == 0 branch in deliverOnce
 // where no context.WithTimeout is created (timeoutCtx stays as ctx).
+// TestValidateOutboundURLPublicIP covers the return nil path at the end of the
+// validateOutboundURL loop (line 136) when all resolved IPs are public.
+// Uses a numeric IP literal so net.LookupIP returns it directly (no DNS query).
+func TestValidateOutboundURLPublicIP(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	// 8.8.8.8 is a public unicast IP — not loopback, not private, not link-local.
+	u, _ := url.Parse("https://8.8.8.8/path")
+	if err := bus.validateOutboundURL(u); err != nil {
+		t.Errorf("public IP 8.8.8.8 should not be blocked: %v", err)
+	}
+}
+
+// TestPublishGoroutinePanicRecovery covers lines 190-192 (the recover block
+// inside Publish's goroutine). Setting b.HTTP = nil causes a nil-pointer panic
+// in deliverOnce when it calls b.HTTP.Do(req); the goroutine's deferred
+// recover() catches it and increments the panic counter.
+func TestPublishGoroutinePanicRecovery(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	bus.Subscribe("panic.evt", Subscriber{URL: "http://127.0.0.1:9", Retries: 0, Timeout: time.Second})
+	bus.HTTP = nil // nil client → panic inside goroutine
+	succ, total, err := bus.Publish(context.Background(), "panic.evt", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if succ != 0 || total != 1 {
+		t.Errorf("panicking goroutine: succ=%d total=%d", succ, total)
+	}
+}
+
+// TestDeliverWithRetryPreCancelledContext covers lines 217-219: the ctx.Err()
+// check at the top of the deliverWithRetry loop. When ctx is already cancelled
+// before the first attempt, the check fires immediately and returns the error
+// without calling deliverOnce.
+func TestDeliverWithRetryPreCancelledContext(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := bus.deliverWithRetry(ctx, Subscriber{URL: "http://127.0.0.1:9", Retries: 3, Timeout: time.Second}, "evt", []byte("{}"))
+	if err == nil {
+		t.Error("pre-cancelled context should return error immediately")
+	}
+}
+
+// TestDeliverOnceConnectionImmediatelyClosed covers lines 273-275: the error
+// return from b.HTTP.Do(req) when the server closes the connection before
+// sending any response.
+func TestDeliverOnceConnectionImmediatelyClosed(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+	defer ln.Close()
+
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	err = bus.deliverOnce(context.Background(), Subscriber{
+		URL:     "http://" + ln.Addr().String(),
+		Timeout: time.Second,
+	}, "evt", []byte("{}"))
+	if err == nil {
+		t.Error("connection immediately closed should return error from http.Do")
+	}
+}
+
+// TestVerifyRequestSigWrongLongPrefix covers lines 333-335: the sig header has
+// length > len("v1=") but doesn't start with "v1=". The first condition of the
+// OR (len <= len) is false so only the second branch (prefix mismatch) fires.
+func TestVerifyRequestSigWrongLongPrefix(t *testing.T) {
+	secret := []byte("k")
+	body := []byte("{}")
+	now := time.Now()
+	ts := strconv.FormatInt(now.Unix(), 10)
+	headers := map[string]string{
+		"X-BLRCS-Timestamp": ts,
+		"X-BLRCS-Signature": "v2=somehashvalue", // length > 3 but prefix is "v2="
+	}
+	err := VerifyRequest(secret, headers, body, 5*time.Minute, now)
+	if err == nil {
+		t.Error("signature with wrong prefix 'v2=' should fail")
+	}
+}
+
 func TestDeliverOnceZeroTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

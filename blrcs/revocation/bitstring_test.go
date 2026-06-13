@@ -1,6 +1,10 @@
 package revocation
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/base64"
+	"strings"
 	"testing"
 )
 
@@ -216,5 +220,31 @@ func TestBitstringPurposeSuspensionRoundTrip(t *testing.T) {
 	on, _ := decoded.GetStatus(5)
 	if on {
 		t.Error("index 5 should be clear")
+	}
+}
+
+// TestDecodeBitstringStatusListDecompressionBomb covers the decompression-bomb
+// guard (line 147-148): a gzip payload that inflates to > maxDecodedListBytes
+// (64 MiB) must be rejected. All-zero bytes compress extremely well so the
+// encoded string stays small while the decompressed size exceeds the cap.
+func TestDecodeBitstringStatusListDecompressionBomb(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	// Slightly over the 64 MiB cap so the LimitReader reads exactly cap+1 bytes.
+	bomb := make([]byte, (64<<20)+1024)
+	if _, err := gz.Write(bomb); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(buf.Bytes())
+
+	_, err := DecodeBitstringStatusList(PurposeRevocation, encoded)
+	if err == nil {
+		t.Error("oversized decompressed list should be rejected")
+	}
+	if !strings.Contains(err.Error(), "decompression bomb") {
+		t.Errorf("want 'decompression bomb' in error, got: %v", err)
 	}
 }

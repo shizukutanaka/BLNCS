@@ -511,3 +511,68 @@ func TestCreateRequestAutoGenAcceptableDIDs(t *testing.T) {
 		t.Errorf("AcceptableDIDs not auto-generated into wire PD: %s", pdJSON)
 	}
 }
+
+// TestMockWalletPresentNoHolderKey covers wallet.go line 157-159: the else
+// branch of `if w.HolderKey != nil` that calls compliance.Present (no KB-JWT).
+func TestMockWalletPresentNoHolderKey(t *testing.T) {
+	ver, iss := setupFlow(t)
+	sdjwt, _, err := iss.IssueSDJWT("sub", map[string]any{"name": "Alice"}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := PresentationDefinition{
+		ID:             "pd-test",
+		RequiredClaims: []string{"name"},
+		AcceptableIssuers: map[string][]byte{
+			iss.ID: iss.PublicKey(),
+		},
+	}
+	reqURL, _, err := ver.CreateRequest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := NewMockWallet("did:web:holder.example")
+	w.Store(StoredCredential{
+		ID:        "cred-no-kb",
+		IssuerDID: iss.ID,
+		IssuerPub: iss.PublicKey(),
+		SDJWT:     sdjwt,
+	})
+	// HolderKey is nil → Present calls compliance.Present (no KB-JWT).
+	resp, err := w.Present(reqURL)
+	if err != nil {
+		t.Fatalf("Present without HolderKey: %v", err)
+	}
+	if resp.VPToken == "" {
+		t.Error("expected non-empty VPToken")
+	}
+}
+
+// TestMockWalletPresentCompliancePresentError covers wallet.go lines 160-162:
+// when compliance.Present returns an error (empty SDJWT → ErrSDJWTEmpty), the
+// wallet must propagate the error.
+func TestMockWalletPresentCompliancePresentError(t *testing.T) {
+	ver, iss := setupFlow(t)
+	def := PresentationDefinition{
+		ID:             "pd-test",
+		RequiredClaims: []string{"name"},
+		AcceptableIssuers: map[string][]byte{
+			iss.ID: iss.PublicKey(),
+		},
+	}
+	reqURL, _, err := ver.CreateRequest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := NewMockWallet("did:web:holder.example")
+	// Empty SDJWT → compliance.Present returns ErrSDJWTEmpty.
+	w.Store(StoredCredential{
+		ID:        "bad-cred",
+		IssuerDID: iss.ID,
+		SDJWT:     "",
+	})
+	_, err = w.Present(reqURL)
+	if err == nil {
+		t.Error("Present with empty SDJWT should return error")
+	}
+}
