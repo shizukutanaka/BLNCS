@@ -882,3 +882,16 @@ func TestVerifyBadVersionIDInLog(t *testing.T) {
 		t.Fatal("malformed versionId should cause Verify to fail")
 	}
 }
+
+func TestUpdatePrevMalformedVersionID(t *testing.T) {
+	// Update with a log whose last entry has a malformed VersionID → parseVersionID error.
+	updateKey, _ := genKey(t)
+	_, err := Update(UpdateParams{
+		Log:     []LogEntry{{VersionID: "bad-format-no-number"}},
+		SignKey:  updateKey,
+		NewState: map[string]any{"id": "did:webvh:x:example.com"},
+	})
+	if err == nil {
+		t.Fatal("malformed prev VersionID should fail")
+	}
+}

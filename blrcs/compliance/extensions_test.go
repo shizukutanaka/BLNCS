@@ -3,11 +3,44 @@ package compliance
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+// ============================================================================
+// test helpers
+// ============================================================================
+
+// craftSignedJWT builds a signed vc+sd-jwt using the given private key.
+func craftSignedJWT(priv ed25519.PrivateKey, payloadMap map[string]any) string {
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"vc+sd-jwt"}`))
+	payBytes, _ := json.Marshal(payloadMap)
+	pay := base64.RawURLEncoding.EncodeToString(payBytes)
+	sig := ed25519.Sign(priv, []byte(hdr+"."+pay))
+	return hdr + "." + pay + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+// discHash returns the base64url SHA-256 digest of a disclosure string (used in _sd).
+func discHash(disc string) string {
+	h := sha256.Sum256([]byte(disc))
+	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// baseSDPayload returns a minimal valid SD-JWT payload for iss.
+func baseSDPayload(iss *Issuer) map[string]any {
+	return map[string]any{
+		"iss": iss.ID,
+		"sub": "sub",
+		"vct": "https://example.com/vct/v1",
+		"iat": float64(time.Now().Unix()),
+		"_sd": []any{},
+	}
+}
 
 // ============================================================================
 // PrivateKey / NewIssuerFromKey
@@ -625,5 +658,255 @@ func TestExtractHolderKeyEdgeCases(t *testing.T) {
 	shortX := map[string]any{"cnf": map[string]any{"jwk": map[string]any{"x": "dG9vc2hvcnQ"}}} // "tooshort"
 	if k := extractHolderKey(shortX); k != nil {
 		t.Error("jwk.x with wrong length should return nil")
+	}
+}
+
+// ============================================================================
+// VerifySDJWTWithBinding — malformed JWT header / sig / payload segments
+// ============================================================================
+
+func TestVerifySDJWTBadHeaderJSON(t *testing.T) {
+	// Header decodes successfully but is not a JSON object → ErrSDJWTMalformed (line 271).
+	iss, _ := NewIssuer("did:web:badhdr.test")
+	// "aGVsbG8" = base64url("hello"), which is not JSON
+	badJWT := "aGVsbG8.payload.sig"
+	_, err := VerifySDJWTWithBinding(badJWT+"~", iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTMalformed {
+		t.Errorf("bad header JSON: want ErrSDJWTMalformed, got %v", err)
+	}
+}
+
+func TestVerifySDJWTBadSigEncoding(t *testing.T) {
+	// Sig segment contains chars invalid for base64url (line 280).
+	iss, _ := NewIssuer("did:web:badsig.test")
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"vc+sd-jwt"}`))
+	pay := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"x"}`))
+	badJWT := hdr + "." + pay + ".!invalid!sig!"
+	_, err := VerifySDJWTWithBinding(badJWT+"~", iss.PublicKey(), VerifyOptions{})
+	if err == nil || !strings.Contains(err.Error(), "sig encoding") {
+		t.Errorf("bad sig encoding: want sig encoding error, got %v", err)
+	}
+}
+
+func TestVerifySDJWTBadPayloadEncoding(t *testing.T) {
+	// Payload segment has padding '=' (invalid for RawURLEncoding) (line 287).
+	// We sign over the raw string so sig verify passes, then payload decode fails.
+	iss, _ := NewIssuer("did:web:badpayenc.test")
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"vc+sd-jwt"}`))
+	pay := "aGVsbG8="        // standard base64 of "hello" — has padding '='
+	sig := ed25519.Sign(iss.privateKey, []byte(hdr+"."+pay))
+	badJWT := hdr + "." + pay + "." + base64.RawURLEncoding.EncodeToString(sig)
+	_, err := VerifySDJWTWithBinding(badJWT+"~", iss.PublicKey(), VerifyOptions{})
+	if err == nil || !strings.Contains(err.Error(), "payload encoding") {
+		t.Errorf("bad payload encoding: want payload encoding error, got %v", err)
+	}
+}
+
+func TestVerifySDJWTBadPayloadJSON(t *testing.T) {
+	// Payload decodes to non-JSON (line 291).
+	iss, _ := NewIssuer("did:web:badpayjson.test")
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"vc+sd-jwt"}`))
+	pay := base64.RawURLEncoding.EncodeToString([]byte("not json!!"))
+	sig := ed25519.Sign(iss.privateKey, []byte(hdr+"."+pay))
+	badJWT := hdr + "." + pay + "." + base64.RawURLEncoding.EncodeToString(sig)
+	_, err := VerifySDJWTWithBinding(badJWT+"~", iss.PublicKey(), VerifyOptions{})
+	if err == nil || !strings.Contains(err.Error(), "payload JSON") {
+		t.Errorf("bad payload JSON: want payload JSON error, got %v", err)
+	}
+}
+
+// ============================================================================
+// VerifySDJWTWithBinding — disclosure processing error paths
+// ============================================================================
+
+func TestVerifySDJWTDisclosureNotInSD(t *testing.T) {
+	// Disclosure whose digest is not in _sd → ErrSDJWTMalformed (line 366).
+	iss, _ := NewIssuer("did:web:notinsd.test")
+	payload := baseSDPayload(iss) // _sd is empty
+	jwt := craftSignedJWT(iss.privateKey, payload)
+	extraDisc := base64.RawURLEncoding.EncodeToString([]byte(`["salt","key","val"]`))
+	sdjwt := jwt + "~" + extraDisc + "~"
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTMalformed {
+		t.Errorf("disc not in _sd: want ErrSDJWTMalformed, got %v", err)
+	}
+}
+
+func TestVerifySDJWTDisclosureBadBase64(t *testing.T) {
+	// Disclosure has invalid base64url chars; its hash IS in _sd → ErrSDJWTMalformed (line 373).
+	iss, _ := NewIssuer("did:web:baddisc.test")
+	badDisc := "not!valid!base64url"
+	payload := baseSDPayload(iss)
+	payload["_sd"] = []any{discHash(badDisc)}
+	jwt := craftSignedJWT(iss.privateKey, payload)
+	sdjwt := jwt + "~" + badDisc + "~"
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTMalformed {
+		t.Errorf("bad base64 disc: want ErrSDJWTMalformed, got %v", err)
+	}
+}
+
+func TestVerifySDJWTDisclosureNotJSONArray(t *testing.T) {
+	// Disclosure decodes to an object, not an array → ErrSDJWTMalformed (line 377).
+	iss, _ := NewIssuer("did:web:notarr.test")
+	disc := base64.RawURLEncoding.EncodeToString([]byte(`{"key":"value"}`))
+	payload := baseSDPayload(iss)
+	payload["_sd"] = []any{discHash(disc)}
+	jwt := craftSignedJWT(iss.privateKey, payload)
+	sdjwt := jwt + "~" + disc + "~"
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTMalformed {
+		t.Errorf("not-array disc: want ErrSDJWTMalformed, got %v", err)
+	}
+}
+
+func TestVerifySDJWTDisclosureWrongArrayLength(t *testing.T) {
+	// Disclosure decodes to a 2-element array (must be 3) → ErrSDJWTMalformed (line 380).
+	iss, _ := NewIssuer("did:web:arrlen.test")
+	disc := base64.RawURLEncoding.EncodeToString([]byte(`["salt","name"]`))
+	payload := baseSDPayload(iss)
+	payload["_sd"] = []any{discHash(disc)}
+	jwt := craftSignedJWT(iss.privateKey, payload)
+	sdjwt := jwt + "~" + disc + "~"
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTMalformed {
+		t.Errorf("wrong arr len: want ErrSDJWTMalformed, got %v", err)
+	}
+}
+
+func TestVerifySDJWTDisclosureNonStringName(t *testing.T) {
+	// Disclosure arr[1] is a number, not a string → ErrSDJWTMalformed (line 384).
+	iss, _ := NewIssuer("did:web:nonstr.test")
+	disc := base64.RawURLEncoding.EncodeToString([]byte(`["salt",123,"val"]`))
+	payload := baseSDPayload(iss)
+	payload["_sd"] = []any{discHash(disc)}
+	jwt := craftSignedJWT(iss.privateKey, payload)
+	sdjwt := jwt + "~" + disc + "~"
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTMalformed {
+		t.Errorf("non-string name: want ErrSDJWTMalformed, got %v", err)
+	}
+}
+
+func TestVerifySDJWTDisclosureReservedName(t *testing.T) {
+	// Disclosure uses a reserved claim name "iss" → ErrSDJWTMalformed (line 389).
+	iss, _ := NewIssuer("did:web:resname.test")
+	disc := base64.RawURLEncoding.EncodeToString([]byte(`["salt","iss","evil"]`))
+	payload := baseSDPayload(iss)
+	payload["_sd"] = []any{discHash(disc)}
+	jwt := craftSignedJWT(iss.privateKey, payload)
+	sdjwt := jwt + "~" + disc + "~"
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTMalformed {
+		t.Errorf("reserved name: want ErrSDJWTMalformed, got %v", err)
+	}
+}
+
+func TestVerifySDJWTDisclosureDuplicateClaim(t *testing.T) {
+	// Disclosure uses a name that already exists as a clear claim → ErrSDJWTMalformed (line 392).
+	iss, _ := NewIssuer("did:web:dupname.test")
+	disc := base64.RawURLEncoding.EncodeToString([]byte(`["salt","foo","val2"]`))
+	payload := baseSDPayload(iss)
+	payload["foo"] = "val1"               // clear claim
+	payload["_sd"] = []any{discHash(disc)} // also a disclosed claim with the same name
+	jwt := craftSignedJWT(iss.privateKey, payload)
+	sdjwt := jwt + "~" + disc + "~"
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTMalformed {
+		t.Errorf("duplicate claim: want ErrSDJWTMalformed, got %v", err)
+	}
+}
+
+// ============================================================================
+// verifyKBJWT — error paths (lines 470, 477, 481)
+// ============================================================================
+
+// appendKBJWT strips the trailing "~" from a bound SDJWT and appends a custom KB-JWT.
+func appendKBJWT(sdjwt, kbjwt string) string {
+	return strings.TrimSuffix(sdjwt, "~") + "~" + kbjwt
+}
+
+func TestVerifyKBJWTBadHeaderBase64(t *testing.T) {
+	// KB-JWT header segment has invalid base64url chars → ErrKeyBindingInvalid (line 470).
+	iss, _ := NewIssuer("did:web:kbhdr.test")
+	holderPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub", nil, nil, holderPub, time.Hour)
+	sdjwt = appendKBJWT(sdjwt, "!!!.pay.sig")
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if !errors.Is(err, ErrKeyBindingInvalid) {
+		t.Errorf("bad KB header b64: want ErrKeyBindingInvalid, got %v", err)
+	}
+}
+
+func TestVerifyKBJWTBadSigBase64(t *testing.T) {
+	// KB-JWT sig segment has invalid base64url chars → ErrKeyBindingInvalid (line 477).
+	iss, _ := NewIssuer("did:web:kbsig.test")
+	holderPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub", nil, nil, holderPub, time.Hour)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"kb+jwt"}`))
+	pay := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
+	sdjwt = appendKBJWT(sdjwt, hdr+"."+pay+".!!!invalidsig!!!")
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if !errors.Is(err, ErrKeyBindingInvalid) {
+		t.Errorf("bad KB sig b64: want ErrKeyBindingInvalid, got %v", err)
+	}
+}
+
+func TestVerifyKBJWTBadPayloadBase64(t *testing.T) {
+	// KB-JWT payload segment has invalid base64url (padding '=') → ErrKeyBindingInvalid (line 477).
+	// Sign over the raw string so sig verify passes, then RawURLEncoding.Decode fails.
+	iss, _ := NewIssuer("did:web:kbplb64.test")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub", nil, nil, holderPub, time.Hour)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"kb+jwt"}`))
+	pay := "aGVsbG8=" // standard base64 — padding '=' is invalid for RawURLEncoding
+	sig := ed25519.Sign(holderPriv, []byte(hdr+"."+pay))
+	kbjwt := hdr + "." + pay + "." + base64.RawURLEncoding.EncodeToString(sig)
+	sdjwt = appendKBJWT(sdjwt, kbjwt)
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if !errors.Is(err, ErrKeyBindingInvalid) {
+		t.Errorf("bad KB payload b64: want ErrKeyBindingInvalid, got %v", err)
+	}
+}
+
+func TestVerifyKBJWTBadPayloadJSON(t *testing.T) {
+	// KB-JWT payload decodes successfully but is not a JSON map → ErrKeyBindingInvalid (line 481).
+	// We sign over "hdr.payload" with holderPriv so sig verify passes, then JSON unmarshal fails.
+	iss, _ := NewIssuer("did:web:kbpljson.test")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub", nil, nil, holderPub, time.Hour)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"kb+jwt"}`))
+	pay := base64.RawURLEncoding.EncodeToString([]byte("not json!")) // valid b64url, bad JSON
+	sig := ed25519.Sign(holderPriv, []byte(hdr+"."+pay))
+	kbjwt := hdr + "." + pay + "." + base64.RawURLEncoding.EncodeToString(sig)
+	sdjwt = appendKBJWT(sdjwt, kbjwt)
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if !errors.Is(err, ErrKeyBindingInvalid) {
+		t.Errorf("bad KB payload JSON: want ErrKeyBindingInvalid, got %v", err)
+	}
+}
+
+// ============================================================================
+// PresentWithKeyBinding — error path (line 565)
+// ============================================================================
+
+func TestPresentWithKeyBindingEmptySJWT(t *testing.T) {
+	// Present("") returns ErrSDJWTEmpty which PresentWithKeyBinding propagates (line 565).
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	_, err := PresentWithKeyBinding("", nil, holderPriv, "nonce", "aud", time.Now())
+	if !errors.Is(err, ErrSDJWTEmpty) {
+		t.Errorf("empty sdjwt: want ErrSDJWTEmpty, got %v", err)
+	}
+}
+
+// ============================================================================
+// BuildDLURI — non-digit GTIN (line 612)
+// ============================================================================
+
+func TestBuildDLURIGTINNonDigit(t *testing.T) {
+	// GTIN of valid length (8) but containing a non-digit character → error (line 612).
+	_, err := BuildDLURI("example.com", GS1Key{GTIN: "1234567A"})
+	if err == nil || !strings.Contains(err.Error(), "non-digit") {
+		t.Errorf("non-digit GTIN: want non-digit error, got %v", err)
 	}
 }
