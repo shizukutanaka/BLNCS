@@ -123,6 +123,21 @@ func (i *Issuer) IssueSDJWTTieredBound(subject string, tc *TieredClaims, holderP
 	return i.IssueSDJWTBound(subject, sd, clear, holderPub, validFor)
 }
 
+// IssueSDJWTBoundStatus — holder key binding (cnf) と失効参照 (status_list) を併せ持つ
+// DPP SD-JWT VC を発行 (vct=DPP)。規制 DPP は通常その両方を要する: 提示はホルダに
+// 暗号的に束縛され (リプレイ防止)、かつ issuer が後から失効できる。
+func (i *Issuer) IssueSDJWTBoundStatus(subject string, sdClaims, clearClaims map[string]any, holderPub ed25519.PublicKey, status *StatusRef, validFor time.Duration) (string, []Disclosure, error) {
+	return i.IssueSDJWTVCBoundStatus(VCTDigitalProductPassport, subject, sdClaims, clearClaims, holderPub, status, validFor)
+}
+
+// IssueSDJWTVCBoundStatus — 任意の vct で holder key binding + 失効参照付き SD-JWT VC を発行。
+func (i *Issuer) IssueSDJWTVCBoundStatus(vct, subject string, sdClaims, clearClaims map[string]any, holderPub ed25519.PublicKey, status *StatusRef, validFor time.Duration) (string, []Disclosure, error) {
+	if len(holderPub) != ed25519.PublicKeySize {
+		return "", nil, ErrHolderKeyRequired
+	}
+	return i.issueSDJWT(vct, subject, sdClaims, clearClaims, holderPub, status, validFor)
+}
+
 // issueSDJWT — SD-JWT VC 発行の共通実装。holderPub が non-nil なら cnf.jwk を、
 // status が non-nil なら status_list claim を埋め込む。
 func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[string]any, holderPub ed25519.PublicKey, status *StatusRef, validFor time.Duration) (string, []Disclosure, error) {

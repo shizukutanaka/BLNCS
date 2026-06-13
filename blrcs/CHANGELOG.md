@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`compliance.IssueSDJWTBoundStatus` / `IssueSDJWTVCBoundStatus` — holder-bound
+  AND revocable in one credential.** The private issuer already supported embedding
+  both a `cnf` (holder key binding) and a `status_list` reference, but no public
+  method passed both — so callers had to choose *either* anti-replay binding
+  (`IssueSDJWTBound`) *or* revocability (`IssueSDJWTStatus`). A regulated DPP/Battery
+  passport needs both. The new methods issue a credential that is holder-bound and
+  revocable at once; tests verify the result requires a KB-JWT, preserves the status
+  reference through presentation, and is correctly reported revoked/not-revoked.
 - **End-to-end hardened-pipeline integration test (`integration`).** A new
   `TestHardenedTriangle_TxCodeProofBoundDCQLKeyBinding` exercises the full
   secure-by-default path the per-package hardening built up — OpenID4VCI offer with
