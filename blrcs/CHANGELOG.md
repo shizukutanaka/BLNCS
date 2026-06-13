@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`mdoc` device authentication (ISO 18013-5 §9.1.3).** The package issued and
+  verified `IssuerSigned` mdocs and committed a `deviceKey` in the MSO, but nothing
+  used that key to bind a presentation — an mdoc presentation was a replayable
+  *bearer* token (the mdoc analog of the SD-JWT bearer-replay gap that KB-JWT closes
+  for OpenID4VP). Added `SignDeviceAuth`/`VerifyDeviceAuth` (COSE_Sign1 over the
+  `DeviceAuthentication` structure bound to a caller-supplied session transcript),
+  and `PresentWithDeviceAuth`/`VerifyDocument` for the full
+  Document = {docType, issuerSigned, deviceSigned} flow. `VerifyDocument` enforces
+  issuer signature + validity window + disclosed-item digests AND the device
+  signature against the MSO `deviceKey`, rejecting credentials with no device key,
+  missing/!invalid `deviceAuth`, or a signature bound to a different transcript.
+  Tests: happy path, wrong-transcript replay, wrong device key, no device key,
+  missing deviceAuth, and expiry-still-enforced.
+
 ### Fixed
 - **`openid4vp` dropped the credential's revocation reference; revoked credentials
   could not be rejected in-flow.** `ProcessResponse` verified signature, holder
