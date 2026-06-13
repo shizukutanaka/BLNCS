@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -42,6 +43,7 @@ var (
 	ErrMissingClaims      = errors.New("vci: required claims missing from offer")
 	ErrInvalidProof       = errors.New("vci: proof invalid")
 	ErrProofNonceMismatch = errors.New("vci: proof nonce mismatch")
+	ErrBadTxCode          = errors.New("vci: transaction code (tx_code) missing or incorrect")
 )
 
 // ============================================================================
@@ -73,6 +75,7 @@ type preAuthEntry struct {
 	tokenExpiresAt time.Time
 	consumed       bool   // credentialエンドポイント使用済み
 	cNonce         string // Proof-of-Possession nonce (token交換時に発行)
+	txCode         string // 取引コード (PIN)。空なら不要。設定時は ExchangeCode で必須照合。
 }
 
 // ============================================================================
@@ -144,7 +147,30 @@ func (iss *Issuer) Signer() *compliance.Issuer { return iss.signer }
 //
 // 内部で pre-authorized code を発行し、TTL付きで保管。
 // Wallet がこのコードを使って /token エンドポイントで access_token を取得する。
+// TxCodeSpec describes the transaction code (PIN) the wallet must collect from the
+// user before redeeming a pre-authorized code (OpenID4VCI Draft 15 §4.1.1). The
+// metadata is advertised in the offer; the code *value* is communicated to the user
+// out-of-band (never in the offer). All fields are optional.
+type TxCodeSpec struct {
+	InputMode   string // "numeric" (default) | "text"
+	Length      int    // expected length (0 = unspecified)
+	Description string // human-readable hint shown by the wallet
+}
+
+// CreateOffer creates a pre-authorized credential offer with no transaction code.
 func (iss *Issuer) CreateOffer(configID, subject string, sdClaims, clearClaims map[string]any) (string, string, error) {
+	return iss.CreateOfferWithTxCode(configID, subject, sdClaims, clearClaims, "", nil)
+}
+
+// CreateOfferWithTxCode creates a pre-authorized offer bound to a transaction code
+// (PIN). The returned offer advertises that a tx_code is required (per spec metadata
+// only, never the value); ExchangeCode then requires the matching code, defeating
+// interception of the pre-authorized code alone (e.g. a photographed QR offer).
+//
+// txCode is the secret value to communicate to the user out-of-band; spec is optional
+// metadata describing how the wallet should collect it. An empty txCode behaves like
+// CreateOffer (no tx_code).
+func (iss *Issuer) CreateOfferWithTxCode(configID, subject string, sdClaims, clearClaims map[string]any, txCode string, spec *TxCodeSpec) (string, string, error) {
 	iss.mu.Lock()
 	cfg, ok := iss.configs[configID]
 	iss.mu.Unlock()
@@ -167,15 +193,33 @@ func (iss *Issuer) CreateOffer(configID, subject string, sdClaims, clearClaims m
 		sdClaims:    sdClaims,
 		clearClaims: clearClaims,
 		expiresAt:   time.Now().Add(iss.preAuthTTL),
+		txCode:      txCode,
 	}
 	iss.mu.Unlock()
+	preAuthGrant := map[string]any{
+		"pre-authorized_code": code,
+	}
+	if txCode != "" {
+		// Advertise that a tx_code is required (metadata only — never the value).
+		tc := map[string]any{}
+		if spec != nil {
+			if spec.InputMode != "" {
+				tc["input_mode"] = spec.InputMode
+			}
+			if spec.Length > 0 {
+				tc["length"] = spec.Length
+			}
+			if spec.Description != "" {
+				tc["description"] = spec.Description
+			}
+		}
+		preAuthGrant["tx_code"] = tc
+	}
 	offer := map[string]any{
 		"credential_issuer":            iss.URL,
 		"credential_configuration_ids": []string{configID},
 		"grants": map[string]any{
-			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
-				"pre-authorized_code": code,
-			},
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": preAuthGrant,
 		},
 	}
 	b, _ := json.Marshal(offer)
@@ -201,7 +245,15 @@ type TokenResponse struct {
 //
 // RFC 6749 §4.4 準拠、Pre-Authorized Code Flow。
 // ワンタイム: code は消費後無効化。
+// ExchangeCode redeems a pre-authorized code with no transaction code. If the offer
+// set a tx_code, this fails with ErrBadTxCode — use ExchangeCodeWithTxCode.
 func (iss *Issuer) ExchangeCode(code string) (*TokenResponse, error) {
+	return iss.ExchangeCodeWithTxCode(code, "")
+}
+
+// ExchangeCodeWithTxCode redeems a pre-authorized code, enforcing the transaction
+// code (PIN) when the offer was created with one. The comparison is constant-time.
+func (iss *Issuer) ExchangeCodeWithTxCode(code, txCode string) (*TokenResponse, error) {
 	iss.mu.Lock()
 	defer iss.mu.Unlock()
 	entry, ok := iss.preAuths[code]
@@ -211,6 +263,13 @@ func (iss *Issuer) ExchangeCode(code string) (*TokenResponse, error) {
 	if entry.accessToken != "" {
 		// 既に交換済み
 		return nil, ErrBadPreAuthCode
+	}
+	// tx_code (PIN) binding: when the offer set one, redemption must present the exact
+	// value. Constant-time compare avoids leaking the code via response timing.
+	if entry.txCode != "" {
+		if subtle.ConstantTimeCompare([]byte(entry.txCode), []byte(txCode)) != 1 {
+			return nil, ErrBadTxCode
+		}
 	}
 	accessToken := randomB64(32)
 	cNonce := randomB64(16)
@@ -501,7 +560,7 @@ func (iss *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 		writeVCIError(w, http.StatusBadRequest, "invalid_grant", "pre-authorized_code required")
 		return
 	}
-	tr, err := iss.ExchangeCode(code)
+	tr, err := iss.ExchangeCodeWithTxCode(code, r.Form.Get("tx_code"))
 	if err != nil {
 		writeVCIError(w, http.StatusBadRequest, "invalid_grant", err.Error())
 		return

@@ -60,6 +60,86 @@ func TestCreateOfferBasic(t *testing.T) {
 	}
 }
 
+// TestExchangeCodeTxCodeRequired covers the tx_code (PIN) binding: an offer created
+// with a transaction code cannot be redeemed without the exact code, defeating
+// interception of the pre-authorized code alone.
+func TestExchangeCodeTxCodeRequired(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	const pin = "secret-pin-9173"
+	_, code, err := iss.CreateOfferWithTxCode(
+		"eu-battery-passport-v1", "bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		map[string]any{"batteryCategory": "ev"},
+		pin, &TxCodeSpec{InputMode: "text", Length: len(pin)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Plain ExchangeCode (no PIN) must fail when a tx_code is required.
+	if _, err := iss.ExchangeCode(code); err != ErrBadTxCode {
+		t.Fatalf("no PIN: want ErrBadTxCode, got %v", err)
+	}
+	// Wrong PIN must fail.
+	if _, err := iss.ExchangeCodeWithTxCode(code, "wrong"); err != ErrBadTxCode {
+		t.Fatalf("wrong PIN: want ErrBadTxCode, got %v", err)
+	}
+	// Failed attempts must NOT consume the code — the correct PIN still works.
+	tr, err := iss.ExchangeCodeWithTxCode(code, pin)
+	if err != nil {
+		t.Fatalf("correct PIN should succeed: %v", err)
+	}
+	if tr.AccessToken == "" {
+		t.Error("access token empty after correct PIN")
+	}
+	// And now the code is consumed.
+	if _, err := iss.ExchangeCodeWithTxCode(code, pin); err != ErrBadPreAuthCode {
+		t.Fatalf("redeemed code reuse: want ErrBadPreAuthCode, got %v", err)
+	}
+}
+
+// TestCreateOfferAdvertisesTxCode confirms the offer advertises the tx_code
+// requirement (metadata only) and never leaks the PIN value.
+func TestCreateOfferAdvertisesTxCode(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	const pin = "distinctive-pin-55501"
+	offerURL, _, err := iss.CreateOfferWithTxCode(
+		"eu-battery-passport-v1", "bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		nil, pin, &TxCodeSpec{InputMode: "text", Length: len(pin), Description: "PIN from email"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(offerURL, "tx_code") {
+		t.Errorf("offer should advertise tx_code requirement: %s", offerURL)
+	}
+	if !strings.Contains(offerURL, "input_mode") {
+		t.Errorf("offer should advertise tx_code metadata: %s", offerURL)
+	}
+	if strings.Contains(offerURL, pin) {
+		t.Errorf("offer MUST NOT contain the PIN value: %s", offerURL)
+	}
+}
+
+// TestExchangeCodeNoTxCodeBackcompat confirms the plain flow is unchanged: an offer
+// with no tx_code redeems via ExchangeCode, and an extraneous tx_code is ignored.
+func TestExchangeCodeNoTxCodeBackcompat(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, err := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Extraneous tx_code on a no-tx offer is ignored (lenient, per spec).
+	if _, err := iss.ExchangeCodeWithTxCode(code, "irrelevant"); err != nil {
+		t.Fatalf("no-tx offer with extraneous PIN should still redeem: %v", err)
+	}
+}
+
 func TestCreateOfferUnknownConfig(t *testing.T) {
 	iss, _ := setupIssuer(t)
 	_, _, err := iss.CreateOffer("unknown-config", "s", nil, nil)

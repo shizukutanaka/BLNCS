@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`openid4vci` transaction code (tx_code / PIN) for the pre-authorized flow
+  (Draft 15 §4.1.1).** The pre-authorized code flow had no tx_code, so anyone who
+  intercepted the pre-authorized code (e.g. a photographed QR offer) could redeem it
+  for a credential. Added `CreateOfferWithTxCode` (advertises the tx_code requirement
+  as metadata — never the value — and binds the offer to a PIN) and
+  `ExchangeCodeWithTxCode` (constant-time PIN check; failed attempts do not consume
+  the code so a legitimate user can retry). The HTTP token endpoint reads the
+  `tx_code` form field. `CreateOffer`/`ExchangeCode` delegate with no tx_code, so
+  existing flows are unchanged. Tests: required/wrong/correct PIN, retry-after-wrong,
+  offer advertises metadata without leaking the PIN, and no-tx back-compat.
+
 ### Fixed
 - **`compliance.Verify` accepted future-dated (not-yet-valid) credentials.** The core
   W3C VC verify enforced `validUntil` (expiry) but never checked `validFrom`, so a
