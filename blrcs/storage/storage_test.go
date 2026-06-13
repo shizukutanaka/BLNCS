@@ -672,3 +672,56 @@ func TestLoadKeyPairDirectoryError(t *testing.T) {
 		t.Error("error should not be ErrNotFound")
 	}
 }
+
+// TestSaveKeyPairWriteFileFails covers storage.go:328-330: os.WriteFile fails
+// when the .tmp path is already occupied by a directory.
+func TestSaveKeyPairWriteFileFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-savekpwf-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	pub, priv, genErr := ed25519.GenerateKey(rand.Reader)
+	if genErr != nil {
+		t.Fatal(genErr)
+	}
+	// Create a directory at the .tmp path → os.WriteFile returns EISDIR.
+	tmpPath := filepath.Join(dir, keypairFileName+".tmp")
+	if mkErr := os.MkdirAll(tmpPath, 0o700); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	if savErr := s.SaveKeyPair(pub, priv); savErr == nil {
+		t.Error("SaveKeyPair with blocked .tmp path must return error")
+	}
+}
+
+// TestSaveKeyPairRenameFails covers storage.go:331-333: os.Rename fails when
+// the final keypair path is occupied by a non-empty directory.
+func TestSaveKeyPairRenameFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-savekprn-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	pub, priv, genErr := ed25519.GenerateKey(rand.Reader)
+	if genErr != nil {
+		t.Fatal(genErr)
+	}
+	// Create a non-empty directory at the final keypair path so that
+	// os.Rename(tmp, final) fails with ENOTDIR/EISDIR.
+	finalPath := filepath.Join(dir, keypairFileName)
+	if mkErr := os.MkdirAll(finalPath, 0o700); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	// Put a file inside so the directory is non-empty (extra guard on some OSes).
+	if wErr := os.WriteFile(filepath.Join(finalPath, "dummy"), []byte("x"), 0o600); wErr != nil {
+		t.Fatal(wErr)
+	}
+	if savErr := s.SaveKeyPair(pub, priv); savErr == nil {
+		t.Error("SaveKeyPair when final path is a non-empty directory must return error")
+	}
+}
