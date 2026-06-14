@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Adversarial-robustness fuzzing of the hardened verification entry points.** The
+  hardening pass added parsers that consume attacker-controlled bytes — the KB-JWT
+  segment (`VerifySDJWTWithBinding`), the mdoc `deviceSigned` CBOR (`VerifyDocument`),
+  and the OpenID4VCI proof JWT (`verifyProofJWT`) — none of which the existing fuzz
+  suite exercised (it covered only the non-binding `VerifySDJWT`, IssuerSigned-only
+  `mdoc.Verify`, and DCQL parsing). Added `FuzzSDJWTKeyBinding`, `FuzzMdocDeviceAuth`
+  (in `fuzz/`), and white-box `FuzzVerifyProofJWT` (in `openid4vci/`). Each ran clean
+  (no panic; tens of thousands of execs, dozens of interesting inputs), confirming the
+  new entry points fail safe on malformed input — closing a robustness gap that the
+  logical-correctness tests could not see. (17 → 20 fuzz targets.)
 - **`openid4vci` credentials can now carry a revocation status.** `IssueCredentialWithProof`
   always issued without a `status_list` reference, so VCI-issued credentials could
   never be revoked. New `OfferOptions{Status}` (via `CreateOfferWithOptions`) records a

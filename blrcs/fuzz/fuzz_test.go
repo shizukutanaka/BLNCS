@@ -554,3 +554,69 @@ func FuzzBitstringStatusList(f *testing.F) {
 		_, _ = bsl.GetStatus(1 << 30)
 	})
 }
+
+// ============================================================================
+// FuzzSDJWTKeyBinding — fuzz the holder-binding verification entry point
+// (VerifySDJWTWithBinding parses the attacker-suppliable KB-JWT segment, which
+// FuzzSDJWT does not exercise). 絶対条件: panic しない。
+// ============================================================================
+
+func FuzzSDJWTKeyBinding(f *testing.F) {
+	iss, _ := compliance.NewIssuer("did:web:fuzz.kb")
+	pub := iss.PublicKey()
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub",
+		map[string]any{"c": "v"}, map[string]any{"clear": "d"}, holderPub, 0)
+	if pres, err := compliance.PresentWithKeyBinding(sdjwt, []string{"c"}, holderPriv, "nonce", "aud", time.Time{}); err == nil {
+		f.Add(pres)
+	}
+	f.Add(sdjwt)                // bound credential, no KB-JWT segment
+	f.Add(sdjwt + "~")          // trailing tilde, empty KB
+	f.Add(sdjwt + "~not.a.jwt") // garbage KB segment
+	f.Add("a.b.c~d~e.f.g")      // structurally jwt~disc~kb but nonsense
+	f.Add("")
+	f.Add("~~~")
+
+	f.Fuzz(func(t *testing.T, data string) {
+		// Both the strict (key binding required) and permissive options must fail
+		// safe — error, never panic — on arbitrary input.
+		_, _ = compliance.VerifySDJWTWithBinding(data, pub, compliance.VerifyOptions{
+			ExpectedNonce: "nonce", ExpectedAudience: "aud", RequireKeyBinding: true,
+		})
+		_, _ = compliance.VerifySDJWTWithBinding(data, pub, compliance.VerifyOptions{})
+	})
+}
+
+// ============================================================================
+// FuzzMdocDeviceAuth — fuzz the mdoc device-authentication verification path
+// (VerifyDocument parses the attacker-suppliable Document CBOR incl. deviceSigned,
+// which FuzzMdoc does not exercise). 絶対条件: panic しない。
+// ============================================================================
+
+func FuzzMdocDeviceAuth(f *testing.F) {
+	issPub, issPriv, _ := ed25519.GenerateKey(rand.Reader)
+	devPub, devPriv, _ := ed25519.GenerateKey(rand.Reader)
+	cred, _ := mdoc.Issue(mdoc.IssueParams{
+		DocType: "org.iso.18013.5.1.mDL",
+		NameSpaces: map[string][]mdoc.Element{
+			"org.iso.18013.5.1": {{Identifier: "family_name", Value: "Doe"}},
+		},
+		DeviceKey:  devPub,
+		IssuerPriv: issPriv,
+	})
+	transcript := []byte("fuzz-session-transcript")
+	if doc, err := mdoc.PresentWithDeviceAuth(cred,
+		map[string][]string{"org.iso.18013.5.1": {"family_name"}},
+		"org.iso.18013.5.1.mDL", devPriv, transcript); err == nil {
+		f.Add(doc)
+	}
+	f.Add(cred) // IssuerSigned, not a Document (no deviceSigned)
+	f.Add([]byte{})
+	f.Add([]byte{0xa0}) // empty CBOR map
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// Arbitrary bytes (and a mismatched transcript) must fail safe, never panic.
+		_, _ = mdoc.VerifyDocument(data, issPub, transcript, time.Now())
+		_, _ = mdoc.VerifyDocument(data, issPub, []byte("other-transcript"), time.Now())
+	})
+}
