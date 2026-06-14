@@ -296,6 +296,28 @@ func TestKeyBindingBadKBJWTFormat(t *testing.T) {
 	}
 }
 
+// TestKeyBindingRejectsAlgDowngrade pins the algorithm-confusion guard on the
+// holder-binding path: a KB-JWT with the correct typ but a non-EdDSA `alg` (e.g.
+// "none" or a symmetric alg) must be rejected before any signature check. This is
+// the alg branch of the verifyKBJWT header guard; the wrong-typ branch is covered
+// by TestKeyBindingBadKBJWTFormat. Without this, a refactor that loosened the alg
+// check (e.g. a header-dispatched verifier registry) could silently reintroduce
+// alg-confusion on the holder binding.
+func TestKeyBindingRejectsAlgDowngrade(t *testing.T) {
+	iss, _ := NewIssuer("did:web:issuer")
+	holderPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("h", map[string]any{"a": 1}, nil, holderPub, time.Hour)
+	base, _ := Present(sdjwt, []string{"a"})
+
+	for _, alg := range []string{"none", "HS256", "RS256", ""} {
+		hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"` + alg + `","typ":"kb+jwt"}`))
+		pres := base + hdr + ".payload.sig"
+		if _, err := VerifySDJWTWithBinding(pres, iss.PublicKey(), VerifyOptions{}); err != ErrKeyBindingInvalid {
+			t.Fatalf("KB-JWT alg=%q: want ErrKeyBindingInvalid, got %v", alg, err)
+		}
+	}
+}
+
 // TestKeyBindingMissingIat — a KB-JWT without iat must be rejected.
 func TestKeyBindingMissingIat(t *testing.T) {
 	iss, _ := NewIssuer("did:web:issuer")

@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Downgrade-resistance regression test for the holder-binding path.** Auditing the
+  KB-JWT verifier through an algorithm-confusion lens confirmed it pins `alg=EdDSA` +
+  `typ=kb+jwt` and verifies with hardcoded Ed25519 (no header-dispatched verifier) —
+  but only the wrong-`typ` branch of that guard was tested; the **alg-downgrade**
+  branch (correct typ, `alg` = `none`/`HS256`/`RS256`/empty) was not. Added
+  `TestKeyBindingRejectsAlgDowngrade` so a future refactor that loosened the
+  holder-binding alg check (e.g. a header-dispatched registry) cannot silently
+  reintroduce alg-confusion. The issuer-JWT (`alg=none`), `_sd_alg`, and COSE
+  downgrade paths were already covered.
 - **Adversarial-robustness fuzzing of the hardened verification entry points.** The
   hardening pass added parsers that consume attacker-controlled bytes — the KB-JWT
   segment (`VerifySDJWTWithBinding`), the mdoc `deviceSigned` CBOR (`VerifyDocument`),
