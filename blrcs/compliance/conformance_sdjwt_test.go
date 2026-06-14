@@ -129,3 +129,41 @@ func TestVerifyNbfNotInClaims(t *testing.T) {
 		t.Error("nbf must be stripped from vc.Claims (reserved)")
 	}
 }
+
+// TestCrossCredentialDisclosureRejected pins the disclosure-transplant defense
+// (domain separation at the credential level): a disclosure minted for credential A
+// cannot be grafted onto a presentation of credential B. B's _sd digest set is
+// signed by the issuer, so A's disclosure (whose digest is absent from B's _sd) must
+// be rejected outright — never silently dropped, which would mask tampering.
+func TestCrossCredentialDisclosureRejected(t *testing.T) {
+	iss, err := NewIssuer("did:web:issuer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Credential A carries a "secretA" selectively-disclosable claim.
+	aFull, _, err := iss.IssueSDJWT("subA", map[string]any{"secretA": "valueA"}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aParts := strings.Split(aFull, "~")
+	if len(aParts) < 2 || aParts[1] == "" {
+		t.Fatal("expected a disclosure segment in credential A")
+	}
+	aDisclosure := aParts[1]
+
+	// Credential B is a distinct credential (its own _sd set), signed by the same key.
+	bFull, _, err := iss.IssueSDJWT("subB", map[string]any{"claimB": "valueB"}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Graft A's disclosure onto B's presentation.
+	grafted := strings.TrimSuffix(bFull, "~") + "~" + aDisclosure + "~"
+	vc, err := VerifySDJWT(grafted, iss.PublicKey())
+	if err == nil {
+		if _, leaked := vc.Claims["secretA"]; leaked {
+			t.Fatal("CRITICAL: transplanted disclosure from another credential was accepted")
+		}
+		t.Fatal("grafted foreign disclosure must be rejected, not silently dropped")
+	}
+}

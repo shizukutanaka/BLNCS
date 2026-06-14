@@ -1061,3 +1061,49 @@ func TestVerifyConsistencySnNonZeroAtEnd(t *testing.T) {
 		t.Error("truncated consistency proof should fail")
 	}
 }
+
+// TestReceiptCheckpointSigNotTransferable pins domain separation between the two
+// structures the Transparency Service key signs: receipts and checkpoints. They
+// share a RootHash prefix, so a missing domain tag could in principle let one
+// signature be replayed as the other. This asserts the signatures are not
+// transferable — a checkpoint signature must not verify a receipt and vice versa.
+func TestReceiptCheckpointSigNotTransferable(t *testing.T) {
+	ledger, err := NewLedger("did:web:ts.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ledger.Close() }()
+	priv, _ := mustIssuer(t, "did:web:iss")
+	stmt, err := SignStatement(priv, "did:web:iss", "sub", "text/plain", []byte("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := ledger.Register(stmt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp := ledger.SignedCheckpoint()
+	tsPub := ledger.PublicKey()
+
+	// Sanity: each verifies in its own context.
+	if err := VerifyReceipt(receipt, stmt, tsPub); err != nil {
+		t.Fatalf("receipt should verify: %v", err)
+	}
+	if err := VerifyCheckpoint(cp, tsPub); err != nil {
+		t.Fatalf("checkpoint should verify: %v", err)
+	}
+
+	// A checkpoint signature must NOT verify a receipt.
+	forgedReceipt := *receipt
+	forgedReceipt.TSSignature = cp.Signature
+	if err := VerifyReceipt(&forgedReceipt, stmt, tsPub); err == nil {
+		t.Fatal("checkpoint signature must not verify as a receipt signature")
+	}
+
+	// A receipt signature must NOT verify a checkpoint.
+	forgedCP := cp
+	forgedCP.Signature = receipt.TSSignature
+	if err := VerifyCheckpoint(forgedCP, tsPub); err == nil {
+		t.Fatal("receipt signature must not verify as a checkpoint signature")
+	}
+}

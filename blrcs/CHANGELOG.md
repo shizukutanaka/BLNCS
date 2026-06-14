@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Cross-protocol / cross-credential signature-confusion regression tests
+  (domain separation).** Auditing through a domain-separation lens — "when one key
+  signs several message types, or material from one credential is grafted onto
+  another, is the confusion rejected?" — surfaced two real, previously-untested
+  confusion surfaces (both currently defended, neither pinned):
+  - `TestCrossCredentialDisclosureRejected` (compliance): a disclosure minted for
+    credential A grafted onto a presentation of credential B is rejected outright
+    (its digest is absent from B's issuer-signed `_sd`) — never silently dropped.
+  - `TestReceiptCheckpointSigNotTransferable` (scitt): the Transparency-Service key
+    signs both receipts and checkpoints (shared `RootHash` prefix); the test pins
+    that a checkpoint signature does not verify a receipt and vice versa.
 - **Downgrade-resistance regression test for the holder-binding path.** Auditing the
   KB-JWT verifier through an algorithm-confusion lens confirmed it pins `alg=EdDSA` +
   `typ=kb+jwt` and verifies with hardcoded Ed25519 (no header-dispatched verifier) —
