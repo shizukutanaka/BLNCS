@@ -18,6 +18,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"strconv"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"blrcs/compliance"
 	"blrcs/openid4vci"
 	"blrcs/openid4vp"
+	"blrcs/revocation"
 )
 
 // buildProofJWT constructs an OpenID4VCI proof-of-possession JWT (Draft 15 §5.1.2)
@@ -153,5 +155,100 @@ func TestHardenedTriangle_TxCodeProofBoundDCQLKeyBinding(t *testing.T) {
 	// --- 7. Replay defense: the one-time state is consumed ---
 	if _, err := verifier.ProcessResponse(&openid4vp.AuthorizationResponse{VPToken: pres, State: state}); err == nil {
 		t.Error("replay of consumed state should fail")
+	}
+}
+
+// TestHardenedTriangle_RevocationLifecycle proves the full credential lifecycle:
+// a VCI-issued credential that is holder-bound AND revocable verifies while valid,
+// and is rejected in-flow once the issuer flips its status-list bit.
+func TestHardenedTriangle_RevocationLifecycle(t *testing.T) {
+	signer, err := compliance.NewIssuer("did:web:factory.lifecycle.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := openid4vci.NewIssuer("https://issue.lifecycle.example", signer)
+	issuer.RequireProof = true
+	issuer.RegisterConfiguration(openid4vci.CredentialConfiguration{
+		ID:                "battery-v1",
+		CredentialType:    "BatteryPassport",
+		DisclosableClaims: []string{"carbonKgCO2e"},
+		ClearClaims:       []string{"batteryCategory"},
+		ValidForDays:      3650,
+	})
+
+	// Issuer-owned revocation list; this credential occupies index 7.
+	const statusIdx = 7
+	statusList := revocation.NewBitstringStatusList(revocation.PurposeRevocation, 128)
+	status := &compliance.StatusRef{URI: "https://issue.lifecycle.example/status/1", Index: statusIdx}
+
+	// --- Issue a holder-bound + revocable credential via proof-of-possession ---
+	_, code, err := issuer.CreateOfferWithOptions(
+		"battery-v1", "battery-lifecycle-001",
+		map[string]any{"carbonKgCO2e": 42.0},
+		map[string]any{"batteryCategory": "ev"},
+		openid4vci.OfferOptions{Status: status},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := issuer.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, tr.CNonce, issuer.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+	cr, err := issuer.IssueCredentialWithProof(tr.AccessToken, openid4vci.CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdjwt := cr.Credential
+
+	// --- Verifier checks revocation against the issuer's list ---
+	verifier := openid4vp.NewVerifier(
+		"https://verify.lifecycle.example",
+		"https://verify.lifecycle.example/cb",
+		nil,
+	)
+	verifier.TrustedIssuers = map[string][]byte{signer.ID: signer.PublicKey()}
+	verifier.RevocationChecker = func(s *compliance.StatusRef) (bool, error) {
+		return statusList.GetStatus(s.Index)
+	}
+
+	// present runs one full DCQL request → KB-JWT presentation → ProcessResponse.
+	present := func() error {
+		q := openid4vp.DCQLQuery{Credentials: []openid4vp.CredentialQuery{{
+			ID:     "battery",
+			Format: "dc+sd-jwt",
+			Meta:   &openid4vp.CredentialQueryMeta{VCTValues: []string{compliance.VCTDigitalProductPassport}},
+			Claims: []openid4vp.ClaimQuery{{Path: []string{"batteryCategory"}}},
+		}}}
+		reqURL, state, cerr := verifier.CreateRequestDCQL(q)
+		if cerr != nil {
+			return cerr
+		}
+		u, _ := url.Parse(reqURL)
+		qv := u.Query()
+		pres, perr := compliance.PresentWithKeyBinding(sdjwt, []string{"carbonKgCO2e"}, holderPriv, qv.Get("nonce"), qv.Get("client_id"), time.Time{})
+		if perr != nil {
+			return perr
+		}
+		_, verr := verifier.ProcessResponse(&openid4vp.AuthorizationResponse{VPToken: pres, State: state})
+		return verr
+	}
+
+	// 1. While not revoked, the credential verifies.
+	if err := present(); err != nil {
+		t.Fatalf("valid credential should verify: %v", err)
+	}
+
+	// 2. Issuer revokes by flipping the status bit.
+	if err := statusList.SetStatus(statusIdx, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. The same credential is now rejected in-flow.
+	if err := present(); !errors.Is(err, openid4vp.ErrCredentialRevoked) {
+		t.Fatalf("revoked credential: want ErrCredentialRevoked, got %v", err)
 	}
 }

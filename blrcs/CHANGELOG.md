@@ -32,6 +32,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   credential is holder-bound, the privacy contract holds (undisclosed claims don't
   leak), PIN-less redemption is rejected, and one-time state defeats replay — proving
   all the hardened pieces compose without the permissive shortcuts.
+  `TestHardenedTriangle_RevocationLifecycle` extends this across the full credential
+  lifecycle: a VCI-issued holder-bound + revocable credential verifies while valid,
+  then is rejected in-flow with `ErrCredentialRevoked` once the issuer flips its
+  status-list bit.
 - **`openid4vci` transaction code (tx_code / PIN) for the pre-authorized flow
   (Draft 15 §4.1.1).** The pre-authorized code flow had no tx_code, so anyone who
   intercepted the pre-authorized code (e.g. a photographed QR offer) could redeem it
