@@ -170,6 +170,85 @@ func TestExchangeCodeTxCodeBruteForceLimit(t *testing.T) {
 	}
 }
 
+// TestIssueCredentialBoundAndRevocable confirms an offer with a status reference and
+// proof-of-possession yields a credential that is both holder-bound (cnf) AND
+// revocable (status_list) — so VCI-issued credentials can be revoked.
+func TestIssueCredentialBoundAndRevocable(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	iss.RequireProof = true
+	status := &compliance.StatusRef{URI: "https://status.example/list", Index: 9}
+	_, code, err := iss.CreateOfferWithOptions(
+		"eu-battery-passport-v1", "bat-rev",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+		OfferOptions{Status: status},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, tr.CNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Holder-bound: plain verify must require a KB-JWT.
+	if _, verr := compliance.VerifySDJWT(cr.Credential, signer.PublicKey()); verr != compliance.ErrKeyBindingMissing {
+		t.Fatalf("want ErrKeyBindingMissing, got %v", verr)
+	}
+	// Present and verify: result must carry the status reference.
+	pres, err := compliance.PresentWithKeyBinding(cr.Credential, []string{"carbonKgCO2ePerKWh"}, holderPriv, "n", "a", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vc, err := compliance.VerifySDJWTWithBinding(pres, signer.PublicKey(), compliance.VerifyOptions{
+		ExpectedNonce: "n", ExpectedAudience: "a", RequireKeyBinding: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !vc.KeyBound {
+		t.Error("credential should be holder-bound")
+	}
+	if vc.Status == nil || vc.Status.Index != 9 || vc.Status.URI != status.URI {
+		t.Fatalf("status reference not embedded: %+v", vc.Status)
+	}
+}
+
+// TestIssueCredentialBearerRevocable covers the no-proof status path: a bearer
+// credential can still carry a revocation reference.
+func TestIssueCredentialBearerRevocable(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	status := &compliance.StatusRef{URI: "https://status.example/list", Index: 3}
+	_, code, err := iss.CreateOfferWithOptions(
+		"eu-battery-passport-v1", "bat-bearer-rev",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+		OfferOptions{Status: status},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := iss.IssueCredential(tr.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vc, err := compliance.VerifySDJWT(cr.Credential, signer.PublicKey())
+	if err != nil {
+		t.Fatalf("bearer credential should verify: %v", err)
+	}
+	if vc.Status == nil || vc.Status.Index != 3 {
+		t.Fatalf("status reference not embedded on bearer credential: %+v", vc.Status)
+	}
+}
+
 func TestCreateOfferUnknownConfig(t *testing.T) {
 	iss, _ := setupIssuer(t)
 	_, _, err := iss.CreateOffer("unknown-config", "s", nil, nil)

@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`openid4vci` credentials can now carry a revocation status.** `IssueCredentialWithProof`
+  always issued without a `status_list` reference, so VCI-issued credentials could
+  never be revoked. New `OfferOptions{Status}` (via `CreateOfferWithOptions`) records a
+  status reference on the offer; issuance then selects the right credential shape —
+  holder-bound + revocable when proof-of-possession is present, bearer + revocable
+  otherwise — connecting the compliance bound/status methods to the VCI layer.
+  `CreateOffer`/`CreateOfferWithTxCode` are unchanged delegators. Tests cover the
+  proof-bound+revocable and bearer+revocable paths.
 - **`compliance.IssueSDJWTBoundStatus` / `IssueSDJWTVCBoundStatus` — holder-bound
   AND revocable in one credential.** The private issuer already supported embedding
   both a `cnf` (holder key binding) and a `status_list` reference, but no public

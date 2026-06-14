@@ -73,10 +73,11 @@ type preAuthEntry struct {
 	expiresAt      time.Time
 	accessToken    string // 一度交換されると埋まる
 	tokenExpiresAt time.Time
-	consumed       bool   // credentialエンドポイント使用済み
-	cNonce         string // Proof-of-Possession nonce (token交換時に発行)
-	txCode         string // 取引コード (PIN)。空なら不要。設定時は ExchangeCode で必須照合。
-	txCodeFails    int    // tx_code 失敗回数 (ブルートフォース防御)
+	consumed       bool                  // credentialエンドポイント使用済み
+	cNonce         string                // Proof-of-Possession nonce (token交換時に発行)
+	txCode         string                // 取引コード (PIN)。空なら不要。設定時は ExchangeCode で必須照合。
+	txCodeFails    int                   // tx_code 失敗回数 (ブルートフォース防御)
+	status         *compliance.StatusRef // 失効参照 (任意)。設定時は発行クレデンシャルに埋込。
 }
 
 // ============================================================================
@@ -164,9 +165,22 @@ type TxCodeSpec struct {
 	Description string // human-readable hint shown by the wallet
 }
 
+// OfferOptions carries the optional knobs for a credential offer. The zero value
+// reproduces CreateOffer (no transaction code, no revocation status).
+type OfferOptions struct {
+	// TxCode — transaction code (PIN) value; empty disables tx_code binding.
+	TxCode string
+	// TxCodeSpec — optional tx_code metadata advertised to the wallet.
+	TxCodeSpec *TxCodeSpec
+	// Status — optional revocation reference embedded in the issued credential so the
+	// verifier can later check status (draft-ietf-oauth-status-list). The issuer owns
+	// status-index allocation; this records which (URI, index) the credential occupies.
+	Status *compliance.StatusRef
+}
+
 // CreateOffer creates a pre-authorized credential offer with no transaction code.
 func (iss *Issuer) CreateOffer(configID, subject string, sdClaims, clearClaims map[string]any) (string, string, error) {
-	return iss.CreateOfferWithTxCode(configID, subject, sdClaims, clearClaims, "", nil)
+	return iss.CreateOfferWithOptions(configID, subject, sdClaims, clearClaims, OfferOptions{})
 }
 
 // CreateOfferWithTxCode creates a pre-authorized offer bound to a transaction code
@@ -178,6 +192,14 @@ func (iss *Issuer) CreateOffer(configID, subject string, sdClaims, clearClaims m
 // metadata describing how the wallet should collect it. An empty txCode behaves like
 // CreateOffer (no tx_code).
 func (iss *Issuer) CreateOfferWithTxCode(configID, subject string, sdClaims, clearClaims map[string]any, txCode string, spec *TxCodeSpec) (string, string, error) {
+	return iss.CreateOfferWithOptions(configID, subject, sdClaims, clearClaims, OfferOptions{TxCode: txCode, TxCodeSpec: spec})
+}
+
+// CreateOfferWithOptions creates a pre-authorized offer with full control over the
+// transaction code and revocation status. When opts.Status is set, the credential
+// issued for this offer carries the status_list reference, so a VCI-issued credential
+// can be revoked (and, with proof-of-possession, be holder-bound and revocable at once).
+func (iss *Issuer) CreateOfferWithOptions(configID, subject string, sdClaims, clearClaims map[string]any, opts OfferOptions) (string, string, error) {
 	iss.mu.Lock()
 	cfg, ok := iss.configs[configID]
 	iss.mu.Unlock()
@@ -200,24 +222,25 @@ func (iss *Issuer) CreateOfferWithTxCode(configID, subject string, sdClaims, cle
 		sdClaims:    sdClaims,
 		clearClaims: clearClaims,
 		expiresAt:   time.Now().Add(iss.preAuthTTL),
-		txCode:      txCode,
+		txCode:      opts.TxCode,
+		status:      opts.Status,
 	}
 	iss.mu.Unlock()
 	preAuthGrant := map[string]any{
 		"pre-authorized_code": code,
 	}
-	if txCode != "" {
+	if opts.TxCode != "" {
 		// Advertise that a tx_code is required (metadata only — never the value).
 		tc := map[string]any{}
-		if spec != nil {
-			if spec.InputMode != "" {
-				tc["input_mode"] = spec.InputMode
+		if opts.TxCodeSpec != nil {
+			if opts.TxCodeSpec.InputMode != "" {
+				tc["input_mode"] = opts.TxCodeSpec.InputMode
 			}
-			if spec.Length > 0 {
-				tc["length"] = spec.Length
+			if opts.TxCodeSpec.Length > 0 {
+				tc["length"] = opts.TxCodeSpec.Length
 			}
-			if spec.Description != "" {
-				tc["description"] = spec.Description
+			if opts.TxCodeSpec.Description != "" {
+				tc["description"] = opts.TxCodeSpec.Description
 			}
 		}
 		preAuthGrant["tx_code"] = tc
@@ -350,6 +373,7 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	entry.consumed = true
 	cNonce := entry.cNonce
 	subject, sdClaims, clearClaims := entry.subject, entry.sdClaims, entry.clearClaims
+	status := entry.status
 	validForDays := cfg.ValidForDays
 	iss.mu.Unlock()
 
@@ -386,11 +410,19 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	}
 
 	validFor := time.Duration(validForDays) * 24 * time.Hour
+	// Issue with whichever combination the offer + proof selected: holder-bound (cnf)
+	// when proof-of-possession was provided, and/or revocable (status_list) when the
+	// offer set a status reference.
 	var sdjwt string
 	var err error
-	if holderKey != nil {
+	switch {
+	case holderKey != nil && status != nil:
+		sdjwt, _, err = iss.signer.IssueSDJWTBoundStatus(subject, sdClaims, clearClaims, holderKey, status, validFor)
+	case holderKey != nil:
 		sdjwt, _, err = iss.signer.IssueSDJWTBound(subject, sdClaims, clearClaims, holderKey, validFor)
-	} else {
+	case status != nil:
+		sdjwt, _, err = iss.signer.IssueSDJWTStatus(subject, sdClaims, clearClaims, status, validFor)
+	default:
 		sdjwt, _, err = iss.signer.IssueSDJWT(subject, sdClaims, clearClaims, validFor)
 	}
 	if err != nil {
