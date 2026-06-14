@@ -140,6 +140,15 @@ go test -bench=. -benchmem ./...
 - [EU Regulation 2024/1781 ESPR](https://eur-lex.europa.eu/eli/reg/2024/1781)
 - [EU Regulation 2023/1542 Battery](https://eur-lex.europa.eu/eli/reg/2023/1542)
 
+## Security model
+
+The credential lifecycle is secure-by-default: OpenID4VP requires holder key
+binding (KB-JWT), DCQL queries (incl. `credential_sets`) are enforced, revocation
+is checkable in-flow, mdoc presentations require ISO 18013-5 device authentication,
+and OpenID4VCI offers can be PIN-bound (`tx_code`) with brute-force limits. See
+[SECURITY.md](SECURITY.md#credential-security-model) for the knobs and how to use
+them.
+
 ## License
 
 This reference implementation is provided as-is. The exact license terms are
