@@ -611,7 +611,10 @@ func (iss *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 	tr, err := iss.ExchangeCodeWithTxCode(code, r.Form.Get("tx_code"))
 	if err != nil {
-		writeVCIError(w, http.StatusBadRequest, "invalid_grant", err.Error())
+		// Do not reveal whether the code or the tx_code (PIN) was wrong, or whether the
+		// code was already consumed: distinguishing these is an oracle that helps an
+		// attacker brute-force the PIN or confirm a stolen code (CWE-209).
+		writeVCIError(w, http.StatusBadRequest, "invalid_grant", "pre-authorized_code or tx_code invalid")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

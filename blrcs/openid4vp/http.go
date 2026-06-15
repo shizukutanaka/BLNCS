@@ -100,7 +100,13 @@ func (v *Verifier) CallbackHandler(onSuccess func(*VerifiedPresentation)) http.H
 		}
 		vp, err := v.ProcessResponse(resp)
 		if err != nil {
-			writeCallbackError(w, err.Error())
+			// Do not leak which verification step failed (issuer unknown / signature
+			// mismatch / revoked / claim missing) — that is an oracle for an attacker
+			// probing the endpoint (CWE-209). Surface the detail server-side only.
+			if v.OnVerifyError != nil {
+				v.OnVerifyError(err)
+			}
+			writeCallbackError(w, "presentation verification failed")
 			return
 		}
 		if onSuccess != nil {

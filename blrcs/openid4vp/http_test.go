@@ -160,6 +160,9 @@ func TestCallbackHandlerJSONFallback(t *testing.T) {
 
 func TestCallbackHandlerInvalidClaim(t *testing.T) {
 	ver, iss := setupFlow(t)
+	// The detailed error must reach the server-side hook, never the client.
+	var serverErr error
+	ver.OnVerifyError = func(e error) { serverErr = e }
 	ts := httptest.NewServer(ver.CallbackHandler(nil))
 	defer ts.Close()
 
@@ -185,8 +188,16 @@ func TestCallbackHandlerInvalidClaim(t *testing.T) {
 	if out["status"] != "failure" {
 		t.Errorf("status: %s", out["status"])
 	}
-	if !strings.Contains(out["error"], "missing") {
-		t.Errorf("error hint: %s", out["error"])
+	// CWE-209: the client response must NOT reveal which check failed (no claim name).
+	if strings.Contains(out["error"], "missing") || strings.Contains(out["error"], "claim") {
+		t.Errorf("client error leaks internal detail: %s", out["error"])
+	}
+	if out["error"] != "presentation verification failed" {
+		t.Errorf("expected generic client error, got: %s", out["error"])
+	}
+	// The detail is preserved server-side for logging/audit.
+	if serverErr == nil || !strings.Contains(serverErr.Error(), "missing") {
+		t.Errorf("OnVerifyError should receive the detailed error, got: %v", serverErr)
 	}
 }
 

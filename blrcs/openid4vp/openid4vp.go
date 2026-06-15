@@ -202,6 +202,12 @@ type Verifier struct {
 	// compliance.CheckRevokedToken を status issuer 鍵付きで包む。nil の場合は確認せず、
 	// VerifiedPresentation.Status を介して relying party が自分で確認できる。
 	RevocationChecker func(status *compliance.StatusRef) (revoked bool, err error)
+
+	// OnVerifyError — 任意。設定すると CallbackHandler は ProcessResponse の詳細エラーを
+	// これに渡す (サーバ側ログ/監査用)。クライアントには常に一般化したメッセージのみ返す:
+	// どの検証段階で失敗したか (issuer 不明 / 署名不一致 / 失効 / claim 欠落 等) を
+	// 攻撃者に対する oracle として漏らさないため (CWE-209)。
+	OnVerifyError func(error)
 }
 
 // NewVerifier — Apple式の1行構築。secure-by-default で RequireKeyBinding=true。

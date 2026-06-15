@@ -83,6 +83,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   redeems it. Test covers the limit and post-burn rejection.
 
 ### Fixed
+- **Information disclosure at HTTP trust boundaries (CWE-209) — `openid4vp` and
+  `openid4vci` handlers.**
+  Both HTTP endpoints returned verbatim internal error messages to the client,
+  giving an attacker a free oracle for probing the system:
+  - `CallbackHandler` propagated `ProcessResponse`'s raw error text, so an
+    attacker presenting forged credentials could distinguish "issuer unknown" /
+    "signature mismatch" / "revoked" / "claim missing" by reading the 400
+    response body — narrowing a forgery or replay attack step by step.
+  - The VCI token endpoint propagated the `ExchangeCodeWithTxCode` error, so a
+    holder of a stolen pre-authorized code could confirm whether a guessed PIN
+    was "wrong PIN" vs "code already consumed", accelerating a brute-force.
+  
+  Fix: both handlers now return a single generic message to the client
+  (`"presentation verification failed"` / `"pre-authorized_code or tx_code
+  invalid"`). Server-side detail is preserved via the new optional
+  `Verifier.OnVerifyError func(error)` hook so operators can log/audit without
+  leaking to the wire. Tests assert the generic string reaches the client AND
+  the full error reaches the hook.
+
 - **`compliance.Verify` accepted future-dated (not-yet-valid) credentials.** The core
   W3C VC verify enforced `validUntil` (expiry) but never checked `validFrom`, so a
   credential whose validity window had not started verified fine — asymmetric with
