@@ -37,6 +37,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`webhook` SSRF guard was bypassable via DNS rebinding + missed the CGNAT range.**
+  `validateOutboundURL` resolved DNS and checked the result, but the HTTP transport
+  re-resolved at connection time, so a low-TTL DNS record could pass validation and
+  then rebind to a private/loopback or `169.254.169.254` cloud-metadata address when
+  the client actually dialed (a TOCTOU; the check and the connection used independent
+  resolutions). Delivery now enforces the policy at *dial* time via a guarded
+  `DialContext` that resolves once and connects only to the validated IP, so the
+  address the policy approved is the address dialed. Also added the RFC 6598
+  carrier-grade-NAT range `100.64.0.0/10` (reachable inside cloud networks but not
+  flagged by `net.IP.IsPrivate`) to the blocklist, refactored into a shared
+  `isBlockedIP` used by both the URL check and the dialer. Tests: `isBlockedIP` covers
+  loopback/RFC1918/link-local/CGNAT/IPv4-mapped/IPv6-ULA and admits public IPs; the
+  dialer rejects loopback and metadata literals and steps aside when
+  `AllowPrivateTargets` is set.
+
 - **`openid4vci` issuer leaked memory without bound — abandoned offers/tokens were
   never evicted (resource exhaustion, Axis 10).** The `preAuths` and `tokens` maps
   only shrank on the success/burn paths: an offer created but never redeemed, or an

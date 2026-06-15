@@ -343,6 +343,54 @@ func TestSSRFGuardBlocksLoopback(t *testing.T) {
 	}
 }
 
+// TestIsBlockedIP pins the non-public ranges the SSRF guard must reject,
+// including the RFC 6598 CGNAT range that net.IP.IsPrivate misses.
+func TestIsBlockedIP(t *testing.T) {
+	blocked := []string{
+		"127.0.0.1",        // loopback
+		"10.1.2.3",         // RFC 1918
+		"192.168.0.1",      // RFC 1918
+		"172.16.5.5",       // RFC 1918
+		"169.254.169.254",  // link-local (cloud metadata)
+		"0.0.0.0",          // unspecified
+		"100.64.0.1",       // RFC 6598 CGNAT (NOT caught by IsPrivate)
+		"100.127.255.254",  // RFC 6598 upper edge
+		"::1",              // IPv6 loopback
+		"fc00::1",          // IPv6 unique-local
+		"::ffff:127.0.0.1", // IPv4-mapped loopback
+	}
+	for _, s := range blocked {
+		if !isBlockedIP(net.ParseIP(s)) {
+			t.Errorf("%s should be blocked", s)
+		}
+	}
+	allowed := []string{"8.8.8.8", "1.1.1.1", "203.0.113.10", "2606:4700:4700::1111"}
+	for _, s := range allowed {
+		if isBlockedIP(net.ParseIP(s)) {
+			t.Errorf("%s should be allowed (public)", s)
+		}
+	}
+}
+
+// TestSafeDialContextBlocksPrivateLiteral verifies the dial-time guard rejects a
+// connection to a private/loopback address — the enforcement point that defeats
+// DNS rebinding (the URL check and the dial now agree on the same IP).
+func TestSafeDialContextBlocksPrivateLiteral(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	if _, err := bus.safeDialContext(context.Background(), "tcp", "127.0.0.1:9"); !errors.Is(err, ErrBlockedTarget) {
+		t.Fatalf("dial to loopback: want ErrBlockedTarget, got %v", err)
+	}
+	if _, err := bus.safeDialContext(context.Background(), "tcp", "169.254.169.254:80"); !errors.Is(err, ErrBlockedTarget) {
+		t.Fatalf("dial to metadata IP: want ErrBlockedTarget, got %v", err)
+	}
+	// With private targets allowed, the guard steps aside (will fail to connect,
+	// but NOT with ErrBlockedTarget).
+	bus.AllowPrivateTargets = true
+	if _, err := bus.safeDialContext(context.Background(), "tcp", "127.0.0.1:9"); errors.Is(err, ErrBlockedTarget) {
+		t.Fatal("AllowPrivateTargets=true must not block the dial")
+	}
+}
+
 func TestRandomEventID(t *testing.T) {
 	id := randomEventID()
 	// UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx

@@ -104,12 +104,75 @@ func NewBus(tel *telemetry.Telemetry) *Bus {
 			return b.validateOutboundURL(req.URL)
 		},
 	}
+	// Enforce the SSRF policy at *dial* time, not only at URL-validation time.
+	// validateOutboundURL resolves DNS once; the transport would otherwise resolve
+	// again when connecting, so a low-TTL record could pass validation and then
+	// rebind to a private/metadata address (DNS-rebinding TOCTOU). The guarded
+	// dialer resolves and connects to the *same* validated IP, closing that gap.
+	tr, _ := http.DefaultTransport.(*http.Transport)
+	if tr != nil {
+		tr = tr.Clone()
+	} else {
+		tr = &http.Transport{}
+	}
+	tr.DialContext = b.safeDialContext
+	b.HTTP.Transport = tr
 	return b
 }
 
 // ErrBlockedTarget is returned when a subscriber URL resolves to a disallowed
 // (private/loopback/link-local) address or uses a non-http(s) scheme.
 var ErrBlockedTarget = errors.New("webhook: delivery target blocked (SSRF guard)")
+
+// isBlockedIP reports whether an address is one delivery must never reach: any
+// non-public range. Covers loopback, RFC 1918 private, link-local (incl. the
+// 169.254.169.254 cloud-metadata endpoint), the unspecified address, and the
+// RFC 6598 carrier-grade-NAT / shared range 100.64.0.0/10 (not flagged by
+// net.IP.IsPrivate but routinely reachable inside cloud networks).
+func isBlockedIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 100 && ip4[1]&0xc0 == 64 {
+		return true // 100.64.0.0/10 (RFC 6598)
+	}
+	return false
+}
+
+// safeDialContext resolves the host once and connects only to a validated public
+// IP, so the address the policy checked is the address actually dialed (defeats
+// DNS rebinding). When AllowPrivateTargets is set it dials normally.
+func (b *Bus) safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	if b.AllowPrivateTargets {
+		return d.DialContext(ctx, network, addr)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBlockedTarget, err)
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return nil, fmt.Errorf("%w: resolve %s: %v", ErrBlockedTarget, host, err)
+	}
+	var lastErr error
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			lastErr = fmt.Errorf("%w: %s resolves to non-public %s", ErrBlockedTarget, host, ip)
+			continue
+		}
+		conn, derr := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if derr == nil {
+			return conn, nil
+		}
+		lastErr = derr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("%w: %s has no allowed address", ErrBlockedTarget, host)
+	}
+	return nil, lastErr
+}
 
 // validateOutboundURL enforces the SSRF policy for a delivery target.
 func (b *Bus) validateOutboundURL(u *url.URL) error {
@@ -128,8 +191,7 @@ func (b *Bus) validateOutboundURL(u *url.URL) error {
 		return fmt.Errorf("%w: resolve %s: %v", ErrBlockedTarget, host, err)
 	}
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		if isBlockedIP(ip) {
 			return fmt.Errorf("%w: %s resolves to non-public %s", ErrBlockedTarget, host, ip)
 		}
 	}
