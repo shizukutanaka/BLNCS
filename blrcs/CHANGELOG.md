@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`MockWallet` now exercises the JAR defense end-to-end (`VerifierKey`).** The
+  signed-request capability added above was unreachable from the bundled wallet —
+  `MockWallet.Present` still read `nonce`/`client_id` from the *unsigned* query
+  params, so the secure path had no end-to-end exercise and a relay tamper of those
+  params would still have fooled it. New `MockWallet.VerifierKey ed25519.PublicKey`:
+  when set, `Present` requires a signed request object, verifies it with
+  `VerifyRequestObject`, and binds the KB-JWT to the **authenticated** nonce/client_id
+  only. Unset → legacy unsigned behavior (back-compat). Tests prove the contrast:
+  `TestJARE2E_RelayNonceTamperDefeated` (JAR wallet ignores a substituted nonce →
+  verifier still accepts) vs `TestJARE2E_LegacyWalletFooledByNonceTamper` (legacy
+  wallet binds to the tampered nonce → verifier rejects) — the exact exposure JAR
+  closes — plus happy-path and "refuses an unsigned request" cases.
 - **OpenID4VP signed Authorization Requests (RFC 9101 JAR, by value) — closes the
   unauthenticated-request relay gap (Axis 8: authentication scope).** Auditing
   through an authentication-scope lens — "what data does the verifier/wallet act

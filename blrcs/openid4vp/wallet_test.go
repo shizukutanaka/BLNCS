@@ -3,6 +3,7 @@ package openid4vp
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -193,5 +194,148 @@ func TestWalletPresentBadPDJSON(t *testing.T) {
 	_, err := wallet.Present("openid4vp://authorize?state=abc&presentation_definition=%7Bnot+valid+json")
 	if err == nil {
 		t.Fatal("invalid PD JSON should fail")
+	}
+}
+
+// ============================================================================
+// JAR end-to-end: a JAR-aware wallet (VerifierKey set) trusts ONLY the signed
+// request object, so a relay attacker who tampers the unsigned query params
+// cannot redirect or rebind the presentation.
+// ============================================================================
+
+// jarE2ESetup builds a JAR-signing verifier, a JAR-aware wallet holding a
+// matching holder-bound credential, and returns them plus a fresh request URL.
+func jarE2ESetup(t *testing.T) (*Verifier, *MockWallet, string) {
+	t.Helper()
+	issuer, _ := compliance.NewIssuer("did:web:factory.example")
+
+	signPub, signPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := NewVerifier(
+		"https://verify.blrcs.example",
+		"https://verify.blrcs.example/cb",
+		nil,
+	)
+	verifier.RequestSigningKey = signPriv
+
+	holderPub, holderPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet := NewMockWallet("did:web:alice.holder")
+	wallet.HolderKey = holderPriv
+	wallet.VerifierKey = signPub // trust only the signed request object
+
+	sdjwt, _, err := issuer.IssueSDJWTBound(
+		"battery-EV-001",
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 75.0},
+		map[string]any{"productId": "BAT-2026-001"},
+		holderPub,
+		365*24*time.Hour,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet.Store(StoredCredential{
+		ID:        "battery-cred-1",
+		IssuerDID: issuer.ID,
+		IssuerPub: issuer.PublicKey(),
+		SDJWT:     sdjwt,
+	})
+
+	def := PresentationDefinition{
+		ID:             "eu-battery-compliance",
+		RequiredClaims: []string{"batteryCategory", "capacityKWh"},
+		AcceptableIssuers: map[string][]byte{
+			issuer.ID: issuer.PublicKey(),
+		},
+	}
+	reqURL, _, err := verifier.CreateRequest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verifier, wallet, reqURL
+}
+
+// TestJARE2E_HappyPath: signed request → JAR-aware wallet → verifier succeeds.
+func TestJARE2E_HappyPath(t *testing.T) {
+	verifier, wallet, reqURL := jarE2ESetup(t)
+	resp, err := wallet.Present(reqURL)
+	if err != nil {
+		t.Fatalf("wallet present: %v", err)
+	}
+	vp, err := verifier.ProcessResponse(resp)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if vp.Claims["batteryCategory"] != "ev" {
+		t.Errorf("category: %v", vp.Claims["batteryCategory"])
+	}
+}
+
+// TestJARE2E_RelayNonceTamperDefeated: the strongest demonstration of the JAR
+// defense. An attacker rewrites the unsigned `nonce` (and `response_uri`) in the
+// query. A legacy wallet would bind its KB-JWT to the wrong nonce and the
+// verifier would reject it; the JAR-aware wallet binds to the AUTHENTICATED nonce
+// from the signed object, so the genuine verifier still accepts the response.
+func TestJARE2E_RelayNonceTamperDefeated(t *testing.T) {
+	verifier, wallet, reqURL := jarE2ESetup(t)
+
+	u, _ := url.Parse(reqURL)
+	q := u.Query()
+	q.Set("nonce", "attacker-substituted-nonce")
+	q.Set("response_uri", "https://attacker.example/steal")
+	u.RawQuery = q.Encode()
+	tampered := u.String()
+
+	resp, err := wallet.Present(tampered)
+	if err != nil {
+		t.Fatalf("JAR wallet should ignore tampered params and present: %v", err)
+	}
+	// The genuine verifier accepts: the KB-JWT was bound to the signed nonce.
+	if _, err := verifier.ProcessResponse(resp); err != nil {
+		t.Fatalf("verify after relay tamper: want success (signed nonce used), got %v", err)
+	}
+}
+
+// TestJARE2E_LegacyWalletFooledByNonceTamper documents the contrast: a wallet
+// WITHOUT VerifierKey trusts the tampered nonce, so the genuine verifier rejects
+// the resulting presentation. This is exactly the exposure JAR closes.
+func TestJARE2E_LegacyWalletFooledByNonceTamper(t *testing.T) {
+	verifier, wallet, reqURL := jarE2ESetup(t)
+	wallet.VerifierKey = nil // legacy: trust unsigned query params
+
+	u, _ := url.Parse(reqURL)
+	q := u.Query()
+	q.Set("nonce", "attacker-substituted-nonce")
+	u.RawQuery = q.Encode()
+
+	resp, err := wallet.Present(u.String())
+	if err != nil {
+		t.Fatalf("legacy wallet present: %v", err)
+	}
+	// Bound to the wrong nonce → genuine verifier rejects.
+	if _, err := verifier.ProcessResponse(resp); err == nil {
+		t.Fatal("legacy wallet bound to tampered nonce should be rejected by verifier")
+	}
+}
+
+// TestJARE2E_RequiresSignedRequest: a JAR-aware wallet given an UNSIGNED request
+// (no `request` param) refuses rather than silently falling back to query params.
+func TestJARE2E_RequiresSignedRequest(t *testing.T) {
+	_, wallet, _ := jarE2ESetup(t)
+	// Build an unsigned verifier's request and hand it to the JAR-aware wallet.
+	plain := NewVerifier("https://verify.blrcs.example", "https://verify.blrcs.example/cb", nil)
+	def := PresentationDefinition{
+		ID: "x", RequiredClaims: []string{"batteryCategory"},
+	}
+	reqURL, _, err := plain.CreateRequest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wallet.Present(reqURL); err == nil {
+		t.Fatal("JAR-aware wallet must refuse an unsigned request")
 	}
 }

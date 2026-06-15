@@ -81,6 +81,13 @@ type MockWallet struct {
 	// リクエストの nonce / client_id に提示をバインドする (anti-replay)。
 	// nil の場合は従来どおり KB 無しの提示 (cnf 無し credential 用)。
 	HolderKey ed25519.PrivateKey
+
+	// VerifierKey — 設定時、Present は RFC 9101 JAR の署名付き request object を
+	// 必須とし、VerifyRequestObject で検証したうえで nonce / client_id /
+	// presentation_definition を「署名済みの値のみ」から取る。これにより、
+	// 署名なし query を改竄した relay (response_uri 差し替え等) を検知・無効化する。
+	// nil の場合は従来どおり署名なし query を信頼する (back-compat)。
+	VerifierKey ed25519.PublicKey
 }
 
 // StoredCredential — wallet 内保管形式
@@ -115,23 +122,46 @@ func (w *MockWallet) Store(c StoredCredential) {
 //
 // 実wallet UIではユーザが確認ステップを挟むが、テストでは自動化
 func (w *MockWallet) Present(reqURL string) (*AuthorizationResponse, error) {
-	// reqURL parse
-	u, err := url.Parse(reqURL)
-	if err != nil {
-		return nil, fmt.Errorf("wallet: parse request URL: %w", err)
-	}
-	q := u.Query()
-	state := q.Get("state")
-	if state == "" {
-		return nil, errors.New("wallet: state missing in request")
-	}
-	pdRaw := q.Get("presentation_definition")
-	if pdRaw == "" {
-		return nil, errors.New("wallet: presentation_definition missing")
-	}
-	var def PresentationDefinition
-	if err := json.Unmarshal([]byte(pdRaw), &def); err != nil {
-		return nil, fmt.Errorf("wallet: pd parse: %w", err)
+	var (
+		state, nonce, clientID string
+		def                    PresentationDefinition
+	)
+	if w.VerifierKey != nil {
+		// Secure path (RFC 9101 JAR): trust ONLY the signed request object.
+		// Tampered unsigned query params (e.g. a relayed response_uri) are ignored
+		// because every value the wallet acts on comes from the verified JWT.
+		authReq, err := VerifyRequestObject(reqURL, w.VerifierKey)
+		if err != nil {
+			return nil, fmt.Errorf("wallet: request object: %w", err)
+		}
+		state, nonce, clientID = authReq.State, authReq.Nonce, authReq.ClientID
+		def = authReq.PresentationDefinition
+		if state == "" {
+			return nil, errors.New("wallet: state missing in signed request")
+		}
+		if len(def.RequiredClaims) == 0 {
+			return nil, errors.New("wallet: signed request has no presentation_definition")
+		}
+	} else {
+		// Legacy unsigned path — trusts query parameters as-is (back-compat).
+		u, err := url.Parse(reqURL)
+		if err != nil {
+			return nil, fmt.Errorf("wallet: parse request URL: %w", err)
+		}
+		q := u.Query()
+		state = q.Get("state")
+		if state == "" {
+			return nil, errors.New("wallet: state missing in request")
+		}
+		nonce = q.Get("nonce")
+		clientID = q.Get("client_id")
+		pdRaw := q.Get("presentation_definition")
+		if pdRaw == "" {
+			return nil, errors.New("wallet: presentation_definition missing")
+		}
+		if err := json.Unmarshal([]byte(pdRaw), &def); err != nil {
+			return nil, fmt.Errorf("wallet: pd parse: %w", err)
+		}
 	}
 	// 適合 credential 検索 — AcceptableDIDs (wire) を使う
 	acceptSet := make(map[string]bool, len(def.AcceptableDIDs))
@@ -150,10 +180,11 @@ func (w *MockWallet) Present(reqURL string) (*AuthorizationResponse, error) {
 	}
 	// 選択開示 — holder key があれば KB-JWT で nonce/aud にバインド。
 	var presented string
+	var err error
 	if w.HolderKey != nil {
 		presented, err = compliance.PresentWithKeyBinding(
 			matched.SDJWT, def.RequiredClaims, w.HolderKey,
-			q.Get("nonce"), q.Get("client_id"), time.Time{})
+			nonce, clientID, time.Time{})
 	} else {
 		presented, err = compliance.Present(matched.SDJWT, def.RequiredClaims)
 	}
