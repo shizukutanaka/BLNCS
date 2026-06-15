@@ -105,6 +105,13 @@ type Issuer struct {
 	// 短い PIN へのブルートフォースを防ぐ (Draft 15 §6.1 推奨)。0 は既定 (5) を使う。
 	MaxTxCodeAttempts int
 
+	// OnTxCodeLockout — 任意。tx_code (PIN) の失敗が上限に達し pre-authorized code を
+	// 無効化した (burn した) ときに呼ばれる、ブルートフォース検知用の監査フック。
+	// 引数は攻撃対象の offer を識別する subject / configID のみで、秘密 (code・PIN・
+	// tx_code) は決して渡さない。eIDAS/DPP の監査証跡要件向け。ロック解放後に呼ばれる
+	// ため、フック内から Issuer を再呼び出ししても安全。nil なら何もしない (既定)。
+	OnTxCodeLockout func(subject, configID string)
+
 	mu       sync.Mutex
 	preAuths map[string]*preAuthEntry // code → entry
 	tokens   map[string]*preAuthEntry // access_token → same entry
@@ -316,6 +323,16 @@ func (iss *Issuer) ExchangeCode(code string) (*TokenResponse, error) {
 // ExchangeCodeWithTxCode redeems a pre-authorized code, enforcing the transaction
 // code (PIN) when the offer was created with one. The comparison is constant-time.
 func (iss *Issuer) ExchangeCodeWithTxCode(code, txCode string) (*TokenResponse, error) {
+	// Audit hook for brute-force lockout. Captured under the lock, fired after it
+	// is released (LIFO defers: unlock runs before this), so the callback can
+	// safely re-enter the Issuer and never holds iss.mu.
+	var lockedOut bool
+	var loSubject, loConfig string
+	defer func() {
+		if lockedOut && iss.OnTxCodeLockout != nil {
+			iss.OnTxCodeLockout(loSubject, loConfig)
+		}
+	}()
 	iss.mu.Lock()
 	defer iss.mu.Unlock()
 	entry, ok := iss.preAuths[code]
@@ -339,6 +356,8 @@ func (iss *Issuer) ExchangeCodeWithTxCode(code, txCode string) (*TokenResponse, 
 			}
 			if entry.txCodeFails >= limit {
 				delete(iss.preAuths, code) // burn the code; further attempts → ErrBadPreAuthCode
+				lockedOut = true           // signal the audit hook (fired after unlock)
+				loSubject, loConfig = entry.subject, entry.configID
 			}
 			return nil, ErrBadTxCode
 		}

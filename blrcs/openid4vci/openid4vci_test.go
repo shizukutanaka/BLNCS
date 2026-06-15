@@ -170,6 +170,58 @@ func TestExchangeCodeTxCodeBruteForceLimit(t *testing.T) {
 	}
 }
 
+// TestTxCodeLockoutAuditHook pins the forensic-observability fix (Axis 12): the
+// brute-force lockout fires OnTxCodeLockout exactly once, with the offer's
+// subject/configID and never the secret code or PIN.
+func TestTxCodeLockoutAuditHook(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.MaxTxCodeAttempts = 2
+	var fires int
+	var gotSubject, gotConfig string
+	iss.OnTxCodeLockout = func(subject, configID string) {
+		fires++
+		gotSubject, gotConfig = subject, configID
+	}
+	const pin = "4242"
+	_, code, err := iss.CreateOfferWithTxCode(
+		"eu-battery-passport-v1", "bat-777",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		nil, pin, &TxCodeSpec{InputMode: "numeric", Length: 4},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First wrong attempt: under the limit, no lockout.
+	if _, err := iss.ExchangeCodeWithTxCode(code, "0000"); err != ErrBadTxCode {
+		t.Fatalf("attempt 1: want ErrBadTxCode, got %v", err)
+	}
+	if fires != 0 {
+		t.Fatalf("hook must not fire before the limit, fired %d", fires)
+	}
+	// Second wrong attempt reaches the limit → burn → hook fires once.
+	if _, err := iss.ExchangeCodeWithTxCode(code, "0000"); err != ErrBadTxCode {
+		t.Fatalf("attempt 2: want ErrBadTxCode, got %v", err)
+	}
+	if fires != 1 {
+		t.Fatalf("hook should fire exactly once on lockout, fired %d", fires)
+	}
+	if gotSubject != "bat-777" {
+		t.Errorf("hook subject: want bat-777, got %q", gotSubject)
+	}
+	if gotConfig != "eu-battery-passport-v1" {
+		t.Errorf("hook configID: want eu-battery-passport-v1, got %q", gotConfig)
+	}
+	// A no-tx_code offer must never trigger the hook.
+	_, code2, _ := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	if _, err := iss.ExchangeCode(code2); err != nil {
+		t.Fatal(err)
+	}
+	if fires != 1 {
+		t.Errorf("no-tx_code flow must not fire the lockout hook, total fires %d", fires)
+	}
+}
+
 // TestIssueCredentialBoundAndRevocable confirms an offer with a status reference and
 // proof-of-possession yields a credential that is both holder-bound (cnf) AND
 // revocable (status_list) — so VCI-issued credentials can be revoked.

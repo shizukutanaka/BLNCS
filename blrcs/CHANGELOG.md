@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`openid4vci` tx_code brute-force lockout is now auditable
+  (`Issuer.OnTxCodeLockout`) — forensic observability (Axis 12).** When PIN
+  attempts hit `MaxTxCodeAttempts` the pre-authorized code is burned, but this —
+  the single most attack-indicative event in the issuance flow — happened
+  silently: an operator could not distinguish a user fat-fingering a PIN from an
+  attacker exhausting all attempts. For a regulated eIDAS/DPP issuer that audit
+  signal is a requirement. New optional `Issuer.OnTxCodeLockout func(subject,
+  configID string)` fires once when a code is burned by brute-force, passing only
+  the offer's `subject`/`configID` — never the secret code, PIN, or tx_code. It is
+  invoked *after* the issuer lock is released (LIFO defer ordering), so the
+  callback may safely re-enter the `Issuer` and never holds `iss.mu`. Default nil →
+  no behavior change. Tests: hook fires exactly once at the limit (not before),
+  carries the right identifiers, and a no-tx_code flow never triggers it.
 - **SD-JWT decoy digests (`Issuer.DecoyDigests`) — hide the true claim count
   (privacy / unlinkability, Axis 11).** Auditing through a privacy lens — "beyond
   what it discloses, what does a credential's *structure* leak?" — found that the
