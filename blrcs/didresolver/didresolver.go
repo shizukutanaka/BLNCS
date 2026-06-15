@@ -382,6 +382,38 @@ func (t *TrustAnchor) AddKey(pub ed25519.PublicKey) {
 	t.mu.Unlock()
 }
 
+// RemoveDID — DID を信頼対象から外す (鍵漏洩・ローテーション時の失効)。
+//
+// 信頼ストアが追加専用だと、漏洩・更新された issuer 鍵を永久に信頼し続けてしまう。
+// 運用上、信頼判断は取り消せる必要がある。未登録の DID に対しては何もしない。
+func (t *TrustAnchor) RemoveDID(did string) {
+	t.mu.Lock()
+	delete(t.dids, did)
+	t.mu.Unlock()
+}
+
+// RemoveKey — 公開鍵を信頼対象から外す (鍵漏洩・ローテーション時の失効)。
+// 未登録の鍵に対しては何もしない。
+func (t *TrustAnchor) RemoveKey(pub ed25519.PublicKey) {
+	hash := sha256.Sum256(pub)
+	t.mu.Lock()
+	delete(t.keyHashes, hex.EncodeToString(hash[:]))
+	t.mu.Unlock()
+}
+
+// Reset — すべての信頼登録 (DID・鍵) と allowAll を一括クリアする。
+//
+// allowAll が誤って有効化された場合の「非常停止」、および大規模な信頼ストア
+// 再構築時の出発点として使う。Reset 後はゼロ値の TrustAnchor と同じく
+// 何も信頼しない (secure-by-default に戻る)。
+func (t *TrustAnchor) Reset() {
+	t.mu.Lock()
+	t.dids = make(map[string]bool)
+	t.keyHashes = make(map[string]bool)
+	t.allowAll = false
+	t.mu.Unlock()
+}
+
 // AllowAll — DEV/TEST のみ。本番では絶対呼ばないこと。
 func (t *TrustAnchor) AllowAll() {
 	t.mu.Lock()

@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`didresolver.TrustAnchor` trust can now be revoked (`RemoveDID` / `RemoveKey` /
+  `Reset`) — key-lifecycle gap.** The trust store was append-only: `AddDID`/`AddKey`/
+  `AllowAll` had no inverse, so a compromised or rotated issuer key (or an accidental
+  `AllowAll`) stayed trusted forever — an operator had no way to un-trust it without
+  rebuilding the process. A trust decision that cannot be reversed is an operational
+  hazard. Added `RemoveDID(did)` and `RemoveKey(pub)` (no-ops on unregistered
+  entries) and `Reset()` (clears all DIDs, keys, and `allowAll` — an emergency stop
+  returning the anchor to secure-by-default "trust nothing"). Tests: removed DID/key
+  no longer trusted, removal is targeted (other entries survive), and `Reset` clears
+  an accidental `AllowAll`.
 - **`MockWallet` now exercises the JAR defense end-to-end (`VerifierKey`).** The
   signed-request capability added above was unreachable from the bundled wallet —
   `MockWallet.Present` still read `nonce`/`client_id` from the *unsigned* query

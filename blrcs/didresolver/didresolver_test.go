@@ -287,6 +287,59 @@ func TestAllowAllForTesting(t *testing.T) {
 	}
 }
 
+// TestTrustAnchorRemoveDID — a DID can be un-trusted (key rotation / compromise).
+func TestTrustAnchorRemoveDID(t *testing.T) {
+	ta := NewTrustAnchor()
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	ta.AddDID("did:web:issuer")
+	if !ta.IsTrusted("did:web:issuer", pub) {
+		t.Fatal("DID should be trusted after AddDID")
+	}
+	ta.RemoveDID("did:web:issuer")
+	if ta.IsTrusted("did:web:issuer", pub) {
+		t.Fatal("DID must NOT be trusted after RemoveDID (compromise/rotation)")
+	}
+	// Removing an unregistered DID is a no-op (must not panic).
+	ta.RemoveDID("did:web:never-added")
+}
+
+// TestTrustAnchorRemoveKey — a key can be un-trusted independently of its DID.
+func TestTrustAnchorRemoveKey(t *testing.T) {
+	ta := NewTrustAnchor()
+	pub1, _, _ := ed25519.GenerateKey(rand.Reader)
+	pub2, _, _ := ed25519.GenerateKey(rand.Reader)
+	ta.AddKey(pub1)
+	ta.AddKey(pub2)
+	ta.RemoveKey(pub1)
+	if ta.IsTrusted("did:web:any", pub1) {
+		t.Fatal("removed key must not be trusted")
+	}
+	if !ta.IsTrusted("did:web:any", pub2) {
+		t.Fatal("RemoveKey must only remove the named key")
+	}
+	ta.RemoveKey(pub1) // no-op on already-removed key
+}
+
+// TestTrustAnchorReset — Reset clears all trust including an accidental AllowAll,
+// returning the anchor to secure-by-default (trusts nothing).
+func TestTrustAnchorReset(t *testing.T) {
+	ta := NewTrustAnchor()
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	ta.AddDID("did:web:issuer")
+	ta.AddKey(pub)
+	ta.AllowAll() // simulate an accidental dev-mode enablement
+	if !ta.IsTrusted("did:web:anything", pub) {
+		t.Fatal("AllowAll should trust everything before Reset")
+	}
+	ta.Reset()
+	if ta.IsTrusted("did:web:issuer", pub) {
+		t.Fatal("Reset must clear DID trust")
+	}
+	if ta.IsTrusted("did:web:anything", pub) {
+		t.Fatal("Reset must clear AllowAll (emergency stop)")
+	}
+}
+
 // ============================================================================
 // ResolveAndVerify
 // ============================================================================
