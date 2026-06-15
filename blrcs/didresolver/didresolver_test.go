@@ -375,6 +375,72 @@ func TestResolveAndVerifyNotTrusted(t *testing.T) {
 	}
 }
 
+// twoKeyDIDWeb returns a resolver serving a did:web document with two Ed25519
+// verification methods (key rotation: old + new co-exist), plus both keys.
+func twoKeyDIDWeb(t *testing.T) (*Resolver, ed25519.PublicKey, ed25519.PublicKey) {
+	t.Helper()
+	pubOld, _, _ := ed25519.GenerateKey(rand.Reader)
+	pubNew, _, _ := ed25519.GenerateKey(rand.Reader)
+	doc := map[string]any{
+		"id": "did:web:example.com",
+		"verificationMethod": []map[string]any{
+			{"publicKeyJwk": map[string]any{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pubOld)}},
+			{"publicKeyJwk": map[string]any{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(pubNew)}},
+		},
+	}
+	docBytes, _ := json.Marshal(doc)
+	r := New()
+	r.HTTPFetcher = func(ctx context.Context, url string) ([]byte, error) { return docBytes, nil }
+	return r, pubOld, pubNew
+}
+
+// TestResolveAllReturnsAllKeys — a multi-key DID document yields every key, while
+// the single-key Resolve still returns just the first (back-compat).
+func TestResolveAllReturnsAllKeys(t *testing.T) {
+	r, pubOld, pubNew := twoKeyDIDWeb(t)
+	keys, err := r.ResolveAll(context.Background(), "did:web:example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("want 2 keys, got %d", len(keys))
+	}
+	if !equalKeys(keys[0], pubOld) || !equalKeys(keys[1], pubNew) {
+		t.Error("keys returned in wrong order or mismatched")
+	}
+	// Resolve (singular) keeps returning the first key only.
+	first, err := r.Resolve(context.Background(), "did:web:example.com")
+	if err != nil || !equalKeys(first, pubOld) {
+		t.Errorf("Resolve back-compat: got %v err %v", first, err)
+	}
+}
+
+// TestResolveAndVerifyAll_RotationSecondKeyTrusted — the core rotation fix: a
+// credential signed by the NEW (second-listed) key must verify, even though the
+// old key is listed first. With the single-key path this was impossible.
+func TestResolveAndVerifyAll_RotationSecondKeyTrusted(t *testing.T) {
+	r, _, pubNew := twoKeyDIDWeb(t)
+	ta := NewTrustAnchor()
+	ta.AddKey(pubNew) // operator trusts the rotated-in key
+
+	trusted, err := ResolveAndVerifyAll(context.Background(), r, ta, "did:web:example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trusted) != 1 || !equalKeys(trusted[0], pubNew) {
+		t.Fatalf("want only the trusted new key, got %d keys", len(trusted))
+	}
+}
+
+// TestResolveAndVerifyAll_NoneTrusted — if no resolved key is trusted, fail.
+func TestResolveAndVerifyAll_NoneTrusted(t *testing.T) {
+	r, _, _ := twoKeyDIDWeb(t)
+	ta := NewTrustAnchor() // trusts nothing
+	if _, err := ResolveAndVerifyAll(context.Background(), r, ta, "did:web:example.com"); !errors.Is(err, ErrNotTrusted) {
+		t.Fatalf("want ErrNotTrusted, got %v", err)
+	}
+}
+
 // ============================================================================
 // Context cancellation
 // ============================================================================

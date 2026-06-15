@@ -195,19 +195,23 @@ func (c *Composer) VerifyByDID(ctx context.Context, cred *compliance.Credential,
 	)
 	defer span.End()
 
-	pub, err := didresolver.ResolveAndVerify(ctx, c.opts.Resolver, c.opts.TrustAnchor, issuerDID)
+	// ローテーション対応: 信頼できる全鍵を解決し、いずれか1つで検証できれば成功。
+	keys, err := didresolver.ResolveAndVerifyAll(ctx, c.opts.Resolver, c.opts.TrustAnchor, issuerDID)
 	if err != nil {
 		span.RecordError(err)
 		c.tel.Counter("compose.verify.trustfail").Inc()
 		return err
 	}
-	if err := compliance.Verify(cred, pub); err != nil {
-		span.RecordError(err)
-		c.tel.Counter("compose.verify.signaturefail").Inc()
-		return err
+	var verr error
+	for _, pub := range keys {
+		if verr = compliance.Verify(cred, pub); verr == nil {
+			c.tel.Counter("compose.verify.ok").Inc()
+			return nil
+		}
 	}
-	c.tel.Counter("compose.verify.ok").Inc()
-	return nil
+	span.RecordError(verr)
+	c.tel.Counter("compose.verify.signaturefail").Inc()
+	return verr
 }
 
 // VerifySDJWTByDID — SD-JWT 版
@@ -215,11 +219,19 @@ func (c *Composer) VerifySDJWTByDID(ctx context.Context, sdjwt, issuerDID string
 	if c.opts.Resolver == nil || c.opts.TrustAnchor == nil {
 		return nil, errkit.E(errkit.OpSDJWTVerify, errkit.CodeInvalidInput, "Resolver and TrustAnchor required", nil)
 	}
-	pub, err := didresolver.ResolveAndVerify(ctx, c.opts.Resolver, c.opts.TrustAnchor, issuerDID)
+	// ローテーション対応: 信頼できる全鍵で順に検証を試みる。
+	keys, err := didresolver.ResolveAndVerifyAll(ctx, c.opts.Resolver, c.opts.TrustAnchor, issuerDID)
 	if err != nil {
 		return nil, err
 	}
-	return compliance.VerifySDJWT(sdjwt, pub)
+	var vc *compliance.VerifiedClaims
+	var verr error
+	for _, pub := range keys {
+		if vc, verr = compliance.VerifySDJWT(sdjwt, pub); verr == nil {
+			return vc, nil
+		}
+	}
+	return nil, verr
 }
 
 // ============================================================================

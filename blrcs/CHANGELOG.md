@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **DID resolution collapsed a multi-key DID document to its first key — issuer
+  key rotation was unverifiable (key-lifecycle gap).** `parseDIDDocument` returned
+  the *first* Ed25519 verification method only, and `Resolve` returned a single key.
+  A DID document legitimately lists several keys — most importantly during rotation,
+  where the old and new keys co-exist — so a credential signed by any non-first key
+  failed to verify even though its key was published and trusted. Added rotation-aware
+  resolution, fully wired through the verify path so it is actually exercised:
+  - `Resolver.ResolveAll` returns every Ed25519 key in the document (document order,
+    de-duplicated); `Resolve` now returns `ResolveAll()[0]` (back-compat). The cache
+    stores the full key set.
+  - `ResolveAndVerifyAll` returns the trust-anchored subset of resolved keys.
+  - `compose.VerifyByDID` / `VerifySDJWTByDID` now try each trusted key until one
+    verifies the signature, so a credential signed by the old key still verifies
+    while the new key is listed first.
+  - Tests: `ResolveAll` returns both keys (and `Resolve` still returns the first);
+    `ResolveAndVerifyAll` returns only trusted keys / `ErrNotTrusted` when none;
+    and a compose E2E where a credential signed by the second-listed (old) key
+    verifies after rotation.
+
 ### Added
 - **`didresolver.TrustAnchor` trust can now be revoked (`RemoveDID` / `RemoveKey` /
   `Reset`) — key-lifecycle gap.** The trust store was append-only: `AddDID`/`AddKey`/

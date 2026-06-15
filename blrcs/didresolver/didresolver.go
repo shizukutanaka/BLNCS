@@ -56,7 +56,7 @@ type Resolver struct {
 }
 
 type cacheEntry struct {
-	pub       ed25519.PublicKey
+	keys      []ed25519.PublicKey
 	expiresAt time.Time
 }
 
@@ -73,6 +73,21 @@ func New() *Resolver {
 //
 // サポート: did:web (HTTP fetch), did:key (公開鍵埋込), did:jwk (JWK 埋込)
 func (r *Resolver) Resolve(ctx context.Context, did string) (ed25519.PublicKey, error) {
+	keys, err := r.ResolveAll(ctx, did)
+	if err != nil {
+		return nil, err
+	}
+	return keys[0], nil
+}
+
+// ResolveAll — DID が公開するすべての Ed25519 鍵を解決する。
+//
+// DID document は複数の verification method を持ちうる (特に鍵ローテーション中は
+// 旧鍵と新鍵が併存する)。Resolve は先頭鍵だけを返すため、先頭以外の鍵で署名された
+// credential を検証できない。ローテーションを跨いで検証する呼び出し側は ResolveAll を
+// 使い、信頼済みの各鍵で順に署名検証を試みる。
+// did:key / did:jwk は単一鍵のため 1 要素のスライスを返す。
+func (r *Resolver) ResolveAll(ctx context.Context, did string) ([]ed25519.PublicKey, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -81,7 +96,7 @@ func (r *Resolver) Resolve(ctx context.Context, did string) (ed25519.PublicKey, 
 	r.mu.RLock()
 	if e, ok := r.cache[did]; ok && time.Now().Before(e.expiresAt) {
 		r.mu.RUnlock()
-		return e.pub, nil
+		return e.keys, nil
 	}
 	r.mu.RUnlock()
 
@@ -91,15 +106,21 @@ func (r *Resolver) Resolve(ctx context.Context, did string) (ed25519.PublicKey, 
 	}
 	method, identifier := parts[1], parts[2]
 
-	var pub ed25519.PublicKey
+	var keys []ed25519.PublicKey
 	var err error
 	switch method {
 	case "key":
-		pub, err = resolveDIDKey(identifier)
+		var pub ed25519.PublicKey
+		if pub, err = resolveDIDKey(identifier); err == nil {
+			keys = []ed25519.PublicKey{pub}
+		}
 	case "jwk":
-		pub, err = resolveDIDJWK(identifier)
+		var pub ed25519.PublicKey
+		if pub, err = resolveDIDJWK(identifier); err == nil {
+			keys = []ed25519.PublicKey{pub}
+		}
 	case "web":
-		pub, err = r.resolveDIDWeb(ctx, identifier)
+		keys, err = r.resolveDIDWebAll(ctx, identifier)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedMethod, method)
 	}
@@ -109,9 +130,9 @@ func (r *Resolver) Resolve(ctx context.Context, did string) (ed25519.PublicKey, 
 
 	// Cache
 	r.mu.Lock()
-	r.cache[did] = cacheEntry{pub: pub, expiresAt: time.Now().Add(r.CacheTTL)}
+	r.cache[did] = cacheEntry{keys: keys, expiresAt: time.Now().Add(r.CacheTTL)}
 	r.mu.Unlock()
-	return pub, nil
+	return keys, nil
 }
 
 // InvalidateCache — キャッシュ強制クリア (ローテーション後等)
@@ -169,13 +190,13 @@ func (r *Resolver) ResolveServices(ctx context.Context, did string) ([]Service, 
 //
 //	did:web:example.com         → https://example.com/.well-known/did.json
 //	did:web:example.com:user:1  → https://example.com/user/1/did.json
-func (r *Resolver) resolveDIDWeb(ctx context.Context, identifier string) (ed25519.PublicKey, error) {
+func (r *Resolver) resolveDIDWebAll(ctx context.Context, identifier string) ([]ed25519.PublicKey, error) {
 	url := didWebURL(identifier)
 	body, err := r.HTTPFetcher(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrFetchFailed, err)
 	}
-	return parseDIDDocument(body)
+	return parseDIDDocumentAll(body)
 }
 
 func didWebURL(identifier string) string {
@@ -216,27 +237,53 @@ type verificationMethod struct {
 }
 
 func parseDIDDocument(body []byte) (ed25519.PublicKey, error) {
+	keys, err := parseDIDDocumentAll(body)
+	if err != nil {
+		return nil, err
+	}
+	return keys[0], nil
+}
+
+// parseDIDDocumentAll returns every Ed25519 verification-method key in the
+// document, in document order, de-duplicated. A DID document legitimately lists
+// several keys — most importantly during key rotation, where the old and new
+// keys co-exist — so a verifier that only ever reads the first key cannot verify
+// a credential signed by any of the others. Verification-method entries that are
+// not Ed25519 (or fail to parse) are skipped, not fatal.
+func parseDIDDocumentAll(body []byte) ([]ed25519.PublicKey, error) {
 	var doc didDocument
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil, fmt.Errorf("didresolver: parse DID document: %w", err)
 	}
+	var keys []ed25519.PublicKey
+	seen := make(map[string]bool)
+	add := func(pub ed25519.PublicKey) {
+		k := string(pub)
+		if seen[k] {
+			return
+		}
+		seen[k] = true
+		keys = append(keys, pub)
+	}
 	for _, vm := range doc.VerificationMethod {
 		// Try JWK first
 		if jwk := vm.PublicKeyJwk; jwk != nil {
-			pub, err := jwkToEd25519(jwk)
-			if err == nil {
-				return pub, nil
+			if pub, err := jwkToEd25519(jwk); err == nil {
+				add(pub)
+				continue
 			}
 		}
 		// Fall back to multibase
 		if mb := vm.PublicKeyMultibase; mb != "" {
-			pub, err := multibaseToEd25519(mb)
-			if err == nil {
-				return pub, nil
+			if pub, err := multibaseToEd25519(mb); err == nil {
+				add(pub)
 			}
 		}
 	}
-	return nil, ErrNoKey
+	if len(keys) == 0 {
+		return nil, ErrNoKey
+	}
+	return keys, nil
 }
 
 func jwkToEd25519(jwk map[string]interface{}) (ed25519.PublicKey, error) {
@@ -450,6 +497,28 @@ func ResolveAndVerify(ctx context.Context, r *Resolver, t *TrustAnchor, did stri
 		return nil, fmt.Errorf("%w: %s", ErrNotTrusted, did)
 	}
 	return pub, nil
+}
+
+// ResolveAndVerifyAll — DID を解決し、信頼ストアに照合した「信頼できる鍵だけ」を返す。
+//
+// ローテーション対応: DID が複数鍵を公開する場合、そのうち trust anchor に登録された
+// 鍵 (または DID 自体が信頼されていれば全鍵) を返す。呼び出し側は返った各鍵で署名検証を
+// 試みればよい。信頼できる鍵が 1 つも無ければ ErrNotTrusted。
+func ResolveAndVerifyAll(ctx context.Context, r *Resolver, t *TrustAnchor, did string) ([]ed25519.PublicKey, error) {
+	keys, err := r.ResolveAll(ctx, did)
+	if err != nil {
+		return nil, err
+	}
+	trusted := make([]ed25519.PublicKey, 0, len(keys))
+	for _, pub := range keys {
+		if t.IsTrusted(did, pub) {
+			trusted = append(trusted, pub)
+		}
+	}
+	if len(trusted) == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrNotTrusted, did)
+	}
+	return trusted, nil
 }
 
 // ============================================================================

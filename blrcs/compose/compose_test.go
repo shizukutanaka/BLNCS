@@ -307,6 +307,42 @@ func TestVerifySDJWTByDIDHappyPath(t *testing.T) {
 	}
 }
 
+// twoKeyDoc serves a DID document listing two Ed25519 keys (rotation: new+old).
+func twoKeyDoc(first, second ed25519.PublicKey) []byte {
+	doc := map[string]any{
+		"id": "did:web:factory.compose.test",
+		"verificationMethod": []map[string]any{
+			{"publicKeyJwk": map[string]any{"kty": "OKP", "crv": "Ed25519", "x": base64URLEncode(first)}},
+			{"publicKeyJwk": map[string]any{"kty": "OKP", "crv": "Ed25519", "x": base64URLEncode(second)}},
+		},
+	}
+	b, _ := json.Marshal(doc)
+	return b
+}
+
+// TestVerifySDJWTByDID_RotationOldKeyStillVerifies — during key rotation the DID
+// document lists the new key first and the old key second. A credential signed
+// by the OLD key must still verify. The previous single-key resolver returned
+// only the first (new) key, so verification failed; the multi-key path tries each.
+func TestVerifySDJWTByDID_RotationOldKeyStillVerifies(t *testing.T) {
+	c, iss, _ := setup(t)
+	// Credential signed by the original (now "old") key.
+	sdjwt, _, _ := iss.IssueSDJWT("subj", map[string]any{"x": 1}, nil, time.Hour)
+
+	// Rotation: a new key is published FIRST, the old key remains second.
+	rotated, _ := compliance.NewIssuer("did:web:factory.compose.test")
+	c.opts.Resolver.HTTPFetcher = func(ctx context.Context, url string) ([]byte, error) {
+		return twoKeyDoc(rotated.PublicKey(), iss.PublicKey()), nil
+	}
+	vc, err := c.VerifySDJWTByDID(context.Background(), sdjwt, iss.ID)
+	if err != nil {
+		t.Fatalf("rotation: credential signed by old (second-listed) key should verify: %v", err)
+	}
+	if vc.Subject != "subj" {
+		t.Errorf("subject: %s", vc.Subject)
+	}
+}
+
 func TestVerifySDJWTByDIDUntrusted(t *testing.T) {
 	c, iss, _ := setup(t)
 	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"x": 1}, nil, 0)
