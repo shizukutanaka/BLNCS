@@ -293,6 +293,33 @@ func TestExchangeCode(t *testing.T) {
 	}
 }
 
+// TestCNonceExpiresInMatchesTokenTTL pins that c_nonce_expires_in ≤ ExpiresIn
+// (Axis 6: temporal integrity).
+//
+// A wallet that caches a c_nonce for up to c_nonce_expires_in seconds must be
+// able to use it before the access token expires. Advertising a c_nonce window
+// longer than the token lifetime creates a false expectation: the wallet would
+// present a proof JWT referencing a c_nonce whose paired token is already gone.
+func TestCNonceExpiresInMatchesTokenTTL(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, err := iss.CreateOffer(
+		"eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.CNonceExpiresIn > tr.ExpiresIn {
+		t.Errorf("c_nonce_expires_in (%d) > access_token expires_in (%d): "+
+			"wallet would receive a stale-nonce error before it can present the proof",
+			tr.CNonceExpiresIn, tr.ExpiresIn)
+	}
+}
+
 func TestExchangeCodeSingleUse(t *testing.T) {
 	iss, _ := setupIssuer(t)
 	_, code, _ := iss.CreateOffer(

@@ -83,6 +83,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   redeems it. Test covers the limit and post-burn rejection.
 
 ### Fixed
+- **KB-JWT has no standalone freshness guarantee — `openid4vp` `ProcessResponse`
+  never set `MaxKBAge` (Axis 6: temporal integrity).**
+  The SD-JWT specification (§KB-JWT) requires verifiers to enforce that a
+  key-binding JWT is freshly generated for the current transaction — a wallet
+  must not pre-generate KB-JWTs and cache them. `VerifyOptions.MaxKBAge` already
+  existed and the underlying `verifyKBJWT` already enforces it, but `ProcessResponse`
+  never wired the field: `MaxKBAge` was always 0, so KB-JWTs of any age were
+  accepted as long as the nonce matched. Fixed: `ProcessResponse` now sets
+  `MaxKBAge: v.DefaultTTL` (10 min default), binding KB-JWT freshness to the
+  session lifetime. A wallet that somehow holds a nonce and presents a 30-minute-old
+  KB-JWT is rejected. Test: `TestStaleKBJWTRejected` presents a KB-JWT with
+  `iat = 30 minutes ago` and asserts rejection.
+- **`c_nonce_expires_in` advertised longer than access token lifetime —
+  `openid4vci` token endpoint.**
+  Both the `ExchangeCode` and `IssueCredentialWithProof` responses hard-coded
+  `c_nonce_expires_in: 600` (10 minutes) while `tokenTTL` is 300 s (5 minutes).
+  A compliant wallet that caches the c_nonce for up to the advertised 600 s would
+  find its access token already expired by T+300s, causing a confusing
+  authentication error when it tries to use the still-"valid" nonce. Fixed: both
+  responses now set `c_nonce_expires_in = int(iss.tokenTTL.Seconds())` so the
+  advertised nonce window never exceeds the token window. Test:
+  `TestCNonceExpiresInMatchesTokenTTL` asserts `c_nonce_expires_in ≤ expires_in`.
+
 - **Information disclosure at HTTP trust boundaries (CWE-209) — `openid4vp` and
   `openid4vci` handlers.**
   Both HTTP endpoints returned verbatim internal error messages to the client,

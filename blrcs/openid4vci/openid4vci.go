@@ -324,7 +324,7 @@ func (iss *Issuer) ExchangeCodeWithTxCode(code, txCode string) (*TokenResponse, 
 		TokenType:       "Bearer",
 		ExpiresIn:       int(iss.tokenTTL.Seconds()),
 		CNonce:          cNonce,
-		CNonceExpiresIn: 600,
+		CNonceExpiresIn: int(iss.tokenTTL.Seconds()), // must not exceed access token lifetime
 	}, nil
 }
 
@@ -435,7 +435,7 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	return &CredentialResponse{
 		Credential:      sdjwt,
 		CNonce:          newCNonce,
-		CNonceExpiresIn: 600,
+		CNonceExpiresIn: int(iss.tokenTTL.Seconds()), // must not exceed access token lifetime
 	}, nil
 }
 

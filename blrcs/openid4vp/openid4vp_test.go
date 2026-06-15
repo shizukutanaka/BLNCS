@@ -292,6 +292,48 @@ func TestSessionExpiry(t *testing.T) {
 	}
 }
 
+// TestStaleKBJWTRejected verifies that a KB-JWT whose iat predates the session TTL
+// is rejected — enforcing SD-JWT freshness (Axis 6: temporal integrity).
+//
+// A wallet that pre-generates KB-JWTs and caches them cannot replay them beyond
+// the verifier's DefaultTTL window, even if it obtains the matching state token.
+func TestStaleKBJWTRejected(t *testing.T) {
+	ver, iss := setupFlow(t)
+	def := PresentationDefinition{
+		ID:             "fresh-check",
+		RequiredClaims: []string{"foo"},
+		AcceptableIssuers: map[string][]byte{
+			iss.ID: iss.PublicKey(),
+		},
+	}
+	reqURL, state, err := ver.CreateRequest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Issue a holder-bound SD-JWT and generate a KB-JWT with an iat far in the past
+	// (simulating a wallet that pre-generated or cached the presentation).
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, err := iss.IssueSDJWTBound("s", map[string]any{"foo": "bar"}, nil, holderPub, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(reqURL)
+	q := u.Query()
+	// KB-JWT iat = 30 minutes ago — well past the default 10-minute MaxKBAge.
+	staleNow := time.Now().Add(-30 * time.Minute)
+	presented, err := compliance.PresentWithKeyBinding(sdjwt, []string{"foo"}, holderPriv,
+		q.Get("nonce"), q.Get("client_id"), staleNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ver.ProcessResponse(&AuthorizationResponse{VPToken: presented, State: state})
+	if err == nil {
+		t.Fatal("stale KB-JWT should be rejected")
+	}
+}
+
 // ============================================================================
 // Form encoding / parsing (direct_post transport)
 // ============================================================================

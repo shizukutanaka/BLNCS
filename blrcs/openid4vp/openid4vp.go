@@ -373,10 +373,15 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 		return nil, errors.New("openid4vp: no acceptable issuers configured")
 	}
 	// この Authorization Request の nonce / client_id に提示を暗号的にバインド。
+	// MaxKBAge を DefaultTTL に設定することで KB-JWT のフレッシュネスも保証する:
+	// ウォレットが事前に KB-JWT を生成してキャッシュすることを防ぐ。
+	// (nonce バインドが replay を防ぐが、iat フレッシュネスがセッション TTL を超えた
+	//  古い提示を追加で防ぐ — SD-JWT draft §KB-JWT freshness requirement)
 	opts := compliance.VerifyOptions{
 		ExpectedNonce:     req.Nonce,
 		ExpectedAudience:  v.ClientID,
 		RequireKeyBinding: v.RequireKeyBinding,
+		MaxKBAge:          v.DefaultTTL,
 	}
 	var verified *compliance.VerifiedClaims
 	var usedIssuer string
