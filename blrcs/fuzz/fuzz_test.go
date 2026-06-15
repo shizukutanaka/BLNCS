@@ -620,3 +620,31 @@ func FuzzMdocDeviceAuth(f *testing.F) {
 		_, _ = mdoc.VerifyDocument(data, issPub, []byte("other-transcript"), time.Now())
 	})
 }
+
+// ============================================================================
+// FuzzVerifyRequestObject — fuzz the RFC 9101 JAR request-object parser.
+// VerifyRequestObject consumes an attacker-suppliable request URL (the signed
+// `request` JWT lives in a query parameter); it must fail safe, never panic.
+// ============================================================================
+
+func FuzzVerifyRequestObject(f *testing.F) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	ver := openid4vp.NewVerifier("https://verify.example", "https://verify.example/cb", nil)
+	ver.RequestSigningKey = priv
+	if reqURL, _, err := ver.CreateRequest(openid4vp.PresentationDefinition{
+		ID: "fuzz", RequiredClaims: []string{"x"},
+	}); err == nil {
+		f.Add(reqURL)
+	}
+	f.Add("openid4vp://authorize?request=a.b.c")
+	f.Add("openid4vp://authorize?client_id=x&request=")
+	f.Add("openid4vp://authorize?request=" + "...~~~")
+	f.Add("not a url %%%")
+	f.Add("")
+
+	f.Fuzz(func(t *testing.T, requestURL string) {
+		// Arbitrary input (and a wrong key) must fail safe — error, never panic.
+		_, _ = openid4vp.VerifyRequestObject(requestURL, pub)
+		_, _ = openid4vp.VerifyRequestObject(requestURL, nil)
+	})
+}

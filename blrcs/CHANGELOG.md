@@ -150,6 +150,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   (no panic; tens of thousands of execs, dozens of interesting inputs), confirming the
   new entry points fail safe on malformed input — closing a robustness gap that the
   logical-correctness tests could not see. (17 → 20 fuzz targets.)
+- **Fuzzing of the RFC 9101 JAR request-object parser (`FuzzVerifyRequestObject`).**
+  `VerifyRequestObject`, added this session for signed Authorization Requests, parses
+  an attacker-suppliable request URL (the signed `request` JWT rides in a query
+  parameter) but had no fuzz coverage — the same untrusted-input-parser gap the
+  hardening pass closed for the other new entry points. Added a black-box fuzz target
+  (in `fuzz/`) seeded with a valid signed request plus malformed URLs/JWTs; it ran
+  clean (300k+ execs, ~170 interesting inputs, no panic) against both a real and a nil
+  verifier key, confirming the JAR parser fails safe.
 - **`openid4vci` credentials can now carry a revocation status.** `IssueCredentialWithProof`
   always issued without a `status_list` reference, so VCI-issued credentials could
   never be revoked. New `OfferOptions{Status}` (via `CreateOfferWithOptions`) records a
