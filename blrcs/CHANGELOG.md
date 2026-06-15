@@ -7,6 +7,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **OpenID4VP signed Authorization Requests (RFC 9101 JAR, by value) — closes the
+  unauthenticated-request relay gap (Axis 8: authentication scope).** Auditing
+  through an authentication-scope lens — "what data does the verifier/wallet act
+  upon that is NOT inside a signed envelope?" — found mdoc (Document↔MSO docType,
+  deviceAuth↔docType, item↔namespace) and the `state`/`presentation_submission`
+  handling all correctly bound, but surfaced one real, high-severity gap: the
+  Authorization Request was sent as **unsigned** query parameters. The wallet binds
+  its KB-JWT `aud` to a `client_id` it reads from that unauthenticated request, so a
+  relay attacker can keep the genuine `client_id` while substituting their own
+  `response_uri` — and the wallet has no way to detect it (the known OpenID4VP
+  cross-device/relay threat). RFC 9101 exists precisely for this.
+  - New optional `Verifier.RequestSigningKey ed25519.PrivateKey`. When set,
+    `CreateRequest`/`CreateRequestDCQL` additionally emit a `request` parameter
+    carrying the whole request as an Ed25519-signed JWT
+    (`typ=oauth-authz-req+jwt`); the unsigned params remain for non-JAR wallets.
+  - New wallet-side `VerifyRequestObject(requestURL, verifierPub)` verifies the
+    signature, pins `alg=EdDSA`/`typ` (no header-dispatched verifier → no
+    alg-confusion), enforces `exp`, and requires the signed `client_id` to match
+    the top-level `client_id` (binds the dispatcher to the signed content). It
+    returns the **authenticated** `response_uri`/`nonce`/`client_id`, so a wallet
+    that rewrites where it POSTs based on the signed object defeats the relay.
+  - Pure Ed25519 + JSON + base64url (same primitives as the SD-JWT issuer); zero
+    new dependencies. Fully backward-compatible: no signing key → unsigned request
+    exactly as before.
+  - Tests: round-trip; tampered-`response_uri` param has no effect on the
+    authenticated value; tampered signed payload, wrong verifier key, `client_id`
+    mismatch, and `alg`/`typ` confusion (`none`/`HS256`/wrong-typ) each rejected;
+    missing-request-object reported distinctly; unsigned back-compat.
 - **Cross-protocol / cross-credential signature-confusion regression tests
   (domain separation).** Auditing through a domain-separation lens — "when one key
   signs several message types, or material from one credential is grafted onto

@@ -208,6 +208,14 @@ type Verifier struct {
 	// どの検証段階で失敗したか (issuer 不明 / 署名不一致 / 失効 / claim 欠落 等) を
 	// 攻撃者に対する oracle として漏らさないため (CWE-209)。
 	OnVerifyError func(error)
+
+	// RequestSigningKey — 任意 (RFC 9101 JAR)。設定すると CreateRequest /
+	// CreateRequestDCQL が署名なし query に加えて、request 全体を Ed25519 で署名した
+	// JWT を `request` パラメータに同梱する。ウォレットは VerifyRequestObject で
+	// response_uri / nonce / client_id の真正性を確認でき、本物の client_id を保ったまま
+	// response_uri を差し替える relay 攻撃を検知できる。鍵が無い場合は従来どおり
+	// 署名なし request のみ (back-compat)。署名検証鍵は ed25519.PrivateKey.Public()。
+	RequestSigningKey ed25519.PrivateKey
 }
 
 // NewVerifier — Apple式の1行構築。secure-by-default で RequireKeyBinding=true。
@@ -260,7 +268,7 @@ func (v *Verifier) CreateRequest(def PresentationDefinition) (requestURL string,
 	if err := v.store.Save(state, req, v.DefaultTTL); err != nil {
 		return "", "", err
 	}
-	reqURL, err := buildRequestURL(req)
+	reqURL, err := buildRequestURL(req, v.RequestSigningKey, v.DefaultTTL)
 	if err != nil {
 		return "", "", err
 	}
@@ -293,15 +301,17 @@ func (v *Verifier) CreateRequestDCQL(query DCQLQuery) (requestURL string, state 
 	if err := v.store.Save(state, req, v.DefaultTTL); err != nil {
 		return "", "", err
 	}
-	reqURL, err := buildRequestURL(req)
+	reqURL, err := buildRequestURL(req, v.RequestSigningKey, v.DefaultTTL)
 	if err != nil {
 		return "", "", err
 	}
 	return reqURL, state, nil
 }
 
-// 本番は request_uri モード推奨 (URLが長大化しないよう)、MVP は inline query parameters
-func buildRequestURL(req *AuthorizationRequest) (string, error) {
+// buildRequestURL — request を query parameters へ。signKey が non-nil なら
+// RFC 9101 の署名付き request object を `request` パラメータに追加で同梱する
+// (署名なしパラメータは非 JAR ウォレット向けに残す)。
+func buildRequestURL(req *AuthorizationRequest, signKey ed25519.PrivateKey, ttl time.Duration) (string, error) {
 	q := url.Values{}
 	q.Set("client_id", req.ClientID)
 	q.Set("response_type", req.ResponseType)
@@ -323,6 +333,14 @@ func buildRequestURL(req *AuthorizationRequest) (string, error) {
 			return "", fmt.Errorf("openid4vp: marshal presentation_definition: %w", err)
 		}
 		q.Set("presentation_definition", string(b))
+	}
+	// RFC 9101 JAR (by value): 署名鍵があれば request 全体の署名付き JWT を同梱。
+	if len(signKey) == ed25519.PrivateKeySize {
+		jwt, err := signRequestObject(req, signKey, ttl)
+		if err != nil {
+			return "", err
+		}
+		q.Set("request", jwt)
 	}
 	return "openid4vp://authorize?" + q.Encode(), nil
 }
