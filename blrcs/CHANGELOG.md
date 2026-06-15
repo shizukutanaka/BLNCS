@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`openid4vci` issuer leaked memory without bound — abandoned offers/tokens were
+  never evicted (resource exhaustion, Axis 10).** The `preAuths` and `tokens` maps
+  only shrank on the success/burn paths: an offer created but never redeemed, or an
+  access token issued but never used to fetch a credential, stayed in the map forever
+  — well past its TTL. Over time (normal abandoned flows; faster under load) this is
+  unbounded growth and a DoS surface, unlike the `openid4vp` session store which
+  already swept expired state. Added a time-gated lazy sweep (`gcExpiredLocked`,
+  amortized O(1), at most once per minute) invoked from `CreateOffer*` — the only
+  path that adds entries — evicting expired pre-authorized codes (`expiresAt`) and
+  access tokens (`tokenExpiresAt`), bounding both maps to "unexpired entries + the
+  current burst." No background goroutine (so no goroutine leak per `Issuer`). Tests
+  assert an expired abandoned offer and an expired abandoned token are both evicted
+  on the next `CreateOffer`.
 - **DID resolution collapsed a multi-key DID document to its first key — issuer
   key rotation was unverifiable (key-lifecycle gap).** `parseDIDDocument` returned
   the *first* Ed25519 verification method only, and `Resolve` returned a single key.

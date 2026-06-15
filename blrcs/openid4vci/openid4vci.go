@@ -108,6 +108,36 @@ type Issuer struct {
 	mu       sync.Mutex
 	preAuths map[string]*preAuthEntry // code → entry
 	tokens   map[string]*preAuthEntry // access_token → same entry
+	lastGC   time.Time                // 最後に期限切れ掃除を実行した時刻
+}
+
+// gcInterval — 期限切れエントリ掃除の最小間隔。CreateOffer ごとに O(n) 走査すると
+// コストが嵩むため、掃除はこの間隔に1回までに制限する (償却 O(1))。
+const gcInterval = 1 * time.Minute
+
+// gcExpiredLocked — 期限切れの pre-authorized code / access token を退避する。
+// 呼び出し側は iss.mu を保持していること。
+//
+// preAuths / tokens は成功・burn 経路でしか縮まないため、発行されたが一度も
+// 引き換えられなかった offer / token (放置フロー) がマップに永久に残り、無制限の
+// メモリ増加 (DoS 面) になっていた。新規エントリが増える唯一の経路である
+// CreateOffer から時間ゲート付きで本掃除を呼び、両マップのサイズを
+// 「未期限切れエントリ + 直近バースト分」に拘束する。
+func (iss *Issuer) gcExpiredLocked(now time.Time) {
+	if now.Sub(iss.lastGC) < gcInterval {
+		return
+	}
+	iss.lastGC = now
+	for code, e := range iss.preAuths {
+		if now.After(e.expiresAt) {
+			delete(iss.preAuths, code)
+		}
+	}
+	for tok, e := range iss.tokens {
+		if !e.tokenExpiresAt.IsZero() && now.After(e.tokenExpiresAt) {
+			delete(iss.tokens, tok)
+		}
+	}
 }
 
 // defaultMaxTxCodeAttempts — tx_code 失敗の既定上限。
@@ -214,14 +244,16 @@ func (iss *Issuer) CreateOfferWithOptions(configID, subject string, sdClaims, cl
 		}
 	}
 	code := randomB64(32)
+	now := time.Now()
 	iss.mu.Lock()
+	iss.gcExpiredLocked(now) // 放置された期限切れ offer/token を退避 (無制限増加防止)
 	iss.preAuths[code] = &preAuthEntry{
 		code:        code,
 		configID:    configID,
 		subject:     subject,
 		sdClaims:    sdClaims,
 		clearClaims: clearClaims,
-		expiresAt:   time.Now().Add(iss.preAuthTTL),
+		expiresAt:   now.Add(iss.preAuthTTL),
 		txCode:      opts.TxCode,
 		status:      opts.Status,
 	}

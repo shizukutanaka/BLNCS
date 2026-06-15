@@ -343,6 +343,89 @@ func TestExchangeCodeUnknown(t *testing.T) {
 	}
 }
 
+// TestCreateOfferGCEvictsAbandonedOffer pins the resource-exhaustion fix: an
+// offer created but never redeemed must not linger past its TTL. The time-gated
+// sweep on CreateOffer evicts it (Axis 10: unbounded growth).
+func TestCreateOfferGCEvictsAbandonedOffer(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.preAuthTTL = time.Millisecond
+
+	_, code1, err := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss.mu.Lock()
+	_, present := iss.preAuths[code1]
+	iss.mu.Unlock()
+	if !present {
+		t.Fatal("offer should be stored after CreateOffer")
+	}
+
+	// Let it expire and force the GC gate open (it was just set by CreateOffer).
+	time.Sleep(5 * time.Millisecond)
+	iss.mu.Lock()
+	iss.lastGC = time.Now().Add(-time.Hour)
+	iss.mu.Unlock()
+
+	// A new offer triggers the gated sweep.
+	if _, _, err = iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 2.0, "recycledCoPct": 6.0}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	iss.mu.Lock()
+	_, stillThere := iss.preAuths[code1]
+	n := len(iss.preAuths)
+	iss.mu.Unlock()
+	if stillThere {
+		t.Error("expired abandoned offer should have been evicted by GC")
+	}
+	if n != 1 {
+		t.Errorf("preAuths should hold only the new offer, got %d entries", n)
+	}
+}
+
+// TestCreateOfferGCEvictsAbandonedToken: a token created by an exchange but never
+// used to issue a credential is also swept once expired.
+func TestCreateOfferGCEvictsAbandonedToken(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.tokenTTL = time.Millisecond
+
+	_, code, err := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss.mu.Lock()
+	_, present := iss.tokens[tr.AccessToken]
+	iss.mu.Unlock()
+	if !present {
+		t.Fatal("token should be stored after exchange")
+	}
+
+	time.Sleep(5 * time.Millisecond)
+	iss.mu.Lock()
+	iss.lastGC = time.Now().Add(-time.Hour)
+	iss.mu.Unlock()
+
+	if _, _, err = iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 2.0, "recycledCoPct": 6.0}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	iss.mu.Lock()
+	_, stillThere := iss.tokens[tr.AccessToken]
+	iss.mu.Unlock()
+	if stillThere {
+		t.Error("expired abandoned access token should have been evicted by GC")
+	}
+}
+
 func TestExchangeCodeExpired(t *testing.T) {
 	iss, _ := setupIssuer(t)
 	iss.preAuthTTL = 10 * time.Millisecond
