@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **SD-JWT decoy digests (`Issuer.DecoyDigests`) — hide the true claim count
+  (privacy / unlinkability, Axis 11).** Auditing through a privacy lens — "beyond
+  what it discloses, what does a credential's *structure* leak?" — found that the
+  signed `_sd` array reveals the number of selectively-disclosable claims, including
+  the undisclosed ones. That count is a fingerprint: it distinguishes credential
+  types and helps correlate a holder's presentations. The SD-JWT spec (§5.6) answers
+  this with decoy digests. New optional `Issuer.DecoyDigests int`: when `>0`, issuance
+  appends that many dummy digests (SHA-256 of fresh random salts, indistinguishable
+  from real digests) to `_sd`, and the whole array is shuffled with a crypto/rand
+  Fisher-Yates so real and decoy entries are not positionally distinguishable. Decoys
+  have no disclosures, so verification is unaffected (the verifier already ignores
+  `_sd` entries with no presented disclosure) and they never surface as claims.
+  Default `0` → no behavior change (backward-compatible); privacy-conscious issuers
+  set a few. Tests: `_sd` length = real + decoys, round-trip still verifies, decoys
+  disclose nothing, and default-off keeps `_sd` sized to the real claims.
+
 ### Fixed
 - **`openid4vci` issuer leaked memory without bound — abandoned offers/tokens were
   never evicted (resource exhaustion, Axis 10).** The `preAuths` and `tokens` maps

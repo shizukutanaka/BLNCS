@@ -96,6 +96,14 @@ type Issuer struct {
 	ID         string // DID 例: did:web:factory.example/passport
 	privateKey ed25519.PrivateKey
 	publicKey  ed25519.PublicKey
+
+	// DecoyDigests — 任意。>0 のとき、発行する SD-JWT の `_sd` 配列にこの数だけ
+	// ダミー digest を追加する (draft-ietf-oauth-sd-jwt §5.6 "Decoy Digests")。
+	// `_sd` の要素数は「選択的開示可能な claim 数」を——未開示のものまで含めて——
+	// 漏らすため、提示間の相関や credential 種別のフィンガープリントに使える。
+	// decoy を混ぜると真の claim 数が隠れ、unlinkability/プライバシが向上する。
+	// 既定 0 (後方互換: 挙動変化なし)。プライバシ重視の発行者は数個設定する。
+	DecoyDigests int
 }
 
 // NewIssuer — ed25519 鍵ペアを生成し Issuer を構築。id は DID 形式。

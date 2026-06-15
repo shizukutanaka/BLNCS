@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -207,6 +208,23 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 		// Digest: SHA-256(encoded)
 		h := sha256.Sum256([]byte(d.Encoded))
 		sdDigests = append(sdDigests, base64.RawURLEncoding.EncodeToString(h[:]))
+	}
+	// Decoy digests (draft-ietf-oauth-sd-jwt §5.6): hashes of fresh random salts
+	// with no corresponding disclosure. They are indistinguishable from real
+	// digests (same SHA-256 length) and obscure the true number of selectively-
+	// disclosable claims, improving holder unlinkability.
+	for n := 0; n < i.DecoyDigests; n++ {
+		salt, err := randomB64(32)
+		if err != nil {
+			return "", nil, err
+		}
+		h := sha256.Sum256([]byte(salt))
+		sdDigests = append(sdDigests, base64.RawURLEncoding.EncodeToString(h[:]))
+	}
+	// Shuffle so real and decoy digests are not positionally distinguishable
+	// (decoys appended last would otherwise reveal which entries are real).
+	if err := shuffleDigests(sdDigests); err != nil {
+		return "", nil, err
 	}
 	payload["_sd"] = sdDigests
 	// Sign JWT
@@ -847,6 +865,41 @@ func randomB64(n int) (string, error) {
 		return "", fmt.Errorf("compliance: salt generation failed: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// shuffleDigests performs an in-place Fisher-Yates shuffle using crypto/rand so
+// the order of real vs decoy `_sd` digests carries no information. A CSPRNG
+// failure is surfaced rather than silently falling back to a weak source.
+func shuffleDigests(d []string) error {
+	for i := len(d) - 1; i > 0; i-- {
+		j, err := cryptoIntn(i + 1)
+		if err != nil {
+			return err
+		}
+		d[i], d[j] = d[j], d[i]
+	}
+	return nil
+}
+
+// cryptoIntn returns a uniformly random int in [0, n) using crypto/rand,
+// rejecting values in the biased tail (rejection sampling).
+func cryptoIntn(n int) (int, error) {
+	if n <= 0 {
+		return 0, fmt.Errorf("compliance: cryptoIntn non-positive bound %d", n)
+	}
+	// 8 random bytes → uint64; reject the non-uniform remainder.
+	max := ^uint64(0)
+	limit := max - (max % uint64(n))
+	var b [8]byte
+	for {
+		if _, err := rand.Read(b[:]); err != nil {
+			return 0, fmt.Errorf("compliance: shuffle rng failed: %w", err)
+		}
+		v := binary.BigEndian.Uint64(b[:])
+		if v < limit {
+			return int(v % uint64(n)), nil
+		}
+	}
 }
 
 // reservedSDJWTClaim reports whether k is a JWT/SD-JWT reserved claim name

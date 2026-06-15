@@ -79,6 +79,74 @@ func TestNewIssuerFromKeyBadSize(t *testing.T) {
 	}
 }
 
+// sdArrayLen returns the number of entries in the signed `_sd` array of an SD-JWT.
+func sdArrayLen(t *testing.T, sdjwt string) int {
+	t.Helper()
+	jwt := strings.SplitN(sdjwt, "~", 2)[0]
+	parts := strings.Split(jwt, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a JWT: %q", jwt)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pl struct {
+		SD []string `json:"_sd"`
+	}
+	if err := json.Unmarshal(raw, &pl); err != nil {
+		t.Fatal(err)
+	}
+	return len(pl.SD)
+}
+
+// TestDecoyDigestsObscureClaimCount pins the privacy fix (Axis 11): with
+// DecoyDigests>0 the signed `_sd` array no longer reveals the true number of
+// selectively-disclosable claims, yet the credential still verifies and decoys
+// disclose nothing.
+func TestDecoyDigestsObscureClaimCount(t *testing.T) {
+	iss, _ := NewIssuer("did:web:test")
+	iss.DecoyDigests = 5
+
+	sd := map[string]any{"category": "battery", "carbon": 1.5}
+	sdjwt, _, err := iss.IssueSDJWT("subj", sd, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// _sd carries the 2 real claims + 5 decoys, hiding the real count.
+	if got := sdArrayLen(t, sdjwt); got != 7 {
+		t.Errorf("_sd length: want 7 (2 real + 5 decoy), got %d", got)
+	}
+	// Verification still succeeds and yields exactly the real claims.
+	vc, err := VerifySDJWT(sdjwt, iss.PublicKey())
+	if err != nil {
+		t.Fatalf("verify with decoys: %v", err)
+	}
+	if vc.Claims["category"] != "battery" {
+		t.Errorf("category: %v", vc.Claims["category"])
+	}
+	if f, ok := vc.Claims["carbon"].(float64); !ok || f != 1.5 {
+		t.Errorf("carbon: %v", vc.Claims["carbon"])
+	}
+	if len(vc.Claims) != 2 {
+		t.Errorf("decoys must not surface as claims: got %d claims", len(vc.Claims))
+	}
+}
+
+// TestDecoyDigestsDefaultOff confirms backward-compat: DecoyDigests=0 (default)
+// produces an `_sd` array sized exactly to the real claims.
+func TestDecoyDigestsDefaultOff(t *testing.T) {
+	iss, _ := NewIssuer("did:web:test")
+	sd := map[string]any{"a": 1, "b": 2, "c": 3}
+	sdjwt, _, err := iss.IssueSDJWT("subj", sd, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sdArrayLen(t, sdjwt); got != 3 {
+		t.Errorf("default (no decoys): want _sd length 3, got %d", got)
+	}
+}
+
 func TestNewIssuerFromKeyEmptyID(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	_, err := NewIssuerFromKey("", priv)
