@@ -910,3 +910,42 @@ func TestBuildDLURIGTINNonDigit(t *testing.T) {
 		t.Errorf("non-digit GTIN: want non-digit error, got %v", err)
 	}
 }
+
+// ============================================================================
+// issueSDJWT claim-set validation — fail-fast at issuance (Axis 7)
+// ============================================================================
+
+// TestIssueSDJWTSDClaimReserved pins that passing a reserved JWT/SD-JWT claim
+// name (e.g. "iss") inside sdClaims is rejected at issuance time.
+//
+// Without this guard the issuer signs and returns the credential; the verifier
+// then always rejects it with ErrSDJWTMalformed (disclosure collides with reserved
+// claim) — the credential subject has no indication the credential was broken.
+func TestIssueSDJWTSDClaimReserved(t *testing.T) {
+	iss, _ := NewIssuer("did:web:test")
+	for _, reserved := range []string{"iss", "sub", "vct", "iat", "exp", "_sd", "_sd_alg", "cnf", "status"} {
+		_, _, err := iss.IssueSDJWT("s", map[string]any{reserved: "injected"}, nil, time.Hour)
+		if err == nil || !strings.Contains(err.Error(), "reserved claim") {
+			t.Errorf("sdClaims[%q]: want reserved-claim error, got %v", reserved, err)
+		}
+	}
+}
+
+// TestIssueSDJWTClearSDOverlap pins that a claim appearing in both sdClaims and
+// clearClaims is rejected at issuance time.
+//
+// Without this guard the issuer produces a credential that always fails verification:
+// the verifier finds the clear claim already in vc.Claims when it processes the
+// matching disclosure, and returns ErrSDJWTMalformed.
+func TestIssueSDJWTClearSDOverlap(t *testing.T) {
+	iss, _ := NewIssuer("did:web:test")
+	_, _, err := iss.IssueSDJWT(
+		"s",
+		map[string]any{"category": "battery"},   // sdClaims
+		map[string]any{"category": "duplicate"}, // clearClaims — same key
+		time.Hour,
+	)
+	if err == nil || !strings.Contains(err.Error(), "both sdClaims and clearClaims") {
+		t.Errorf("sd/clear overlap: want overlap error, got %v", err)
+	}
+}

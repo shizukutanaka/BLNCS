@@ -167,11 +167,24 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 		payload["status"] = status.statusClaim()
 	}
 	// Guard against callers accidentally (or adversarially) injecting reserved
-	// JWT/SD-JWT claims via clearClaims — those have security-critical semantics
-	// that must only be set by the issuer.
+	// JWT/SD-JWT claims via clearClaims or sdClaims — those have security-critical
+	// semantics that must only be set by the issuer (existing clear guard extended
+	// to sd, plus cross-map overlap guard).
+	//
+	// Without these checks the issuer signs and returns a credential that ALWAYS
+	// fails verification (ErrSDJWTMalformed), giving the credential subject no
+	// indication the credential was already broken at issuance time.
 	for k := range clearClaims {
 		if reservedSDJWTClaim(k) {
 			return "", nil, fmt.Errorf("compliance: clearClaims: %q collides with reserved claim", k)
+		}
+	}
+	for k := range sdClaims {
+		if reservedSDJWTClaim(k) {
+			return "", nil, fmt.Errorf("compliance: sdClaims: %q collides with reserved claim", k)
+		}
+		if _, dup := clearClaims[k]; dup {
+			return "", nil, fmt.Errorf("compliance: claim %q appears in both sdClaims and clearClaims", k)
 		}
 	}
 	// Clear claims → JWT body 直接

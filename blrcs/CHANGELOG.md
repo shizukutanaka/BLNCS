@@ -83,6 +83,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   redeems it. Test covers the limit and post-burn rejection.
 
 ### Fixed
+- **`issueSDJWT` accepted `sdClaims`/`clearClaims` overlap and reserved-name
+  injection without error — credential broken silently at issuance (Axis 7).**
+  Two missing guards in `issueSDJWT`:
+  - A claim appearing in both `sdClaims` and `clearClaims` was accepted by the
+    issuer: the JWT embeds the clear value AND creates a disclosure. At verify
+    time, `ErrSDJWTMalformed` fires when the disclosure's name collides with
+    the already-present clear claim. The credential subject never knows the
+    credential was already broken.
+  - A reserved JWT/SD-JWT claim name (`iss`, `sub`, `vct`, `iat`, `exp`,
+    `_sd`, `_sd_alg`, `cnf`, `status`) in `sdClaims` was similarly accepted
+    at issuance but always rejected at verification — the verifier's
+    disclosure-reserved-name guard fires but the issuer never warned the caller.
+  
+  Both cases now return a clear error from `issueSDJWT` at the moment of
+  signing, before a bad credential is ever produced. The existing `clearClaims`
+  reserved-name check was extended to `sdClaims`, and a new cross-map overlap
+  check was added. Tests: `TestIssueSDJWTSDClaimReserved` (each reserved name
+  → error), `TestIssueSDJWTClearSDOverlap` (same key in both maps → error).
+
 - **KB-JWT has no standalone freshness guarantee — `openid4vp` `ProcessResponse`
   never set `MaxKBAge` (Axis 6: temporal integrity).**
   The SD-JWT specification (§KB-JWT) requires verifiers to enforce that a
