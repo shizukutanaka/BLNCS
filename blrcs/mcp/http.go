@@ -40,6 +40,13 @@ const (
 	sessionIdleTimeout  = 30 * time.Minute
 	sseHeartbeatPeriod  = 25 * time.Second
 	defaultMaxBodyBytes = 16 * 1024 * 1024
+	// defaultMaxSessions bounds the in-memory session map. Sessions live up to
+	// sessionIdleTimeout (30m) and the background GC only sweeps every 5m, so
+	// without a hard cap a client issuing `initialize` repeatedly accumulates
+	// entries faster than they idle-expire — an unbounded-memory DoS. At the cap
+	// the least-recently-seen session is evicted (true LRU), bounding memory to
+	// "cap entries" regardless of request rate.
+	defaultMaxSessions = 16384
 )
 
 // AuthVerifier — 認証プラガブル契約。nilなら認証なし。
@@ -77,6 +84,18 @@ func NewHTTPHandler(srv *Server, auth AuthVerifier, limiter RateLimiter) *HTTPHa
 
 // SetMaxBody — 1リクエスト最大サイズ変更 (default 16MB)
 func (h *HTTPHandler) SetMaxBody(n int64) { h.maxBody = n }
+
+// SetMaxSessions — concurrent live セッション上限を変更 (default 16384)。
+// 上限到達時は最終アクセスが最も古いセッションを退避する (LRU)。
+// n <= 0 は無視 (上限を無効化しない — DoS 防御のため)。
+func (h *HTTPHandler) SetMaxSessions(n int) {
+	if n <= 0 {
+		return
+	}
+	h.sessions.mu.Lock()
+	h.sessions.maxSessions = n
+	h.sessions.mu.Unlock()
+}
 
 // ServeHTTP — net/http.Handler実装
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -230,8 +249,9 @@ func (h *HTTPHandler) handleDelete(w http.ResponseWriter, r *http.Request, _ str
 // ============================================================================
 
 type sessionStore struct {
-	mu   sync.Mutex
-	data map[string]*sessionEntry
+	mu          sync.Mutex
+	data        map[string]*sessionEntry
+	maxSessions int
 }
 
 type sessionEntry struct {
@@ -240,15 +260,54 @@ type sessionEntry struct {
 }
 
 func newSessionStore() *sessionStore {
-	s := &sessionStore{data: make(map[string]*sessionEntry)}
+	s := &sessionStore{
+		data:        make(map[string]*sessionEntry),
+		maxSessions: defaultMaxSessions,
+	}
 	go s.gcLoop()
 	return s
 }
 
 func (s *sessionStore) create(id, principal string) {
 	s.mu.Lock()
+	// Enforce the hard cap before inserting so the map can never exceed
+	// maxSessions. First drop any idle-expired entries (cheap, frees space
+	// without losing live sessions); if still at capacity, evict the
+	// least-recently-seen entry (LRU).
+	if s.maxSessions > 0 && len(s.data) >= s.maxSessions {
+		s.evictIdleLocked()
+		for len(s.data) >= s.maxSessions {
+			s.evictOldestLocked()
+		}
+	}
 	s.data[id] = &sessionEntry{principal: principal, lastSeen: time.Now()}
 	s.mu.Unlock()
+}
+
+// evictIdleLocked removes all idle-expired entries. Caller holds s.mu.
+func (s *sessionStore) evictIdleLocked() {
+	cutoff := time.Now().Add(-sessionIdleTimeout)
+	for id, e := range s.data {
+		if e.lastSeen.Before(cutoff) {
+			delete(s.data, id)
+		}
+	}
+}
+
+// evictOldestLocked removes the single least-recently-seen entry. Caller holds
+// s.mu and must ensure the map is non-empty.
+func (s *sessionStore) evictOldestLocked() {
+	var oldestID string
+	var oldestSeen time.Time
+	first := true
+	for id, e := range s.data {
+		if first || e.lastSeen.Before(oldestSeen) {
+			oldestID, oldestSeen, first = id, e.lastSeen, false
+		}
+	}
+	if !first {
+		delete(s.data, oldestID)
+	}
 }
 
 // touch — セッション存在確認 + 最終アクセス更新
@@ -286,13 +345,8 @@ func (s *sessionStore) gcLoop() {
 }
 
 func (s *sessionStore) gc() {
-	cutoff := time.Now().Add(-sessionIdleTimeout)
 	s.mu.Lock()
-	for id, e := range s.data {
-		if e.lastSeen.Before(cutoff) {
-			delete(s.data, id)
-		}
-	}
+	s.evictIdleLocked()
 	s.mu.Unlock()
 }
 

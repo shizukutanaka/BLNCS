@@ -37,6 +37,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`mcp` HTTP session store grew without bound despite its "in-memory LRU" contract
+  (resource exhaustion, Axis 10 lens on a new surface).** The doc comment promised an
+  "in-memory LRU with idle expiry", but `sessionStore.create` was an unbounded map insert:
+  sessions live up to `sessionIdleTimeout` (30m) and the background GC only sweeps every 5m,
+  so a client issuing `initialize` repeatedly accumulates session entries far faster than they
+  idle-expire — unbounded memory growth gated only by an *optional* rate limiter (none when
+  `auth`/`limiter` are nil). Made it a real bounded LRU: new `defaultMaxSessions = 16384` cap
+  enforced in `create` — it first reclaims any idle-expired entries, then, if still at capacity,
+  evicts the least-recently-seen session, so the map can never exceed the cap regardless of
+  request rate. New `HTTPHandler.SetMaxSessions(n)` tunes the bound (non-positive ignored so
+  the guard can't be disabled); `gc()` now shares the same `evictIdleLocked` helper. Tests:
+  cap is never exceeded and the oldest session is the one evicted (LRU); idle-expired entries
+  are reclaimed before a live session is dropped; `SetMaxSessions` rejects non-positive values.
+
 - **`scitt` Merkle recomputation was O(n) in checkpoint/root queries — DoS via
   repeated checkpoint requests (Axis 13).** `SignedCheckpoint()` and `Root()` both
   called `merkleRoot(l.leafHashes)` (O(n)) while holding the read mutex, even though

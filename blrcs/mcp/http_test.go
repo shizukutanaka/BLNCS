@@ -287,6 +287,93 @@ func TestHTTP_EmptyBodyRejected(t *testing.T) {
 	}
 }
 
+// TestSessionStoreBoundedLRU asserts the session map never exceeds its cap and
+// that, at capacity, the least-recently-seen session is the one evicted (LRU) —
+// closing the unbounded-growth DoS where repeated `initialize` calls accumulate
+// sessions faster than the 30m idle expiry / 5m GC can reclaim them.
+func TestSessionStoreBoundedLRU(t *testing.T) {
+	s := &sessionStore{data: make(map[string]*sessionEntry), maxSessions: 3}
+
+	// Create 3 sessions with strictly increasing lastSeen so ordering is defined.
+	base := time.Now()
+	for i, id := range []string{"a", "b", "c"} {
+		s.create(id, "p")
+		s.mu.Lock()
+		s.data[id].lastSeen = base.Add(time.Duration(i) * time.Second)
+		s.mu.Unlock()
+	}
+	if got := len(s.data); got != 3 {
+		t.Fatalf("len after 3 creates: %d, want 3", got)
+	}
+
+	// "a" is the oldest. Creating a 4th must evict exactly "a" and stay at cap.
+	s.create("d", "p")
+	if got := len(s.data); got != 3 {
+		t.Fatalf("len after 4th create: %d, want 3 (cap enforced)", got)
+	}
+	s.mu.Lock()
+	_, aLives := s.data["a"]
+	_, dLives := s.data["d"]
+	s.mu.Unlock()
+	if aLives {
+		t.Error("oldest session 'a' should have been evicted (LRU)")
+	}
+	if !dLives {
+		t.Error("newest session 'd' should be present")
+	}
+}
+
+// TestSessionStoreCapPrefersIdleEviction asserts that when the map is at
+// capacity but contains idle-expired entries, those are reclaimed first (so a
+// live, recently-seen session is not needlessly evicted).
+func TestSessionStoreCapPrefersIdleEviction(t *testing.T) {
+	s := &sessionStore{data: make(map[string]*sessionEntry), maxSessions: 2}
+	s.create("live", "p")
+	s.create("stale", "p")
+	// Make "stale" idle-expired.
+	s.mu.Lock()
+	s.data["stale"].lastSeen = time.Now().Add(-2 * sessionIdleTimeout)
+	s.mu.Unlock()
+
+	// At capacity (2). Creating a 3rd should reclaim "stale" (idle) and keep "live".
+	s.create("new", "p")
+	s.mu.Lock()
+	_, liveLives := s.data["live"]
+	_, staleLives := s.data["stale"]
+	n := len(s.data)
+	s.mu.Unlock()
+	if staleLives {
+		t.Error("idle-expired 'stale' should be reclaimed before LRU eviction")
+	}
+	if !liveLives {
+		t.Error("live session should survive when an idle entry was available to reclaim")
+	}
+	if n != 2 {
+		t.Fatalf("len: %d, want 2", n)
+	}
+}
+
+// TestSetMaxSessionsIgnoresNonPositive asserts the cap cannot be disabled (a
+// non-positive value is ignored), preserving the DoS guard.
+func TestSetMaxSessionsIgnoresNonPositive(t *testing.T) {
+	srv, _ := NewServer("ts", "server")
+	h := NewHTTPHandler(srv, nil, nil)
+	h.SetMaxSessions(0)
+	h.sessions.mu.Lock()
+	got := h.sessions.maxSessions
+	h.sessions.mu.Unlock()
+	if got != defaultMaxSessions {
+		t.Fatalf("SetMaxSessions(0) changed cap to %d, want default %d", got, defaultMaxSessions)
+	}
+	h.SetMaxSessions(5)
+	h.sessions.mu.Lock()
+	got = h.sessions.maxSessions
+	h.sessions.mu.Unlock()
+	if got != 5 {
+		t.Fatalf("SetMaxSessions(5): cap=%d, want 5", got)
+	}
+}
+
 func TestHTTP_NotificationReturns202(t *testing.T) {
 	ts, _ := newTestHTTP(t, nil, nil)
 	// first initialize
