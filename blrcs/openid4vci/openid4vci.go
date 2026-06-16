@@ -648,7 +648,7 @@ func (iss *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		writeVCIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		writeVCIError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 	if r.Form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:pre-authorized_code" {
@@ -686,19 +686,30 @@ func (iss *Issuer) handleCredential(w http.ResponseWriter, r *http.Request) {
 	accessToken := strings.TrimPrefix(authz, "Bearer ")
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
-		writeVCIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		writeVCIError(w, http.StatusBadRequest, "invalid_request", "request body too large or unreadable")
 		return
 	}
 	var req CredentialRequest
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
-			writeVCIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			writeVCIError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
 			return
 		}
 	}
 	resp, err := iss.IssueCredentialWithProof(accessToken, req)
 	if err != nil {
-		writeVCIError(w, http.StatusBadRequest, "invalid_token", err.Error())
+		// Map internal errors to opaque client-safe messages (CWE-209).
+		// Internal details (signer state, key IDs, nonce oracle) must not leak.
+		switch {
+		case errors.Is(err, ErrBadAccessToken):
+			writeVCIError(w, http.StatusUnauthorized, "invalid_token", "access token invalid or expired")
+		case errors.Is(err, ErrProofNonceMismatch), errors.Is(err, ErrInvalidProof):
+			writeVCIError(w, http.StatusBadRequest, "invalid_proof", "proof validation failed")
+		case errors.Is(err, ErrUnknownConfig):
+			writeVCIError(w, http.StatusBadRequest, "invalid_request", "unknown credential configuration")
+		default:
+			writeVCIError(w, http.StatusInternalServerError, "server_error", "credential issuance failed")
+		}
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

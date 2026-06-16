@@ -1,11 +1,13 @@
 package openid4vci
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -1796,5 +1798,71 @@ func TestVerifyProofJWTBadXCoord(t *testing.T) {
 	_, err := verifyProofJWT(proofJWT, "nonce", "https://issuer.example")
 	if err != ErrInvalidProof {
 		t.Errorf("short X coordinate: want ErrInvalidProof, got %v", err)
+	}
+}
+
+// ============================================================================
+// handleCredential error info-disclosure: opaque responses (CWE-209)
+// ============================================================================
+
+// TestHandleCredentialErrorsAreOpaque verifies that the credential endpoint
+// returns opaque, client-safe error descriptions for every failure path —
+// no internal error strings, signer diagnostics, or key state are leaked.
+func TestHandleCredentialErrorsAreOpaque(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+	client := ts.Client()
+
+	mustBody := func(resp *http.Response) string {
+		t.Helper()
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return string(b)
+	}
+
+	internalStrings := []string{
+		"vci:", "sign", "sdjwt", "compliance", "ed25519", "ErrBadAccessToken",
+		"ErrInvalidProof", "ErrProofNonceMismatch", "ErrUnknownConfig",
+	}
+	leak := func(body string) bool {
+		for _, s := range internalStrings {
+			if strings.Contains(body, s) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Case 1: expired/invalid access token → 401, no internals.
+	req1, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", strings.NewReader("{}"))
+	req1.Header.Set("Authorization", "Bearer bad-token")
+	req1.Header.Set("Content-Type", "application/json")
+	resp1, _ := client.Do(req1)
+	body1 := mustBody(resp1)
+	if resp1.StatusCode != http.StatusUnauthorized {
+		t.Errorf("bad token: want 401, got %d: %s", resp1.StatusCode, body1)
+	}
+	if leak(body1) {
+		t.Errorf("bad token response leaks internals: %s", body1)
+	}
+
+	// Case 2: valid token but bad proof JWT → 400 invalid_proof, no internals.
+	tr := mustGetToken(t, iss)
+	badProof := json.RawMessage(`{"proof_type":"jwt","jwt":"a.b.c"}`)
+	body2JSON, _ := json.Marshal(CredentialRequest{Proof: badProof})
+	req2, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", bytes.NewReader(body2JSON))
+	req2.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req2.Header.Set("Content-Type", "application/json")
+	resp2, _ := client.Do(req2)
+	body2 := mustBody(resp2)
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad proof: want 400, got %d: %s", resp2.StatusCode, body2)
+	}
+	if !strings.Contains(body2, "invalid_proof") {
+		t.Errorf("bad proof: want invalid_proof error code: %s", body2)
+	}
+	if leak(body2) {
+		t.Errorf("bad proof response leaks internals: %s", body2)
 	}
 }

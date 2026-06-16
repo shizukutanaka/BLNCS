@@ -91,6 +91,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   longer than 64 entries with `ErrBadReceipt` before allocating. Test:
   `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
 
+- **`openid4vci` credential endpoint leaked raw internal errors to unauthenticated
+  callers — nonce oracle + signer info-disclosure (CWE-209, Axis 6).** `handleCredential`
+  passed `err.Error()` verbatim as `error_description` in every failure path from
+  `IssueCredentialWithProof`. Internal error strings — `"vci: sdjwt sign: ..."`,
+  `ErrProofNonceMismatch`, `ErrInvalidProof`, signer/crypto library messages — were
+  returned to any caller holding any Bearer token, including expired or forged ones.
+  This turned the credential endpoint into a step-by-step proof-validation oracle: an
+  attacker probing with crafted `proof` JWTs could distinguish nonce mismatch from
+  signature failure from audience mismatch, reducing brute-force complexity. The token
+  endpoint (line 668) already deliberately suppresses failure reasons with a comment
+  about CWE-209; the credential endpoint undid that protection. Fix: all error paths
+  now map to opaque client-safe messages via `errors.Is` dispatch. Additionally: parse
+  and decode errors that previously echoed `err.Error()` (form parse, body read, JSON
+  unmarshal) are replaced with generic strings. `ErrBadAccessToken` correctly returns
+  401 with code `"invalid_token"` (not 400); `ErrInvalidProof`/`ErrProofNonceMismatch`
+  return 400 with code `"invalid_proof"` per OpenID4VCI spec §10.3; signing failures
+  return 500 `"server_error"`. Test: `TestHandleCredentialErrorsAreOpaque` confirms
+  neither the 401 (bad token) nor the 400 (bad proof) paths expose any internal prefix.
+
 - **`replay.Detector.evictOldest` evicted one entry per capacity-overflow, forcing
   O(n) map scan on every insertion under flood — write-lock DoS (Axis 10 resource
   exhaustion).** When `seen` reached `maxSize`, every new `Check` call held the write
