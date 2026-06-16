@@ -319,13 +319,30 @@ func (fs *FileStorage) SaveKeyPair(pub ed25519.PublicKey, priv ed25519.PrivateKe
 	if len(pub) != ed25519.PublicKeySize || len(priv) != ed25519.PrivateKeySize {
 		return errors.New("storage: keypair wrong size")
 	}
-	// atomic write: tmp + rename
+	// Crash-safe atomic write: (1) write + fsync tmp file, (2) rename, (3) syncDir.
+	// os.WriteFile does not fsync file data before close — a crash between WriteFile
+	// and Rename can leave the renamed keypair.bin with zero/garbage bytes (page-cache
+	// flush not guaranteed), silently destroying the private key.
+	// syncDir alone makes the rename durable (directory entry), not the data.
 	tmp := filepath.Join(fs.dir, keypairFileName+".tmp")
 	final := filepath.Join(fs.dir, keypairFileName)
 	buf := make([]byte, 0, ed25519.PublicKeySize+ed25519.PrivateKeySize)
 	buf = append(buf, pub...)
 	buf = append(buf, priv...)
-	if err := os.WriteFile(tmp, buf, 0o600); err != nil {
+
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(buf); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, final); err != nil {

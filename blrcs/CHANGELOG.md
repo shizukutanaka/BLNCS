@@ -91,6 +91,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   longer than 64 entries with `ErrBadReceipt` before allocating. Test:
   `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
 
+- **`storage.FileStorage.SaveKeyPair` used `os.WriteFile` without fsync — same
+  crash-safety gap as the `kms.FileSigner` fix, risking silent key destruction on
+  power loss (key lifecycle, Axis 9).** `os.WriteFile` does not guarantee data
+  durability before the file handle is closed: it opens the file, writes to the
+  page cache, and closes it, but none of those steps flush to durable storage.
+  `os.Rename` then moves the tmp file to `keypair.bin`. If the machine crashes
+  between the rename and the OS flushing the file data, the directory entry
+  `keypair.bin` exists (the rename itself is made durable by the subsequent
+  `syncDir`) but its content may be zeros or partial bytes — the Transparency
+  Service's Ed25519 private key is silently destroyed. All future SCITT receipt
+  signing fails and the TS cannot rotate keys. An attacker who can trigger a
+  controlled power-off immediately after a key rotation (cloud forced-stop, OOM
+  reboot, UPS manipulation) exploits this window. Fix mirrors the `kms.FileSigner`
+  crash-safety pattern already applied: `os.OpenFile` + explicit `Write` + `Sync`
+  (flush file data to disk) + `Close` + `Rename` + `syncDir`. The comment in the
+  original code stated "atomic write: tmp + rename" but was incomplete — `syncDir`
+  alone ensures the rename is durable, not the key bytes written to the tmp file.
+  Test: `TestSaveKeyPairNoStaleTemp` verifies no `.tmp` artefact survives and the
+  key round-trips after reload.
+
 - **`webhook.deliverOnce` drained subscriber response bodies without a size cap —
   rogue endpoint could stream infinite bytes and block all webhook delivery (resource
   exhaustion).** `io.Copy(io.Discard, resp.Body)` has no bound on bytes read. The

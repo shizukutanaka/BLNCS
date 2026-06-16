@@ -697,6 +697,34 @@ func TestSaveKeyPairWriteFileFails(t *testing.T) {
 	}
 }
 
+// TestSaveKeyPairNoStaleTemp verifies the crash-safe write: after a successful
+// SaveKeyPair the .tmp file is not left behind (it was renamed to keypair.bin).
+func TestSaveKeyPairNoStaleTemp(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-savekp-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	if err := s.SaveKeyPair(pub, priv); err != nil {
+		t.Fatalf("SaveKeyPair: %v", err)
+	}
+	tmpPath := filepath.Join(dir, keypairFileName+".tmp")
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Error("stale .tmp file found after successful SaveKeyPair")
+	}
+	// Key must survive reload.
+	pub2, priv2, err := s.LoadKeyPair()
+	if err != nil {
+		t.Fatalf("LoadKeyPair after save: %v", err)
+	}
+	if string(pub2) != string(pub) || string(priv2) != string(priv) {
+		t.Error("keypair mismatch after save + reload")
+	}
+}
+
 // TestSaveKeyPairRenameFails covers storage.go:331-333: os.Rename fails when
 // the final keypair path is occupied by a non-empty directory.
 func TestSaveKeyPairRenameFails(t *testing.T) {
