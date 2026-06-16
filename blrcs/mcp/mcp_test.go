@@ -204,6 +204,51 @@ func TestAutoAudit(t *testing.T) {
 	}
 }
 
+// TestFailedMutatingCallNotAudited asserts that a *rejected* mutating tool call
+// does not append to the transparency ledger. Auditing before dispatch let an
+// unauthorized/invalid call (unknown issuer, bad params) pollute the append-only
+// log and amplify write cost; audit must happen only after a successful dispatch.
+func TestFailedMutatingCallNotAudited(t *testing.T) {
+	srv, _, _ := setupServer(t)
+
+	cases := []struct {
+		name string
+		call string
+	}{
+		{
+			name: "unknown issuer",
+			call: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"issue_passport","arguments":{"issuerId":"did:web:not-registered","productId":"p1"}}}`,
+		},
+		{
+			name: "invalid params (negative carbon)",
+			call: `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"issue_passport","arguments":{"issuerId":"did:web:factory.example","productId":"p1","carbonKgCO2e":-5}}}`,
+		},
+		{
+			name: "register_scitt unknown issuer",
+			call: `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"register_scitt","arguments":{"issuerId":"did:web:not-registered","subject":"s","payload":"data"}}}`,
+		},
+		{
+			name: "issue_sdjwt missing subject",
+			call: `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"issue_sdjwt","arguments":{"issuerId":"did:web:factory.example","sdClaims":{"a":1}}}}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := srv.Ledger().Size()
+			resp := callRaw(t, srv, tc.call)
+			// Must be reported as a tool error...
+			if !resp["result"].(map[string]any)["isError"].(bool) {
+				t.Fatalf("expected isError=true for %q", tc.name)
+			}
+			// ...and must NOT have grown the ledger.
+			if got := srv.Ledger().Size(); got != before {
+				t.Fatalf("failed mutating call polluted ledger: before=%d after=%d", before, got)
+			}
+		})
+	}
+}
+
 func TestUnknownMethod(t *testing.T) {
 	srv, _, _ := setupServer(t)
 	resp := callRaw(t, srv, `{"jsonrpc":"2.0","id":10,"method":"bogus","params":{}}`)

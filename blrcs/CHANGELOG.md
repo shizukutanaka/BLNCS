@@ -37,6 +37,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`mcp` audited tool calls *before* dispatch — rejected calls polluted the transparency
+  ledger (forensic integrity + write-amplification DoS).** `handleToolCall` appended an audit
+  leaf for every mutating tool (`issue_passport`, `attest_range`, `register_scitt`, `issue_sdjwt`)
+  *before* the call ran, so a rejected call — unknown/unregistered issuer, invalid params, missing
+  subject — still cost one Ed25519 signature plus a Merkle append and left a permanent entry in the
+  append-only log for an operation that changed no state. An attacker who isn't even a registered
+  issuer could flood the ledger with garbage and amplify write cost, directly undercutting the
+  adjacent design note about not growing the ledger from cheap calls. Audit now fires only *after*
+  a successful `dispatch`, so the immutable log records actual state changes only. Failed attempts
+  belong in operational logs/metrics, not the cryptographic transparency log. Test:
+  `TestFailedMutatingCallNotAudited` asserts four distinct rejected mutating calls (unknown issuer,
+  negative carbon, unknown SCITT issuer, missing SD-JWT subject) leave the ledger size unchanged.
+
 - **`mcp` HTTP session store grew without bound despite its "in-memory LRU" contract
   (resource exhaustion, Axis 10 lens on a new surface).** The doc comment promised an
   "in-memory LRU with idle expiry", but `sessionStore.create` was an unbounded map insert:

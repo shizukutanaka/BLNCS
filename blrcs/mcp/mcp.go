@@ -325,21 +325,28 @@ func (s *Server) handleToolCall(id json.RawMessage, params json.RawMessage) *rpc
 	if lim != nil && !lim.Allow(p.Name) {
 		return errorResp(id, errRateLimit, "rate limit exceeded for tool: "+p.Name, nil)
 	}
-	// Only mutating tools are audited to the transparency log. Read-only tools
-	// (verify_*, get_*, checkpoint) must not append a ledger leaf per call —
-	// otherwise a client issuing cheap reads grows the ledger without bound and
-	// amplifies the O(n) cost of each append.
-	if auditableTool[p.Name] {
-		s.auditToolCall(p.Name, p.Arguments)
-	}
 
 	result, err := s.dispatch(p.Name, p.Arguments)
 	if err != nil {
+		// A rejected call changed no state, so it must NOT append to the
+		// transparency log. Auditing before dispatch let unauthorized/invalid
+		// mutating calls (unknown issuer, bad params, validation failures) pollute
+		// the append-only ledger and amplify write cost (one Ed25519 sign + Merkle
+		// append per rejected call) — a ledger-pollution / write-amplification DoS.
 		return okResp(id, toolCallResult{
 			Content: []contentBlock{{Type: "text", Text: err.Error()}},
 			IsError: true,
 		})
 	}
+
+	// Only state-changing tools that actually succeeded are recorded to the
+	// transparency log. Read-only tools (verify_*, get_*, checkpoint) are never
+	// audited — otherwise a client issuing cheap reads grows the ledger without
+	// bound and amplifies the O(log n) cost of each append.
+	if auditableTool[p.Name] {
+		s.auditToolCall(p.Name, p.Arguments)
+	}
+
 	return okResp(id, toolCallResult{
 		Content: []contentBlock{{Type: "text", Text: result}},
 		IsError: false,
