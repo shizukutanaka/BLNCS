@@ -37,6 +37,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`telemetry.Histogram.Observe` used `count % reservoirSize` for reservoir sampling
+  — a deterministic circular-buffer that broke every percentile estimate (statistical
+  correctness, Axis 15).** The comment read "reservoir sampling" but the replacement
+  strategy was `h.samples[int(h.count.Load()) % histogramReservoirSize] = v`: for any
+  second batch of 1024 observations this overwrites all 1024 slots in order, making the
+  reservoir a rolling window of the most-recent 1024 values rather than a uniform random
+  sample of all values seen. P50/P95/P99 were therefore only representative of the
+  recent tail; for a DPP-issuance latency histogram with bursty traffic they could
+  appear to drop dramatically even though the long-run distribution was unchanged —
+  exactly the opposite of what a performance alert threshold should behave. Correct
+  reservoir sampling requires Vitter's Algorithm R: for the n-th observation (n > k),
+  pick a random j ∈ [0, n-1]; if j < k, replace samples[j]. This gives each past
+  observation an equal k/n probability of surviving, producing an unbiased random
+  sample regardless of arrival order. Fix: capture the atomic position `n :=
+  h.count.Add(1)`, then use `rand.Int63n(n)` (`math/rand`, stdlib) in the replacement
+  branch. Test: `TestHistogramReservoirSamplingIsRandom` fills the reservoir with
+  `0.0` then sends 1024 observations of `999.0`; with the old deterministic code all
+  zeros are overwritten (zeroCount == 0); with correct Vitter's approximately half
+  survive — the probability of none surviving is < 10⁻³⁰⁰.
+
 - **`compliance.VerifySDJWTWithBinding` had no issuer-binding check — a key-confusion
   attack let a verifier's trusted key validate a credential from a *different* issuer
   (key-confusion / open-key, Axis 14).** A verifier that held Ed25519 key Kₐ for

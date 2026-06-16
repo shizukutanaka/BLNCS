@@ -391,6 +391,43 @@ func TestHistogramSingleSamplePickCap(t *testing.T) {
 	}
 }
 
+// TestHistogramReservoirSamplingIsRandom verifies that the reservoir uses
+// Vitter's Algorithm R (random replacement) rather than a deterministic
+// modular index.  With the old count%size implementation the second batch of
+// reservoir-size observations would overwrite every slot in order, leaving
+// zero samples from the first batch.  With correct Algorithm R roughly half
+// the first-batch samples survive — the probability that all 1024 are evicted
+// by 1024 replacements is astronomically small (< 10^-300).
+func TestHistogramReservoirSamplingIsRandom(t *testing.T) {
+	tel := New(NopRecorder{})
+	h := tel.Histogram("vitter_reservoir")
+
+	// Phase 1: fill the reservoir entirely with 0.0
+	for i := 0; i < histogramReservoirSize; i++ {
+		h.Observe(0.0)
+	}
+	// Phase 2: send another reservoirSize observations of 999.0
+	for i := 0; i < histogramReservoirSize; i++ {
+		h.Observe(999.0)
+	}
+
+	h.mu.Lock()
+	zeroCount := 0
+	for _, s := range h.samples {
+		if s == 0.0 {
+			zeroCount++
+		}
+	}
+	h.mu.Unlock()
+
+	// With the old count%size code all 1024 slots would be 999.0 (zeroCount==0).
+	// With Vitter's Algorithm R approximately 512 zeros survive; the probability
+	// of none surviving is effectively zero.
+	if zeroCount == 0 {
+		t.Error("reservoir sampling is deterministic: all first-batch samples were overwritten; want Vitter's Algorithm R (random replacement)")
+	}
+}
+
 // TestDefaultNilFallback covers the `return New(NopRecorder{})` branch in
 // Default() when no default has been set.
 func TestDefaultNilFallback(t *testing.T) {

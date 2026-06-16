@@ -26,6 +26,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"math/rand"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -260,7 +261,7 @@ func (t *Telemetry) Histogram(name string) *Histogram {
 }
 
 func (h *Histogram) Observe(v float64) {
-	h.count.Add(1)
+	n := h.count.Add(1) // capture 1-indexed position for Vitter's Algorithm R
 	h.sum.Add(int64(v * 1000))
 	for {
 		old := h.maxValue.Load()
@@ -275,9 +276,12 @@ func (h *Histogram) Observe(v float64) {
 	if len(h.samples) < histogramReservoirSize {
 		h.samples = append(h.samples, v)
 	} else {
-		// reservoir sampling
-		idx := int(h.count.Load()) % histogramReservoirSize
-		h.samples[idx] = v
+		// Vitter's Algorithm R: each past observation has equal probability k/n
+		// of surviving in the reservoir, giving an unbiased random sample.
+		j := rand.Int63n(n)
+		if j < histogramReservoirSize {
+			h.samples[j] = v
+		}
 	}
 	h.mu.Unlock()
 }
