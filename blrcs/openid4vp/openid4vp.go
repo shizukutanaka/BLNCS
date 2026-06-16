@@ -106,9 +106,17 @@ type SessionStore interface {
 	Consume(state string) error // ワンタイム: 使用後無効化 (リプレイ防止)
 }
 
+// defaultMemStoreMax caps pending authorization sessions to prevent unbounded
+// memory growth from unauthenticated CreateRequest floods. Each entry is small
+// (~200B) so 50 000 entries ≈ 10 MB, a negligible fraction of typical heap.
+// The GC loop clears expired entries every 5 minutes; this cap is the safety
+// net for the attack window between GC ticks.
+const defaultMemStoreMax = 50_000
+
 type memoryStore struct {
-	mu   sync.Mutex
-	data map[string]*memEntry
+	mu      sync.Mutex
+	data    map[string]*memEntry
+	maxSize int
 }
 
 type memEntry struct {
@@ -118,15 +126,37 @@ type memEntry struct {
 
 // NewMemoryStore — インメモリ SessionStore 構築 (TTL 付き GC 内蔵)。
 func NewMemoryStore() SessionStore {
-	s := &memoryStore{data: make(map[string]*memEntry)}
+	return NewMemoryStoreWithCap(defaultMemStoreMax)
+}
+
+// NewMemoryStoreWithCap constructs a memoryStore with a custom session cap.
+// cap ≤ 0 is replaced by defaultMemStoreMax.
+func NewMemoryStoreWithCap(cap int) SessionStore {
+	if cap <= 0 {
+		cap = defaultMemStoreMax
+	}
+	s := &memoryStore{data: make(map[string]*memEntry), maxSize: cap}
 	go s.gcLoop()
 	return s
 }
 
 func (m *memoryStore) Save(state string, req *AuthorizationRequest, ttl time.Duration) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.data) >= m.maxSize {
+		// Sweep one expired entry to make room before failing.
+		now := time.Now()
+		for k, e := range m.data {
+			if now.After(e.expires) {
+				delete(m.data, k)
+				break
+			}
+		}
+		if len(m.data) >= m.maxSize {
+			return errors.New("openid4vp: session store full")
+		}
+	}
 	m.data[state] = &memEntry{req: req, expires: time.Now().Add(ttl)}
-	m.mu.Unlock()
 	return nil
 }
 

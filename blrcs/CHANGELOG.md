@@ -91,6 +91,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   longer than 64 entries with `ErrBadReceipt` before allocating. Test:
   `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
 
+- **`openid4vp.memoryStore` grew without bound — unauthenticated `CreateRequest` floods could
+  exhaust heap (resource exhaustion, Axis 10 on a new surface).** `memoryStore.Save` was an
+  uncapped map insert: an unauthenticated caller could issue unlimited `CreateRequest` calls,
+  each reserving a 200-byte `memEntry` under a unique random `state` key. The GC loop runs
+  every 5 minutes; during the 10-minute `DefaultTTL` window an attacker can accumulate entries
+  far faster than they expire — no server-side authentication required, just repeated HTTP
+  POSTs. Added `defaultMemStoreMax = 50_000` (≈10 MB) enforced inside `Save`: if at capacity,
+  one expired entry is swept first to reclaim space; if still full, `Save` returns
+  `"openid4vp: session store full"`. Live unexpired sessions are never silently evicted —
+  returning an error is preferable to dropping an in-flight authentication flow. New
+  `NewMemoryStoreWithCap(n)` (non-positive → default) enables lower limits in tests and
+  constrained deployments. Tests: cap never exceeded with all-live entries; an expired entry
+  is swept to admit a new save; non-positive cap falls back to default.
+
 - **`kms.FileSigner.save()` was not crash-safe — missing fsync and syncDir after rename
   risked silently regenerating the signing key after a power failure (key lifecycle, Axis 9).**
   `save()` called `os.WriteFile` which does not guarantee data durability before the rename: a

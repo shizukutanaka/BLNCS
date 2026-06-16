@@ -738,3 +738,71 @@ func TestProcessResponseRevocation(t *testing.T) {
 		t.Errorf("Status should be nil for a credential without a status reference: %+v", vp4.Status)
 	}
 }
+
+// ============================================================================
+// memoryStore — bounded session store tests
+// ============================================================================
+
+// TestMemoryStoreBoundedCap verifies that the store never exceeds its cap and
+// returns an error when full and no expired entries exist to sweep.
+func TestMemoryStoreBoundedCap(t *testing.T) {
+	const cap = 5
+	store := NewMemoryStoreWithCap(cap).(*memoryStore)
+	req := &AuthorizationRequest{State: "x", Nonce: "n"}
+	for i := range cap {
+		state := "s" + string(rune('a'+i))
+		if err := store.Save(state, req, time.Hour); err != nil {
+			t.Fatalf("save %d failed: %v", i, err)
+		}
+	}
+	if len(store.data) != cap {
+		t.Fatalf("expected %d entries, got %d", cap, len(store.data))
+	}
+	// One more save must fail — all entries are still live.
+	if err := store.Save("overflow", req, time.Hour); err == nil {
+		t.Fatal("save beyond cap should fail when no expired entries exist")
+	}
+	if len(store.data) != cap {
+		t.Fatalf("store grew past cap: %d", len(store.data))
+	}
+}
+
+// TestMemoryStoreExpiredEntriesSweptBeforeError verifies that an expired entry
+// is evicted during Save to make room, so a new entry is accepted instead of
+// returning an error.
+func TestMemoryStoreExpiredEntriesSweptBeforeError(t *testing.T) {
+	const cap = 3
+	store := NewMemoryStoreWithCap(cap).(*memoryStore)
+	req := &AuthorizationRequest{State: "x", Nonce: "n"}
+	// Fill to cap with entries that expire immediately.
+	for i := range cap {
+		state := "s" + string(rune('a'+i))
+		if err := store.Save(state, req, -time.Second); err != nil {
+			t.Fatalf("save %d failed: %v", i, err)
+		}
+	}
+	// Force expiry.
+	store.mu.Lock()
+	now := time.Now()
+	for _, e := range store.data {
+		e.expires = now.Add(-2 * time.Second)
+	}
+	store.mu.Unlock()
+
+	// A new save should succeed by sweeping one expired entry.
+	if err := store.Save("new-live", req, time.Hour); err != nil {
+		t.Fatalf("save should succeed after sweeping expired entry: %v", err)
+	}
+}
+
+// TestNewMemoryStoreWithCapNonPositive verifies that cap ≤ 0 falls back to defaultMemStoreMax.
+func TestNewMemoryStoreWithCapNonPositive(t *testing.T) {
+	s := NewMemoryStoreWithCap(0).(*memoryStore)
+	if s.maxSize != defaultMemStoreMax {
+		t.Errorf("cap 0 should default to %d, got %d", defaultMemStoreMax, s.maxSize)
+	}
+	s2 := NewMemoryStoreWithCap(-1).(*memoryStore)
+	if s2.maxSize != defaultMemStoreMax {
+		t.Errorf("cap -1 should default to %d, got %d", defaultMemStoreMax, s2.maxSize)
+	}
+}
