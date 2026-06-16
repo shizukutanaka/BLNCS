@@ -421,6 +421,13 @@ func VerifyReceipt(r *Receipt, stmt Statement, tsPub ed25519.PublicKey) error {
 	if err != nil {
 		return ErrBadReceipt
 	}
+	// Reject before allocating: a valid RFC 6962 audit path for a 2^63-leaf tree
+	// has at most 63 hashes; anything larger is malformed or a memory-exhaustion
+	// attempt against VerifyReceipt callers.
+	const maxAuditPathLen = 64
+	if len(r.AuditPath) > maxAuditPathLen {
+		return ErrBadReceipt
+	}
 	path := make([][]byte, len(r.AuditPath))
 	for i, p := range r.AuditPath {
 		b, err := hexDecode(p)
@@ -490,7 +497,8 @@ type Checkpoint struct {
 func (l *Ledger) SignedCheckpoint() Checkpoint {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	root := merkleRoot(l.leafHashes)
+	n := len(l.leafHashes)
+	root := l.cachedRoot(n) // O(log n) amortised; merkleRoot would be O(n) per call
 	cp := Checkpoint{
 		TreeSize:  uint64(len(l.leafHashes)),
 		RootHash:  fmt.Sprintf("%x", root),

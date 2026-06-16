@@ -37,6 +37,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`scitt` Merkle recomputation was O(n) in checkpoint/root queries — DoS via
+  repeated checkpoint requests (Axis 13).** `SignedCheckpoint()` and `Root()` both
+  called `merkleRoot(l.leafHashes)` (O(n)) while holding the read mutex, even though
+  `Register()` and `Get()` already used the `perfectSubtree`-memoizing `cachedRoot()`
+  (O(log n) amortized). A client repeatedly calling the checkpoint endpoint could force
+  O(n) Merkle recomputation per request with a O(1) request — and block the write mutex
+  for longer. Fixed by replacing the uncached calls with `l.cachedRoot(len(l.leafHashes))`
+  in both functions; correctness is asserted by `TestSignedCheckpointMatchesCachedRoot` and
+  `TestRootMatchesCachedRoot` which verify bit-for-bit agreement with the reference
+  `merkleRoot` for all tree sizes 1–50.
+- **`scitt.VerifyReceipt` allocated unbounded slice before checking path length (resource
+  exhaustion).** An untrusted receipt with an enormous `AuditPath` (e.g., 1 million entries
+  in a JSON array) caused `make([][]byte, N)` allocation before the TS signature or
+  inclusion-proof check caught the malformed receipt. A valid RFC 6962 audit path for any
+  conceivable tree (up to 2^63 leaves) has at most 63 hashes; guard now rejects any path
+  longer than 64 entries with `ErrBadReceipt` before allocating. Test:
+  `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
+
 - **`webhook` SSRF guard was bypassable via DNS rebinding + missed the CGNAT range.**
   `validateOutboundURL` resolved DNS and checked the result, but the HTTP transport
   re-resolved at connection time, so a low-TTL DNS record could pass validation and

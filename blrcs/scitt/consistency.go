@@ -132,5 +132,5 @@ func isPow2(x uint64) bool {
 func (l *Ledger) Root() []byte {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return merkleRoot(l.leafHashes)
+	return l.cachedRoot(len(l.leafHashes)) // O(log n) amortised; merkleRoot is O(n)
 }

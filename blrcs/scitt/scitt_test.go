@@ -1107,3 +1107,83 @@ func TestReceiptCheckpointSigNotTransferable(t *testing.T) {
 		t.Fatal("receipt signature must not verify as a checkpoint signature")
 	}
 }
+
+// ============================================================================
+// Axis-13 (Merkle complexity + receipt audit path bounds)
+// ============================================================================
+
+// TestSignedCheckpointMatchesCachedRoot asserts that SignedCheckpoint (now using
+// cachedRoot) produces exactly the same root hash as the reference merkleRoot.
+// This proves the O(n)→O(log n) substitution is correct and not a silent regression.
+func TestSignedCheckpointMatchesCachedRoot(t *testing.T) {
+	ledger, _ := NewLedger("ts-cp-cached")
+	priv, _ := mustIssuer(t, "iss")
+
+	for n := 1; n <= 50; n++ {
+		s, _ := SignStatement(priv, "iss", fmt.Sprintf("s%d", n), "c", []byte(fmt.Sprintf("%d", n)))
+		if _, err := ledger.Register(s); err != nil {
+			t.Fatalf("n=%d: %v", n, err)
+		}
+
+		cp := ledger.SignedCheckpoint()
+
+		// Reference: the slow uncached path
+		ledger.mu.RLock()
+		refRoot := fmt.Sprintf("%x", merkleRoot(ledger.leafHashes))
+		ledger.mu.RUnlock()
+
+		if cp.RootHash != refRoot {
+			t.Fatalf("n=%d: checkpoint root %q != ref %q", n, cp.RootHash, refRoot)
+		}
+		if err := VerifyCheckpoint(cp, ledger.PublicKey()); err != nil {
+			t.Fatalf("n=%d: checkpoint signature invalid: %v", n, err)
+		}
+	}
+}
+
+// TestVerifyReceiptOversizedAuditPathRejected asserts that a receipt whose
+// AuditPath has more than 64 entries is rejected before any allocation. A
+// legitimate tree of any conceivable size (up to 2^63 leaves) requires at most
+// 63 path elements, so 65 is unambiguously malformed.
+func TestVerifyReceiptOversizedAuditPathRejected(t *testing.T) {
+	ledger, _ := NewLedger("ts-bigpath")
+	priv, _ := mustIssuer(t, "iss")
+	stmt, _ := SignStatement(priv, "iss", "s", "c", []byte("payload"))
+	receipt, _ := ledger.Register(stmt)
+
+	bad := *receipt
+	// Build a 65-element audit path of zero-hash hex strings; TS signature is
+	// copied from the original (validation must fail before it's re-checked).
+	bad.AuditPath = make([]string, 65)
+	for i := range bad.AuditPath {
+		bad.AuditPath[i] = fmt.Sprintf("%064x", 0) // 32 zero bytes as hex
+	}
+
+	if err := VerifyReceipt(&bad, stmt, ledger.PublicKey()); err != ErrBadReceipt {
+		t.Fatalf("oversized AuditPath: want ErrBadReceipt, got %v", err)
+	}
+}
+
+// TestRootMatchesCachedRoot asserts that Root() (now using cachedRoot) matches
+// the reference merkleRoot for every tree size 1..50.
+func TestRootMatchesCachedRoot(t *testing.T) {
+	ledger, _ := NewLedger("ts-root-cached")
+	priv, _ := mustIssuer(t, "iss")
+
+	for n := 1; n <= 50; n++ {
+		s, _ := SignStatement(priv, "iss", fmt.Sprintf("s%d", n), "c", []byte(fmt.Sprintf("%d", n)))
+		if _, err := ledger.Register(s); err != nil {
+			t.Fatalf("n=%d: %v", n, err)
+		}
+
+		got := ledger.Root()
+
+		ledger.mu.RLock()
+		want := merkleRoot(ledger.leafHashes)
+		ledger.mu.RUnlock()
+
+		if !equalBytes(got, want) {
+			t.Fatalf("n=%d: Root()=%x != ref=%x", n, got, want)
+		}
+	}
+}
