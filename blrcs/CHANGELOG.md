@@ -91,6 +91,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   longer than 64 entries with `ErrBadReceipt` before allocating. Test:
   `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
 
+- **`kms.FileSigner.save()` was not crash-safe — missing fsync and syncDir after rename
+  risked silently regenerating the signing key after a power failure (key lifecycle, Axis 9).**
+  `save()` called `os.WriteFile` which does not guarantee data durability before the rename: a
+  crash in the flush window could leave the key file absent or truncated, causing the next
+  `NewFileSigner` call to silently generate a *new* Ed25519 key — invalidating every credential,
+  SCITT receipt, and SD-JWT issued under the previous key with no error. The fix follows the
+  identical pattern already used in `storage.FileStorage.SaveKeyPair`: (1) write to `<path>.tmp`
+  using `os.OpenFile` with explicit `Sync()` to flush data to disk, (2) `os.Rename` for atomic
+  name-swap, (3) `syncDir(filepath.Dir(path))` to flush the directory entry. Without step 3 the
+  rename is in the page cache and can be lost on sudden power loss even after the file data is
+  durable. Added `syncDir` helper (identical to the one in `storage`). Test:
+  `TestFileSignerSaveIsAtomic` verifies no stale `.tmp` artefact survives a clean write and the
+  key file round-trips correctly after reload.
+
 - **`webhook` SSRF guard was bypassable via DNS rebinding + missed the CGNAT range.**
   `validateOutboundURL` resolved DNS and checked the result, but the HTTP transport
   re-resolved at connection time, so a low-TTL DNS record could pass validation and

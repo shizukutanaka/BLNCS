@@ -492,19 +492,49 @@ func TestFileSignerMkdirFails(t *testing.T) {
 }
 
 // TestFileSignerSaveFails covers the fs.save() error branch in NewFileSigner and the
-// os.WriteFile error branch inside save(). A directory at the .tmp path causes WriteFile
+// os.OpenFile error branch inside save(). A directory at the .tmp path causes OpenFile
 // to return EISDIR, which propagates back through NewFileSigner.
 func TestFileSignerSaveFails(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := filepath.Join(dir, "my.key")
 	tmpPath := keyPath + ".tmp"
-	// Block WriteFile by pre-creating a directory at the .tmp path.
+	// Block OpenFile by pre-creating a directory at the .tmp path.
 	if err := os.MkdirAll(tmpPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// os.Stat(keyPath) → not found → generate key → save() → WriteFile(tmpPath) → EISDIR
+	// os.Stat(keyPath) → not found → generate key → save() → OpenFile(tmpPath) → EISDIR
 	_, err := NewFileSigner("id", keyPath)
 	if err == nil {
 		t.Fatal("NewFileSigner should fail when the .tmp path is a directory")
+	}
+}
+
+// TestFileSignerSaveIsAtomic verifies that a successful save leaves no stale .tmp
+// file and that the key file round-trips correctly — exercising the crash-safe
+// write-fsync-rename-syncdir sequence.
+func TestFileSignerSaveIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "atomic.key")
+
+	s, err := NewFileSigner("did:web:atomic", keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := s.PublicKey()
+	s.Close()
+
+	// No .tmp artefact should survive a clean write.
+	if _, err := os.Stat(keyPath + ".tmp"); !os.IsNotExist(err) {
+		t.Error("stale .tmp file left after successful save")
+	}
+
+	// Key survives reload — confirming rename committed a valid file.
+	s2, err := NewFileSigner("did:web:atomic", keyPath)
+	if err != nil {
+		t.Fatalf("reload after atomic save failed: %v", err)
+	}
+	defer s2.Close()
+	if string(s2.PublicKey()) != string(pub) {
+		t.Error("reloaded public key does not match saved key")
 	}
 }

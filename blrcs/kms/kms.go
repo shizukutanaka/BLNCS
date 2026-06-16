@@ -31,6 +31,22 @@ import (
 	"sync"
 )
 
+// syncDir fsyncs a directory so newly created/renamed entries survive a crash.
+// Without this, os.Rename can succeed (the rename is in the page cache) but be
+// lost on a sudden power failure before the directory entry is flushed to disk.
+// The pattern is identical to storage.FileStorage.syncDir.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
+}
+
 // ============================================================================
 // Signer interface — Apple SecKeyCreateSignature 相当
 // ============================================================================
@@ -188,10 +204,32 @@ func (f *FileSigner) save() error {
 	buf := make([]byte, 0, ed25519.PublicKeySize+ed25519.PrivateKeySize)
 	buf = append(buf, f.pub...)
 	buf = append(buf, f.priv...)
-	if err := os.WriteFile(tmp, buf, 0o600); err != nil {
+
+	// Atomic write: write to tmp, fsync file data, rename, then fsync the
+	// directory entry. Without fsyncing (a) the file and (b) the directory,
+	// a crash in the flush window can leave either partial key bytes or a
+	// missing rename, both causing NewFileSigner to silently generate a new
+	// key on next startup — invalidating all previously-issued credentials
+	// and SCITT receipts. The pattern mirrors storage.FileStorage.SaveKeyPair.
+	tmpF, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("kms: create keyfile: %w", err)
+	}
+	if _, err := tmpF.Write(buf); err != nil {
+		_ = tmpF.Close()
 		return fmt.Errorf("kms: write keyfile: %w", err)
 	}
-	return os.Rename(tmp, f.path)
+	if err := tmpF.Sync(); err != nil {
+		_ = tmpF.Close()
+		return fmt.Errorf("kms: sync keyfile: %w", err)
+	}
+	if err := tmpF.Close(); err != nil {
+		return fmt.Errorf("kms: close keyfile: %w", err)
+	}
+	if err := os.Rename(tmp, f.path); err != nil {
+		return fmt.Errorf("kms: rename keyfile: %w", err)
+	}
+	return syncDir(filepath.Dir(f.path))
 }
 
 func (f *FileSigner) ID() string                   { return f.id }
