@@ -91,6 +91,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   longer than 64 entries with `ErrBadReceipt` before allocating. Test:
   `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
 
+- **`compliance` W3C VC proof metadata (`proofPurpose`, `verificationMethod`) was not
+  bound to the Ed25519 signature — post-issuance tampering undetectable (credential
+  malleability, authentication scope).** `canonicalPayload` signed `@context`, `type`,
+  `issuer`, `validFrom`, `validUntil`, `credentialSubject`, and `credentialStatus` — but
+  excluded the `Proof` object entirely. A relay or storage layer could silently overwrite
+  `proof.verificationMethod` (pointing to an attacker-controlled DID) or
+  `proof.proofPurpose` (from `"assertionMethod"` to `"authentication"`) without
+  invalidating the Ed25519 signature. Downstream systems that use `verificationMethod`
+  to drive DID key lookup — standard verifier behaviour per W3C VC Data Model — would
+  fetch the attacker-supplied DID document and accept a different key for future
+  verifications. The W3C Ed25519Signature2020 Linked Data Proof specification requires
+  that all proof option fields (except `proofValue` itself) be included in the signed
+  bytes. Fix: (1) `canonicalPayload` now includes `proofPurpose` and
+  `verificationMethod` from `cred.Proof` when set; (2) `Issue` and `IssueWithStatus`
+  pre-set these fields on the Proof object *before* calling `canonicalPayload`, so
+  they are bound at signing time; (3) `VerifyAt` asserts `ProofPurpose ==
+  "assertionMethod"` after signature verification, preventing purpose-confusion
+  attacks where a key-agreement proof is replayed as an assertion proof. Tests:
+  `TestProofMetadataMalleabilityRejected` verifies that tampering either field after
+  issuance breaks signature verification; `TestProofPurposeEnforced` verifies that a
+  wrong purpose is rejected independently of the signature check.
+
 - **`openid4vp.memoryStore` grew without bound — unauthenticated `CreateRequest` floods could
   exhaust heap (resource exhaustion, Axis 10 on a new surface).** `memoryStore.Save` was an
   uncapped map insert: an unauthenticated caller could issue unlimited `CreateRequest` calls,

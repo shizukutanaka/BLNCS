@@ -124,16 +124,28 @@ func (i *Issuer) PublicKey() ed25519.PublicKey { return i.publicKey }
 // canonicalPayload — 決定的バイト列を生成 (署名対象)
 // 注意: JSON-LD正規化 (URDNA2015) は重いので、最小フィールドのみ確定順で配列化
 // VC 2.0: validFrom/validUntil + credentialStatus を署名対象に含める
+//
+// Ed25519Signature2020 (W3C LD-Proofs): proofPurpose と verificationMethod も
+// 署名対象に含めることで、転送中の改ざん (purpose confusion / key redirection)
+// を防ぐ。proofValue は含めない (署名自体は自己参照できない)。
 func canonicalPayload(c *Credential) ([]byte, error) {
+	var proofPurpose, verificationMethod string
+	if c.Proof != nil {
+		proofPurpose = c.Proof.ProofPurpose
+		verificationMethod = c.Proof.VerificationMethod
+	}
 	return json.Marshal(struct {
-		Context []string          `json:"@context"`
-		Type    []string          `json:"type"`
-		Issuer  string            `json:"issuer"`
-		VF      time.Time         `json:"validFrom"`
-		VU      *time.Time        `json:"validUntil,omitempty"`
-		Subject PassportClaim     `json:"credentialSubject"`
-		Status  *CredentialStatus `json:"credentialStatus,omitempty"`
-	}{c.Context, c.Type, c.Issuer, c.ValidFrom, c.ValidUntil, c.Subject, c.Status})
+		Context            []string          `json:"@context"`
+		Type               []string          `json:"type"`
+		Issuer             string            `json:"issuer"`
+		VF                 time.Time         `json:"validFrom"`
+		VU                 *time.Time        `json:"validUntil,omitempty"`
+		Subject            PassportClaim     `json:"credentialSubject"`
+		Status             *CredentialStatus `json:"credentialStatus,omitempty"`
+		ProofPurpose       string            `json:"proofPurpose"`
+		VerificationMethod string            `json:"verificationMethod"`
+	}{c.Context, c.Type, c.Issuer, c.ValidFrom, c.ValidUntil, c.Subject, c.Status,
+		proofPurpose, verificationMethod})
 }
 
 // Issue — DPP発行
@@ -156,18 +168,20 @@ func (i *Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential
 		exp := now.Add(validFor)
 		cred.ValidUntil = &exp
 	}
-	payload, err := canonicalPayload(cred)
-	if err != nil {
-		return nil, fmt.Errorf("canonicalize: %w", err)
-	}
-	sig := ed25519.Sign(i.privateKey, payload)
+	// Pre-set proof metadata (without ProofValue) so canonicalPayload binds
+	// proofPurpose and verificationMethod to the signature, preventing
+	// post-issuance tampering (W3C LD-Proofs / Ed25519Signature2020 pattern).
 	cred.Proof = &Proof{
 		Type:               "Ed25519Signature2020",
 		Created:            now,
 		VerificationMethod: i.ID + "#key-1",
 		ProofPurpose:       "assertionMethod",
-		ProofValue:         base64.StdEncoding.EncodeToString(sig),
 	}
+	payload, err := canonicalPayload(cred)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize: %w", err)
+	}
+	cred.Proof.ProofValue = base64.StdEncoding.EncodeToString(ed25519.Sign(i.privateKey, payload))
 	return cred, nil
 }
 
@@ -208,18 +222,17 @@ func (i *Issuer) IssueWithStatus(claim PassportClaim, validFor time.Duration, st
 		exp := now.Add(validFor)
 		cred.ValidUntil = &exp
 	}
-	payload, err := canonicalPayload(cred)
-	if err != nil {
-		return nil, fmt.Errorf("canonicalize: %w", err)
-	}
-	sig := ed25519.Sign(i.privateKey, payload)
 	cred.Proof = &Proof{
 		Type:               "Ed25519Signature2020",
 		Created:            now,
 		VerificationMethod: i.ID + "#key-1",
 		ProofPurpose:       "assertionMethod",
-		ProofValue:         base64.StdEncoding.EncodeToString(sig),
 	}
+	payload, err := canonicalPayload(cred)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize: %w", err)
+	}
+	cred.Proof.ProofValue = base64.StdEncoding.EncodeToString(ed25519.Sign(i.privateKey, payload))
 	return cred, nil
 }
 
@@ -252,6 +265,9 @@ func VerifyAt(cred *Credential, pub ed25519.PublicKey, now time.Time) error {
 		return fmt.Errorf("canonicalize: %w", err)
 	}
 	if !ed25519.Verify(pub, payload, sig) {
+		return ErrInvalidSig
+	}
+	if cred.Proof.ProofPurpose != "assertionMethod" {
 		return ErrInvalidSig
 	}
 	return nil

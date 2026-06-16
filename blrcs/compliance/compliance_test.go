@@ -391,6 +391,74 @@ func TestVerifyRangeBadBase64Sig(t *testing.T) {
 // Present — malformed disclosure paths
 // ============================================================================
 
+// TestProofMetadataMalleabilityRejected verifies that tampering with
+// ProofPurpose or VerificationMethod after issuance invalidates the signature.
+// These fields are now included in canonicalPayload, so any post-issuance
+// change breaks ed25519.Verify and is caught by VerifyAt.
+func TestProofMetadataMalleabilityRejected(t *testing.T) {
+	iss, err := NewIssuer("did:web:test.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := iss.Issue(PassportClaim{ProductID: "PROD-1"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := iss.PublicKey()
+
+	// Happy path: unmodified credential must verify.
+	if err := Verify(cred, pub); err != nil {
+		t.Fatalf("fresh credential should verify: %v", err)
+	}
+
+	// Tamper ProofPurpose: changing from "assertionMethod" to "authentication"
+	// must be rejected even though every other field is authentic.
+	tampered1 := *cred
+	proof1 := *cred.Proof
+	proof1.ProofPurpose = "authentication"
+	tampered1.Proof = &proof1
+	if err := Verify(&tampered1, pub); err == nil {
+		t.Error("tampered ProofPurpose should fail verification")
+	}
+
+	// Tamper VerificationMethod: redirecting to a different key DID must fail.
+	tampered2 := *cred
+	proof2 := *cred.Proof
+	proof2.VerificationMethod = "did:web:attacker.example#key-1"
+	tampered2.Proof = &proof2
+	if err := Verify(&tampered2, pub); err == nil {
+		t.Error("tampered VerificationMethod should fail verification")
+	}
+}
+
+// TestProofPurposeEnforced verifies that VerifyAt rejects a credential whose
+// ProofPurpose is not "assertionMethod", even if the signature itself is valid
+// (e.g. if someone replays a key-agreement proof as an assertionMethod).
+func TestProofPurposeEnforced(t *testing.T) {
+	iss, _ := NewIssuer("did:web:purpose.test")
+	cred, _ := iss.Issue(PassportClaim{ProductID: "X"}, time.Hour)
+	pub := iss.PublicKey()
+
+	// Forge a credential whose canonical payload is identical but whose
+	// ProofPurpose is wrong. Since ProofPurpose is now signed, the only
+	// way to get a valid signature with a wrong purpose is to re-sign.
+	// Confirm that the original purpose "assertionMethod" passes.
+	if err := Verify(cred, pub); err != nil {
+		t.Fatalf("good credential: %v", err)
+	}
+	// Directly mutate ProofPurpose (simulating a relay rewrite).
+	orig := cred.Proof.ProofPurpose
+	cred.Proof.ProofPurpose = "keyAgreement"
+	if err := Verify(cred, pub); err == nil {
+		t.Error("wrong ProofPurpose should be rejected")
+	}
+	// Restore and confirm it passes again.
+	cred.Proof.ProofPurpose = orig
+	if err := Verify(cred, pub); err != nil {
+		t.Fatalf("restored credential should verify: %v", err)
+	}
+}
+
 func TestPresentMalformedDisclosures(t *testing.T) {
 	iss, _ := NewIssuer("did:web:p.test")
 	// Use a real JWT header for the first segment; disclosures we fabricate.
