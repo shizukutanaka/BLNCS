@@ -482,7 +482,15 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 		iss.mu.Unlock()
 		return nil, fmt.Errorf("vci: sdjwt sign: %w", err)
 	}
+	// Rotate c_nonce per OpenID4VCI spec: the rotated nonce is stored under the
+	// token entry so that proof-of-possession for a subsequent credential request
+	// (multi-use token or deferred issuance) is bound to the new challenge.
+	// Without this write-back, newCNonce is dead code: the entry retains the old
+	// nonce indefinitely, making every retry use the same stale nonce.
 	newCNonce := randomB64(16)
+	iss.mu.Lock()
+	entry.cNonce = newCNonce
+	iss.mu.Unlock()
 	return &CredentialResponse{
 		Credential:      sdjwt,
 		CNonce:          newCNonce,

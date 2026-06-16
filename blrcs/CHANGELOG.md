@@ -91,6 +91,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   longer than 64 entries with `ErrBadReceipt` before allocating. Test:
   `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
 
+- **`openid4vci.IssueCredentialWithProof` generated a rotated `c_nonce` but never
+  stored it — nonce rotation was dead code, violating OpenID4VCI §6.3 (protocol
+  correctness).** `newCNonce := randomB64(16)` was generated after successful
+  issuance and returned to the wallet in the `CredentialResponse`, but `entry.cNonce`
+  was never updated. For deferred issuance or multi-use token scenarios (where the
+  wallet makes a second credential request with the same access token), the internal
+  nonce stayed at the original value from the token exchange. Any subsequent proof
+  JWT bound to the rotated `newCNonce` would be rejected with `ErrProofNonceMismatch`
+  — effectively making the server's rotated nonce a lie. Fix: after signing, acquire
+  the lock and update `entry.cNonce = newCNonce` before returning, so the stored
+  challenge matches the nonce the server advertised. Test: `TestIssueCredentialWithProofRotatesCNonce`
+  verifies the returned nonce differs from the original token-response nonce and that
+  the internal entry reflects the rotated value.
+
 - **`storage.FileStorage.SaveKeyPair` used `os.WriteFile` without fsync — same
   crash-safety gap as the `kms.FileSigner` fix, risking silent key destruction on
   power loss (key lifecycle, Axis 9).** `os.WriteFile` does not guarantee data

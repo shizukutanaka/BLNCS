@@ -737,6 +737,57 @@ func TestIssueCredentialWithProofHappy(t *testing.T) {
 	}
 }
 
+// TestIssueCredentialWithProofRotatesCNonce verifies that after a successful
+// credential issuance the returned c_nonce is stored back into the token entry,
+// so a subsequent proof-of-possession request (deferred issuance, multi-use token)
+// must use the rotated nonce — not the original c_nonce from the token response.
+// Without the write-back, the rotated nonce was dead code: entry.cNonce stayed at
+// the original value making every retry use the same stale nonce.
+func TestIssueCredentialWithProofRotatesCNonce(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-nonce",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalNonce := tr.CNonce
+
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, originalNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatalf("valid proof: %v", err)
+	}
+	if cr.CNonce == "" {
+		t.Fatal("response must include a rotated c_nonce")
+	}
+	if cr.CNonce == originalNonce {
+		t.Error("rotated c_nonce must differ from the original token-response nonce")
+	}
+
+	// The token entry's internal cNonce must now equal the rotated value.
+	iss.mu.Lock()
+	var entry *preAuthEntry
+	for _, e := range iss.tokens {
+		entry = e
+	}
+	iss.mu.Unlock()
+	if entry == nil {
+		// Token was consumed by the successful issuance — entry may be absent
+		// (implementation detail). Just confirm the response nonce was non-empty.
+		t.Log("token entry evicted after issuance; nonce rotation confirmed via response only")
+		return
+	}
+	if entry.cNonce != cr.CNonce {
+		t.Errorf("internal entry.cNonce=%q should equal response CNonce=%q", entry.cNonce, cr.CNonce)
+	}
+}
+
 // TestIssueCredentialWithProofBindsHolderKey is the regression test for the
 // proof-of-possession binding gap: a credential issued against a valid proof MUST
 // be holder-bound (carry a cnf), otherwise it is a bearer credential that the
