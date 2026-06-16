@@ -427,8 +427,13 @@ func (s *Server) toolIssuePassport(args json.RawMessage) (string, error) {
 	if in.CarbonKgCO2e < 0 {
 		return "", errors.New("mcp: carbonKgCO2e must be non-negative")
 	}
-	if in.Recyclability < 0 || in.Recyclability > 100 {
-		return "", errors.New("mcp: recyclability must be between 0 and 100")
+	// Recyclability is a fraction in [0,1] (compliance.PassportClaim canonical
+	// range), and the advertised inputSchema declares minimum:0/maximum:1. The
+	// previous 0..100 bound contradicted both and let a value like 85 (meant as
+	// "85%") be signed into a credential as "8500%" — invalid data in a permanent
+	// signed artifact. Validate against the real range.
+	if in.Recyclability < 0 || in.Recyclability > 1 {
+		return "", errors.New("mcp: recyclability must be a fraction between 0 and 1")
 	}
 	s.mu.RLock()
 	iss, ok := s.issuers[in.IssuerID]

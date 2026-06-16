@@ -37,6 +37,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`mcp` `issue_passport` accepted out-of-range `recyclability`, signing invalid data into a
+  permanent credential (input-validation / schema drift).** `compliance.PassportClaim.Recyclability`
+  is canonically a fraction in `[0,1]` and the tool's advertised `inputSchema` declares
+  `minimum:0, maximum:1`, but the validator checked `0..100`. A client passing `recyclability: 85`
+  (intending 85%) had it accepted and Ed25519-signed into a DPP as `85.0` — a nonsensical "8500%"
+  value, immutable once issued. Tightened the bound to the real `[0,1]` range so the validator,
+  the schema, and the underlying type agree. Test: `TestToolIssuePassportRecyclabilityFractionRange`
+  asserts `85` is now rejected while `0.85` is still accepted (existing `200.0` rejection unchanged).
+
 - **`mcp` audited tool calls *before* dispatch — rejected calls polluted the transparency
   ledger (forensic integrity + write-amplification DoS).** `handleToolCall` appended an audit
   leaf for every mutating tool (`issue_passport`, `attest_range`, `register_scitt`, `issue_sdjwt`)

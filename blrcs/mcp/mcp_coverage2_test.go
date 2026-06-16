@@ -155,6 +155,35 @@ func TestToolIssuePassportBadRecyclability(t *testing.T) {
 	}
 }
 
+// TestToolIssuePassportRecyclabilityFractionRange asserts the validator enforces
+// the canonical [0,1] fraction range (matching compliance.PassportClaim and the
+// advertised inputSchema), rejecting values > 1 that the old 0..100 bound wrongly
+// admitted — which would otherwise sign nonsensical "8500%" recyclability into a
+// permanent credential. A valid fraction (0.85) must still pass.
+func TestToolIssuePassportRecyclabilityFractionRange(t *testing.T) {
+	srv, iss, _ := setupServer(t)
+
+	// 85 (a percentage, not a fraction) must now be rejected.
+	resp := mcpToolCall(t, srv, "issue_passport", map[string]any{
+		"issuerId":      iss.ID,
+		"productId":     "TEST-FRAC-1",
+		"recyclability": 85.0,
+	})
+	if !strings.Contains(resp, "isError") {
+		t.Errorf("recyclability=85 (out of [0,1]) should be rejected: %s", resp)
+	}
+
+	// A genuine fraction must still succeed.
+	resp = mcpToolCall(t, srv, "issue_passport", map[string]any{
+		"issuerId":      iss.ID,
+		"productId":     "TEST-FRAC-2",
+		"recyclability": 0.85,
+	})
+	if strings.Contains(resp, `"isError":true`) {
+		t.Errorf("recyclability=0.85 (valid fraction) should be accepted: %s", resp)
+	}
+}
+
 func TestToolIssuePassportEmptyProductID(t *testing.T) {
 	srv, iss, _ := setupServer(t)
 	// Known issuer but empty productId → Issue() returns ErrEmptyProductID
