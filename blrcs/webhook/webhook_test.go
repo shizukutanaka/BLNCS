@@ -677,3 +677,45 @@ func TestDeliverOnceZeroTimeout(t *testing.T) {
 		t.Errorf("zero timeout deliverOnce should succeed: %v", err)
 	}
 }
+
+// TestDeliverOnceBodyDrainIsBounded verifies that a subscriber endpoint
+// streaming an oversized response body does not block deliverOnce indefinitely.
+// The LimitReader cap means the goroutine returns promptly even when the server
+// streams far more than 64 KiB, preventing wg.Wait() stalls in Publish.
+func TestDeliverOnceBodyDrainIsBounded(t *testing.T) {
+	const oversizeBody = 1 << 20 // 1 MiB — well above the 64 KiB drain cap
+
+	// Server streams 1 MiB with Status 200.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		chunk := make([]byte, 4096)
+		for written := 0; written < oversizeBody; written += len(chunk) {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+	defer server.Close()
+
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	// Use a generous timeout so the test doesn't rely on deadline cancellation.
+	sub := Subscriber{URL: server.URL, Timeout: 5 * time.Second}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- bus.deliverOnce(context.Background(), sub, "evt", []byte("{}"))
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("deliverOnce with oversized body: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("deliverOnce hung on oversized response body (LimitReader not applied)")
+	}
+}

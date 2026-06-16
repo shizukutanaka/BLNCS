@@ -336,7 +336,10 @@ func (b *Bus) deliverOnce(ctx context.Context, s Subscriber, eventType string, p
 		return err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	// Drain up to 64 KiB to allow connection reuse; a LimitReader prevents a
+	// rogue subscriber endpoint streaming an infinite body from holding this
+	// goroutine (and blocking wg.Wait) past the subscriber Timeout.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}

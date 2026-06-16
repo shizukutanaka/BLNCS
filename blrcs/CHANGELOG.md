@@ -91,6 +91,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   longer than 64 entries with `ErrBadReceipt` before allocating. Test:
   `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
 
+- **`webhook.deliverOnce` drained subscriber response bodies without a size cap —
+  rogue endpoint could stream infinite bytes and block all webhook delivery (resource
+  exhaustion).** `io.Copy(io.Discard, resp.Body)` has no bound on bytes read. The
+  subscriber-level `Timeout` creates a context deadline that cancels the body read
+  when it fires, but a caller may set a large `Timeout` (e.g., 30 minutes) and the
+  per-request context is the only protection: if the rogue server streams slowly
+  (just fast enough to reset the idle timeout) and the subscriber `Timeout` is large,
+  the draining goroutine can block for the full duration. Since `Publish` spawns one
+  goroutine per subscriber and waits with `wg.Wait()`, a single adversarially
+  configured subscriber can stall all webhook delivery for every event type during
+  that window. Fixed by wrapping the body with `io.LimitReader(resp.Body, 64<<10)`:
+  64 KiB is sufficient to drain any legitimate webhook ACK and allows connection
+  reuse, but caps the worst-case read regardless of timeout. Test:
+  `TestDeliverOnceBodyDrainIsBounded` confirms that a 1 MiB response body (16× the
+  cap) returns promptly rather than blocking for seconds.
+
 - **`openid4vci` credential endpoint leaked raw internal errors to unauthenticated
   callers — nonce oracle + signer info-disclosure (CWE-209, Axis 6).** `handleCredential`
   passed `err.Error()` verbatim as `error_description` in every failure path from
