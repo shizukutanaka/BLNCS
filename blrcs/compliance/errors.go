@@ -23,6 +23,11 @@ var (
 	ErrSDJWTUnsupportedHashAlg = errors.New("compliance: sd-jwt unsupported _sd_alg (only sha-256)")
 	ErrSDJWTMissingVCT         = errors.New("compliance: sd-jwt-vc missing required vct claim")
 	ErrSDJWTDuplicateDigest    = errors.New("compliance: sd-jwt duplicate digest in _sd")
+	// ErrSDJWTIssuerMismatch is returned by VerifySDJWTWithBinding when
+	// VerifyOptions.ExpectedIssuer is set and the JWT iss claim does not match.
+	// This prevents key-confusion: a verifier who obtains a public key for a
+	// specific issuer should also confirm the credential claims that issuer.
+	ErrSDJWTIssuerMismatch = errors.New("compliance: sd-jwt issuer does not match expected issuer")
 
 	// SD-JWT Key Binding (KB-JWT) — IETF SD-JWT / SD-JWT-VC holder binding
 	ErrHolderKeyRequired = errors.New("compliance: holder public key required for key binding")

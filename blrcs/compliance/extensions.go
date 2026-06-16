@@ -248,10 +248,13 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 //
 // ゼロ値は「現在時刻・標準 60s leeway・key binding 任意」で動作する。
 type VerifyOptions struct {
-	Now               time.Time     // ゼロ値なら time.Now()
-	Leeway            time.Duration // 時刻ズレ許容 (ゼロなら 60s)
-	ExpectedNonce     string        // 設定時、KB-JWT の nonce と一致必須
-	ExpectedAudience  string        // 設定時、KB-JWT の aud と一致必須
+	Now              time.Time     // ゼロ値なら time.Now()
+	Leeway           time.Duration // 時刻ズレ許容 (ゼロなら 60s)
+	ExpectedNonce    string        // 設定時、KB-JWT の nonce と一致必須
+	ExpectedAudience string        // 設定時、KB-JWT の aud と一致必須
+	// ExpectedIssuer — 設定時、JWT の iss クレームと一致必須 (key-confusion 防止)。
+	// 検証者は公開鍵をそのまま受け入れず、鍵がどの発行者を表すかも確認すべき。
+	ExpectedIssuer    string
 	RequireKeyBinding bool          // true なら cnf 無し credential も拒否
 	MaxKBAge          time.Duration // >0 なら KB-JWT iat の最大許容経過時間 (freshness)
 }
@@ -367,6 +370,12 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	// SD-JWT-VC: vct は必須クレーム (draft-ietf-oauth-sd-jwt-vc §3.2.2.2)。
 	if vc.VCT == "" {
 		return nil, ErrSDJWTMissingVCT
+	}
+	// 発行者バインディング: key-confusion 防止。
+	// 検証者が ExpectedIssuer を設定した場合、JWT の iss クレームと一致必須。
+	// 設定しない場合は従来動作 (後方互換)。
+	if opts.ExpectedIssuer != "" && vc.Issuer != opts.ExpectedIssuer {
+		return nil, ErrSDJWTIssuerMismatch
 	}
 
 	// 有効期限の強制 (leeway 込み)

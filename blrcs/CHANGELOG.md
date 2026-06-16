@@ -37,6 +37,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`compliance.VerifySDJWTWithBinding` had no issuer-binding check — a key-confusion
+  attack let a verifier's trusted key validate a credential from a *different* issuer
+  (key-confusion / open-key, Axis 14).** A verifier that held Ed25519 key Kₐ for
+  issuer A could be fooled into accepting a token where `iss = B` if an attacker could
+  obtain any other token also signed by Kₐ (shared key, compromised key material, or a
+  verifier that calls `VerifySDJWTWithBinding` with a hard-coded public key rather than
+  one looked up by DID). The verifier checked the signature but never confirmed that
+  the `iss` claim in the payload actually corresponds to the issuer whose key it
+  supplied — so a valid signature over `iss=B` was silently accepted by a verifier
+  expecting `iss=A`. Added `VerifyOptions.ExpectedIssuer string`: when non-empty,
+  `VerifySDJWTWithBinding` compares the JWT `iss` claim against the option and returns
+  `ErrSDJWTIssuerMismatch` on mismatch — *after* the cryptographic signature check
+  passes (so the guard cannot be bypassed by forging a signature). Empty (default) →
+  backward-compatible, no check. `ErrSDJWTIssuerMismatch` is a new exported sentinel in
+  `errors.go` following the existing `ErrSDJWT*` pattern. Tests:
+  `TestVerifySDJWTExpectedIssuerMismatch` covers correct issuer (pass), empty issuer
+  (pass, back-compat), wrong `ExpectedIssuer` (→ `ErrSDJWTIssuerMismatch`), and wrong
+  verifier key (→ `ErrSDJWTSigFailed`, confirming the guard never short-circuits the
+  crypto check).
+
 - **`mcp` `issue_passport` accepted out-of-range `recyclability`, signing invalid data into a
   permanent credential (input-validation / schema drift).** `compliance.PassportClaim.Recyclability`
   is canonically a fraction in `[0,1]` and the tool's advertised `inputSchema` declares

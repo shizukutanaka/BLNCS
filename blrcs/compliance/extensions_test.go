@@ -1017,3 +1017,49 @@ func TestIssueSDJWTClearSDOverlap(t *testing.T) {
 		t.Errorf("sd/clear overlap: want overlap error, got %v", err)
 	}
 }
+
+// TestVerifySDJWTExpectedIssuerMismatch verifies that VerifyOptions.ExpectedIssuer
+// prevents key-confusion attacks where a verifier's trusted issuer key is used to
+// verify a credential from a different issuer (e.g. a relay attacker obtaining a
+// valid token signed by a different, also-trusted key and presenting it as-is).
+func TestVerifySDJWTExpectedIssuerMismatch(t *testing.T) {
+	issuerA, _ := NewIssuer("did:web:issuer-a.example")
+	issuerB, _ := NewIssuer("did:web:issuer-b.example")
+
+	// Issuer A signs a credential.
+	sdjwt, _, err := issuerA.IssueSDJWT("sub", map[string]any{"tier": "A"}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 1: ExpectedIssuer matches — must succeed.
+	_, err = VerifySDJWTWithBinding(sdjwt, issuerA.PublicKey(), VerifyOptions{
+		ExpectedIssuer: "did:web:issuer-a.example",
+	})
+	if err != nil {
+		t.Fatalf("correct ExpectedIssuer: want nil, got %v", err)
+	}
+
+	// Case 2: ExpectedIssuer empty — backward-compat, must succeed.
+	_, err = VerifySDJWTWithBinding(sdjwt, issuerA.PublicKey(), VerifyOptions{})
+	if err != nil {
+		t.Fatalf("empty ExpectedIssuer: want nil, got %v", err)
+	}
+
+	// Case 3: ExpectedIssuer set to B but credential claims A — key-confusion rejected.
+	_, err = VerifySDJWTWithBinding(sdjwt, issuerA.PublicKey(), VerifyOptions{
+		ExpectedIssuer: "did:web:issuer-b.example",
+	})
+	if !errors.Is(err, ErrSDJWTIssuerMismatch) {
+		t.Errorf("wrong ExpectedIssuer: want ErrSDJWTIssuerMismatch, got %v", err)
+	}
+
+	// Case 4: Issuer B has a different key — even if the verifier somehow has B's
+	// key, verifying A's credential against it fails at the sig step first.
+	_, err = VerifySDJWTWithBinding(sdjwt, issuerB.PublicKey(), VerifyOptions{
+		ExpectedIssuer: "did:web:issuer-a.example",
+	})
+	if !errors.Is(err, ErrSDJWTSigFailed) {
+		t.Errorf("wrong key: want ErrSDJWTSigFailed, got %v", err)
+	}
+}
