@@ -91,6 +91,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   longer than 64 entries with `ErrBadReceipt` before allocating. Test:
   `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
 
+- **`replay.Detector.evictOldest` evicted one entry per capacity-overflow, forcing
+  O(n) map scan on every insertion under flood — write-lock DoS (Axis 10 resource
+  exhaustion).** When `seen` reached `maxSize`, every new `Check` call held the write
+  mutex while scanning all 100,000 entries to find and delete the single oldest one.
+  An attacker flooding unique payloads keeps the map permanently at capacity, making
+  every subsequent legitimate `Check` O(n) under an exclusive lock, blocking all
+  concurrent readers and writers — including the GC goroutine that also holds the
+  same lock. The lock contention collapses throughput proportionally to concurrent
+  callers. The new two-phase bulk eviction: (1) sweep all TTL-expired entries — free,
+  no replay-window loss; (2) if still at capacity, sort and delete the oldest
+  `maxSize/10` entries in one pass — amortizing the O(n) scan cost 10,000-fold vs
+  single-entry eviction at the default cap of 100,000. Existing `TestMaxSizeEvictsOldest`
+  continues to pass (tiny map: batch still rounds up to 1). New tests:
+  `TestBulkEvictionRemovesOldestBatch` verifies the batch path; 
+  `TestBulkEvictionExpiredEntriesSweptFirst` verifies Phase 1 prevents unnecessary
+  eviction of live replay-window entries.
+
 - **`atrest.Cipher.Encrypt` had no per-key encryption counter — unbounded random-nonce
   GCM use degrades authentication after 2^32 calls (NIST SP 800-38D violation, Axis 8
   key lifecycle).** AES-256-GCM with 96-bit random nonces has a 2^96-size nonce space,

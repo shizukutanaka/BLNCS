@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 )
@@ -127,20 +128,46 @@ func fingerprint(payload []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-// evictOldest — caller がロックを保持している前提
+// evictBatchFraction — evict this fraction of maxSize entries per bulk-eviction.
+// At maxSize=100 000 this is 10 000, amortising the O(n) scan 10 000-fold vs
+// the previous single-entry eviction (where every insertion forced a full scan).
+const evictBatchFraction = 10
+
+// evictOldest — caller がロックを保持している前提.
+//
+// Two-phase eviction:
+//  1. Delete all TTL-expired entries (free; causes no replay-window loss).
+//  2. If still at cap, bulk-delete the oldest maxSize/evictBatchFraction entries
+//     so the O(n) sort cost is amortized over a batch rather than paid per insert.
 func (d *Detector) evictOldest() {
-	var oldestKey string
-	var oldestTime time.Time
-	first := true
+	// Phase 1: purge expired entries — no replay-window loss.
+	cutoff := time.Now().Add(-d.ttl)
 	for k, t := range d.seen {
-		if first || t.Before(oldestTime) {
-			oldestKey = k
-			oldestTime = t
-			first = false
+		if t.Before(cutoff) {
+			delete(d.seen, k)
 		}
 	}
-	if oldestKey != "" {
-		delete(d.seen, oldestKey)
+	if len(d.seen) < d.maxSize {
+		return
+	}
+	// Phase 2: bulk-evict the oldest batch when no expired entries freed enough space.
+	target := d.maxSize / evictBatchFraction
+	if target < 1 {
+		target = 1
+	}
+	type kv struct {
+		k string
+		t time.Time
+	}
+	entries := make([]kv, 0, len(d.seen))
+	for k, t := range d.seen {
+		entries = append(entries, kv{k, t})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].t.Before(entries[j].t)
+	})
+	for i := 0; i < target && i < len(entries); i++ {
+		delete(d.seen, entries[i].k)
 	}
 }
 
