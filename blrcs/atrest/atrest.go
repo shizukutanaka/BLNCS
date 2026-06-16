@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 )
 
 // ============================================================================
@@ -43,12 +44,21 @@ const (
 	keyIDSize = 4
 )
 
+// maxEncryptionsPerKey — NIST SP 800-38D random-nonce GCM limit.
+// 2^32 encryptions per key keeps nonce-collision probability below 2^-32.
+// Exceeding this bound degrades AES-GCM's authentication guarantee and risks
+// XOR-of-plaintexts plaintext recovery on a nonce collision.
+const maxEncryptionsPerKey uint64 = 1 << 32
+
 var (
 	ErrInvalidKey         = errors.New("atrest: key must be 32 bytes (AES-256)")
 	ErrInvalidEnvelope    = errors.New("atrest: invalid envelope format")
 	ErrUnsupportedVersion = errors.New("atrest: unsupported envelope version")
 	ErrIntegrityFail      = errors.New("atrest: integrity check failed (tampered data)")
 	ErrUnknownKey         = errors.New("atrest: key ID not found in keyring")
+	// ErrKeyExhausted is returned when Encrypt has been called maxEncryptionsPerKey
+	// times under the same key. Rotate the active key via Keyring.SetActive.
+	ErrKeyExhausted = errors.New("atrest: encryption count limit reached, rotate key")
 )
 
 // ============================================================================
@@ -72,8 +82,9 @@ var (
 
 // Cipher — 単一鍵の暗号化/復号化器
 type Cipher struct {
-	keyID [keyIDSize]byte
-	gcm   cipher.AEAD
+	keyID    [keyIDSize]byte
+	gcm      cipher.AEAD
+	encCount atomic.Uint64 // enforces NIST SP 800-38D nonce-space limit
 }
 
 // NewCipher — 鍵から Cipher 構築
@@ -97,8 +108,12 @@ func NewCipher(keyID [keyIDSize]byte, key []byte) (*Cipher, error) {
 
 // Encrypt — payload を envelope 形式で暗号化
 //
-// nonce はランダム生成 (caller は同じ payload を複数回呼んでも問題なし)
+// nonce はランダム生成 (caller は同じ payload を複数回呼んでも問題なし)。
+// NIST SP 800-38D: 同一鍵で 2^32 回以上の Encrypt は ErrKeyExhausted を返す。
 func (c *Cipher) Encrypt(payload []byte) ([]byte, error) {
+	if c.encCount.Add(1) > maxEncryptionsPerKey {
+		return nil, ErrKeyExhausted
+	}
 	nonce := make([]byte, nonceSize)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, fmt.Errorf("atrest: nonce gen: %w", err)

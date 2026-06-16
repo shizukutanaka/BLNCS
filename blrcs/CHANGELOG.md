@@ -91,6 +91,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   longer than 64 entries with `ErrBadReceipt` before allocating. Test:
   `TestVerifyReceiptOversizedAuditPathRejected` sends a 65-entry path.
 
+- **`atrest.Cipher.Encrypt` had no per-key encryption counter — unbounded random-nonce
+  GCM use degrades authentication after 2^32 calls (NIST SP 800-38D violation, Axis 8
+  key lifecycle).** AES-256-GCM with 96-bit random nonces has a 2^96-size nonce space,
+  but the birthday-bound collision probability reaches 2^-32 at approximately 2^32
+  encryptions per key — well within reach of a busy credential store. A nonce collision
+  (key, nonce) pair allows an adversary to XOR the two ciphertexts, recovering the XOR
+  of plaintexts and permanently destroying the GCM authentication guarantee for those
+  slots; `ErrIntegrityFail` can then be silently bypassed for forged ciphertexts
+  targeting those slots. NIST SP 800-38D recommends treating 2^32 as the mandatory
+  rotation trigger for random-nonce GCM. Added `maxEncryptionsPerKey = 2^32` enforced
+  via an `atomic.Uint64` counter in `Cipher`. On the 2^32+1-st call `Encrypt` returns
+  `ErrKeyExhausted` before generating a nonce, forcing callers to rotate via
+  `Keyring.SetActive`. The sentinel is new (backward-compatible); existing code paths
+  that catch `ErrIntegrityFail` are unaffected. Tests: `TestEncryptKeyExhaustedAfterLimit`
+  pre-sets the counter and confirms `ErrKeyExhausted` is returned;
+  `TestKeyringRotationAfterExhaustion` confirms that rotating to a new key via
+  `Keyring.SetActive` resumes encryption and the new envelope round-trips correctly.
+
 - **`compliance` W3C VC proof metadata (`proofPurpose`, `verificationMethod`) was not
   bound to the Ed25519 signature — post-issuance tampering undetectable (credential
   malleability, authentication scope).** `canonicalPayload` signed `@context`, `type`,

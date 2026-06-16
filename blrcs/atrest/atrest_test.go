@@ -360,3 +360,65 @@ func TestKeyringDecryptInvalidEnvelope(t *testing.T) {
 		t.Fatal("invalid envelope should be rejected by Keyring.Decrypt")
 	}
 }
+
+// ============================================================================
+// NIST SP 800-38D nonce-space limit
+// ============================================================================
+
+// TestEncryptKeyExhaustedAfterLimit verifies that Cipher.Encrypt returns
+// ErrKeyExhausted once the per-key encryption count reaches maxEncryptionsPerKey.
+// We fast-path this by pre-setting the atomic counter to the limit directly
+// (same package), so the test doesn't actually perform 2^32 encryptions.
+func TestEncryptKeyExhaustedAfterLimit(t *testing.T) {
+	key, _ := GenerateKey()
+	c, err := NewCipher(KeyIDFromUint32(42), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Confirm normal encryption works.
+	if _, err := c.Encrypt([]byte("hello")); err != nil {
+		t.Fatalf("first encrypt should succeed: %v", err)
+	}
+
+	// Artificially advance the counter to the limit so the next call overflows.
+	c.encCount.Store(maxEncryptionsPerKey)
+
+	if _, err := c.Encrypt([]byte("overflowed")); !errors.Is(err, ErrKeyExhausted) {
+		t.Fatalf("want ErrKeyExhausted, got %v", err)
+	}
+}
+
+// TestKeyringRotationAfterExhaustion verifies the intended workflow: rotate
+// to a new key via Keyring.SetActive and encryption resumes successfully.
+func TestKeyringRotationAfterExhaustion(t *testing.T) {
+	kr := NewKeyring()
+	k1, _ := GenerateKey()
+	c1, _ := NewCipher(KeyIDFromUint32(1), k1)
+	kr.Add(c1)
+
+	// Exhaust key 1.
+	c1.encCount.Store(maxEncryptionsPerKey)
+	if _, err := kr.Encrypt([]byte("x")); !errors.Is(err, ErrKeyExhausted) {
+		t.Fatalf("exhausted key should return ErrKeyExhausted: %v", err)
+	}
+
+	// Add and activate key 2 — encryption must resume.
+	k2, _ := GenerateKey()
+	c2, _ := NewCipher(KeyIDFromUint32(2), k2)
+	kr.Add(c2)
+	if err := kr.SetActive(KeyIDFromUint32(2)); err != nil {
+		t.Fatal(err)
+	}
+	env, err := kr.Encrypt([]byte("after-rotation"))
+	if err != nil {
+		t.Fatalf("encrypt after key rotation: %v", err)
+	}
+	plain, err := kr.Decrypt(env)
+	if err != nil {
+		t.Fatalf("decrypt after rotation: %v", err)
+	}
+	if string(plain) != "after-rotation" {
+		t.Errorf("plaintext mismatch: %s", plain)
+	}
+}
