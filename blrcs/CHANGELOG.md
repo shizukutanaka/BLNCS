@@ -37,6 +37,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`metrics` Prometheus exporter did not escape label values or HELP text —
+  exposition-format corruption and metric injection (output integrity, Axis 18).**
+  `formatLabelsInner` wrote each label as `%s="%s"` with no escaping, and the `# HELP`
+  lines interpolated the raw metric name verbatim. The Prometheus exposition format
+  (https://prometheus.io/docs/instrumenting/exposition_formats/) requires label values
+  to escape backslash (`\`→`\\`), double-quote (`"`→`\"`), and line-feed (`\n`→`\n`); HELP
+  text must escape backslash and line-feed. A common label value carrying a `"` (e.g. a
+  `version` string from `git describe`, or any value sourced from an env var) silently
+  produced malformed output that breaks scrape parsing — and a value containing a newline
+  let crafted content inject forged metric lines into the scrape (`1.0"} injected_total
+  999\nevil{x="` becomes a fake `injected_total 999` series). Fix: added `escapeLabelValue`
+  (escapes `\`, `"`, `\n`) applied to every label value, `escapeHelp` (escapes `\`, `\n`)
+  applied to the interpolated name in HELP lines, and ran label *keys* through the existing
+  `sanitize` so they always match the Prometheus name grammar. Both escapers fast-path
+  values with no special characters. Tests: `TestLabelValueEscaping` confirms a malicious
+  quote/newline/backslash value is escaped and cannot inject a metric line;
+  `TestEscapeHelpAndLabelHelpers` unit-tests both escapers including the HELP rule that
+  leaves `"` literal.
+
 - **`jsonschema.Compile` did not pre-compile regex patterns — every `Validate` call
   re-compiled all `pattern` / `patternProperties` regexes from scratch, and an invalid
   regex silently became a per-call validation error instead of a fail-fast compile error

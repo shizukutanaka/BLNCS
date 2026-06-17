@@ -105,6 +105,54 @@ func TestMetricNameSanitize(t *testing.T) {
 	}
 }
 
+// TestLabelValueEscaping verifies that Prometheus label values escape the
+// backslash, double-quote, and line-feed characters per the exposition format.
+// Without escaping, a value with a '"' corrupts the line and a newline lets an
+// attacker inject forged metric lines into the scrape.
+func TestLabelValueEscaping(t *testing.T) {
+	tel := telemetry.New(telemetry.NopRecorder{})
+	tel.Counter("c").Inc()
+	// A malicious/awkward label value with a quote, backslash, and newline that
+	// would otherwise break the exposition format or inject a fake metric.
+	exp := NewExporter(tel, map[string]string{
+		"version": `1.0"} injected_total 999` + "\n" + `evil{x="`,
+		"path":    `C:\temp`,
+	})
+	var buf strings.Builder
+	exp.WriteMetrics(&buf)
+	out := buf.String()
+
+	// The raw quote/newline/backslash must not appear unescaped in the value.
+	if strings.Contains(out, "injected_total 999\n") {
+		t.Errorf("newline in label value was not escaped — metric injection possible:\n%s", out)
+	}
+	// The escaped forms must be present.
+	if !strings.Contains(out, `\"`) {
+		t.Errorf("double-quote not escaped as \\\":\n%s", out)
+	}
+	if !strings.Contains(out, `\n`) {
+		t.Errorf("newline not escaped as \\n:\n%s", out)
+	}
+	if !strings.Contains(out, `C:\\temp`) {
+		t.Errorf("backslash not escaped as \\\\:\n%s", out)
+	}
+}
+
+// TestEscapeHelpAndLabelHelpers unit-tests the escapers directly, including the
+// HELP rule (double-quote is NOT escaped in HELP, only backslash and newline).
+func TestEscapeHelpAndLabelHelpers(t *testing.T) {
+	if got := escapeLabelValue(`a"b\c` + "\n" + "d"); got != `a\"b\\c\nd` {
+		t.Errorf("escapeLabelValue = %q", got)
+	}
+	if got := escapeLabelValue("plain"); got != "plain" {
+		t.Errorf("escapeLabelValue should pass plain values through, got %q", got)
+	}
+	// HELP keeps '"' literal but escapes '\' and newline.
+	if got := escapeHelp(`a"b\c` + "\n" + "d"); got != `a"b\\c\nd` {
+		t.Errorf("escapeHelp = %q", got)
+	}
+}
+
 func TestHTTPHandlerGET(t *testing.T) {
 	tel := makeTelWithData(t)
 	exp := NewExporter(tel, map[string]string{"v": "1"})

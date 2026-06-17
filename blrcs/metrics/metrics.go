@@ -69,7 +69,7 @@ func (e *Exporter) WriteMetrics(w io.Writer) {
 	for _, name := range cNames {
 		val := snap.Counters[name]
 		metricName := sanitize(name) + "_total"
-		fmt.Fprintf(w, "# HELP %s BLRCS counter: %s\n", metricName, name)
+		fmt.Fprintf(w, "# HELP %s BLRCS counter: %s\n", metricName, escapeHelp(name))
 		fmt.Fprintf(w, "# TYPE %s counter\n", metricName)
 		fmt.Fprintf(w, "%s%s %d %s\n", metricName, labelStr, val, ts)
 	}
@@ -79,7 +79,7 @@ func (e *Exporter) WriteMetrics(w io.Writer) {
 	for _, name := range hNames {
 		h := snap.Histograms[name]
 		metricName := sanitize(name)
-		fmt.Fprintf(w, "# HELP %s BLRCS histogram: %s\n", metricName, name)
+		fmt.Fprintf(w, "# HELP %s BLRCS histogram: %s\n", metricName, escapeHelp(name))
 		fmt.Fprintf(w, "# TYPE %s summary\n", metricName)
 		// quantiles
 		quantiles := map[string]float64{
@@ -176,11 +176,39 @@ func (e *Exporter) formatLabels(m map[string]string) string {
 func (e *Exporter) formatLabelsInner(m map[string]string) string {
 	pairs := make([]string, 0, len(m))
 	for k, v := range m {
-		pairs = append(pairs, fmt.Sprintf(`%s="%s"`, k, v))
+		pairs = append(pairs, fmt.Sprintf(`%s="%s"`, sanitize(k), escapeLabelValue(v)))
 	}
 	sort.Strings(pairs)
 	return strings.Join(pairs, ",")
 }
+
+// escapeLabelValue escapes a Prometheus label value per the exposition format
+// (https://prometheus.io/docs/instrumenting/exposition_formats/): the
+// backslash, double-quote, and line-feed characters MUST be escaped as \\, \",
+// and \n. Without this an operator label value containing a '"' or newline
+// corrupts the exposition output — and a newline lets crafted content inject
+// forged metric lines into the scrape.
+func escapeLabelValue(s string) string {
+	if !strings.ContainsAny(s, "\\\"\n") {
+		return s
+	}
+	return labelValueEscaper.Replace(s)
+}
+
+var labelValueEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+
+// escapeHelp escapes HELP text per the exposition format: only the backslash and
+// line-feed characters are escaped (double-quote is emitted literally in HELP).
+// The metric name is interpolated into HELP text verbatim, so a name carrying a
+// newline would otherwise split the HELP line and corrupt the output.
+func escapeHelp(s string) string {
+	if !strings.ContainsAny(s, "\\\n") {
+		return s
+	}
+	return helpEscaper.Replace(s)
+}
+
+var helpEscaper = strings.NewReplacer(`\`, `\\`, "\n", `\n`)
 
 func sortedKeys(m map[string]int64) []string {
 	keys := make([]string, 0, len(m))
