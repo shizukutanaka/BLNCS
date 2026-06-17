@@ -278,7 +278,10 @@ func (h *Histogram) Observe(v float64) {
 	} else {
 		// Vitter's Algorithm R: each past observation has equal probability k/n
 		// of surviving in the reservoir, giving an unbiased random sample.
-		j := rand.Int63n(n)
+		// math/rand is correct here — reservoir selection is a statistical
+		// estimator for latency percentiles, not a security primitive; no secret
+		// is derived from these draws.
+		j := rand.Int63n(n) //nolint:gosec // G404: statistical sampling, not security-sensitive
 		if j < histogramReservoirSize {
 			h.samples[j] = v
 		}
