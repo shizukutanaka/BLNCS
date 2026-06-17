@@ -37,6 +37,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`cbor` decoder pre-allocated array/map containers from the *declared* length
+  before validating element bytes — a 5-byte header could force a ~256 MB allocation
+  (allocation-amplification DoS, Axis 13 on the CBOR foundation).** `decode` capped the
+  declared count at `maxItems` (16 M) and then immediately ran `make([]any, n)` /
+  `make(map[any]any, n)`. A definite-length array header declaring 16,777,215 elements
+  (`0x9a 0x00 0xFF 0xFF 0xFF`, just under the cap) is only 5 bytes but forces a 16 M-entry
+  `[]any` (~256 MB) — and decoding then fails on the very next byte with "unexpected end
+  of data," after the allocation already happened. Because `cbor.Unmarshal` sits under
+  every COSE_Sign1, SCITT receipt, and ISO 18013-5 mdoc verification path, an
+  unauthenticated peer presenting a malformed credential could repeatedly trigger
+  multi-hundred-MB transient allocations and OOM the process. Byte/text strings were
+  already safe (`readN` validates availability before `make`); only arrays and maps
+  pre-sized from an untrusted count. Fix: before allocating, reject any array whose
+  declared length exceeds the remaining input bytes (each element is ≥1 byte) and any map
+  whose declared length exceeds (remaining bytes)/2 (each entry is a key + value, ≥2
+  bytes). This bounds the container allocation to the actual input size while leaving all
+  valid inputs unaffected. Tests: `TestDecodeArrayLengthExceedsInput` and
+  `TestDecodeMapLengthExceedsInput` reject the sub-`maxItems` amplification headers;
+  `TestDecodeArrayExactLengthStillWorks` confirms valid arrays decode unchanged.
+
 - **`telemetry.Histogram.Observe` used `count % reservoirSize` for reservoir sampling
   — a deterministic circular-buffer that broke every percentile estimate (statistical
   correctness, Axis 15).** The comment read "reservoir sampling" but the replacement

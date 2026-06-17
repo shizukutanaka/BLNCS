@@ -455,6 +455,14 @@ func (d *decoder) decode() (any, error) {
 		if n > maxItems {
 			return nil, errors.New("cbor: array too large")
 		}
+		// Each array element occupies at least one byte, so an array claiming more
+		// elements than there are bytes left is malformed. Checking this *before*
+		// make() bounds the allocation to the input size: without it a 5-byte header
+		// declaring ~16M elements forces a ~256 MB []any allocation (amplification
+		// DoS) even though decoding fails immediately on the first missing element.
+		if n > uint64(len(d.data)-d.pos) {
+			return nil, errors.New("cbor: array length exceeds remaining input")
+		}
 		arr := make([]any, n)
 		for i := range arr {
 			v, err := d.decode()
@@ -468,6 +476,12 @@ func (d *decoder) decode() (any, error) {
 	case majorMap:
 		if n > maxItems {
 			return nil, errors.New("cbor: map too large")
+		}
+		// Each map entry is a key plus a value — at least two bytes — so a map
+		// claiming more entries than (remaining bytes)/2 is malformed. Same
+		// pre-allocation amplification guard as arrays above.
+		if n > uint64(len(d.data)-d.pos)/2 {
+			return nil, errors.New("cbor: map length exceeds remaining input")
 		}
 		m := make(map[any]any, n)
 		for i := uint64(0); i < n; i++ {

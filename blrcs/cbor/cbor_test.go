@@ -712,6 +712,46 @@ func TestDecodeMapTooLarge(t *testing.T) {
 	}
 }
 
+// TestDecodeArrayLengthExceedsInput pins the pre-allocation amplification guard:
+// a header declaring an element count under maxItems but far larger than the
+// remaining bytes must be rejected before make([]any, n) runs. Without the guard
+// this 5-byte input would allocate ~256 MB.
+func TestDecodeArrayLengthExceedsInput(t *testing.T) {
+	// 0x9a = major 4 (array), add=26 → 4-byte length follows.
+	// Length 0x00FFFFFF = 16777215, just under maxItems (16777216), but the input
+	// has zero element bytes after the header.
+	data := []byte{0x9a, 0x00, 0xFF, 0xFF, 0xFF}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("array length exceeding remaining input should error before allocation")
+	}
+}
+
+// TestDecodeMapLengthExceedsInput pins the same guard for maps: a declared entry
+// count under maxItems but exceeding (remaining bytes)/2 must be rejected.
+func TestDecodeMapLengthExceedsInput(t *testing.T) {
+	// 0xba = major 5 (map), add=26 → 4-byte length follows.
+	// Length 0x00FFFFFF = 16777215 entries (= 33M+ bytes minimum) from a 5-byte input.
+	data := []byte{0xba, 0x00, 0xFF, 0xFF, 0xFF}
+	if _, err := Unmarshal(data); err == nil {
+		t.Fatal("map length exceeding remaining input should error before allocation")
+	}
+}
+
+// TestDecodeArrayExactLengthStillWorks confirms the guard does not reject valid
+// small arrays where every declared element is actually present.
+func TestDecodeArrayExactLengthStillWorks(t *testing.T) {
+	// 0x83 = major 4 (array), len 3; three small uints 1,2,3.
+	data := []byte{0x83, 0x01, 0x02, 0x03}
+	v, err := Unmarshal(data)
+	if err != nil {
+		t.Fatalf("valid 3-element array should decode: %v", err)
+	}
+	arr, ok := v.([]any)
+	if !ok || len(arr) != 3 {
+		t.Fatalf("want 3-element array, got %T %v", v, v)
+	}
+}
+
 // errMarshalCBOR is a Marshaler that always fails.
 type errMarshalCBOR struct{}
 
