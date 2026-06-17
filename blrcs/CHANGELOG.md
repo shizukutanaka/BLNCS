@@ -37,6 +37,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`jsonschema.Compile` did not pre-compile regex patterns — every `Validate` call
+  re-compiled all `pattern` / `patternProperties` regexes from scratch, and an invalid
+  regex silently became a per-call validation error instead of a fail-fast compile error
+  (correctness / performance, Axis 17).** The `Schema` struct stored only the parsed
+  schema tree; `checkString` and `checkObjectKeywords` called `regexp.Compile(p)` on
+  every `Validate` invocation. For a VCT-metadata schema validated once per credential
+  presentation (the `vctmeta.ValidateClaimsWithSchema` call path), the regex for each
+  `pattern` / `patternProperties` keyword was compiled fresh on every call — O(N×M)
+  compilations for N validations and M patterns. Beyond performance, the bigger
+  correctness gap: `Compile()` accepted schemas with invalid regexes without error; only
+  at validation time (for every future call) did they surface as `"invalid pattern … in
+  schema"` validation errors — making an author mistake look like a data error. Fix:
+  (1) Added `walkPatterns` which walks the full schema tree at `Compile()` time and
+  pre-compiles every `pattern` (string keyword) and `patternProperties` key into a
+  `map[string]*regexp.Regexp` stored on the `Schema` struct. Duplicate patterns across
+  the tree share one compiled regexp. (2) `Compile()` now returns an error immediately
+  on any invalid regex — fail-fast at schema load time. (3) `Validate` passes the
+  pre-compiled map to the `validator` and all child validators (allOf/anyOf/oneOf/not/
+  contains); `checkString` and `checkObjectKeywords` do a map lookup instead of
+  compiling. Tests: `TestCheckStringInvalidPattern` and
+  `TestCompileInvalidPatternPropertiesFails` verify fail-fast compile error;
+  `TestPatternPrecompiledIsCached` verifies the pre-compiled map is shared correctly
+  across duplicate patterns and that validation still accepts/rejects correctly.
+
 - **`cbor` decoder pre-allocated array/map containers from the *declared* length
   before validating element bytes — a 5-byte header could force a ~256 MB allocation
   (allocation-amplification DoS, Axis 13 on the CBOR foundation).** `decode` capped the

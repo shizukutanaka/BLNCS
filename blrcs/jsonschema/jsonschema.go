@@ -36,8 +36,9 @@ const maxRefDepth = 64
 
 // Schema is a compiled JSON Schema ready for validation.
 type Schema struct {
-	root map[string]any // the parsed root document (for $ref resolution)
-	node any            // this schema node: map[string]any or bool
+	root     map[string]any            // the parsed root document (for $ref resolution)
+	node     any                       // this schema node: map[string]any or bool
+	compiled map[string]*regexp.Regexp // pre-compiled patterns (keyed by pattern string)
 }
 
 // ValidationError aggregates one or more constraint violations.
@@ -52,20 +53,102 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("jsonschema: %d validation errors: %s", len(e.Errors), strings.Join(e.Errors, "; "))
 }
 
-// Compile parses a JSON Schema document.
+// Compile parses a JSON Schema document and pre-compiles all regex patterns.
+//
+// Pre-compilation means Validate never calls regexp.Compile on the hot path,
+// and an invalid pattern or patternProperties key is caught here (fail-fast)
+// rather than silently producing a per-call validation error.
 func Compile(raw []byte) (*Schema, error) {
 	var node any
 	if err := json.Unmarshal(raw, &node); err != nil {
 		return nil, fmt.Errorf("jsonschema: parse schema: %w", err)
 	}
 	root, _ := node.(map[string]any)
-	return &Schema{root: root, node: node}, nil
+	compiled := make(map[string]*regexp.Regexp)
+	if err := walkPatterns(node, compiled); err != nil {
+		return nil, fmt.Errorf("jsonschema: %w", err)
+	}
+	return &Schema{root: root, node: node, compiled: compiled}, nil
+}
+
+// walkPatterns traverses the schema tree and pre-compiles every pattern and
+// patternProperties key into dest. It recurses into all schema keywords that
+// may contain sub-schemas.
+func walkPatterns(node any, dest map[string]*regexp.Regexp) error {
+	switch n := node.(type) {
+	case bool:
+		return nil
+	case []any:
+		for _, sub := range n {
+			if err := walkPatterns(sub, dest); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		if p, ok := n["pattern"].(string); ok {
+			if _, seen := dest[p]; !seen {
+				re, err := regexp.Compile(p)
+				if err != nil {
+					return fmt.Errorf("invalid pattern %q: %w", p, err)
+				}
+				dest[p] = re
+			}
+		}
+		if pp, ok := n["patternProperties"].(map[string]any); ok {
+			for pat, sub := range pp {
+				if _, seen := dest[pat]; !seen {
+					re, err := regexp.Compile(pat)
+					if err != nil {
+						return fmt.Errorf("invalid patternProperties key %q: %w", pat, err)
+					}
+					dest[pat] = re
+				}
+				if err := walkPatterns(sub, dest); err != nil {
+					return err
+				}
+			}
+		}
+		// Recurse into keywords that carry sub-schemas.
+		if props, ok := n["properties"].(map[string]any); ok {
+			for _, sub := range props {
+				if err := walkPatterns(sub, dest); err != nil {
+					return err
+				}
+			}
+		}
+		for _, key := range []string{"items", "contains", "additionalProperties", "not"} {
+			if sub, ok := n[key]; ok {
+				if err := walkPatterns(sub, dest); err != nil {
+					return err
+				}
+			}
+		}
+		for _, key := range []string{"allOf", "anyOf", "oneOf", "prefixItems"} {
+			if arr, ok := n[key].([]any); ok {
+				for _, sub := range arr {
+					if err := walkPatterns(sub, dest); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		for _, key := range []string{"$defs", "definitions"} {
+			if defs, ok := n[key].(map[string]any); ok {
+				for _, sub := range defs {
+					if err := walkPatterns(sub, dest); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // Validate checks instance against the schema, returning a *ValidationError
 // listing every violation, or nil if valid.
 func (s *Schema) Validate(instance any) error {
-	v := &validator{root: s.root}
+	v := &validator{root: s.root, compiled: s.compiled}
 	v.validate(s.node, instance, "")
 	if len(v.errs) == 0 {
 		return nil
@@ -78,9 +161,10 @@ func (s *Schema) Validate(instance any) error {
 // ============================================================================
 
 type validator struct {
-	root  map[string]any
-	errs  []string
-	depth int
+	root     map[string]any
+	compiled map[string]*regexp.Regexp
+	errs     []string
+	depth    int
 }
 
 func (v *validator) fail(path, format string, args ...any) {
@@ -248,10 +332,8 @@ func (v *validator) checkString(sch map[string]any, inst any, path string) {
 		v.fail(path, "string longer than maxLength %v", n)
 	}
 	if p, ok := sch["pattern"].(string); ok {
-		re, err := regexp.Compile(p)
-		if err != nil {
-			v.fail(path, "invalid pattern %q in schema", p)
-		} else if !re.MatchString(s) {
+		// Pre-compiled at Compile time; always present for a valid pattern.
+		if re, found := v.compiled[p]; found && !re.MatchString(s) {
 			v.fail(path, "string does not match pattern %q", p)
 		}
 	}
@@ -324,14 +406,14 @@ func (v *validator) checkObjectKeywords(sch map[string]any, inst any, path strin
 	props, _ := sch["properties"].(map[string]any)
 	patternProps, _ := sch["patternProperties"].(map[string]any)
 
-	// Pre-compile patternProperties regexes.
+	// Use pre-compiled patternProperties regexes (compiled at Compile time).
 	type pp struct {
 		re   *regexp.Regexp
 		node any
 	}
 	var compiledPP []pp
 	for pat, node := range patternProps {
-		if re, err := regexp.Compile(pat); err == nil {
+		if re, found := v.compiled[pat]; found {
 			compiledPP = append(compiledPP, pp{re: re, node: node})
 		}
 	}
@@ -427,7 +509,7 @@ func (v *validator) checkArray(sch map[string]any, inst any, path string) {
 	if c, ok := sch["contains"]; ok {
 		found := false
 		for _, el := range arr {
-			sub := &validator{root: v.root, depth: v.depth}
+			sub := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
 			sub.validate(c, el, path)
 			if len(sub.errs) == 0 {
 				found = true
@@ -447,7 +529,7 @@ func (v *validator) checkArray(sch map[string]any, inst any, path string) {
 func (v *validator) checkCombinators(sch map[string]any, inst any, path string) {
 	if all, ok := sch["allOf"].([]any); ok {
 		for i, sub := range all {
-			child := &validator{root: v.root, depth: v.depth}
+			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
 			child.validate(sub, inst, path)
 			if len(child.errs) > 0 {
 				v.fail(path, "allOf[%d] failed: %s", i, strings.Join(child.errs, ", "))
@@ -457,7 +539,7 @@ func (v *validator) checkCombinators(sch map[string]any, inst any, path string) 
 	if any_, ok := sch["anyOf"].([]any); ok {
 		ok := false
 		for _, sub := range any_ {
-			child := &validator{root: v.root, depth: v.depth}
+			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
 			child.validate(sub, inst, path)
 			if len(child.errs) == 0 {
 				ok = true
@@ -471,7 +553,7 @@ func (v *validator) checkCombinators(sch map[string]any, inst any, path string) 
 	if one, ok := sch["oneOf"].([]any); ok {
 		matches := 0
 		for _, sub := range one {
-			child := &validator{root: v.root, depth: v.depth}
+			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
 			child.validate(sub, inst, path)
 			if len(child.errs) == 0 {
 				matches++
@@ -482,7 +564,7 @@ func (v *validator) checkCombinators(sch map[string]any, inst any, path string) 
 		}
 	}
 	if not, ok := sch["not"]; ok {
-		child := &validator{root: v.root, depth: v.depth}
+		child := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
 		child.validate(not, inst, path)
 		if len(child.errs) == 0 {
 			v.fail(path, "value must not match 'not' schema")

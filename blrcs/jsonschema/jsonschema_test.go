@@ -661,10 +661,42 @@ func TestJsonTypeNonStandard(t *testing.T) {
 	}
 }
 
-// TestCheckStringInvalidPattern covers `v.fail(…, "invalid pattern …")` in checkString.
+// TestCheckStringInvalidPattern: invalid regex in `pattern` is now rejected at
+// Compile time (fail-fast) rather than silently producing a per-call validation
+// error on every Validate invocation.
 func TestCheckStringInvalidPattern(t *testing.T) {
-	s := compile(t, `{"type":"string","pattern":"[invalid"}`)
-	mustInvalid(t, s, "hello")
+	_, err := Compile([]byte(`{"type":"string","pattern":"[invalid"}`))
+	if err == nil {
+		t.Fatal("Compile should fail for an invalid pattern regex")
+	}
+}
+
+// TestCompileInvalidPatternPropertiesFails covers the same fail-fast behavior
+// for invalid patternProperties keys.
+func TestCompileInvalidPatternPropertiesFails(t *testing.T) {
+	_, err := Compile([]byte(`{"patternProperties":{"[invalid":{"type":"string"}}}`))
+	if err == nil {
+		t.Fatal("Compile should fail for an invalid patternProperties key regex")
+	}
+}
+
+// TestPatternPrecompiledIsCached verifies that pre-compiled patterns are shared
+// across multiple Validate calls: a pattern that appears in both `pattern` and a
+// nested properties child compiles once but applies correctly to both paths.
+func TestPatternPrecompiledIsCached(t *testing.T) {
+	s := compile(t, `{
+		"type": "object",
+		"properties": {
+			"code": {"type": "string", "pattern": "^[0-9]{4}$"},
+			"id":   {"type": "string", "pattern": "^[0-9]{4}$"}
+		}
+	}`)
+	// Both properties share the same pre-compiled regex for "^[0-9]{4}$".
+	if len(s.compiled) != 1 {
+		t.Errorf("expected 1 unique compiled regex, got %d", len(s.compiled))
+	}
+	mustValid(t, s, map[string]any{"code": "1234", "id": "5678"})
+	mustInvalid(t, s, map[string]any{"code": "abc", "id": "5678"})
 }
 
 // TestMinPropertiesViolation covers `v.fail(…, "fewer than minProperties …")`.
