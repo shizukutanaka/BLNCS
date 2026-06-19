@@ -164,6 +164,35 @@ func TestMarkUsedDefaultRateLimit(t *testing.T) {
 	}
 }
 
+// TestMarkUsedRateLimitOne pins that WarnRateLimit==1 (the most aggressive
+// setting: warn on every call) actually warns on every call. The previous
+// n%rate==1 test made rate==1 a no-op (n%1 is always 0), silently disabling
+// all deprecation warnings — the opposite of the operator's intent.
+func TestMarkUsedRateLimitOne(t *testing.T) {
+	rec := &captureRec{}
+	tel := telemetry.New(rec)
+	r := NewRegistry(tel)
+	r.Register(API{Path: "loud.F", Stability: StabilityStable})
+	r.Deprecate("loud.F", Deprecation{
+		Since: "2.0", RemoveIn: "3.0", Replacement: "new.F",
+		WarnRateLimit: 1, // warn on EVERY call
+	})
+
+	const calls = 5
+	for i := 0; i < calls; i++ {
+		r.MarkUsed("loud.F")
+	}
+	warnCount := 0
+	for _, ev := range rec.eventsCopy() {
+		if ev.Name == "apiversion.deprecated_call" {
+			warnCount++
+		}
+	}
+	if warnCount != calls {
+		t.Errorf("WarnRateLimit=1 should warn on every call: got %d warnings for %d calls", warnCount, calls)
+	}
+}
+
 // ============================================================================
 // AllAPIs / DeprecatedAPIs
 // ============================================================================

@@ -37,6 +37,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`apiversion.MarkUsed` with `WarnRateLimit == 1` silently emitted zero deprecation
+  warnings — the most aggressive setting disabled the safety signal entirely (off-by-one
+  / modular-arithmetic, Axis 19).** The rate-limit guard was `if n%int64(rate) != 1
+  { return }`, intended as "warn on the 1st call and every `rate` calls thereafter." For
+  any `rate > 1` this is correct, but `WarnRateLimit: 1` means "warn on every call" — yet
+  `n % 1` is always `0`, so `0 != 1` is always true and `MarkUsed` returned before ever
+  warning. An operator who set the loudest possible deprecation warning got total silence,
+  the exact opposite of intent, and a silent failure mode for a signal whose whole purpose
+  is visibility. Fixed by switching the test to `(n-1)%int64(rate) != 0`, which is
+  identical for every `rate > 1` (warns at n = 1, rate+1, 2·rate+1, …) but correctly warns
+  on *every* call when `rate == 1`. Test: `TestMarkUsedRateLimitOne` asserts 5 calls with
+  `WarnRateLimit: 1` produce 5 warnings; the existing `rate=10` and default-`rate=100`
+  tests still pass, confirming no regression for the common path.
+
 - **`metrics` Prometheus exporter did not escape label values or HELP text —
   exposition-format corruption and metric injection (output integrity, Axis 18).**
   `formatLabelsInner` wrote each label as `%s="%s"` with no escaping, and the `# HELP`

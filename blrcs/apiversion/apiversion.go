@@ -133,8 +133,11 @@ func (r *Registry) MarkUsed(path string) {
 	if rate <= 0 {
 		rate = 100 // default: 100呼出毎に1警告
 	}
-	// rate-limited: nが rate倍数の場合のみ warn
-	if n%int64(rate) != 1 {
+	// Warn on the 1st call and every `rate` calls thereafter. Using (n-1)%rate
+	// (rather than n%rate==1) keeps rate==1 meaningful: "warn on every call".
+	// With n%rate==1, rate==1 would make the test n%1==1 — never true — so the
+	// most aggressive setting silently emitted zero warnings.
+	if (n-1)%int64(rate) != 0 {
 		return
 	}
 	r.tel.Warn("apiversion.deprecated_call",
