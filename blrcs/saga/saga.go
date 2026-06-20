@@ -222,19 +222,27 @@ func (s *Saga) compensate(ctx context.Context, state *State, completedIdx int, r
 	for i := completedIdx; i >= 0; i-- {
 		step := s.steps[i]
 		if step.Compensate == nil {
-			// no-op compensate (記念に名前だけ残す)
 			continue
 		}
-		// compensate ctx に新しい timeout 推奨 — caller の ctx が cancel された後でも実行
-		compCtx := ctx
-		if ctx.Err() != nil {
-			var cancel context.CancelFunc
-			compCtx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-		}
-		if err := step.Compensate(compCtx, state); err != nil {
-			report.CompensateErrors[step.Name] = err
-		}
+		s.runCompensation(ctx, state, step, report)
+	}
+}
+
+// runCompensation executes a single compensation step, giving it a fresh
+// context when the parent is already cancelled (so compensations always run
+// even after context cancellation). Splitting into its own function ensures
+// defer cancel() fires immediately when this function returns — not at the end
+// of the compensate() loop, which would accumulate one timer goroutine per
+// step for the entire duration of the compensation chain.
+func (s *Saga) runCompensation(ctx context.Context, state *State, step Step, report *RunReport) {
+	compCtx := ctx
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		compCtx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+	}
+	if err := step.Compensate(compCtx, state); err != nil {
+		report.CompensateErrors[step.Name] = err
 	}
 }
 

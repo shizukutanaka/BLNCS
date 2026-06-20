@@ -37,6 +37,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`saga.compensate` used `defer cancel()` inside a for loop — timer goroutine
+  leak for the entire duration of the compensation chain (resource management /
+  Go pitfall, Axis 25).** `compensate()` looped over completed steps in reverse
+  and, for each step whose parent context was cancelled, called
+  `context.WithTimeout(context.Background(), 30s)` and then `defer cancel()`.
+  In Go, `defer` executes at enclosing function return — not at the end of each
+  loop iteration. For a saga with N completed steps whose context was cancelled,
+  N timer goroutines were created and not cancelled until `compensate()` itself
+  returned (after all N compensations had finished sequentially). Each 30-second
+  timer goroutine was held live for the entire remaining compensation chain rather
+  than being released promptly after its step finished. Fixed: extracted a
+  `runCompensation()` helper that executes a single step; `defer cancel()` now
+  fires when `runCompensation` returns (immediately after that step's
+  `Compensate()` call), not accumulated until `compensate()`'s loop exit. Existing
+  behavior is unchanged — compensations still get a fresh context when the parent
+  is cancelled. Test: `TestCompensationContextIsLivePerStep` — 3 steps succeed,
+  the 4th cancels the parent ctx and fails, triggering compensation; each of the
+  3 compensations records whether its `compCtx` was live (`Err() == nil`) and
+  asserts it was (proves the fresh context was provided and not pre-cancelled by
+  a leaked timer).
+
 - **`vctmeta.Resolve` did not verify that the fetched Type Metadata document's
   `vct` claim matched the requested URL — credential type-confusion attack
   (IETF SD-JWT-VC §5 compliance, Axis 24).** After fetching the metadata document

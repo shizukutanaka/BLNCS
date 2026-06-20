@@ -280,6 +280,52 @@ func TestContextCancellationRollsBack(t *testing.T) {
 	_ = report
 }
 
+// TestCompensationContextIsLivePerStep verifies that each compensation step
+// receives a fresh, non-cancelled context even when the parent context is
+// already done at compensation time. The fix extracts runCompensation() so
+// each compensation's defer cancel() fires when that function returns, not
+// accumulated until the end of the compensate() for loop.
+//
+// Setup: steps 0–2 succeed with a live ctx; step 3 cancels the parent ctx
+// AND returns an error, triggering compensation for steps 0–2. Because
+// ctx.Err() != nil inside compensate, each step must receive a fresh 30s
+// timeout context — not the already-done parent.
+func TestCompensationContextIsLivePerStep(t *testing.T) {
+	ctx, cancelParent := context.WithCancel(context.Background())
+
+	liveAtCompensate := make([]bool, 3)
+
+	s := New("ctx-live-per-step")
+	for i := 0; i < 3; i++ {
+		idx := i
+		s.Step(fmt.Sprintf("step%d", idx),
+			func(ctx context.Context, st *State) error { return nil },
+			func(compCtx context.Context, st *State) error {
+				liveAtCompensate[idx] = compCtx.Err() == nil
+				return nil
+			},
+		)
+	}
+	// This step cancels the parent context AND returns an error, so steps 0–2
+	// are compensated with a cancelled parent ctx. Each must still get a live
+	// 30s timeout context (not the cancelled parent).
+	s.Step("cancel-and-fail",
+		func(ctx context.Context, st *State) error {
+			cancelParent()
+			return errors.New("forced failure after cancel")
+		},
+		nil,
+	)
+
+	s.Run(ctx, NewState(nil)) //nolint:errcheck
+
+	for i, live := range liveAtCompensate {
+		if !live {
+			t.Errorf("step%d compensation context was already done; want fresh 30s timeout", i)
+		}
+	}
+}
+
 // ============================================================================
 // State propagation
 // ============================================================================
