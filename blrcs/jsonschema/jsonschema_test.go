@@ -762,3 +762,66 @@ func TestIsUUIDNonHexChar(t *testing.T) {
 	s := compile(t, `{"type":"string","format":"uuid"}`)
 	mustInvalid(t, s, "123e4567-e89b-12d3-a456-42661417400z")
 }
+
+// TestComplexityBudgetExponentialRef verifies that an adversarially-crafted
+// cyclic $ref schema returns ErrComplexityBudget rather than running forever.
+//
+// The schema is compact (~150 bytes) but causes exponential evaluation:
+// each validation of "$defs/bomb" spawns two anyOf branches that each
+// re-follow the same $ref, doubling the work. With maxRefDepth = 64 and no
+// budget this produces 2^64 validator calls; with the budget it aborts after
+// maxValidateOps calls and returns ErrComplexityBudget in bounded time.
+//
+// This attack vector is reachable via vctmeta.ValidateClaims when a
+// vct#integrity check is absent or the metadata server is hostile.
+func TestComplexityBudgetExponentialRef(t *testing.T) {
+	const bomb = `{
+		"$defs": {
+			"T": {
+				"anyOf": [
+					{"$ref": "#/$defs/T"},
+					{"$ref": "#/$defs/T"}
+				]
+			}
+		},
+		"$ref": "#/$defs/T"
+	}`
+	sch, err := Compile([]byte(bomb))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	got := sch.Validate("any value")
+	if got != ErrComplexityBudget {
+		t.Fatalf("expected ErrComplexityBudget, got %v", got)
+	}
+}
+
+// TestComplexityBudgetNormalSchemaUnaffected verifies that a legitimately complex
+// schema (many properties with anyOf sub-schemas) completes without hitting the budget.
+func TestComplexityBudgetNormalSchemaUnaffected(t *testing.T) {
+	// 50 distinctly-named properties, each with a 3-branch anyOf.
+	// This is well within normal use but exercises the combinator paths.
+	names := []string{
+		"a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9",
+		"b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b9",
+		"c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9",
+		"d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9",
+		"e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9",
+	}
+	props := make([]string, len(names))
+	for i, n := range names {
+		props[i] = `"` + n + `":{"anyOf":[{"type":"string"},{"type":"number"},{"type":"null"}]}`
+	}
+	raw := `{"type":"object","properties":{` + strings.Join(props, ",") + `}}`
+	sch, err := Compile([]byte(raw))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	inst := make(map[string]any, len(names))
+	for _, n := range names {
+		inst[n] = "value"
+	}
+	if err := sch.Validate(inst); err != nil {
+		t.Fatalf("expected valid, got: %v", err)
+	}
+}

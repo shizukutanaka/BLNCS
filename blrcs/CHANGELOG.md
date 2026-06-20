@@ -37,6 +37,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`jsonschema.Validate` had no operation budget — exponential-time DoS via
+  adversarial `$ref`/`anyOf`/`oneOf` nesting (security / algorithmic complexity,
+  Axis 36).** A compact (~150 byte) schema consisting of a cyclic `$ref` inside a
+  2-branch `anyOf` causes exponential validator-call growth: each schema-node
+  evaluation spawns two child validators that each re-follow the same `$ref`,
+  doubling work at every level. With `maxRefDepth = 64` guarding individual chains,
+  the total call count reaches 2^64 ≈ 1.8 × 10^19 — effectively infinite. This
+  attack is reachable via `vctmeta.ValidateClaims`, which is called with the JSON
+  Schema embedded in SD-JWT-VC Type Metadata documents fetched from the credential
+  `vct` URL. When `vct#integrity` is absent or the metadata server is hostile, an
+  attacker can supply such a schema and lock a goroutine indefinitely. Fixed by
+  adding a shared operation counter (`ops *int`) to the `validator` type; all child
+  validators (created for `allOf`/`anyOf`/`oneOf`/`not`/`contains`) carry the same
+  pointer so the counter is global across the entire validation call tree. Each
+  `validate` invocation increments the counter and returns immediately when it
+  exceeds `maxValidateOps = 1 000 000`. `Schema.Validate` checks the final counter
+  and returns the new sentinel `ErrComplexityBudget` when exceeded. The budget is
+  generous enough for schemas with hundreds of properties × dozens of combinator
+  branches without triggering in practice. Tests: `TestComplexityBudgetExponentialRef`
+  (the 2-branch anyOf cyclic bomb, confirmed to complete in milliseconds and return
+  `ErrComplexityBudget`); `TestComplexityBudgetNormalSchemaUnaffected` (50 properties
+  × 3-branch anyOf validates successfully without hitting the budget).
+
 - **OpenID4VP presentation replay was possible under concurrency — TOCTOU
   between `Load` and `Consume` (security / replay, Axis 35).** `ProcessResponse`
   enforced one-time use of the authorization `state` by calling `store.Consume`

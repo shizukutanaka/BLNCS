@@ -34,6 +34,14 @@ import (
 // maxRefDepth bounds $ref following to prevent infinite recursion on cyclic schemas.
 const maxRefDepth = 64
 
+// maxValidateOps is the total number of schema-node evaluations allowed per
+// Validate call. It is shared across all child validators spawned during a
+// single call (via a pointer) so that adversarial branching (e.g. 60 levels
+// of oneOf with N sub-schemas each) cannot multiply past this cap.
+// 1 000 000 ops covers schemas with hundreds of properties × dozens of items
+// × several combinator branches without triggering the limit in practice.
+const maxValidateOps = 1_000_000
+
 // Schema is a compiled JSON Schema ready for validation.
 type Schema struct {
 	root     map[string]any            // the parsed root document (for $ref resolution)
@@ -147,9 +155,15 @@ func walkPatterns(node any, dest map[string]*regexp.Regexp) error {
 
 // Validate checks instance against the schema, returning a *ValidationError
 // listing every violation, or nil if valid.
+// Returns ErrComplexityBudget if the schema requires more than maxValidateOps
+// node evaluations (adversarial exponential nesting).
 func (s *Schema) Validate(instance any) error {
-	v := &validator{root: s.root, compiled: s.compiled}
+	ops := 0
+	v := &validator{root: s.root, compiled: s.compiled, ops: &ops}
 	v.validate(s.node, instance, "")
+	if ops > maxValidateOps {
+		return ErrComplexityBudget
+	}
 	if len(v.errs) == 0 {
 		return nil
 	}
@@ -165,6 +179,7 @@ type validator struct {
 	compiled map[string]*regexp.Regexp
 	errs     []string
 	depth    int
+	ops      *int // shared across child validators; incremented on every validate call
 }
 
 func (v *validator) fail(path, format string, args ...any) {
@@ -177,6 +192,10 @@ func (v *validator) fail(path, format string, args ...any) {
 
 // validate dispatches on a schema node (bool or object).
 func (v *validator) validate(node, inst any, path string) {
+	*v.ops++
+	if *v.ops > maxValidateOps {
+		return // budget exhausted; Validate will return ErrComplexityBudget
+	}
 	switch sch := node.(type) {
 	case bool:
 		// `true` accepts everything; `false` rejects everything.
@@ -509,7 +528,7 @@ func (v *validator) checkArray(sch map[string]any, inst any, path string) {
 	if c, ok := sch["contains"]; ok {
 		found := false
 		for _, el := range arr {
-			sub := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
+			sub := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
 			sub.validate(c, el, path)
 			if len(sub.errs) == 0 {
 				found = true
@@ -529,7 +548,7 @@ func (v *validator) checkArray(sch map[string]any, inst any, path string) {
 func (v *validator) checkCombinators(sch map[string]any, inst any, path string) {
 	if all, ok := sch["allOf"].([]any); ok {
 		for i, sub := range all {
-			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
+			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
 			child.validate(sub, inst, path)
 			if len(child.errs) > 0 {
 				v.fail(path, "allOf[%d] failed: %s", i, strings.Join(child.errs, ", "))
@@ -539,7 +558,7 @@ func (v *validator) checkCombinators(sch map[string]any, inst any, path string) 
 	if any_, ok := sch["anyOf"].([]any); ok {
 		ok := false
 		for _, sub := range any_ {
-			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
+			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
 			child.validate(sub, inst, path)
 			if len(child.errs) == 0 {
 				ok = true
@@ -553,7 +572,7 @@ func (v *validator) checkCombinators(sch map[string]any, inst any, path string) 
 	if one, ok := sch["oneOf"].([]any); ok {
 		matches := 0
 		for _, sub := range one {
-			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
+			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
 			child.validate(sub, inst, path)
 			if len(child.errs) == 0 {
 				matches++
@@ -564,7 +583,7 @@ func (v *validator) checkCombinators(sch map[string]any, inst any, path string) 
 		}
 	}
 	if not, ok := sch["not"]; ok {
-		child := &validator{root: v.root, compiled: v.compiled, depth: v.depth}
+		child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
 		child.validate(not, inst, path)
 		if len(child.errs) == 0 {
 			v.fail(path, "value must not match 'not' schema")
@@ -676,3 +695,11 @@ func resolvePointer(root map[string]any, pointer string) (any, bool) {
 
 // ErrUnknownFormat is returned for clarity in tests when needed.
 var ErrUnknownFormat = errors.New("jsonschema: unknown format")
+
+// ErrComplexityBudget is returned by Validate when the total number of
+// schema-node evaluations exceeds maxValidateOps. Legitimate schemas over
+// realistic claim sets stay well under this limit; it exists to bound
+// exponential blowup from adversarially-crafted nested oneOf/anyOf/allOf
+// schemas reachable via vctmeta.ValidateClaims from externally-fetched
+// Type Metadata documents.
+var ErrComplexityBudget = errors.New("jsonschema: complexity budget exceeded")
