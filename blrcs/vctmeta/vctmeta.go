@@ -34,6 +34,13 @@ var (
 	ErrNoSchema            = errors.New("vctmeta: type metadata has no embedded schema")
 	ErrExtendsChainTooDeep = errors.New("vctmeta: extends chain exceeds maximum depth")
 	ErrExtendsCycle        = errors.New("vctmeta: extends chain contains a cycle")
+	// ErrVCTMismatch — the fetched metadata's vct claim does not match the requested URL.
+	// IETF SD-JWT-VC §5: "the value of the vct claim in the metadata MUST be
+	// equal to the VC type identifier URL used to retrieve the metadata."
+	// A mismatch means the server served metadata for a different credential type
+	// (misconfigured CDN, wrong-object response, or type-confusion attack): the
+	// wrong JSON Schema would then be applied to claim validation.
+	ErrVCTMismatch = errors.New("vctmeta: metadata vct does not match requested URL")
 )
 
 const (
@@ -128,6 +135,13 @@ func Resolve(ctx context.Context, vct, expectedIntegrity string, fetch FetchFunc
 	var tm TypeMetadata
 	if err := json.Unmarshal(data, &tm); err != nil {
 		return nil, fmt.Errorf("vctmeta: parse: %w", err)
+	}
+	// IETF SD-JWT-VC §5: the metadata document's vct claim MUST equal the URL
+	// used to retrieve it. Without this check a misconfigured or hostile server
+	// could return metadata for type B when fetched as type A, applying the wrong
+	// JSON Schema to credential claim validation (type-confusion attack).
+	if tm.VCT != vct {
+		return nil, fmt.Errorf("%w: got %q, want %q", ErrVCTMismatch, tm.VCT, vct)
 	}
 	tm.Raw = data
 	return &tm, nil

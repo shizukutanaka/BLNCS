@@ -37,6 +37,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`vctmeta.Resolve` did not verify that the fetched Type Metadata document's
+  `vct` claim matched the requested URL — credential type-confusion attack
+  (IETF SD-JWT-VC §5 compliance, Axis 24).** After fetching the metadata document
+  from `vct` (e.g. `https://schema.europa.eu/dpp/sd-jwt-vc/v1`) and checking
+  integrity (when provided), `Resolve` unmarshalled the JSON and returned without
+  asserting `tm.VCT == vct`. A misconfigured CDN, compromised origin, or
+  path-traversal response could serve a metadata document for type B (`"vct":
+  "https://attacker.example.com/type"`) while being fetched as type A. The caller
+  would then validate credential claims against B's JSON Schema instead of A's —
+  either silently accepting invalid claims or falsely rejecting valid ones. The IETF
+  SD-JWT-VC draft §5 requires: "the value of the `vct` claim in the metadata MUST
+  be equal to the VC type identifier URL." Fixed: added `ErrVCTMismatch` sentinel
+  and a check immediately after unmarshal in `Resolve()`; `ResolveChain` inherits
+  the fix because it calls `Resolve` for every link. Tests:
+  `TestResolveVCTMismatch` (server returns metadata with a foreign `vct` → error)
+  and `TestResolveVCTEmptyInMetadata` (metadata has no `vct` field at all → error).
+
 - **`kms.FileSigner.load()` and `storage.FileStorage.LoadKeyPair()` never verified
   that the stored public key matched the private key — silent keypair corruption
   (integrity, Axis 23).** Both functions read a 96-byte file (`pub(32) || priv(64)`)

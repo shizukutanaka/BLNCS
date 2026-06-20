@@ -361,9 +361,9 @@ func TestCanonicalizeJSONInvalid(t *testing.T) {
 // different value than the raw bytes appear to encode — a JCS integrity hole.
 func TestCanonicalizeJSONDuplicateKey(t *testing.T) {
 	cases := []string{
-		`{"a":1,"a":2}`,          // top-level dup
-		`{"b":1,"a":2,"b":3}`,   // dup not adjacent
-		`{"x":{"k":1,"k":2}}`,   // nested dup
+		`{"a":1,"a":2}`,       // top-level dup
+		`{"b":1,"a":2,"b":3}`, // dup not adjacent
+		`{"x":{"k":1,"k":2}}`, // nested dup
 	}
 	for _, c := range cases {
 		if _, err := CanonicalizeJSON([]byte(c)); !errors.Is(err, ErrJCSDuplicateKey) {

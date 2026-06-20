@@ -263,7 +263,7 @@ func TestBulkEvictionRemovesOldestBatch(t *testing.T) {
 	}
 	got := d.Size()
 	wantMin := maxSize - (maxSize/evictBatchFraction - 1) // at most batch-1 extra slots freed
-	wantMax := maxSize - 1                                 // at least 1 freed (always)
+	wantMax := maxSize - 1                                // at least 1 freed (always)
 	if got > wantMin || got < wantMax {
 		// Accept any size in [maxSize-batch, maxSize-1] to handle tiny-maxSize rounding.
 		_ = wantMin

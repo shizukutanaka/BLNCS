@@ -90,6 +90,30 @@ func TestResolveNoIntegritySkipsCheck(t *testing.T) {
 	}
 }
 
+// TestResolveVCTMismatch verifies that Resolve rejects metadata whose vct
+// claim does not match the URL it was fetched from. Without this check a
+// misconfigured CDN or type-confusion attack could cause claim validation to
+// use the wrong JSON Schema: the server at https://a.example/type serves a
+// document with "vct":"https://b.example/other-type", and the caller would
+// silently validate claims against b's schema instead of a's.
+func TestResolveVCTMismatch(t *testing.T) {
+	wrongDoc := []byte(`{"vct":"https://other.example.com/type","name":"Wrong Type"}`)
+	_, err := Resolve(context.Background(), vctURL, "", memFetcher(wrongDoc))
+	if !errors.Is(err, ErrVCTMismatch) {
+		t.Fatalf("metadata vct != requested URL: want ErrVCTMismatch, got %v", err)
+	}
+}
+
+// TestResolveVCTEmptyInMetadata verifies that metadata lacking a vct claim
+// (empty string after unmarshal) is also rejected via ErrVCTMismatch.
+func TestResolveVCTEmptyInMetadata(t *testing.T) {
+	noVCT := []byte(`{"name":"No VCT field"}`)
+	_, err := Resolve(context.Background(), vctURL, "", memFetcher(noVCT))
+	if !errors.Is(err, ErrVCTMismatch) {
+		t.Fatalf("metadata with no vct: want ErrVCTMismatch, got %v", err)
+	}
+}
+
 // ============================================================================
 // Schema validation (jsonschema integration)
 // ============================================================================
