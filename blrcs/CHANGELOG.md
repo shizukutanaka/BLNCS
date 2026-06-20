@@ -37,6 +37,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`httpchain.WithCORS` with `AllowedOrigins: ["*"]` reflected the incoming `Origin`
+  header verbatim instead of emitting `Access-Control-Allow-Origin: *` (CORS footgun /
+  future credentials-theft vector, Axis 21).** When the wildcard is configured the
+  middleware computed `allow := true` and then wrote `w.Header().Set("Access-Control-Allow-Origin",
+  origin)` — where `origin` is the attacker-controlled `Origin` header — instead of the
+  literal token `"*"`. Functionally equivalent today (every origin is allowed either way),
+  but a serious footgun: browsers permit `Access-Control-Allow-Credentials: true` only when
+  the response carries an explicit origin, *not* `"*"`. If that header were ever added, any
+  site on the internet could make credentialed cross-origin requests because the server would
+  reflect their exact origin. Fixed: when `wildcard == true` the response is hardcoded to
+  `*` and `Vary: Origin` is not set (the response is identical for every origin, so Vary is
+  incorrect and would cause spurious cache misses). Per-origin allowlisting continues to
+  reflect the matched origin and set `Vary`. Test: `TestCORSWildcardEmitsStarNotReflection`
+  confirms the header is `"*"` (not the incoming origin) and that `Vary` is absent.
+
+- **`didwebvh.verifyEntryProof` accepted proofs with any `proofPurpose` — key-purpose
+  confusion attack (W3C Data Integrity §2.1 violation, Axis 20).** The verifier checked
+  the cryptosuite, decoded the signature, and called `ed25519.Verify` but never asserted
+  `p.ProofPurpose == "assertionMethod"`. Because `proofPurpose` is part of the signed data
+  (included in `proofConfig` → `hashData`), a proof signed with `proofPurpose:
+  "authentication"` by an authorized update key produces a cryptographically valid
+  signature over a *different* hash — and the verifier accepted it. An attacker who could
+  obtain a legitimate authentication challenge signed by the DID controller (e.g. during a
+  WebAuthn or DIDComm flow) could replay it as a DID log-update proof. Fixed: added
+  `if p.ProofPurpose != "assertionMethod" { continue }` before signature verification, so
+  the loop skips every proof whose purpose is not the expected one for this operation.
+  Test: `TestProofPurposeWrongRejected` builds an update entry signed with `proofPurpose:
+  "authentication"` by the legitimate update key (a valid signature — the only thing
+  stopping it is the purpose check) and asserts `ErrProofInvalid`.
+
 - **`apiversion.MarkUsed` with `WarnRateLimit == 1` silently emitted zero deprecation
   warnings — the most aggressive setting disabled the safety signal entirely (off-by-one
   / modular-arithmetic, Axis 19).** The rate-limit guard was `if n%int64(rate) != 1

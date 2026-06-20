@@ -497,6 +497,56 @@ func TestLastHashVariants(t *testing.T) {
 	}
 }
 
+// TestProofPurposeWrongRejected verifies that a validly-signed log entry is
+// rejected when its proof carries proofPurpose != "assertionMethod". The
+// signature is cryptographically correct (produced by an authorized update key),
+// so the only defence is the purpose check required by W3C Data Integrity §2.1.
+// Before the fix, the verifier accepted any purpose — a key-purpose confusion
+// attack where an "authentication" proof from an unrelated protocol flow could
+// masquerade as an authoritative DID-update proof.
+func TestProofPurposeWrongRejected(t *testing.T) {
+	updateKey, updateMK := genKey(t)
+	genesis, did, err := Create(CreateParams{DIDPath: "ex:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build update entry body (no proof yet).
+	entry := &LogEntry{
+		VersionTime: time.Now().Add(time.Second).UTC().Format(time.RFC3339),
+		Parameters:  Parameters{SCID: genesis.Parameters.SCID, UpdateKeys: genesis.Parameters.UpdateKeys},
+		State:       map[string]any{"id": did, "v": "2"},
+	}
+	eh, err := computeEntryHash(entry, genesis.VersionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.VersionID = "2-" + eh
+
+	// Build a proof with the WRONG proofPurpose but a VALID signature.
+	// hashData commits proofPurpose into the signing input, so the signature
+	// below is genuinely valid for purpose "authentication" — the only thing
+	// that correctly rejects it is the proofPurpose guard.
+	badProof := Proof{
+		Type:               "DataIntegrityProof",
+		Cryptosuite:        Cryptosuite,
+		Created:            entry.VersionTime,
+		VerificationMethod: did + "#" + updateMK,
+		ProofPurpose:       "authentication", // must be "assertionMethod"
+	}
+	data, err := hashData(entry, genesis.VersionID, &badProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badProof.ProofValue = multiformats.EncodeMultibaseBase58(ed25519.Sign(updateKey, data))
+	entry.Proof = []Proof{badProof}
+
+	_, err = Verify([]LogEntry{*genesis, *entry})
+	if !errors.Is(err, ErrProofInvalid) {
+		t.Fatalf("wrong proofPurpose must yield ErrProofInvalid, got %v", err)
+	}
+}
+
 func TestEffectiveSCIDEmptyLog(t *testing.T) {
 	if s := effectiveSCID(nil); s != "" {
 		t.Errorf("empty log: want empty SCID, got %q", s)

@@ -469,6 +469,42 @@ func TestNewNilTelemetry(t *testing.T) {
 	}
 }
 
+// TestCORSWildcardEmitsStarNotReflection verifies that when AllowedOrigins
+// contains "*" the middleware emits "Access-Control-Allow-Origin: *" (the
+// RFC 6454 form) rather than reflecting the incoming Origin header verbatim.
+// Reflecting an explicit origin is a future footgun: browsers allow cookies with
+// an explicit-origin CORS header but not with "*", so the reflected form would
+// enable cross-origin credential theft if Access-Control-Allow-Credentials were
+// ever added. It also must not set Vary, since the response is identical for all
+// origins under a wildcard policy.
+func TestCORSWildcardEmitsStarNotReflection(t *testing.T) {
+	chain := New(telemetry.New(telemetry.NopRecorder{})).WithCORS(CORSConfig{
+		AllowedOrigins: []string{"*"},
+	})
+	h := chain.Then(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	req, _ := http.NewRequest("GET", ts.URL, nil)
+	req.Header.Set("Origin", "https://attacker.example")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	got := resp.Header.Get("Access-Control-Allow-Origin")
+	if got != "*" {
+		t.Errorf("wildcard CORS: want *, got %q", got)
+	}
+	if resp.Header.Get("Vary") != "" {
+		t.Errorf("wildcard CORS must not set Vary, got %q", resp.Header.Get("Vary"))
+	}
+}
+
 // TestWriteBeforeWriteHeaderSetsStatus200 covers the statusCapturingWriter.Write
 // path where Write is called before WriteHeader (implicit 200).
 func TestWriteBeforeWriteHeaderSetsStatus200(t *testing.T) {

@@ -386,8 +386,16 @@ func (c *Chain) WithCORS(cfg CORSConfig) *Chain {
 			if origin != "" {
 				allow := wildcard || originSet[origin]
 				if allow {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					w.Header().Set("Vary", "Origin")
+					if wildcard {
+						// RFC 6454 §7.2: when permitting all origins, emit the literal
+						// "*" token. Reflecting the incoming Origin instead is a footgun:
+						// it becomes a vulnerability if Credentials is ever added, because
+						// browsers allow cookies with an explicit-origin header but not "*".
+						w.Header().Set("Access-Control-Allow-Origin", "*")
+					} else {
+						w.Header().Set("Access-Control-Allow-Origin", origin)
+						w.Header().Set("Vary", "Origin")
+					}
 				}
 			}
 			if r.Method == http.MethodOptions {

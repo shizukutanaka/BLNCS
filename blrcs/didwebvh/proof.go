@@ -99,6 +99,11 @@ func verifyEntryProof(entry *LogEntry, predecessorVersionID string, authorizedKe
 		if p.Cryptosuite != Cryptosuite || p.ProofValue == "" {
 			continue
 		}
+		// W3C Data Integrity §2.1: consumers MUST reject a proof whose
+		// proofPurpose does not match the expected purpose for the operation.
+		if p.ProofPurpose != "assertionMethod" {
+			continue
+		}
 		sig, err := multiformats.DecodeMultibaseBase58(p.ProofValue)
 		if err != nil || len(sig) != ed25519.SignatureSize {
 			continue
