@@ -37,6 +37,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`did:key` / multibase decoding accepted trailing bytes → DID identifier
+  malleability (security / identity integrity, Axis 32).** `resolveDIDKey`
+  length-checked the base58-decoded payload with `len < 2+32` and then sliced
+  `decoded[2:34]`, and `base58Ed25519Decode` used `len >= 2+32` for its multicodec
+  branch — both *accepted* payloads longer than the canonical 34 bytes (2-byte
+  `ed25519-pub` multicodec + 32-byte key) and silently discarded the trailing
+  bytes. The consequence is identifier malleability: `did:key:z<key>`,
+  `did:key:z<key+0x00>`, `did:key:z<key+junk>`, … all resolve to the *same*
+  issuer public key, so one key is addressable by infinitely many distinct DID
+  strings. For a credential system where the DID *is* the issuer/holder identity,
+  this breaks the 1:1 DID↔key invariant any allow/deny list or audit log relies
+  on — a denied issuer could re-present under a non-canonical DID that maps to the
+  same key, or two log entries for "different" DIDs could be the same principal.
+  (The `'m'` multibase branch and `jwkToEd25519` were already strict; only the
+  base58 paths were loose.) Fixed: require the EXACT length (`len != 2+32` →
+  `ErrMalformedDID`) in both `resolveDIDKey` and the multicodec branch of
+  `base58Ed25519Decode`, so only the canonical encoding is accepted. Tests:
+  `TestResolveDIDKeyTrailingBytesRejected` confirms the canonical form still
+  resolves while 1-, 2-, and 4-byte trailing suffixes are each rejected, and
+  `TestBase58Ed25519DecodeTrailingBytesRejected` covers the multibase path. The
+  existing too-short and wrong-multicodec tests remain green.
+
 - **mdoc digest & device-auth comparisons were not constant-time
   (defense-in-depth / timing side-channel, Axis 31).** `mdoc/verify.go` defined a
   hand-rolled `equalBytes` with early-exit-on-first-mismatch behavior and used it

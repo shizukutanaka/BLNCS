@@ -1020,6 +1020,39 @@ func TestResolveDIDKeyWrongMulticodec(t *testing.T) {
 	}
 }
 
+// TestResolveDIDKeyTrailingBytesRejected guards against did:key identifier
+// malleability: a multicodec + 32-byte key with EXTRA trailing bytes must be
+// rejected, not silently truncated to the same key. Otherwise one issuer key
+// would be addressable by infinitely many distinct did:key strings.
+func TestResolveDIDKeyTrailingBytesRejected(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	// Canonical form (0xed 0x01 + 32 bytes) must resolve to pub.
+	canonical := append([]byte{0xed, 0x01}, pub...)
+	r := New()
+	got, err := r.Resolve(context.Background(), "did:key:z"+base58Encode(canonical))
+	if err != nil || !equalKeys(got, pub) {
+		t.Fatalf("canonical did:key should resolve to pub: err=%v", err)
+	}
+	// Same key with trailing garbage MUST be rejected (no truncation).
+	for _, extra := range [][]byte{{0x00}, {0xff, 0xff}, []byte("junk")} {
+		malleable := append(append([]byte{0xed, 0x01}, pub...), extra...)
+		did := "did:key:z" + base58Encode(malleable)
+		if _, err := r.Resolve(context.Background(), did); !errors.Is(err, ErrMalformedDID) {
+			t.Errorf("trailing %d bytes: want ErrMalformedDID, got %v", len(extra), err)
+		}
+	}
+}
+
+// TestBase58Ed25519DecodeTrailingBytesRejected is the multibase-level analog:
+// a 34+ byte multicodec payload with trailing bytes must not be truncated.
+func TestBase58Ed25519DecodeTrailingBytesRejected(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	malleable := append(append([]byte{0xed, 0x01}, pub...), 0x00) // 35 bytes
+	if _, err := base58Ed25519Decode(base58Encode(malleable)); err == nil {
+		t.Error("35-byte multicodec payload should be rejected, not truncated")
+	}
+}
+
 // TestResolveDIDJWKBadJSONBody exercises the json.Unmarshal failure inside
 // resolveDIDJWK: valid base64url that decodes to non-JSON bytes.
 func TestResolveDIDJWKBadJSONBody(t *testing.T) {

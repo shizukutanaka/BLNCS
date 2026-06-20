@@ -349,14 +349,19 @@ func resolveDIDKey(identifier string) (ed25519.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMalformedDID, err)
 	}
-	// Multicodec ed25519-pub: 0xed 0x01
-	if len(decoded) < 2+ed25519.PublicKeySize {
-		return nil, fmt.Errorf("%w: too short", ErrMalformedDID)
+	// Multicodec ed25519-pub: 0xed 0x01 followed by exactly 32 key bytes.
+	// Require the EXACT length: accepting trailing bytes after the key would
+	// silently truncate them, so the same key would be addressable by infinitely
+	// many distinct did:key strings (identifier malleability). For a system where
+	// the DID *is* the issuer identity, that breaks the 1:1 DID↔key invariant and
+	// could be used to slip past DID allow/deny lists with a non-canonical form.
+	if len(decoded) != 2+ed25519.PublicKeySize {
+		return nil, fmt.Errorf("%w: did:key must be 2-byte multicodec + 32-byte key, got %d bytes", ErrMalformedDID, len(decoded))
 	}
 	if decoded[0] != 0xed || decoded[1] != 0x01 {
 		return nil, fmt.Errorf("%w: not Ed25519 multicodec (got %x %x)", ErrMalformedDID, decoded[0], decoded[1])
 	}
-	pub := decoded[2 : 2+ed25519.PublicKeySize]
+	pub := decoded[2:]
 	return ed25519.PublicKey(pub), nil
 }
 
@@ -365,9 +370,12 @@ func base58Ed25519Decode(s string) (ed25519.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Strip multicodec if present
-	if len(decoded) >= 2+ed25519.PublicKeySize && decoded[0] == 0xed && decoded[1] == 0x01 {
-		return ed25519.PublicKey(decoded[2 : 2+ed25519.PublicKeySize]), nil
+	// Strip multicodec if present. Require the EXACT 34-byte length (2-byte
+	// prefix + 32-byte key): accepting trailing bytes would silently truncate
+	// them, making one key addressable by many distinct multibase strings
+	// (identifier malleability — see resolveDIDKey).
+	if len(decoded) == 2+ed25519.PublicKeySize && decoded[0] == 0xed && decoded[1] == 0x01 {
+		return ed25519.PublicKey(decoded[2:]), nil
 	}
 	if len(decoded) == ed25519.PublicKeySize {
 		return ed25519.PublicKey(decoded), nil
