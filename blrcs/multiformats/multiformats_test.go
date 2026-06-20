@@ -557,3 +557,49 @@ func TestCanonicalizeNilAndBool(t *testing.T) {
 		}
 	}
 }
+
+// TestCanonicalizeDepthLimitJSON verifies that CanonicalizeJSON rejects JSON
+// that exceeds maxCanonicalizeDepth nesting levels.  Without the cap, deeply
+// nested DID documents fetched from attacker-controlled URLs would cause
+// walkJSONTokens and canonicalValue to recurse until goroutine stack exhaustion.
+func TestCanonicalizeDepthLimitJSON(t *testing.T) {
+	// Build JSON nested one level beyond the cap.
+	depth := maxCanonicalizeDepth + 1
+	open := strings.Repeat(`{"x":`, depth)
+	close := `0` + strings.Repeat(`}`, depth)
+	bomb := open + close
+
+	_, err := CanonicalizeJSON([]byte(bomb))
+	if !errors.Is(err, ErrCanonicalizeDepth) {
+		t.Fatalf("expected ErrCanonicalizeDepth for depth %d, got %v", depth, err)
+	}
+}
+
+// TestCanonicalizeDepthLimitValue verifies that Canonicalize also enforces the
+// depth cap on an already-decoded Go value (the path used by didwebvh/proof.go).
+func TestCanonicalizeDepthLimitValue(t *testing.T) {
+	// Build a map[string]any nested one level beyond the cap.
+	var v any = float64(0)
+	for i := 0; i <= maxCanonicalizeDepth; i++ {
+		v = map[string]any{"x": v}
+	}
+	_, err := Canonicalize(v)
+	if !errors.Is(err, ErrCanonicalizeDepth) {
+		t.Fatalf("expected ErrCanonicalizeDepth for %d-deep map, got %v", maxCanonicalizeDepth+1, err)
+	}
+}
+
+// TestCanonicalizeDepthLimitAtBoundary verifies that exactly-at-limit nesting
+// succeeds (the cap is inclusive, not off-by-one in the wrong direction).
+func TestCanonicalizeDepthLimitAtBoundary(t *testing.T) {
+	// Build JSON at exactly the cap (not beyond it).
+	depth := maxCanonicalizeDepth
+	open := strings.Repeat(`{"x":`, depth)
+	close := `0` + strings.Repeat(`}`, depth)
+	ok := open + close
+
+	_, err := CanonicalizeJSON([]byte(ok))
+	if err != nil {
+		t.Fatalf("expected success at depth %d, got %v", depth, err)
+	}
+}

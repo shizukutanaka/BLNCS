@@ -18,6 +18,18 @@ var ErrJCSUnsupported = errors.New("multiformats: value not canonicalizable")
 // raw bytes appear to encode — breaking the JCS tamper-detection guarantee.
 var ErrJCSDuplicateKey = errors.New("multiformats: JSON object contains duplicate key")
 
+// ErrCanonicalizeDepth is returned when JSON nesting exceeds maxCanonicalizeDepth.
+// A DID document with pathological nesting (e.g. 1 million nested arrays) would
+// exhaust goroutine stack via unbounded recursion in walkJSONTokens / canonicalValue;
+// the cap prevents that at a depth that no legitimate document reaches.
+var ErrCanonicalizeDepth = errors.New("multiformats: JSON nesting too deep")
+
+// maxCanonicalizeDepth limits recursive descent in walkJSONTokens and
+// canonicalValue. Legitimate DID documents and credential payloads are at most
+// a handful of levels deep; 512 gives ample headroom without risk of stack
+// exhaustion.
+const maxCanonicalizeDepth = 512
+
 // CanonicalizeJSON returns the RFC 8785 (JCS) canonical form of a JSON document.
 //
 // It parses with json.Number (so integers round-trip exactly) and re-serializes
@@ -44,7 +56,7 @@ func CanonicalizeJSON(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("multiformats: parse JSON: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := canonicalValue(&buf, v); err != nil {
+	if err := canonicalValue(&buf, v, 0); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -56,10 +68,13 @@ func CanonicalizeJSON(data []byte) ([]byte, error) {
 func detectDuplicateKeys(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
-	return walkJSONTokens(dec)
+	return walkJSONTokens(dec, 0)
 }
 
-func walkJSONTokens(dec *json.Decoder) error {
+func walkJSONTokens(dec *json.Decoder, depth int) error {
+	if depth > maxCanonicalizeDepth {
+		return ErrCanonicalizeDepth
+	}
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -81,7 +96,7 @@ func walkJSONTokens(dec *json.Decoder) error {
 				return fmt.Errorf("%w: %q", ErrJCSDuplicateKey, key)
 			}
 			seen[key] = struct{}{}
-			if err := walkJSONTokens(dec); err != nil {
+			if err := walkJSONTokens(dec, depth+1); err != nil {
 				return err
 			}
 		}
@@ -89,7 +104,7 @@ func walkJSONTokens(dec *json.Decoder) error {
 		return err
 	case '[':
 		for dec.More() {
-			if err := walkJSONTokens(dec); err != nil {
+			if err := walkJSONTokens(dec, depth+1); err != nil {
 				return err
 			}
 		}
@@ -103,13 +118,16 @@ func walkJSONTokens(dec *json.Decoder) error {
 // map[string]any, []any, string, json.Number, float64, bool, nil) to JCS form.
 func Canonicalize(v any) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := canonicalValue(&buf, v); err != nil {
+	if err := canonicalValue(&buf, v, 0); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
 }
 
-func canonicalValue(buf *bytes.Buffer, v any) error {
+func canonicalValue(buf *bytes.Buffer, v any, depth int) error {
+	if depth > maxCanonicalizeDepth {
+		return ErrCanonicalizeDepth
+	}
 	switch val := v.(type) {
 	case nil:
 		buf.WriteString("null")
@@ -135,20 +153,20 @@ func canonicalValue(buf *bytes.Buffer, v any) error {
 			if i > 0 {
 				buf.WriteByte(',')
 			}
-			if err := canonicalValue(buf, elem); err != nil {
+			if err := canonicalValue(buf, elem, depth+1); err != nil {
 				return err
 			}
 		}
 		buf.WriteByte(']')
 	case map[string]any:
-		return canonicalObject(buf, val)
+		return canonicalObject(buf, val, depth+1)
 	default:
 		return fmt.Errorf("%w: %T", ErrJCSUnsupported, v)
 	}
 	return nil
 }
 
-func canonicalObject(buf *bytes.Buffer, m map[string]any) error {
+func canonicalObject(buf *bytes.Buffer, m map[string]any, depth int) error {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -165,7 +183,7 @@ func canonicalObject(buf *bytes.Buffer, m map[string]any) error {
 		}
 		writeJCSString(buf, k)
 		buf.WriteByte(':')
-		if err := canonicalValue(buf, m[k]); err != nil {
+		if err := canonicalValue(buf, m[k], depth); err != nil {
 			return err
 		}
 	}

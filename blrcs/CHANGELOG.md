@@ -37,6 +37,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`multiformats.CanonicalizeJSON` / `Canonicalize` unbounded recursive descent
+  — goroutine stack exhaustion via deeply-nested DID documents (security / DoS,
+  Axis 38).** `walkJSONTokens` (duplicate-key pre-scan) and `canonicalValue`
+  (JCS re-serializer) both recurse without any depth cap; a DID document with
+  N levels of nested objects causes N stack frames. In `didwebvh/didwebvh.go`
+  and `didwebvh/proof.go`, these functions are called on externally-fetched DID
+  documents, so a hostile DID host can craft a million-level JSON tree that
+  exhausts the goroutine's stack (≥ 1 GB) or — at lower depths — consumes
+  enough memory to deny service to other goroutines. Fixed by adding
+  `maxCanonicalizeDepth = 512` and the sentinel `ErrCanonicalizeDepth`; both
+  `walkJSONTokens` and `canonicalValue` accept a `depth int` parameter and
+  return the error immediately when `depth > 512`. Legitimate DID documents
+  and credential payloads are at most a handful of levels deep.  Tests:
+  `TestCanonicalizeDepthLimitJSON` (one level beyond cap → `ErrCanonicalizeDepth`
+  from `CanonicalizeJSON`), `TestCanonicalizeDepthLimitValue` (same via
+  `Canonicalize` — the path used by `didwebvh/proof.go`),
+  `TestCanonicalizeDepthLimitAtBoundary` (exactly-at-cap → success, verifying
+  no off-by-one).
+
 - **SCITT Merkle inclusion and consistency proof root-hash comparisons were
   timing-variable — oracle for expected root hash (security / defense-in-depth,
   Axis 37).** The `scitt` package contained a hand-rolled `equalBytes` helper
