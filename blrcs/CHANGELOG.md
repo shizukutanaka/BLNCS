@@ -37,6 +37,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`TieredClaims.Set` defaulted invalid tiers to `TierRestricted` instead of
+  `TierAuthority` — wrong fail-safe direction in the ESPR access control model
+  (security / data minimization, Axis 30).** `TieredClaims` is the central
+  mechanism by which ESPR / Battery Reg 2023/1542 access tiers (public /
+  restricted / authority) are assigned to DPP claims before SD-JWT issuance.
+  When the caller supplied an unrecognised `AccessTier` string (e.g. a typo
+  `"Authority"` instead of `TierAuthority`, or a value from an incorrect
+  constant), the silent fallback was `TierRestricted` — the middle tier.
+  Under ESPR's model, `TierRestricted` is accessible to recyclers and repairers;
+  `TierAuthority` is accessible only to market-surveillance authorities and
+  customs. A developer who intended to protect a supplier contract
+  (`TierAuthority`) but misspelled the tier constant would silently produce a
+  credential that exposes that secret to every certified recycler who requests
+  it — a privilege escalation with no warning or error. The Apple principle
+  "安全側に倒す" (fail toward the safe side) requires the fallback to be the
+  *most* restrictive option when intent cannot be determined. Fixed: change the
+  fallback from `TierRestricted` to `TierAuthority` and update the comment to
+  explain the security rationale. Tests: `TestTieredClaimsInvalidTierFailsafe`
+  now checks five different malformed tier strings (wrong case, empty string,
+  etc.) and asserts each resolves to `TierAuthority`; the new
+  `TestTieredClaimsInvalidTierNotExposedToRestricted` confirms the claim is
+  invisible to `TierRestricted` viewers but fully visible to `TierAuthority`
+  viewers.
+
 - **`openid4vp.MemoryStore` GC goroutine leaked — no stop mechanism existed
   (reliability / goroutine leak, Axis 29).** `NewMemoryStore()` and
   `NewMemoryStoreWithCap()` each start a background `gcLoop` goroutine (5-minute

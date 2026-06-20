@@ -64,10 +64,12 @@ func NewTieredClaims() *TieredClaims {
 	}
 }
 
-// Set — claim を階層付きで登録 (無効な階層は restricted に丸める)。
+// Set — claim を階層付きで登録する。
+// tier が不明な場合は最も厳格な TierAuthority に倒す (安全側への失敗):
+// 誤った tier 指定による情報流出は、過剰保護より遥かに危険なため。
 func (tc *TieredClaims) Set(key string, value any, tier AccessTier) *TieredClaims {
 	if !tier.IsValid() {
-		tier = TierRestricted // フェイルセーフ: 不明は最小公開でなく中間に倒す
+		tier = TierAuthority // fail secure: unknown tier → maximally restricted
 	}
 	tc.tiers[key] = tier
 	tc.vals[key] = value

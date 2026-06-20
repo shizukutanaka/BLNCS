@@ -43,11 +43,38 @@ func TestTieredClaimsSetAndGet(t *testing.T) {
 	}
 }
 
+// TestTieredClaimsInvalidTierFailsafe verifies that an unrecognised tier string
+// falls to TierAuthority (the most restrictive tier), not TierRestricted.
+// Before the fix, invalid tiers defaulted to TierRestricted, so a developer
+// typo like AccessTier("Authority") (wrong case) could silently expose
+// authority-only supply-chain secrets to recyclers (TierRestricted viewers).
+// The secure-by-default direction is always toward maximum restriction.
 func TestTieredClaimsInvalidTierFailsafe(t *testing.T) {
-	tc := NewTieredClaims().Set("x", 1, AccessTier("bogus"))
-	tier, _ := tc.Tier("x")
-	if tier != TierRestricted {
-		t.Errorf("invalid tier should fail safe to restricted, got %s", tier)
+	for _, badTier := range []AccessTier{"bogus", "Authority", "PUBLIC", "", "RESTRICTED"} {
+		tc := NewTieredClaims().Set("x", 1, badTier)
+		tier, _ := tc.Tier("x")
+		if tier != TierAuthority {
+			t.Errorf("invalid tier %q should fail secure to authority, got %s", badTier, tier)
+		}
+	}
+}
+
+// TestTieredClaimsInvalidTierNotExposedToRestricted confirms that a claim
+// stored under an invalid tier is NOT accessible at TierRestricted level —
+// only at TierAuthority level — after the secure-default fix.
+func TestTieredClaimsInvalidTierNotExposedToRestricted(t *testing.T) {
+	tc := NewTieredClaims().Set("secret", "supplierContract", AccessTier("bogus"))
+
+	// Restricted viewer must NOT see the claim.
+	resView := tc.ClaimsAtOrBelow(TierRestricted)
+	if resView["secret"] != nil {
+		t.Error("invalid-tier claim must not be visible to TierRestricted viewer")
+	}
+
+	// Authority viewer must see it (claim is still stored and accessible).
+	authView := tc.ClaimsAtOrBelow(TierAuthority)
+	if authView["secret"] == nil {
+		t.Error("invalid-tier claim should be visible to TierAuthority viewer")
 	}
 }
 
