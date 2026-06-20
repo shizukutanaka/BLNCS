@@ -113,8 +113,13 @@ type SessionStore interface {
 // net for the attack window between GC ticks.
 const defaultMemStoreMax = 50_000
 
-type memoryStore struct {
+// MemoryStore is an in-process SessionStore with a TTL-based GC ticker.
+// It implements both SessionStore and io.Closer; callers must call Close when
+// done to stop the background GC goroutine and prevent leaks.
+type MemoryStore struct {
 	mu      sync.Mutex
+	once    sync.Once
+	stop    chan struct{}
 	data    map[string]*memEntry
 	maxSize int
 }
@@ -125,22 +130,29 @@ type memEntry struct {
 }
 
 // NewMemoryStore — インメモリ SessionStore 構築 (TTL 付き GC 内蔵)。
-func NewMemoryStore() SessionStore {
+// The returned *MemoryStore implements io.Closer; call Close to stop the GC goroutine.
+func NewMemoryStore() *MemoryStore {
 	return NewMemoryStoreWithCap(defaultMemStoreMax)
 }
 
-// NewMemoryStoreWithCap constructs a memoryStore with a custom session cap.
+// NewMemoryStoreWithCap constructs a MemoryStore with a custom session cap.
 // cap ≤ 0 is replaced by defaultMemStoreMax.
-func NewMemoryStoreWithCap(cap int) SessionStore {
+func NewMemoryStoreWithCap(cap int) *MemoryStore {
 	if cap <= 0 {
 		cap = defaultMemStoreMax
 	}
-	s := &memoryStore{data: make(map[string]*memEntry), maxSize: cap}
+	s := &MemoryStore{data: make(map[string]*memEntry), maxSize: cap, stop: make(chan struct{})}
 	go s.gcLoop()
 	return s
 }
 
-func (m *memoryStore) Save(state string, req *AuthorizationRequest, ttl time.Duration) error {
+// Close stops the background GC goroutine. It is safe to call multiple times.
+func (m *MemoryStore) Close() error {
+	m.once.Do(func() { close(m.stop) })
+	return nil
+}
+
+func (m *MemoryStore) Save(state string, req *AuthorizationRequest, ttl time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.data) >= m.maxSize {
@@ -160,7 +172,7 @@ func (m *memoryStore) Save(state string, req *AuthorizationRequest, ttl time.Dur
 	return nil
 }
 
-func (m *memoryStore) Load(state string) (*AuthorizationRequest, error) {
+func (m *MemoryStore) Load(state string) (*AuthorizationRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.data[state]
@@ -174,25 +186,30 @@ func (m *memoryStore) Load(state string) (*AuthorizationRequest, error) {
 	return e.req, nil
 }
 
-func (m *memoryStore) Consume(state string) error {
+func (m *MemoryStore) Consume(state string) error {
 	m.mu.Lock()
 	delete(m.data, state)
 	m.mu.Unlock()
 	return nil
 }
 
-func (m *memoryStore) gcLoop() {
+func (m *MemoryStore) gcLoop() {
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
-	for range t.C {
-		m.mu.Lock()
-		now := time.Now()
-		for k, e := range m.data {
-			if now.After(e.expires) {
-				delete(m.data, k)
+	for {
+		select {
+		case <-t.C:
+			m.mu.Lock()
+			now := time.Now()
+			for k, e := range m.data {
+				if now.After(e.expires) {
+					delete(m.data, k)
+				}
 			}
+			m.mu.Unlock()
+		case <-m.stop:
+			return
 		}
-		m.mu.Unlock()
 	}
 }
 
@@ -260,6 +277,17 @@ func NewVerifier(clientID, responseURI string, store SessionStore) *Verifier {
 		DefaultTTL:        10 * time.Minute,
 		RequireKeyBinding: true,
 	}
+}
+
+// Close releases resources held by the Verifier. If the underlying SessionStore
+// implements io.Closer (e.g. *MemoryStore), its GC goroutine is stopped.
+// Calling Close multiple times is safe.
+func (v *Verifier) Close() error {
+	type closer interface{ Close() error }
+	if c, ok := v.store.(closer); ok {
+		return c.Close()
+	}
+	return nil
 }
 
 // CreateRequest — 新 Authorization Request を発行

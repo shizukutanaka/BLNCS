@@ -37,6 +37,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`openid4vp.MemoryStore` GC goroutine leaked — no stop mechanism existed
+  (reliability / goroutine leak, Axis 29).** `NewMemoryStore()` and
+  `NewMemoryStoreWithCap()` each start a background `gcLoop` goroutine (5-minute
+  ticker) to evict expired sessions. The goroutine ran for the lifetime of the
+  process: there was no stop channel, no `Close()` method, and the goroutine held
+  a reference to the store, so the store itself could never be garbage-collected
+  either. In test suites that create many `Verifier` instances (each with its own
+  implicit `MemoryStore`), goroutines accumulate until the test binary exits —
+  causing false positives in goroutine-leak detectors and masking real leaks. In
+  long-running servers that periodically create and discard verifiers (e.g. per
+  tenant or per request), goroutines pile up indefinitely. Fixed: exported
+  `MemoryStore` (formerly `memoryStore`), added `stop chan struct{}` and
+  `once sync.Once` fields, changed `gcLoop` to `select` between the ticker and
+  the stop channel, and added `Close() error` that closes the stop channel exactly
+  once via `once.Do`. `NewMemoryStore()` and `NewMemoryStoreWithCap()` now return
+  `*MemoryStore` (concrete, satisfies `SessionStore`), giving callers direct access
+  to `Close()`. Added `Verifier.Close() error` that forwards to the store's
+  `Close()` when the store implements `io.Closer`, leaving custom store
+  implementations unaffected. Tests: `TestMemoryStoreCloseIdempotent` (two
+  sequential closes, no panic), `TestMemoryStoreCloseStopsGC` (stop channel is
+  closed after `Close()`), `TestVerifierCloseStopsStore` (verifier with implicit
+  store), `TestVerifierCloseWithExternalStore` (custom store without `io.Closer`
+  returns nil) — all pass under `-race`.
+
 - **`atrest.Keyring` was not thread-safe — concurrent key rotation and
   encryption shared unprotected map/pointer fields (thread safety / AES-GCM
   key dispatch, Axis 28).** `Keyring.Add` and `SetActive` write to `k.ciphers`

@@ -747,7 +747,7 @@ func TestProcessResponseRevocation(t *testing.T) {
 // returns an error when full and no expired entries exist to sweep.
 func TestMemoryStoreBoundedCap(t *testing.T) {
 	const cap = 5
-	store := NewMemoryStoreWithCap(cap).(*memoryStore)
+	store := NewMemoryStoreWithCap(cap)
 	req := &AuthorizationRequest{State: "x", Nonce: "n"}
 	for i := range cap {
 		state := "s" + string(rune('a'+i))
@@ -772,7 +772,7 @@ func TestMemoryStoreBoundedCap(t *testing.T) {
 // returning an error.
 func TestMemoryStoreExpiredEntriesSweptBeforeError(t *testing.T) {
 	const cap = 3
-	store := NewMemoryStoreWithCap(cap).(*memoryStore)
+	store := NewMemoryStoreWithCap(cap)
 	req := &AuthorizationRequest{State: "x", Nonce: "n"}
 	// Fill to cap with entries that expire immediately.
 	for i := range cap {
@@ -797,12 +797,80 @@ func TestMemoryStoreExpiredEntriesSweptBeforeError(t *testing.T) {
 
 // TestNewMemoryStoreWithCapNonPositive verifies that cap ≤ 0 falls back to defaultMemStoreMax.
 func TestNewMemoryStoreWithCapNonPositive(t *testing.T) {
-	s := NewMemoryStoreWithCap(0).(*memoryStore)
+	s := NewMemoryStoreWithCap(0)
 	if s.maxSize != defaultMemStoreMax {
 		t.Errorf("cap 0 should default to %d, got %d", defaultMemStoreMax, s.maxSize)
 	}
-	s2 := NewMemoryStoreWithCap(-1).(*memoryStore)
+	s2 := NewMemoryStoreWithCap(-1)
 	if s2.maxSize != defaultMemStoreMax {
 		t.Errorf("cap -1 should default to %d, got %d", defaultMemStoreMax, s2.maxSize)
 	}
 }
+
+// ============================================================================
+// MemoryStore.Close — goroutine lifecycle
+// ============================================================================
+
+// TestMemoryStoreCloseIdempotent verifies that calling Close twice does not panic.
+// Before the fix, the gcLoop goroutine had no stop mechanism; the stop channel
+// was introduced so Close terminates the background ticker goroutine exactly once.
+func TestMemoryStoreCloseIdempotent(t *testing.T) {
+	s := NewMemoryStore()
+	if err := s.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// TestMemoryStoreCloseStopsGC verifies that the stop channel is closed by
+// Close(), making the select case in gcLoop unblock and return.
+// We confirm by checking that the stop channel is closed after Close().
+func TestMemoryStoreCloseStopsGC(t *testing.T) {
+	s := NewMemoryStore()
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A closed channel returns the zero value immediately.
+	select {
+	case _, ok := <-s.stop:
+		if ok {
+			t.Error("stop channel should be closed (not readable)")
+		}
+	default:
+		t.Error("stop channel should be closed; default branch means it's still open")
+	}
+}
+
+// TestVerifierCloseStopsStore verifies that Verifier.Close forwards to the
+// underlying MemoryStore's Close, stopping the GC goroutine.
+func TestVerifierCloseStopsStore(t *testing.T) {
+	ver := NewVerifier("https://v.example", "https://v.example/cb", nil)
+	if err := ver.Close(); err != nil {
+		t.Fatalf("Verifier.Close: %v", err)
+	}
+	// Calling again must not panic (idempotent).
+	if err := ver.Close(); err != nil {
+		t.Fatalf("second Verifier.Close: %v", err)
+	}
+}
+
+// TestVerifierCloseWithExternalStore verifies that Verifier.Close is a no-op
+// when the session store does not implement io.Closer (e.g. a custom KV store).
+func TestVerifierCloseWithExternalStore(t *testing.T) {
+	// stubStore satisfies SessionStore but not io.Closer.
+	stub := &stubSessionStore{}
+	ver := NewVerifier("https://v.example", "https://v.example/cb", stub)
+	if err := ver.Close(); err != nil {
+		t.Fatalf("Close with non-Closer store should return nil: %v", err)
+	}
+}
+
+type stubSessionStore struct{}
+
+func (s *stubSessionStore) Save(_ string, _ *AuthorizationRequest, _ time.Duration) error {
+	return nil
+}
+func (s *stubSessionStore) Load(_ string) (*AuthorizationRequest, error) { return nil, nil }
+func (s *stubSessionStore) Consume(_ string) error                       { return nil }
