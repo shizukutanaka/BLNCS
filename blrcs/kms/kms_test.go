@@ -509,6 +509,31 @@ func TestFileSignerSaveFails(t *testing.T) {
 	}
 }
 
+// TestFileSignerLoadPubKeyMismatch verifies that loading a keyfile whose stored
+// public key does not match the private key's derived public key is rejected.
+// Without this check, a corrupted keyfile silently yields an inconsistent keypair:
+// Sign() would produce signatures verifiable under the derived public key, but
+// anything using the stored public key would fail verification without any error.
+func TestFileSignerLoadPubKeyMismatch(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "mismatch.key")
+
+	// Write a keyfile where the 32-byte pub section is a different key entirely.
+	differentPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	_, realPriv, _ := ed25519.GenerateKey(rand.Reader)
+
+	buf := make([]byte, 0, ed25519.PublicKeySize+ed25519.PrivateKeySize)
+	buf = append(buf, differentPub...) // wrong pub — differs from realPriv.Public()
+	buf = append(buf, realPriv...)
+	if err := os.WriteFile(keyPath, buf, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewFileSigner("id", keyPath); err == nil {
+		t.Fatal("FileSigner should reject keyfile where pub != priv.Public()")
+	}
+}
+
 // TestFileSignerSaveIsAtomic verifies that a successful save leaves no stale .tmp
 // file and that the key file round-trips correctly — exercising the crash-safe
 // write-fsync-rename-syncdir sequence.

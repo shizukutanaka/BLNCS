@@ -37,6 +37,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`kms.FileSigner.load()` and `storage.FileStorage.LoadKeyPair()` never verified
+  that the stored public key matched the private key — silent keypair corruption
+  (integrity, Axis 23).** Both functions read a 96-byte file (`pub(32) || priv(64)`)
+  and copied the bytes into separate `pub`/`priv` fields without checking that
+  `pub == priv.Public()`. A corrupted or partially-overwritten keyfile where bytes 0–31
+  disagree with the derived public key would load silently; `Sign()` would produce
+  signatures verifiable only under `priv.Public()`, while anything using the stored
+  `pub` (including SCITT `Receipt.TSKey` and every `VerifyReceipt` call) would fail
+  verification with no error surfaced at load time. Fixed: both functions now call
+  `priv.Public().(ed25519.PublicKey)` and compare with `bytes.Equal`; a mismatch
+  returns `ErrCorrupted` / a descriptive error immediately at startup, before any
+  credential or receipt can be signed with the inconsistent pair. Tests:
+  `TestFileSignerLoadPubKeyMismatch` (kms) and `TestFileStorageLoadKeyPairPubMismatch`
+  (storage) each write a keyfile with a `differentPub || realPriv` payload and assert
+  the loader returns an error.
+
 - **`multiformats.CanonicalizeJSON` silently accepted JSON with duplicate keys —
   cryptographic-commitment integrity gap (JCS correctness, Axis 22).** Go's
   `json.Decode` is specified to take the last value when an object has duplicate

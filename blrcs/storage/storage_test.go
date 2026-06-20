@@ -753,3 +753,33 @@ func TestSaveKeyPairRenameFails(t *testing.T) {
 		t.Error("SaveKeyPair when final path is a non-empty directory must return error")
 	}
 }
+
+// TestFileStorageLoadKeyPairPubMismatch verifies that FileStorage.LoadKeyPair
+// rejects a keypair file where the stored public key does not match the private
+// key's derived public key. Without this check, a corrupted or tampered keyfile
+// silently yields an inconsistent (pub, priv) pair: receipts embedding the stored
+// pub would fail verification while Sign would still succeed under the derived pub.
+func TestFileStorageLoadKeyPairPubMismatch(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+
+	// Build a keyfile where the pub section is from a different keypair.
+	differentPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	_, realPriv, _ := ed25519.GenerateKey(rand.Reader)
+
+	buf := make([]byte, 0, ed25519.PublicKeySize+ed25519.PrivateKeySize)
+	buf = append(buf, differentPub...)
+	buf = append(buf, realPriv...)
+	kpPath := filepath.Join(dir, "keypair.bin")
+	if err := os.WriteFile(kpPath, buf, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := fs.LoadKeyPair(); !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("mismatched pub/priv should return ErrCorrupted, got %v", err)
+	}
+}

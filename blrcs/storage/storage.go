@@ -15,6 +15,7 @@ package storage
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/json"
@@ -312,6 +313,12 @@ func (fs *FileStorage) LoadKeyPair() (ed25519.PublicKey, ed25519.PrivateKey, err
 	priv := make(ed25519.PrivateKey, ed25519.PrivateKeySize)
 	copy(pub, b[:ed25519.PublicKeySize])
 	copy(priv, b[ed25519.PublicKeySize:])
+	// Verify the stored public key matches the private key's embedded public key.
+	// A mismatch means the file is corrupted or tampered: signing would succeed
+	// but receipts carrying the stored pub would fail verification.
+	if !bytes.Equal(pub, priv.Public().(ed25519.PublicKey)) {
+		return nil, nil, fmt.Errorf("%w: keypair public key does not match private key", ErrCorrupted)
+	}
 	return pub, priv, nil
 }
 

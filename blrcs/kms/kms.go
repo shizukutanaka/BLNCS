@@ -21,6 +21,7 @@
 package kms
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -196,6 +197,12 @@ func (f *FileSigner) load() error {
 	f.priv = make(ed25519.PrivateKey, ed25519.PrivateKeySize)
 	copy(f.pub, b[:ed25519.PublicKeySize])
 	copy(f.priv, b[ed25519.PublicKeySize:])
+	// Verify the stored public key is consistent with the private key. A mismatch
+	// means file corruption or tampering: Sign() would produce valid signatures
+	// under the derived public key but callers using f.pub would see failures.
+	if !bytes.Equal(f.pub, f.priv.Public().(ed25519.PublicKey)) {
+		return errors.New("kms: keyfile corrupted: public key does not match private key")
+	}
 	return nil
 }
 
