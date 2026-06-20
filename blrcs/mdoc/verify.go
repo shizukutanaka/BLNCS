@@ -3,6 +3,7 @@ package mdoc
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/subtle"
 	"fmt"
 	"time"
 
@@ -174,7 +175,7 @@ func verifyItem(itemRaw any, nsDigests map[int][]byte) (id string, value any, di
 	if !ok {
 		return "", nil, 0, fmt.Errorf("%w: digestID %d", ErrUnknownDigestID, digestID)
 	}
-	if !equalBytes(sum[:], want) {
+	if subtle.ConstantTimeCompare(sum[:], want) != 1 {
 		return "", nil, 0, fmt.Errorf("%w: element %q (digestID %d)", ErrDigestMismatch, id, digestID)
 	}
 	return id, value, digestID, nil
@@ -288,16 +289,4 @@ func parseDeviceKey(raw any) ed25519.PublicKey {
 		return nil
 	}
 	return ed25519.PublicKey(x)
-}
-
-func equalBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

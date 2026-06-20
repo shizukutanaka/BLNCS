@@ -2,6 +2,7 @@ package mdoc
 
 import (
 	"crypto/ed25519"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"time"
@@ -106,7 +107,7 @@ func VerifyDeviceAuth(deviceSignature []byte, docType string, sessionTranscript 
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrDeviceAuth, err)
 	}
-	if !equalBytes(res.Payload, want) {
+	if subtle.ConstantTimeCompare(res.Payload, want) != 1 {
 		return fmt.Errorf("%w: session-transcript/docType binding mismatch", ErrDeviceAuth)
 	}
 	return nil

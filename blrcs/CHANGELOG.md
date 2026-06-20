@@ -37,6 +37,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **mdoc digest & device-auth comparisons were not constant-time
+  (defense-in-depth / timing side-channel, Axis 31).** `mdoc/verify.go` defined a
+  hand-rolled `equalBytes` with early-exit-on-first-mismatch behavior and used it
+  in two security-critical paths: (1) the ISO 18013-5 MSO `valueDigests` check in
+  `verifyItem` (SHA-256 digest of each disclosed `IssuerSignedItem` vs. the
+  issuer-attested digest — tamper / substitution detection), and (2) the device
+  authentication payload binding in `VerifyDeviceAuth` (the device-signed
+  `DeviceAuthenticationBytes` vs. the verifier-reconstructed expected bytes —
+  holder-binding / session-transcript check). A byte-by-byte comparison that
+  returns as soon as it finds a mismatch leaks, through timing, *how many leading
+  bytes matched*. While neither operand is a long-lived secret (digests are public
+  once the credential is disclosed, and the binding payload is verifier-derived),
+  an attacker who can submit forged credentials and measure verification latency
+  could in principle use the digest comparison as an oracle to forge a colliding
+  `IssuerSignedItem` byte-by-byte without ever seeing a valid signature — exactly
+  the class of attack `crypto/subtle` exists to foreclose. Cryptographic
+  comparisons should be constant-time unconditionally; relying on "this value is
+  not secret today" is fragile. Fixed: replace both call sites with
+  `crypto/subtle.ConstantTimeCompare(...) != 1` and delete the `equalBytes`
+  helper. `ConstantTimeCompare` already returns 0 for length-mismatched inputs, so
+  the length-guard semantics are preserved. No API or behavior change for valid
+  credentials; the digest-mismatch and binding-mismatch rejection paths remain
+  covered by `TestVerifyDigestMismatch`, `TestVerifyItemDigestMismatch`, and the
+  device-auth tests.
+
 - **`TieredClaims.Set` defaulted invalid tiers to `TierRestricted` instead of
   `TierAuthority` — wrong fail-safe direction in the ESPR access control model
   (security / data minimization, Axis 30).** `TieredClaims` is the central

@@ -556,15 +556,9 @@ func TestItemElementIDErrors(t *testing.T) {
 }
 
 // ============================================================================
-// Coverage uplift: equalBytes len-mismatch, verifyItem non-bstr tag content,
+// Coverage uplift: verifyItem non-bstr tag content,
 // Present error paths, Verify namespace error paths
 // ============================================================================
-
-func TestEqualBytesLengthMismatch(t *testing.T) {
-	if equalBytes([]byte{1, 2, 3}, []byte{1, 2}) {
-		t.Error("different-length slices should not be equal")
-	}
-}
 
 func TestVerifyItemNonBstrTag24Content(t *testing.T) {
 	// Tag 24 whose content is a string, not bstr → ErrMalformed
