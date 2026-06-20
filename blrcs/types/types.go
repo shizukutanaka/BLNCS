@@ -12,6 +12,7 @@
 package types
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -93,14 +94,15 @@ func (d DID) Identifier() string {
 
 // MarshalJSON / UnmarshalJSON — JSON互換
 func (d DID) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + d.value + `"`), nil
+	return json.Marshal(d.value)
 }
 
 func (d *DID) UnmarshalJSON(b []byte) error {
-	if len(b) < 2 || b[0] != '"' || b[len(b)-1] != '"' {
-		return errors.New("did: not a JSON string")
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return fmt.Errorf("did: %w", err)
 	}
-	got, err := NewDID(string(b[1 : len(b)-1]))
+	got, err := NewDID(s)
 	if err != nil {
 		return err
 	}

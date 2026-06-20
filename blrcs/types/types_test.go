@@ -88,6 +88,62 @@ func TestDIDJSONRejectsInvalid(t *testing.T) {
 	}
 }
 
+// TestDIDMarshalJSONSpecialChars verifies that DID.MarshalJSON properly escapes
+// characters that would otherwise break or inject into the containing JSON document.
+func TestDIDMarshalJSONSpecialChars(t *testing.T) {
+	cases := []string{
+		`did:web:foo"bar`,       // double-quote → classic injection candidate
+		`did:web:back\slash`,    // backslash
+		"did:web:tab\there",     // tab
+		"did:web:ctrl\x01chars", // control character
+	}
+	for _, raw := range cases {
+		d, err := NewDID(raw)
+		if err != nil {
+			t.Fatalf("NewDID(%q): %v", raw, err)
+		}
+		b, err := json.Marshal(d)
+		if err != nil {
+			t.Fatalf("MarshalJSON(%q): %v", raw, err)
+		}
+		var got string
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatalf("MarshalJSON(%q) output not valid JSON string: %v; bytes: %s", raw, err, b)
+		}
+		if got != raw {
+			t.Errorf("round-trip(%q): got %q", raw, got)
+		}
+	}
+}
+
+// TestDIDMarshalJSONInjection verifies that embedding a DID with embedded quotes
+// in a struct produces valid, non-injected JSON — the injected key must not appear.
+func TestDIDMarshalJSONInjection(t *testing.T) {
+	type holder struct {
+		ID DID `json:"id"`
+	}
+	raw := `did:web:a","evil":true`
+	d, _ := NewDID(raw)
+	b, err := json.Marshal(holder{ID: d})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var h holder
+	if err := json.Unmarshal(b, &h); err != nil {
+		t.Fatalf("output is not valid JSON: %v; bytes: %s", err, b)
+	}
+	if h.ID.String() != raw {
+		t.Errorf("round-trip mismatch: got %q want %q", h.ID.String(), raw)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(b, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, injected := fields["evil"]; injected {
+		t.Errorf("JSON injection succeeded — 'evil' key found in output: %s", b)
+	}
+}
+
 // ============================================================================
 // GTIN
 // ============================================================================

@@ -37,6 +37,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`types.DID.MarshalJSON` / `UnmarshalJSON` JSON injection and escape-sequence
+  mishandling (security / correctness, Axis 39).** `DID.MarshalJSON` produced JSON
+  by raw string concatenation (`"` + d.value + `"`), without escaping the content.
+  `NewDID` does not reject `"`, `\`, or control characters in the method-specific
+  identifier (the third colon-separated component), so a `DID` constructed from a
+  crafted string — for instance `did:web:a","evil":true` — would produce broken or
+  injected JSON when embedded in any struct marshaled with `json.Marshal`. In a DID
+  resolution context, where DID values flow from externally-fetched documents into
+  application data structures that are later serialized, this is an exploitable path:
+  an attacker controlling a DID document (or the method-specific id in a log entry)
+  can inject arbitrary JSON keys into downstream API responses or audit records.
+  Compounding the issue, `UnmarshalJSON` performed the inverse operation incorrectly:
+  it stripped the outer JSON quote bytes without decoding escape sequences, so a
+  round-trip through `Marshal`→`Unmarshal` for a DID containing `\"` would yield a
+  value with literal backslash-quote bytes rather than the original `"` character.
+  Fixed by replacing both methods with stdlib-correct implementations: `MarshalJSON`
+  delegates to `json.Marshal(d.value)`, which escapes all characters that require it;
+  `UnmarshalJSON` delegates to `json.Unmarshal(b, &s)` and then calls `NewDID(s)`,
+  which properly handles all JSON escape sequences. The GTIN and CountryCode types
+  have analogous patterns but are safe because their validators admit only digits and
+  uppercase ASCII letters respectively. Tests: `TestDIDMarshalJSONSpecialChars` (DIDs
+  with `"`, `\`, tab, and control-character identifiers round-trip correctly through
+  `json.Marshal`/`json.Unmarshal`); `TestDIDMarshalJSONInjection` (embedding a DID
+  with `","evil":true` in a JSON struct produces valid, non-injected JSON — the
+  injected key is absent from the parsed result).
+
 - **`multiformats.CanonicalizeJSON` / `Canonicalize` unbounded recursive descent
   — goroutine stack exhaustion via deeply-nested DID documents (security / DoS,
   Axis 38).** `walkJSONTokens` (duplicate-key pre-scan) and `canonicalValue`
