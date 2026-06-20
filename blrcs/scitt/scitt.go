@@ -509,12 +509,36 @@ func (l *Ledger) SignedCheckpoint() Checkpoint {
 	return cp
 }
 
-// checkpointSigPayload — checkpoint に対する署名/副署の正規バイト列 (root||size||ts)。
+// checkpointSigPayload — checkpoint に対する署名/副署の正規バイト列。
+//
+// domain-tag ‖ TSID ‖ rootHash ‖ treeSize ‖ timestamp を、各可変長フィールドを
+// 4-byte 長さ前置きして連結する (連結の曖昧性排除)。
+//
+// TSID (log / Transparency Service の識別子 = checkpoint の "origin") を必ず
+// 署名対象に含めることが重要: witness の split-view 防御は cp.TSID 単位で
+// lineage を追跡する (w.seen[cp.TSID]) ため、TSID が署名で束縛されないと、
+// 正しく署名された checkpoint を別 log の TSID に張り替えても VerifyCheckpoint を
+// 通過してしまい、per-log の追跡が破壊される。C2SP / RFC 6962 の checkpoint も
+// origin 行を署名本体に含めるのと同じ理由。
 func checkpointSigPayload(cp Checkpoint) []byte {
+	buf := make([]byte, 0, 64+len(cp.TSID)+len(cp.RootHash))
+	buf = appendLenPrefixed(buf, []byte("blrcs-checkpoint-v1")) // domain separation
+	buf = appendLenPrefixed(buf, []byte(cp.TSID))
+	buf = appendLenPrefixed(buf, []byte(cp.RootHash))
 	var sz [8]byte
 	binary.BigEndian.PutUint64(sz[:], cp.TreeSize)
-	payload := append([]byte(cp.RootHash), sz[:]...)
-	return append(payload, []byte(cp.Timestamp.Format(time.RFC3339Nano))...)
+	buf = append(buf, sz[:]...)
+	buf = appendLenPrefixed(buf, []byte(cp.Timestamp.Format(time.RFC3339Nano)))
+	return buf
+}
+
+// appendLenPrefixed appends a 4-byte big-endian length followed by b, so that
+// concatenated variable-length fields cannot be confused for one another.
+func appendLenPrefixed(dst, b []byte) []byte {
+	var l [4]byte
+	binary.BigEndian.PutUint32(l[:], uint32(len(b)))
+	dst = append(dst, l[:]...)
+	return append(dst, b...)
 }
 
 // VerifyCheckpoint — log (Transparency Service) の checkpoint 署名を検証する。

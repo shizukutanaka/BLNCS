@@ -37,6 +37,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **SCITT checkpoint signature did not bind the log identity (`TSID`) →
+  cross-log checkpoint relabeling (security / transparency-log integrity,
+  Axis 33).** `checkpointSigPayload` signed only `rootHash ‖ treeSize ‖
+  timestamp`, omitting `cp.TSID` — the Transparency-Service / log identifier that
+  is the checkpoint's *origin*. The witness split-view defense
+  (`scitt/witness.go`) keys its entire per-log lineage state on that field
+  (`w.seen[cp.TSID]`, regression/consistency checks scoped per TSID), so leaving
+  it outside the signed body made it attacker-malleable: a validly-signed
+  checkpoint could be relabeled to a different log's TSID and still pass
+  `VerifyCheckpoint`, letting an attacker move a signed tree head between logs and
+  defeat the non-equivocation tracking. C2SP / RFC 6962 checkpoints bind the
+  origin line into the signed note for exactly this reason. Fixed: rewrite
+  `checkpointSigPayload` to a domain-separated, 4-byte-length-prefixed encoding
+  (`"blrcs-checkpoint-v1" ‖ TSID ‖ rootHash ‖ treeSize ‖ timestamp`) so the log
+  identity is covered and variable-length fields cannot be confused for one
+  another. Test: `TestCheckpointSignatureBindsTSID` confirms a genuine checkpoint
+  verifies but the same checkpoint with a relabeled TSID fails with
+  `ErrCheckpointSig`. (Sign and verify share the helper, so existing
+  checkpoint/cosignature/witness tests stay green; checkpoints are ephemeral
+  runtime artifacts, so there is no persisted-signature compatibility concern.)
+
 - **`did:key` / multibase decoding accepted trailing bytes → DID identifier
   malleability (security / identity integrity, Axis 32).** `resolveDIDKey`
   length-checked the base58-decoded payload with `len < 2+32` and then sliced

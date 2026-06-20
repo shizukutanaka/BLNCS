@@ -416,6 +416,30 @@ func TestVerifyCheckpointBadBase64Sig(t *testing.T) {
 	}
 }
 
+// TestCheckpointSignatureBindsTSID proves the checkpoint signature covers the
+// log identity (TSID / origin). A validly-signed checkpoint whose TSID is
+// relabeled to a different log MUST fail verification — otherwise an attacker
+// could move a signed tree head between logs and defeat the witness's per-log
+// (w.seen[cp.TSID]) split-view tracking.
+func TestCheckpointSignatureBindsTSID(t *testing.T) {
+	ledger, _ := NewLedger("did:web:log-a.example")
+	growLedger(t, ledger, 3)
+	cp := ledger.SignedCheckpoint()
+	tsPub := ledger.PublicKey()
+
+	// Sanity: the genuine checkpoint verifies.
+	if err := VerifyCheckpoint(cp, tsPub); err != nil {
+		t.Fatalf("genuine checkpoint should verify: %v", err)
+	}
+
+	// Relabel the log identity; signature must no longer verify.
+	forged := cp
+	forged.TSID = "did:web:log-b.example"
+	if err := VerifyCheckpoint(forged, tsPub); err != ErrCheckpointSig {
+		t.Errorf("TSID-relabeled checkpoint must fail: want ErrCheckpointSig, got %v", err)
+	}
+}
+
 func TestVerifyCheckpointShortPubKey(t *testing.T) {
 	ledger, _ := NewLedger("ts-spk")
 	growLedger(t, ledger, 1)
