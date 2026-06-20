@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -351,6 +352,32 @@ func TestCanonicalizeJSONInvalid(t *testing.T) {
 	_, err := CanonicalizeJSON([]byte(`{not json`))
 	if err == nil {
 		t.Error("invalid JSON should fail")
+	}
+}
+
+// TestCanonicalizeJSONDuplicateKey verifies that CanonicalizeJSON rejects
+// JSON objects with duplicate keys at the top level. Go's json.Decode would
+// silently keep the last value, producing a canonical form that commits to a
+// different value than the raw bytes appear to encode — a JCS integrity hole.
+func TestCanonicalizeJSONDuplicateKey(t *testing.T) {
+	cases := []string{
+		`{"a":1,"a":2}`,          // top-level dup
+		`{"b":1,"a":2,"b":3}`,   // dup not adjacent
+		`{"x":{"k":1,"k":2}}`,   // nested dup
+	}
+	for _, c := range cases {
+		if _, err := CanonicalizeJSON([]byte(c)); !errors.Is(err, ErrJCSDuplicateKey) {
+			t.Errorf("CanonicalizeJSON(%s) want ErrJCSDuplicateKey, got %v", c, err)
+		}
+	}
+}
+
+// TestCanonicalizeJSONDuplicateKeyDifferentLevels ensures that the same key in
+// different nested objects is not mis-identified as a duplicate.
+func TestCanonicalizeJSONDuplicateKeyDifferentLevels(t *testing.T) {
+	in := `{"a":{"a":1}}`
+	if _, err := CanonicalizeJSON([]byte(in)); err != nil {
+		t.Errorf("same key in different objects should not be a dup: %v", err)
 	}
 }
 

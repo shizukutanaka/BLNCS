@@ -37,6 +37,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`multiformats.CanonicalizeJSON` silently accepted JSON with duplicate keys —
+  cryptographic-commitment integrity gap (JCS correctness, Axis 22).** Go's
+  `json.Decode` is specified to take the last value when an object has duplicate
+  keys and silently discard all earlier ones. `CanonicalizeJSON` decoded first and
+  then re-serialized, so `{"a":1,"a":2}` canonicalized to `{"a":2}` without error.
+  Any caller passing a raw JSON document to `CanonicalizeJSON` and using the output
+  as a cryptographic commitment would commit to `2`, but the raw bytes say `1` first
+  — a silent divergence between what is signed and what the document actually
+  contains. In the context of did:webvh SCID derivation or Data Integrity proof
+  binding, an adversary supplying a JSON document with strategically placed duplicate
+  keys could craft a different canonical form than intended. Fixed by adding a
+  token-by-token pre-scan (`detectDuplicateKeys` / `walkJSONTokens`) before the
+  decode step; it returns `ErrJCSDuplicateKey` for any duplicate key at any nesting
+  level. The `Canonicalize(v any)` path is unaffected (Go `map[string]any` cannot
+  have duplicate keys). Tests: top-level and nested duplicate keys return the error;
+  the same key in different nested objects (not a duplicate) still canonicalizes.
+
 - **`httpchain.WithCORS` with `AllowedOrigins: ["*"]` reflected the incoming `Origin`
   header verbatim instead of emitting `Access-Control-Allow-Origin: *` (CORS footgun /
   future credentials-theft vector, Axis 21).** When the wildcard is configured the

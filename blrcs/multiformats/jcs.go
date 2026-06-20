@@ -12,6 +12,12 @@ import (
 // ErrJCSUnsupported is returned for values JCS cannot canonicalize here.
 var ErrJCSUnsupported = errors.New("multiformats: value not canonicalizable")
 
+// ErrJCSDuplicateKey is returned when CanonicalizeJSON finds a JSON object with
+// duplicate keys. Go's json.Decode silently keeps the last value for duplicate
+// keys, which would make the canonical form commit to a different value than the
+// raw bytes appear to encode — breaking the JCS tamper-detection guarantee.
+var ErrJCSDuplicateKey = errors.New("multiformats: JSON object contains duplicate key")
+
 // CanonicalizeJSON returns the RFC 8785 (JCS) canonical form of a JSON document.
 //
 // It parses with json.Number (so integers round-trip exactly) and re-serializes
@@ -25,6 +31,12 @@ var ErrJCSUnsupported = errors.New("multiformats: value not canonicalizable")
 // not rely on float edge cases); callers needing full ES number canonicalization
 // for arbitrary floats should not depend on this.
 func CanonicalizeJSON(data []byte) ([]byte, error) {
+	// Pre-scan for duplicate keys: Go's json.Decode silently keeps the last
+	// value for duplicates, so without this check the canonical form would
+	// commit to a different value than the raw bytes appear to encode.
+	if err := detectDuplicateKeys(data); err != nil {
+		return nil, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var v any
@@ -36,6 +48,55 @@ func CanonicalizeJSON(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// detectDuplicateKeys scans raw JSON data token-by-token and returns
+// ErrJCSDuplicateKey if any JSON object contains the same key more than once at
+// the same nesting level. This is needed because json.Decode silently last-wins.
+func detectDuplicateKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	return walkJSONTokens(dec)
+}
+
+func walkJSONTokens(dec *json.Decoder) error {
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	d, isDelim := t.(json.Delim)
+	if !isDelim {
+		return nil // scalar value — no duplicate key possible
+	}
+	switch d {
+	case '{':
+		seen := make(map[string]struct{})
+		for dec.More() {
+			kt, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, _ := kt.(string)
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("%w: %q", ErrJCSDuplicateKey, key)
+			}
+			seen[key] = struct{}{}
+			if err := walkJSONTokens(dec); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token() // consume closing '}'
+		return err
+	case '[':
+		for dec.More() {
+			if err := walkJSONTokens(dec); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token() // consume closing ']'
+		return err
+	}
+	return nil
 }
 
 // Canonicalize serializes an in-memory JSON value (the decoded-JSON Go model:
