@@ -37,6 +37,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`atrest.Keyring` was not thread-safe — concurrent key rotation and
+  encryption shared unprotected map/pointer fields (thread safety / AES-GCM
+  key dispatch, Axis 28).** `Keyring.Add` and `SetActive` write to `k.ciphers`
+  (a `map`) and `k.active` (a pointer); `Encrypt`, `Decrypt`, `HasKey`, and
+  `ActiveKeyID` read those same fields — all without synchronisation. The key
+  rotation use case (`SetActive` called at runtime after the keyring has already
+  been shared across goroutines) is the primary reason the mutex is needed: a
+  service that rotates AES-256-GCM keys while simultaneously processing
+  encryption/decryption requests would trigger a data race, risking corrupted
+  `active` pointer or map state and consequent plaintext exposure or goroutine
+  crash. `Cipher.Encrypt` already used `atomic.Uint64` for the NIST nonce
+  counter — the `Keyring` level (which routes calls to the right `Cipher`) was
+  the missing layer. Fixed: added `mu sync.RWMutex` to `Keyring`; `Add` and
+  `SetActive` acquire the write lock; `Encrypt`, `Decrypt`, `HasKey`, and
+  `ActiveKeyID` acquire the read lock (releasing before delegating to
+  `Cipher.Encrypt`, which is already concurrency-safe). New test:
+  `TestKeyringConcurrentRotationAndEncrypt` — 200 key-rotation cycles,
+  200 encrypt/decrypt cycles, and 200 `HasKey` calls running in parallel;
+  passes cleanly under `-race`.
+
 - **`cbor.coseVerifiers` global map had no mutex — data race between
   `RegisterVerifier` (write) and `Verify1` (read) under concurrent use
   (thread safety / Go map invariant, Axis 27).** Go's built-in map is not

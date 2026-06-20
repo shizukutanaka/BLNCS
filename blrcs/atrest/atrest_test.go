@@ -3,6 +3,7 @@ package atrest
 import (
 	"bytes"
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -421,4 +422,60 @@ func TestKeyringRotationAfterExhaustion(t *testing.T) {
 	if string(plain) != "after-rotation" {
 		t.Errorf("plaintext mismatch: %s", plain)
 	}
+}
+
+// ============================================================================
+// Concurrent Keyring access (data-race guard)
+// ============================================================================
+
+// TestKeyringConcurrentRotationAndEncrypt verifies that concurrent SetActive
+// (key rotation) and Encrypt/Decrypt calls on a Keyring are race-free.
+// Before the sync.RWMutex fix, concurrent map reads/writes were a data race
+// detectable under -race and could produce crashes or corrupted state.
+func TestKeyringConcurrentRotationAndEncrypt(t *testing.T) {
+	k1, _ := GenerateKey()
+	k2, _ := GenerateKey()
+	c1, _ := NewCipher(KeyIDFromUint32(1), k1)
+	c2, _ := NewCipher(KeyIDFromUint32(2), k2)
+
+	kr := NewKeyring()
+	kr.Add(c1)
+	kr.Add(c2)
+
+	payload := []byte("concurrent-payload")
+
+	var wg sync.WaitGroup
+	// Goroutine 1: repeatedly rotate the active key.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			if i%2 == 0 {
+				_ = kr.SetActive(KeyIDFromUint32(1))
+			} else {
+				_ = kr.SetActive(KeyIDFromUint32(2))
+			}
+		}
+	}()
+	// Goroutine 2: repeatedly encrypt (reads active key pointer).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			if env, err := kr.Encrypt(payload); err == nil {
+				if _, err := kr.Decrypt(env); err != nil {
+					t.Errorf("Decrypt after concurrent rotation: %v", err)
+				}
+			}
+		}
+	}()
+	// Goroutine 3: repeatedly check HasKey (reads ciphers map).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			kr.HasKey(KeyIDFromUint32(1))
+		}
+	}()
+	wg.Wait()
 }

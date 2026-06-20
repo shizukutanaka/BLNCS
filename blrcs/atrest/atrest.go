@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 )
 
@@ -166,7 +167,9 @@ func (c *Cipher) KeyID() [keyIDSize]byte {
 //
 // 用途: 鍵ローテーション後も古い envelope を読める。
 // 新規 Encrypt は最新 (Active) 鍵のみ使用。
+// スレッドセーフ: Add/SetActive (書込) と Encrypt/Decrypt (読取) は concurrent 安全。
 type Keyring struct {
+	mu      sync.RWMutex
 	ciphers map[[keyIDSize]byte]*Cipher
 	active  *Cipher
 }
@@ -178,14 +181,18 @@ func NewKeyring() *Keyring {
 
 // Add — 鍵追加 (最初に追加された鍵が active になる)
 func (k *Keyring) Add(c *Cipher) {
+	k.mu.Lock()
 	k.ciphers[c.keyID] = c
 	if k.active == nil {
 		k.active = c
 	}
+	k.mu.Unlock()
 }
 
 // SetActive — Encrypt で使う鍵を選択
 func (k *Keyring) SetActive(keyID [keyIDSize]byte) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
 	c, ok := k.ciphers[keyID]
 	if !ok {
 		return ErrUnknownKey
@@ -196,10 +203,13 @@ func (k *Keyring) SetActive(keyID [keyIDSize]byte) error {
 
 // Encrypt — active 鍵で暗号化
 func (k *Keyring) Encrypt(payload []byte) ([]byte, error) {
-	if k.active == nil {
+	k.mu.RLock()
+	active := k.active
+	k.mu.RUnlock()
+	if active == nil {
 		return nil, errors.New("atrest: no active key in keyring")
 	}
-	return k.active.Encrypt(payload)
+	return active.Encrypt(payload)
 }
 
 // Decrypt — envelope の keyID から正しい鍵を選んで復号
@@ -211,7 +221,9 @@ func (k *Keyring) Decrypt(envelope []byte) ([]byte, error) {
 	}
 	var envKeyID [keyIDSize]byte
 	copy(envKeyID[:], envelope[1:1+keyIDSize])
+	k.mu.RLock()
 	c, ok := k.ciphers[envKeyID]
+	k.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("%w: %x", ErrUnknownKey, envKeyID)
 	}
@@ -220,16 +232,21 @@ func (k *Keyring) Decrypt(envelope []byte) ([]byte, error) {
 
 // HasKey — keyID 登録済みか
 func (k *Keyring) HasKey(keyID [keyIDSize]byte) bool {
+	k.mu.RLock()
 	_, ok := k.ciphers[keyID]
+	k.mu.RUnlock()
 	return ok
 }
 
 // ActiveKeyID — 現在 Encrypt に使われる鍵
 func (k *Keyring) ActiveKeyID() [keyIDSize]byte {
-	if k.active == nil {
+	k.mu.RLock()
+	active := k.active
+	k.mu.RUnlock()
+	if active == nil {
 		return [keyIDSize]byte{}
 	}
-	return k.active.keyID
+	return active.keyID
 }
 
 // ============================================================================
