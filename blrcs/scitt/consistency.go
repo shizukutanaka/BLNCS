@@ -1,6 +1,7 @@
 package scitt
 
 import (
+	"crypto/subtle"
 	"errors"
 	"math/bits"
 )
@@ -62,7 +63,7 @@ func VerifyConsistency(m, n uint64, oldRoot, newRoot []byte, proof [][]byte) err
 		return ErrConsistency
 	}
 	if m == n {
-		if !equalBytes(oldRoot, newRoot) {
+		if subtle.ConstantTimeCompare(oldRoot, newRoot) != 1 {
 			return ErrConsistency
 		}
 		if len(proof) != 0 {
@@ -112,10 +113,10 @@ func VerifyConsistency(m, n uint64, oldRoot, newRoot []byte, proof [][]byte) err
 		sn >>= 1
 	}
 
-	if !equalBytes(fr, oldRoot) {
+	if subtle.ConstantTimeCompare(fr, oldRoot) != 1 {
 		return ErrConsistency
 	}
-	if !equalBytes(sr, newRoot) {
+	if subtle.ConstantTimeCompare(sr, newRoot) != 1 {
 		return ErrConsistency
 	}
 	if sn != 0 {

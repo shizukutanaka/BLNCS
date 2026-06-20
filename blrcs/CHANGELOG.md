@@ -37,6 +37,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **SCITT Merkle inclusion and consistency proof root-hash comparisons were
+  timing-variable — oracle for expected root hash (security / defense-in-depth,
+  Axis 37).** The `scitt` package contained a hand-rolled `equalBytes` helper
+  with an early-exit byte loop, used in all three security-critical hash
+  comparisons: (1) Merkle inclusion proof final root check (`VerifyInclusion`),
+  (2) RFC 6962 consistency proof old-root check (`VerifyConsistency` lines
+  `fr == oldRoot`), and (3) the trivial `m == n` same-size check
+  (`oldRoot == newRoot`). An attacker submitting crafted SCITT receipts to the
+  verification endpoint and measuring response latency could exploit the
+  timing differential (up to ~32 ns per byte position) to incrementally recover
+  the expected SHA-256 root hash — enabling forgery of a receipt that passes
+  verification without access to the actual ledger. The same function was
+  already removed from the `mdoc` package in iteration 31. Fix: removed
+  `equalBytes` from `scitt.go`; added `crypto/subtle` to both `scitt.go` and
+  `consistency.go`; replaced all three call sites with
+  `subtle.ConstantTimeCompare(a, b) == 1`. Test files updated to use
+  `bytes.Equal` (timing-indifferent for non-security comparisons in tests).
+  New test `TestVerifyInclusionTamperedLastByte`: constructs a real 1-leaf
+  tree, verifies with the correct root, then flips only the last byte — must
+  be rejected. This is the discriminating case for constant-time vs. early-exit
+  comparison (early-exit would differ by only ~0 ns on a 31-byte match, while
+  constant-time always returns in the same time regardless).
+
 - **`jsonschema.Validate` had no operation budget — exponential-time DoS via
   adversarial `$ref`/`anyOf`/`oneOf` nesting (security / algorithmic complexity,
   Axis 36).** A compact (~150 byte) schema consisting of a cyclic `$ref` inside a

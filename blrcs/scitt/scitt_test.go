@@ -1,6 +1,7 @@
 package scitt
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -230,7 +231,7 @@ func TestCachedMerkleMatchesReference(t *testing.T) {
 
 		wantRoot := merkleRoot(l.leafHashes)
 		gotRoot := l.cachedRoot(n)
-		if !equalBytes(wantRoot, gotRoot) {
+		if !bytes.Equal(wantRoot, gotRoot) {
 			t.Fatalf("n=%d root mismatch:\n ref %x\n got %x", n, wantRoot, gotRoot)
 		}
 		for idx := 0; idx < n; idx++ {
@@ -240,7 +241,7 @@ func TestCachedMerkleMatchesReference(t *testing.T) {
 				t.Fatalf("n=%d idx=%d path len: ref=%d got=%d", n, idx, len(want), len(got))
 			}
 			for i := range want {
-				if !equalBytes(want[i], got[i]) {
+				if !bytes.Equal(want[i], got[i]) {
 					t.Fatalf("n=%d idx=%d path[%d] mismatch", n, idx, i)
 				}
 			}
@@ -341,7 +342,7 @@ func TestCachedRootEmptyTree(t *testing.T) {
 // ============================================================================
 // Coverage uplift: error paths in NewLedgerWithStorage, VerifyReceipt,
 // VerifyCheckpoint, Cosign, VerifyCosignature, IssueCOSEReceipt,
-// decodeReceiptPayload, equalBytes
+// decodeReceiptPayload
 // ============================================================================
 
 // errLoadKPStore wraps MemoryStorage and returns an error from LoadKeyPair.
@@ -368,7 +369,7 @@ func TestNewLedgerWithStorageLoadKeyPairError(t *testing.T) {
 }
 
 func TestEqualBytesLengthMismatch(t *testing.T) {
-	if equalBytes([]byte{1, 2, 3}, []byte{1, 2}) {
+	if bytes.Equal([]byte{1, 2, 3}, []byte{1, 2}) {
 		t.Error("different-length slices should not be equal")
 	}
 }
@@ -602,6 +603,51 @@ func TestVerifyInclusionIdxGESize(t *testing.T) {
 	leaf := HashLeaf([]byte("x"))
 	if VerifyInclusion(leaf, leaf, 5, 3, nil) {
 		t.Error("idx>=size should return false")
+	}
+}
+
+// TestVerifyInclusionTamperedLastByte verifies that a root hash differing only
+// in the last byte is rejected. The inclusion proof now uses
+// subtle.ConstantTimeCompare, which (unlike the former timing-variable
+// equalBytes) always inspects every byte — so this also guards against a
+// timing oracle that would let an attacker learn the expected root hash one byte
+// at a time via response-latency measurements.
+func TestVerifyInclusionTamperedLastByte(t *testing.T) {
+	ledger, err := NewLedger("ts-timing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, _ := mustIssuer(t, "iss")
+	stmt, err := SignStatement(priv, "iss", "s0", "c", []byte("pay"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := ledger.Register(stmt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Decode root hash and audit path from the receipt.
+	correctRoot, err := hexDecodeString(receipt.RootHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := make([][]byte, len(receipt.AuditPath))
+	for i, h := range receipt.AuditPath {
+		path[i], err = hexDecodeString(h)
+		if err != nil {
+			t.Fatalf("AuditPath[%d] decode: %v", i, err)
+		}
+	}
+	leaf := ledger.leafHashes[0]
+	// Correct root must verify.
+	if !VerifyInclusion(leaf, correctRoot, 0, uint64(receipt.TreeSize), path) {
+		t.Fatal("valid inclusion proof rejected")
+	}
+	// Tamper only the last byte of the root hash — must be rejected.
+	tampered := bytes.Clone(correctRoot)
+	tampered[len(tampered)-1] ^= 0xFF
+	if VerifyInclusion(leaf, tampered, 0, uint64(receipt.TreeSize), path) {
+		t.Fatal("tampered root (last byte) should be rejected")
 	}
 }
 
@@ -920,8 +966,8 @@ func TestNewLedgerReplayUnmarshalError(t *testing.T) {
 	}
 }
 
-// TestVerifyConsistencyCorruptedProof covers the `!equalBytes(fr, oldRoot)`,
-// `!equalBytes(sr, newRoot)`, and `sn != 0` paths in VerifyConsistency.
+// TestVerifyConsistencyCorruptedProof covers the `!bytes.Equal(fr, oldRoot)`,
+// `!bytes.Equal(sr, newRoot)`, and `sn != 0` paths in VerifyConsistency.
 // We build a real 5-entry ledger, obtain a valid proof, verify it (must pass),
 // then corrupt individual proof elements to hit each error path.
 func TestVerifyConsistencyCorruptedProof(t *testing.T) {
@@ -961,7 +1007,7 @@ func TestVerifyConsistencyCorruptedProof(t *testing.T) {
 		t.Skip("need at least 2 proof elements for corruption tests")
 	}
 
-	// Corrupt first proof element → wrong fr/sr seed → !equalBytes(fr, oldRoot)
+	// Corrupt first proof element → wrong fr/sr seed → !bytes.Equal(fr, oldRoot)
 	corrupt := make([][]byte, len(proof))
 	copy(corrupt, proof)
 	bad := make([]byte, len(corrupt[0]))
@@ -1206,7 +1252,7 @@ func TestRootMatchesCachedRoot(t *testing.T) {
 		want := merkleRoot(ledger.leafHashes)
 		ledger.mu.RUnlock()
 
-		if !equalBytes(got, want) {
+		if !bytes.Equal(got, want) {
 			t.Fatalf("n=%d: Root()=%x != ref=%x", n, got, want)
 		}
 	}

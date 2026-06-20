@@ -18,6 +18,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -150,19 +151,7 @@ func VerifyInclusion(leafHash, rootHash []byte, idx, size uint64, path [][]byte)
 		n = (n + 1) >> 1
 	}
 	// 残り上方ノードがない = root
-	return equalBytes(node, rootHash)
-}
-
-func equalBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return subtle.ConstantTimeCompare(node, rootHash) == 1
 }
 
 // ============================================================================

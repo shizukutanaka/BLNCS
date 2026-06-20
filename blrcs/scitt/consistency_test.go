@@ -1,6 +1,7 @@
 package scitt
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -170,7 +171,7 @@ func TestLedgerRoot(t *testing.T) {
 	root := ledger.Root()
 	ckpt := ledger.SignedCheckpoint()
 	want, _ := hexDecode(ckpt.RootHash)
-	if !equalBytes(root, want) {
+	if !bytes.Equal(root, want) {
 		t.Error("Root() should match checkpoint root")
 	}
 }
