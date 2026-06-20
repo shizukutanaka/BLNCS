@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -217,6 +219,48 @@ func TestReplayRejected(t *testing.T) {
 	// Replay must fail (state consumed)
 	if _, err := ver.ProcessResponse(resp); err != ErrStateNotFound {
 		t.Fatalf("replay: want ErrStateNotFound, got %v", err)
+	}
+}
+
+// TestConcurrentReplayRejected guards the TOCTOU between Load and Consume: Load
+// does not delete the one-time state, so without an atomic, return-checked
+// Consume two simultaneous submissions of the SAME valid vp_token+state could
+// both pass verification and both be accepted (a presentation double-spend). The
+// nonce binding does not help — a replay carries the same valid nonce. Exactly
+// one of N concurrent identical requests must succeed; the rest must be rejected.
+// Run with -race to surface any residual data race on the store.
+func TestConcurrentReplayRejected(t *testing.T) {
+	ver, iss := setupFlow(t)
+	def := PresentationDefinition{
+		ID:                "x",
+		RequiredClaims:    []string{"foo"},
+		AcceptableIssuers: map[string][]byte{iss.ID: iss.PublicKey()},
+	}
+	reqURL, state, _ := ver.CreateRequest(def)
+	presented := boundPresent(t, iss, reqURL, "s", map[string]any{"foo": "bar"}, nil, []string{"foo"})
+
+	const n = 16
+	var (
+		wg        sync.WaitGroup
+		start     = make(chan struct{})
+		successes atomic.Int32
+	)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start // line everyone up so they race on the same state
+			resp := &AuthorizationResponse{VPToken: presented, State: state}
+			if _, err := ver.ProcessResponse(resp); err == nil {
+				successes.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if got := successes.Load(); got != 1 {
+		t.Fatalf("exactly one concurrent submission must be accepted, got %d", got)
 	}
 }
 

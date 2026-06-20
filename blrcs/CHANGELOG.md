@@ -37,6 +37,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **OpenID4VP presentation replay was possible under concurrency — TOCTOU
+  between `Load` and `Consume` (security / replay, Axis 35).** `ProcessResponse`
+  enforced one-time use of the authorization `state` by calling `store.Consume`
+  *after* full verification, but (a) `MemoryStore.Load` reads the session without
+  deleting it and (b) `MemoryStore.Consume` unconditionally deleted and returned
+  `nil`, and its result was discarded (`_ = v.store.Consume(...)`). So two (or N)
+  simultaneous submissions of the *same* valid `vp_token`+`state` could all pass
+  `Load`, all verify (a replay carries the same valid nonce, so the nonce binding
+  does not stop it), and all be accepted — a presentation double-spend. A
+  regression test confirms the severity: against the old code **all 16** concurrent
+  identical submissions were accepted. Fixed by making the one-time consumption an
+  atomic, return-checked claim: `MemoryStore.Consume` is now a single locked
+  check-and-delete that returns `ErrStateNotFound` if the state is already gone,
+  the `SessionStore.Consume` contract documents this requirement, and
+  `ProcessResponse` rejects the request when `Consume` fails. Late consumption is
+  retained (state is preserved if verification or the revocation check fails, so
+  legitimate retries still work), but only the first of any concurrent set now
+  wins. Test: `TestConcurrentReplayRejected` (runs under `-race`; asserts exactly
+  one of N simultaneous submissions succeeds) plus the existing
+  `TestReplayRejected` sequential case.
+
 - **`did:webvh` SCID self-certification scanned only `state`, not
   `parameters`, for the `{SCID}` placeholder → forgeable / non-canonical
   genesis (security / identity integrity, Axis 34).** `deriveSCID` rejects a

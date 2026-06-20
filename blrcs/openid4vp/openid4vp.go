@@ -103,7 +103,11 @@ type AuthorizationResponse struct {
 type SessionStore interface {
 	Save(state string, req *AuthorizationRequest, ttl time.Duration) error
 	Load(state string) (*AuthorizationRequest, error)
-	Consume(state string) error // ワンタイム: 使用後無効化 (リプレイ防止)
+	// Consume — ワンタイム: 使用後無効化 (リプレイ防止)。atomic な
+	// check-and-delete であること: 既に消費済み (または不在/期限切れ) なら
+	// ErrStateNotFound を返さねばならない。並行リプレイ検出のため、戻り値で
+	// 「自分が消費に成功した唯一の呼び出しか」を判別できる必要がある。
+	Consume(state string) error
 }
 
 // defaultMemStoreMax caps pending authorization sessions to prevent unbounded
@@ -186,10 +190,18 @@ func (m *MemoryStore) Load(state string) (*AuthorizationRequest, error) {
 	return e.req, nil
 }
 
+// Consume atomically invalidates a one-time state, returning ErrStateNotFound if
+// the state was already consumed (or never existed / has expired). This lets
+// ProcessResponse detect a concurrent replay: Load does not delete, so two
+// simultaneous submissions of the same valid vp_token+state can both pass Load
+// and both verify, but only the first Consume wins — the loser is rejected.
 func (m *MemoryStore) Consume(state string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.data[state]; !ok {
+		return ErrStateNotFound
+	}
 	delete(m.data, state)
-	m.mu.Unlock()
 	return nil
 }
 
@@ -502,8 +514,13 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 		}
 	}
 
-	// ワンタイム消費 (リプレイ防止)
-	_ = v.store.Consume(resp.State)
+	// ワンタイム消費 (リプレイ防止)。Consume は atomic check-and-delete なので、
+	// 同一 vp_token+state を並行送信した TOCTOU リプレイでは、Load・検証を両方が
+	// 通過しても Consume に勝てるのは一方のみ。敗者は ErrStateNotFound で拒否し、
+	// 一度きりの提示が二重に受理されるのを防ぐ。
+	if err := v.store.Consume(resp.State); err != nil {
+		return nil, err
+	}
 
 	return &VerifiedPresentation{
 		State:     resp.State,
