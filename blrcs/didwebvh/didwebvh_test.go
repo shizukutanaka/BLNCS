@@ -374,6 +374,29 @@ func TestSCIDPlaceholderInjectionRejected(t *testing.T) {
 	}
 }
 
+// TestSCIDPlaceholderInjectionInParametersRejected is the parameters-side analog
+// of the state injection test. It is a *discriminating* test: Create does not
+// substitute the placeholder inside nextKeyHashes, so a genesis carrying the
+// {SCID} literal there still self-certifies (the derived SCID matches, because
+// the verify-time real→placeholder substitution reproduces the create-time hash
+// input). Such a non-canonical entry must nonetheless be rejected — an earlier
+// deriveSCID scanned only state, leaving the more security-sensitive parameters
+// half unguarded, and this entry would have verified successfully.
+func TestSCIDPlaceholderInjectionInParametersRejected(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, _, err := Create(CreateParams{
+		DIDPath:       "ex:p",
+		UpdateKey:     updateKey,
+		NextKeyHashes: []string{SCIDPlaceholder},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Verify([]LogEntry{*genesis}); err == nil {
+		t.Fatal("genesis with {SCID} placeholder in parameters must be rejected")
+	}
+}
+
 // ============================================================================
 // versionTime monotonicity — backward time and proof tampering
 // ============================================================================

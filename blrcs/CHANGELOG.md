@@ -37,6 +37,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`did:webvh` SCID self-certification scanned only `state`, not
+  `parameters`, for the `{SCID}` placeholder → forgeable / non-canonical
+  genesis (security / identity integrity, Axis 34).** `deriveSCID` rejects a
+  genesis that still contains the literal `{SCID}` placeholder, because the
+  verify-time real→placeholder inverse substitution would otherwise be
+  non-invertible. Its own comment said *"the genesis DID document (state) **and
+  its parameters** must not contain the placeholder"*, but the code checked only
+  `entry.State` — leaving the more security-sensitive `parameters` half
+  (`updateKeys`, `nextKeyHashes`, …) unguarded. This was exploitable: because
+  `Create` does not substitute the placeholder inside `nextKeyHashes`, a genesis
+  carrying `{SCID}` there **self-certifies** — the derived SCID matches, so the
+  whole log verifies — yet it is non-canonical and should never be accepted. The
+  new regression test confirms this is a true positive: with the old code
+  `Verify` *succeeds* on such an entry, and only the fix rejects it. Fixed:
+  `deriveSCID` now scans the entire hash input (parameters + state, excluding the
+  `versionId` we deliberately set to the placeholder) via `containsPlaceholder`,
+  so any `{SCID}` literal anywhere in the genesis is rejected with
+  `ErrSCIDMismatch`. Tests: `TestSCIDPlaceholderInjectionInParametersRejected`
+  (discriminating — fails against the unpatched code); the existing
+  state-injection and happy-path tests stay green.
+
 - **SCITT checkpoint signature did not bind the log identity (`TSID`) →
   cross-log checkpoint relabeling (security / transparency-log integrity,
   Axis 33).** `checkpointSigPayload` signed only `rootHash ‖ treeSize ‖

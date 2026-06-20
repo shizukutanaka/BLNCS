@@ -149,16 +149,28 @@ func deriveSCID(entry *LogEntry) (string, error) {
 	if len(entry.Parameters.SCID) < 8 {
 		return "", fmt.Errorf("%w: scid too short", ErrSCIDMismatch)
 	}
-	// The genesis DID document (state) and its parameters must not themselves
-	// contain the placeholder literal at verify time — that would make the
-	// substitution non-invertible and let a crafted entry forge a matching SCID.
-	// (versionId is set to the placeholder by us below, so it is excluded.)
-	if containsPlaceholder(entry.State) {
-		return "", fmt.Errorf("%w: genesis state contains the SCID placeholder literal", ErrSCIDMismatch)
-	}
 	in, err := entryHashInput(entry, SCIDPlaceholder)
 	if err != nil {
 		return "", err
+	}
+	// The genesis entry — its parameters AND state — must not itself contain the
+	// placeholder literal at verify time: at creation the real SCID replaced every
+	// placeholder, so a legitimate entry has none left. If a crafted entry smuggles
+	// a raw "{SCID}" into any field (e.g. nextKeyHashes, updateKeys, or a state
+	// value), the real→placeholder inverse substitution below would be
+	// non-invertible and could be used to forge a matching SCID. We scan the whole
+	// hash input rather than just state (an earlier version checked only state,
+	// leaving the parameters — the more security-sensitive half — unguarded).
+	// versionId is excluded because we deliberately set it to the placeholder here.
+	scanInput := make(map[string]any, len(in))
+	for k, v := range in {
+		if k == "versionId" {
+			continue
+		}
+		scanInput[k] = v
+	}
+	if containsPlaceholder(scanInput) {
+		return "", fmt.Errorf("%w: genesis entry contains the SCID placeholder literal", ErrSCIDMismatch)
 	}
 	withPlaceholder := substituteSCID(in, entry.Parameters.SCID, SCIDPlaceholder)
 	return computeHash(withPlaceholder)
