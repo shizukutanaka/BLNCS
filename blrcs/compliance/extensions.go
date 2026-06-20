@@ -261,6 +261,15 @@ type VerifyOptions struct {
 
 const defaultLeeway = 60 * time.Second
 
+// maxSDJWTSegments caps the number of "~"-delimited segments in an SD-JWT
+// before strings.Split is called. A real EU DPP / Battery Passport credential
+// has at most a few dozen selective-disclosure claims; 256 is a generous bound
+// that prevents a DoS where an attacker appends millions of "~" characters to
+// any SD-JWT (the issuer signature covers only the first segment, so the rest
+// is attacker-editable) forcing a multi-megabyte slice allocation before the
+// signature check runs.
+const maxSDJWTSegments = 256
+
 // VerifySDJWT — SD-JWT 検証 + 開示 claim 抽出 (有効期限を強制、KB は任意)。
 //
 // 後方互換: 既存呼び出し元の署名は不変。exp/iat による有効期限チェックが
@@ -292,6 +301,15 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 		leeway = defaultLeeway
 	}
 
+	// Cap the number of ~-delimited segments before splitting. An attacker can
+	// append thousands of "~" characters to a syntactically valid SD-JWT
+	// without invalidating the issuer signature (which covers only parts[0]).
+	// strings.Split on a 4 MiB string of "~" would allocate ~4 M string
+	// headers (~64 MB) before the sig check runs. The check is O(n) but uses
+	// O(1) memory, so it bounds the slice allocation to O(maxSDJWTSegments).
+	if strings.Count(sdjwt, "~") > maxSDJWTSegments {
+		return nil, ErrSDJWTTooManyDisclosures
+	}
 	parts := strings.Split(sdjwt, "~")
 	// 末尾要素が '.' を含めば KB-JWT (disclosure は base64url で '.' を含まない)。
 	// len(parts)==1 は区切り '~' を持たない素の JWT で、KB も開示も無い
@@ -573,6 +591,9 @@ func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, opts Veri
 func Present(sdjwt string, reveal []string) (string, error) {
 	if sdjwt == "" {
 		return "", ErrSDJWTEmpty
+	}
+	if strings.Count(sdjwt, "~") > maxSDJWTSegments {
+		return "", ErrSDJWTTooManyDisclosures
 	}
 	parts := strings.Split(sdjwt, "~")
 	jwtPart := parts[0]

@@ -23,6 +23,12 @@ var (
 	ErrSDJWTUnsupportedHashAlg = errors.New("compliance: sd-jwt unsupported _sd_alg (only sha-256)")
 	ErrSDJWTMissingVCT         = errors.New("compliance: sd-jwt-vc missing required vct claim")
 	ErrSDJWTDuplicateDigest    = errors.New("compliance: sd-jwt duplicate digest in _sd")
+	// ErrSDJWTTooManyDisclosures is returned when the number of ~-separated
+	// segments in a presented SD-JWT exceeds the configured cap (256). An
+	// attacker who appends thousands of ~ characters to any SD-JWT string can
+	// force strings.Split to allocate a proportionally large slice before the
+	// signature check runs; this cap makes the allocation O(1) instead.
+	ErrSDJWTTooManyDisclosures = errors.New("compliance: sd-jwt too many disclosure segments")
 	// ErrSDJWTIssuerMismatch is returned by VerifySDJWTWithBinding when
 	// VerifyOptions.ExpectedIssuer is set and the JWT iss claim does not match.
 	// This prevents key-confusion: a verifier who obtains a public key for a

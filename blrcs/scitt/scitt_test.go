@@ -640,13 +640,13 @@ func TestVerifyInclusionTamperedLastByte(t *testing.T) {
 	}
 	leaf := ledger.leafHashes[0]
 	// Correct root must verify.
-	if !VerifyInclusion(leaf, correctRoot, 0, uint64(receipt.TreeSize), path) {
+	if !VerifyInclusion(leaf, correctRoot, 0, receipt.TreeSize, path) {
 		t.Fatal("valid inclusion proof rejected")
 	}
 	// Tamper only the last byte of the root hash — must be rejected.
 	tampered := bytes.Clone(correctRoot)
 	tampered[len(tampered)-1] ^= 0xFF
-	if VerifyInclusion(leaf, tampered, 0, uint64(receipt.TreeSize), path) {
+	if VerifyInclusion(leaf, tampered, 0, receipt.TreeSize, path) {
 		t.Fatal("tampered root (last byte) should be rejected")
 	}
 }

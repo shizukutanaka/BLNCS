@@ -885,6 +885,34 @@ func TestVerifySDJWTDisclosureDuplicateClaim(t *testing.T) {
 	}
 }
 
+// TestVerifySDJWTTooManyDisclosures verifies that an SD-JWT with more than
+// maxSDJWTSegments "~"-separated segments is rejected before any slice
+// allocation proportional to the segment count occurs. This guards against a
+// DoS where an attacker appends thousands of "~" characters to any SD-JWT —
+// the issuer signature covers only the first segment, so the trailer is
+// attacker-editable without a valid issuer key.
+func TestVerifySDJWTTooManyDisclosures(t *testing.T) {
+	// Build a syntactically invalid (but oversized) SD-JWT with 257 "~" chars.
+	oversized := "header.payload.sig" + strings.Repeat("~", maxSDJWTSegments+1)
+
+	_, err := VerifySDJWTWithBinding(oversized, nil, VerifyOptions{})
+	if err != ErrSDJWTTooManyDisclosures {
+		t.Errorf("too many segments: want ErrSDJWTTooManyDisclosures, got %v", err)
+	}
+
+	// Same check via the backward-compat wrapper.
+	_, err = VerifySDJWT(oversized, nil)
+	if err != ErrSDJWTTooManyDisclosures {
+		t.Errorf("VerifySDJWT: want ErrSDJWTTooManyDisclosures, got %v", err)
+	}
+
+	// Present() also applies the cap.
+	_, err = Present(oversized, nil)
+	if err != ErrSDJWTTooManyDisclosures {
+		t.Errorf("Present: want ErrSDJWTTooManyDisclosures, got %v", err)
+	}
+}
+
 // ============================================================================
 // verifyKBJWT — error paths (lines 470, 477, 481)
 // ============================================================================

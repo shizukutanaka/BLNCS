@@ -37,6 +37,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **SD-JWT disclosure-segment DoS via unbounded `strings.Split` (security, Axis 42).**
+  `VerifySDJWTWithBinding` (and the `VerifySDJWT` / `VerifySDJWTAt` wrappers) called
+  `strings.Split(sdjwt, "~")` with no limit on the number of resulting segments.
+  The issuer signature covers only the first `~`-separated segment (the JWT proper),
+  leaving the remaining disclosure segments attacker-editable. A malicious wallet can
+  take any legitimately issued SD-JWT and append thousands of `~` characters without
+  invalidating the signature; `strings.Split` on a 4 MiB input of `~` allocates
+  ~4 million string-header entries (~64 MB) **before** the signature check runs,
+  enabling memory exhaustion under concurrent load. Fixed by adding a package-level
+  `maxSDJWTSegments = 256` constant and checking `strings.Count(sdjwt, "~") >
+  maxSDJWTSegments` before the split in both `VerifySDJWTWithBinding` and `Present`.
+  New sentinel: `ErrSDJWTTooManyDisclosures`. A real EU DPP / Battery Passport
+  credential has at most a few dozen selective-disclosure claims; 256 is generous.
+  Test: `TestVerifySDJWTTooManyDisclosures` sends a 257-tilde string and asserts
+  `ErrSDJWTTooManyDisclosures` from `VerifySDJWTWithBinding`, `VerifySDJWT`, and
+  `Present`.
+- **Two unnecessary type conversions in `scitt/scitt_test.go` (lint, Axis 42).**
+  `uint64(receipt.TreeSize)` on lines 643 and 649 were identity conversions:
+  `Receipt.TreeSize` is already `uint64`. Removed both casts; `golangci-lint
+  run ./...` now reports 0 issues.
+- **README stats corrected (doc, Axis 42).** Fuzz-target count updated from
+  20 to 21 (the `openid4vci.FuzzVerifyProofJWT` target was not counted);
+  test count updated from "1000+" to "1700+" to better reflect the actual 1760
+  test functions in the suite.
 - **`openid4vci.Issuer` token endpoint missing `http.MaxBytesReader` — unbounded
   request body DoS (security, Axis 41).** `handleToken` called `r.ParseForm()`
   directly without first wrapping `r.Body` in `http.MaxBytesReader`. Unlike
