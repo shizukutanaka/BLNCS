@@ -44,15 +44,30 @@ var (
 // Resolver
 // ============================================================================
 
+// defaultMaxCacheSize caps the number of DID entries the resolver keeps in
+// memory. Each entry is ~64 bytes of DID string + a 32-byte public key slice.
+// 4096 entries ≈ 1 MB — ample for any realistic DID graph while preventing
+// unbounded growth when an attacker presents credentials from many distinct
+// fake DID issuers.
+const defaultMaxCacheSize = 4096
+
 // Resolver — DID → ed25519 公開鍵の解決
 //
 // HTTPFetcher は test-injectable (HTTP モック / オフライン解決)
 type Resolver struct {
-	HTTPFetcher func(ctx context.Context, url string) ([]byte, error)
-	CacheTTL    time.Duration
+	HTTPFetcher  func(ctx context.Context, url string) ([]byte, error)
+	CacheTTL     time.Duration
+	MaxCacheSize int // 0 → defaultMaxCacheSize
 
 	mu    sync.RWMutex
 	cache map[string]cacheEntry
+}
+
+func (r *Resolver) maxEntries() int {
+	if r.MaxCacheSize > 0 {
+		return r.MaxCacheSize
+	}
+	return defaultMaxCacheSize
 }
 
 type cacheEntry struct {
@@ -128,9 +143,21 @@ func (r *Resolver) ResolveAll(ctx context.Context, did string) ([]ed25519.Public
 		return nil, err
 	}
 
-	// Cache
+	// Cache — bounded write: purge expired entries if at capacity, then insert
+	// only if there is room. Skipping the insert when full is safe: the next
+	// caller simply re-fetches, which is correct (no data loss, no panic).
 	r.mu.Lock()
-	r.cache[did] = cacheEntry{keys: keys, expiresAt: time.Now().Add(r.CacheTTL)}
+	if len(r.cache) >= r.maxEntries() {
+		now := time.Now()
+		for k, e := range r.cache {
+			if now.After(e.expiresAt) {
+				delete(r.cache, k)
+			}
+		}
+	}
+	if len(r.cache) < r.maxEntries() {
+		r.cache[did] = cacheEntry{keys: keys, expiresAt: time.Now().Add(r.CacheTTL)}
+	}
 	r.mu.Unlock()
 	return keys, nil
 }

@@ -37,6 +37,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`didresolver.Resolver` cache unbounded — memory exhaustion via many distinct
+  DID issuers (security / DoS, Axis 40).** The DID resolver's `cache
+  map[string]cacheEntry` had no maximum size and no eviction policy. Expired entries
+  were only skipped on read, never removed; `InvalidateCache` could only delete a
+  single named entry. In an OpenID4VP / credential-verification flow, an attacker
+  presenting credentials from many distinct fake DID issuers would cause the cache
+  to grow without bound — each unique DID string occupies ~100 bytes of key + a
+  32-byte public key value, so 1 million entries ≈ 130 MB, reachable with a
+  sustained presentation flood. Fixed by adding `MaxCacheSize int` (default 0 →
+  `defaultMaxCacheSize = 4096`) to `Resolver`. On each cache write, if
+  `len(cache) >= maxEntries()`, all expired entries are purged first; the new entry
+  is inserted only if there is room after the purge. This bounds memory to
+  `O(MaxCacheSize)` while recovering capacity organically as TTLs expire. Tests:
+  `TestCacheSizeCap` (resolving `cap+2` distinct DIDs with long TTL — cache stays
+  at or below cap); `TestCacheSizeCapAllowsInsertAfterPurge` (fill with short-TTL
+  entries, let them expire, verify next insert triggers purge and then caches the
+  new entry).
+
 - **`types.DID.MarshalJSON` / `UnmarshalJSON` JSON injection and escape-sequence
   mishandling (security / correctness, Axis 39).** `DID.MarshalJSON` produced JSON
   by raw string concatenation (`"` + d.value + `"`), without escaping the content.

@@ -1077,6 +1077,81 @@ func TestResolveAndVerifyResolveFails(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Cache size cap (DoS / memory exhaustion prevention)
+// ============================================================================
+
+// TestCacheSizeCap verifies that resolving more unique DIDs than MaxCacheSize
+// never grows the internal cache map beyond that limit. Without the cap an
+// attacker presenting credentials from many fabricated DID issuers would cause
+// unbounded memory growth.
+func TestCacheSizeCap(t *testing.T) {
+	const cap = 3
+	r := New()
+	r.MaxCacheSize = cap
+	r.CacheTTL = time.Hour // long TTL — entries won't expire during this test
+
+	// Resolve cap+2 distinct did:key DIDs to drive the overflow path.
+	for i := 0; i < cap+2; i++ {
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		prefixed := append([]byte{0xed, 0x01}, pub...)
+		did := "did:key:z" + base58Encode(prefixed)
+		got, err := r.Resolve(context.Background(), did)
+		if err != nil {
+			t.Fatalf("resolve[%d]: %v", i, err)
+		}
+		if !equalKeys(got, pub) {
+			t.Errorf("resolve[%d]: key mismatch", i)
+		}
+	}
+	// The cache must not exceed the cap regardless of how many DIDs were resolved.
+	r.mu.RLock()
+	size := len(r.cache)
+	r.mu.RUnlock()
+	if size > cap {
+		t.Errorf("cache grew to %d entries, exceeding cap %d", size, cap)
+	}
+}
+
+// TestCacheSizeCapAllowsInsertAfterPurge verifies that once the cache is full
+// of expired entries, the next write triggers a purge and caches the new entry.
+func TestCacheSizeCapAllowsInsertAfterPurge(t *testing.T) {
+	const cap = 2
+	r := New()
+	r.MaxCacheSize = cap
+	r.CacheTTL = 10 * time.Millisecond // short TTL so entries expire quickly
+
+	// Fill the cache to capacity.
+	for i := 0; i < cap; i++ {
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		prefixed := append([]byte{0xed, 0x01}, pub...)
+		did := "did:key:z" + base58Encode(prefixed)
+		if _, err := r.Resolve(context.Background(), did); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Wait for all cached entries to expire.
+	time.Sleep(30 * time.Millisecond)
+
+	// Resolving a new DID should purge expired entries and then cache the result.
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	prefixed := append([]byte{0xed, 0x01}, pub...)
+	newDID := "did:key:z" + base58Encode(prefixed)
+	got, err := r.Resolve(context.Background(), newDID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equalKeys(got, pub) {
+		t.Error("key mismatch after cache purge")
+	}
+	r.mu.RLock()
+	_, inCache := r.cache[newDID]
+	r.mu.RUnlock()
+	if !inCache {
+		t.Error("new entry must be in cache after expired entries were purged")
+	}
+}
+
 func TestMultibaseToEd25519Variants(t *testing.T) {
 	// Generate a real Ed25519 public key for use in tests.
 	rawPub, _, err := ed25519.GenerateKey(rand.Reader)
