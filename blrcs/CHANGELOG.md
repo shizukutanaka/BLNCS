@@ -7,6 +7,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`revocation.IndexAllocator` — issuer-metric privacy via random status-list
+  index assignment (privacy, Axis 43; spec §4 / backlog #11a).** A published
+  Bitstring Status List is effectively public. Bit `0` ("not revoked") is the
+  status of both an unissued index *and* a valid credential, so the list does not
+  by itself reveal issuance volume — but with *sequential* index assignment every
+  revoked `1` bit lands in `[0, highWaterMark)`, so the largest revoked index ≈
+  the number of credentials ever issued and a credential's index is monotonic in
+  its issuance time. That leaks the issuer's issuance volume and ordering. New
+  `IndexAllocator` hands out uniformly-random, unique indices from a fixed-size
+  space (CSPRNG rejection sampling, with a random-start probe fallback near
+  saturation), spreading revoked bits across the whole list so the maximum revoked
+  index ≈ the capacity regardless of true volume, and decoupling an index from
+  issuance time. Correctness is unchanged (unique in-range indices →
+  identical `SetStatus`/`GetStatus`). `Reserve` rebuilds allocator state after a
+  restart from stored indices. The residual leak — the absolute *count* of set
+  bits — is irreducible for a plain bitstring and is tracked as backlog #11b
+  (accumulator / padded Bloom-cascade, CRSet). Spec §4 and the conformance matrix
+  updated; new normative §9 "Resource bounds (DoS resistance)" codifies the
+  SD-JWT segment cap, HTTP body caps, bounded in-memory stores, compression-bomb
+  guards, and recursive-decoder depth limits added across recent passes. Tests:
+  uniqueness/in-range across a full fill, exhaustion → `ErrAllocatorFull`,
+  `Reserve` (idempotent + range-checked + never re-handed-out), a statistical
+  anti-clustering check, the high-occupancy fallback path, and an end-to-end wire
+  into a `BitstringStatusList`.
 - **`openid4vci` tx_code brute-force lockout is now auditable
   (`Issuer.OnTxCodeLockout`) — forensic observability (Axis 12).** When PIN
   attempts hit `MaxTxCodeAttempts` the pre-authorized code is burned, but this —

@@ -76,6 +76,16 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
   carrying `sub` (= the credential's `status.uri`), `iat`, and `exp`/`ttl`.
 - A verifier checking status MUST authenticate the token, bind its `sub` to the
   credential's `status.uri` (`ErrStatusListMismatch`), and read the bit at `idx`.
+- **Issuer-metric privacy:** because `0` ("not revoked") is the status of both an
+  unissued index and a valid credential, the published list does not by itself
+  reveal issuance volume — *unless* indices are assigned sequentially, in which
+  case the largest revoked index ≈ issuance volume and a credential's index is
+  monotonic in issuance time. Issuers SHOULD therefore assign status indices
+  **uniformly at random** from a fixed-size space (`revocation.IndexAllocator`),
+  which spreads revoked bits across the whole list and decouples an index from
+  both issuance volume and ordering. The residual leak — the absolute *count* of
+  set bits — is irreducible for a plain bitstring and requires an accumulator /
+  padded Bloom-cascade (CRSet); see backlog #11.
 
 ## 5. Presentation (OpenID4VP)
 - `CreateRequest`/`CreateRequestDCQL` MUST generate a fresh `nonce` + `state` and
@@ -106,6 +116,29 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
   JWS `alg`s MAY be registered via `RegisterJWSVerifier` without a core dep.
 - All HTTP servers SHOULD set Read/Write/Idle timeouts and body-size limits.
 
+## 9. Resource bounds (DoS resistance)
+Every parser that consumes attacker-influenced input MUST bound the work and
+memory it commits **before** completing authentication of that input. Normative
+bounds:
+- **Untrusted bytes are signed only in part.** Where a signature covers only a
+  prefix of the wire string (e.g. an SD-JWT JWS covers `parts[0]` but the `~`
+  disclosure trailer is editable), the parser MUST cap the structural size of the
+  *unsigned* remainder before allocating proportionally to it. SD-JWT
+  verification MUST reject inputs with more than 256 `~`-separated segments
+  (`ErrSDJWTTooManyDisclosures`) before `strings.Split`.
+- **HTTP bodies MUST be capped** with `http.MaxBytesReader` (or an
+  `io.LimitReader`) before parsing: OpenID4VCI token endpoint ≤64 KiB, credential
+  endpoint ≤1 MiB; OpenID4VP callback ≤4 MiB; MCP ≤16 MiB; `did:web` document
+  fetch ≤64 KiB.
+- **In-memory stores MUST be bounded.** The DID-resolution cache, OpenID4VP
+  session store, OpenID4VCI offer/token maps, and replay detector MUST each cap
+  their entry count and evict (TTL purge or refuse-when-full) so an attacker
+  presenting many distinct items cannot exhaust memory.
+- **Compression MUST be bomb-guarded.** Status-list decode bounds both compressed
+  input (≤8 MiB) and decompressed output (≤64 MiB) via `io.LimitReader`.
+- **Recursive decoders MUST bound depth.** CBOR (≤64), JCS (≤512), and JSON
+  Schema `$ref` (≤64) enforce explicit depth/complexity ceilings.
+
 ---
 
 ## Conformance matrix
@@ -127,7 +160,8 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §3 bare-JWS no-panic | ✅ | |
 | §4 anti-bomb decode | ✅ | |
 | §4 signed Status List Token + sub binding | ✅ | |
-| §4 issuer-metric privacy (padding/accumulator) | ❌ | backlog #11 (CRSet) |
+| §4 issuer-metric privacy — random index assignment (volume/order hiding) | ✅ | **implemented** (`revocation.IndexAllocator`) |
+| §4 issuer-metric privacy — revocation-count hiding (accumulator/CRSet) | ❌ | backlog #11 (irreducible for plain bitstring) |
 | §5 OpenID4VP nonce binding + one-time state | ✅ | |
 | §5 client_id scheme validation | ✅ | **implemented** (`openid4vp.ValidateClientID`) |
 | §6 SCITT register ordering + proofs | ✅ | |
@@ -147,10 +181,18 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 | §7 crypto-agility hook (JWS) | ✅ | EdDSA built-in; ML-DSA pluggable |
 | §7 HTTP rate-limit enforcement | ✅ | **implemented** (`httpmw.RateLimiter`) |
 | §7 HTTP server read/write/idle timeouts | ✅ | **implemented** (`tlsharden.HardenedServer`) |
+| §9 SD-JWT segment cap (unsigned-trailer DoS) | ✅ | **implemented** (`maxSDJWTSegments`, `ErrSDJWTTooManyDisclosures`) |
+| §9 HTTP body-size caps (all endpoints) | ✅ | **implemented** (`http.MaxBytesReader` across vci/vp/mcp/didresolver) |
+| §9 bounded in-memory stores (cache/session/offer/replay) | ✅ | **implemented** (TTL purge + capacity caps) |
+| §9 compression bomb guard | ✅ | **implemented** (`revocation` 8 MiB / 64 MiB bounds) |
+| §9 recursive-decoder depth bounds (CBOR/JCS/$ref) | ✅ | **implemented** (64 / 512 / 64) |
 | §1 did:webvh verifiable history | ❌ | backlog #5 |
 | §4 issuer-metric privacy (CRSet accumulator) | ❌ | backlog #11 |
 
 ### Highest-value remaining gaps (ordered)
-1. CRSet revocation privacy (§4) — backlog #11 (issuer-metric privacy via accumulator padding).
+1. CRSet revocation-*count* privacy (§4) — backlog #11. Random index assignment
+   (`revocation.IndexAllocator`) now hides issuance volume/order; hiding the
+   absolute revocation count still needs an accumulator / padded Bloom-cascade,
+   which is irreducible for a plain bitstring.
 2. mdoc DeviceResponse / session-transcript binding (§2a) — proximity transport (ISO 18013-5 §8/§9), beyond the credential-format scope now covered.
 3. did:webvh official-vector interop — the verification model is implemented and tested (`didwebvh`); validate byte-for-byte against the published did:webvh test vectors and add witness cosigning + did:web fallback.
