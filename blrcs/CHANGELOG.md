@@ -37,6 +37,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`replay.Detector.Close()` panicked on double-close — idempotency failure
+  (reliability / Go channel pitfall, Axis 26).** `Close()` called `close(d.gcStop)`
+  directly. In Go, closing an already-closed channel is an unconditional runtime
+  panic. The idiomatic usage pattern — `defer d.Close()` combined with an explicit
+  early-return close on an error path (or a component that also calls Close) — would
+  trigger the panic and crash the process, taking the replay-detection service and
+  any in-flight DPP issuance requests down with it. Fixed: added `closeOnce
+  sync.Once` to the struct; `Close()` now calls `closeOnce.Do(func() { close(d.gcStop) })`.
+  The GC goroutine terminates exactly once regardless of how many times or from how
+  many goroutines `Close()` is called. Tests: `TestCloseIdempotent` (two sequential
+  calls, no panic) and `TestCloseConcurrent` (10 goroutines calling Close in
+  parallel, race detector clean).
+
 - **`saga.compensate` used `defer cancel()` inside a for loop — timer goroutine
   leak for the entire duration of the compensation chain (resource management /
   Go pitfall, Axis 25).** `compensate()` looped over completed steps in reverse

@@ -34,11 +34,12 @@ var ErrReplay = errors.New("replay: already processed")
 
 // Detector — リプレイ検出器
 type Detector struct {
-	mu      sync.RWMutex
-	seen    map[string]time.Time // fingerprint -> first-seen
-	ttl     time.Duration
-	maxSize int
-	gcStop  chan struct{}
+	mu        sync.RWMutex
+	seen      map[string]time.Time // fingerprint -> first-seen
+	ttl       time.Duration
+	maxSize   int
+	gcStop    chan struct{}
+	closeOnce sync.Once
 }
 
 // NewDetector — TTL と最大サイズを指定して構築
@@ -63,8 +64,11 @@ func NewDetector(ttl time.Duration, maxSize int) *Detector {
 }
 
 // Close — GC goroutine を停止
+//
+// 冪等: 複数回呼んでも安全 (defer + explicit close の組合せが一般的)。
+// sync.Once がないと close(d.gcStop) を 2 回呼んだ時 Go はパニックする。
 func (d *Detector) Close() {
-	close(d.gcStop)
+	d.closeOnce.Do(func() { close(d.gcStop) })
 }
 
 // Check — fingerprint を計算、既に登録済みなら ErrReplay

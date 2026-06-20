@@ -297,3 +297,31 @@ func TestBulkEvictionExpiredEntriesSweptFirst(t *testing.T) {
 		t.Errorf("size after expired sweep: want 1, got %d", d.Size())
 	}
 }
+
+// TestCloseIdempotent verifies that calling Close() more than once does not
+// panic. A common real-world pattern is `defer d.Close()` combined with an
+// explicit early-return cleanup (or a parent that also calls Close). Before
+// the sync.Once fix, the second call to close(d.gcStop) on an already-closed
+// channel caused a runtime panic.
+func TestCloseIdempotent(t *testing.T) {
+	d := NewDetector(time.Hour, 100)
+	d.Close()
+	// Second call must not panic.
+	d.Close()
+}
+
+// TestCloseConcurrent verifies that concurrent Close() calls are safe under
+// the race detector (all goroutines invoking sync.Once — only one fires the
+// underlying close, the rest return immediately).
+func TestCloseConcurrent(t *testing.T) {
+	d := NewDetector(time.Hour, 100)
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.Close()
+		}()
+	}
+	wg.Wait()
+}
