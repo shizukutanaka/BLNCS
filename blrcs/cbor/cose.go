@@ -17,6 +17,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"sync"
 )
 
 // Standard COSE header parameters (RFC 9052 §3.1).
@@ -51,14 +52,19 @@ var ErrCOSEUnsupportedAlg = errors.New("cbor/cose: unsupported algorithm")
 // sigInput is the Sig_Structure byte string that was signed.
 type COSEVerifier func(pub, sigInput, sig []byte) bool
 
-var coseVerifiers = map[int]COSEVerifier{
-	AlgEdDSA: verifyEdDSA,
-}
+var (
+	coseVerifiersMu sync.RWMutex
+	coseVerifiers   = map[int]COSEVerifier{
+		AlgEdDSA: verifyEdDSA,
+	}
+)
 
 // RegisterVerifier registers a custom signature verifier for the given COSE
-// algorithm identifier. It is safe to call before any Sign1/Verify1 calls.
+// algorithm identifier. It is safe to call concurrently with Verify1.
 // Registering a nil verifier removes support for that algorithm.
 func RegisterVerifier(alg int, v COSEVerifier) {
+	coseVerifiersMu.Lock()
+	defer coseVerifiersMu.Unlock()
 	if v == nil {
 		delete(coseVerifiers, alg)
 	} else {
@@ -202,7 +208,9 @@ func Verify1(data []byte, pub ed25519.PublicKey, externalAAD []byte) (*Verify1Re
 		return nil, err
 	}
 
+	coseVerifiersMu.RLock()
 	verifier, ok := coseVerifiers[alg]
+	coseVerifiersMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("%w: %d", ErrCOSEUnsupportedAlg, alg)
 	}

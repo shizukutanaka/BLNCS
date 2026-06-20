@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"sync"
 	"testing"
 )
 
@@ -434,4 +435,41 @@ func TestVerify1NonBstrPayload(t *testing.T) {
 	if _, err := Verify1(b, ed25519.PublicKey(make([]byte, 32)), nil); err == nil {
 		t.Fatal("non-bstr payload should fail")
 	}
+}
+
+// ============================================================================
+// Concurrent registry access (data-race guard)
+// ============================================================================
+
+// TestRegisterVerifierConcurrentWithVerify1 checks that concurrent
+// RegisterVerifier and Verify1 calls do not race on coseVerifiers. Before the
+// sync.RWMutex fix the race detector flagged this pattern.
+func TestRegisterVerifierConcurrentWithVerify1(t *testing.T) {
+	priv, pub := genKey(t)
+	payload := []byte("concurrent-payload")
+	signed, err := Sign1(Header{HeaderAlg: AlgEdDSA}, nil, payload, nil, priv)
+	if err != nil {
+		t.Fatalf("Sign1: %v", err)
+	}
+
+	const customAlg = -998
+	var wg sync.WaitGroup
+	// Goroutine 1: repeatedly register and de-register a custom verifier.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			RegisterVerifier(customAlg, func(_, _, _ []byte) bool { return false })
+			RegisterVerifier(customAlg, nil)
+		}
+	}()
+	// Goroutine 2: repeatedly verify a valid EdDSA token (reads coseVerifiers).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			Verify1(signed, pub, nil) //nolint:errcheck
+		}
+	}()
+	wg.Wait()
 }

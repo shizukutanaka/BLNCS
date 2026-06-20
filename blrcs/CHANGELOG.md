@@ -37,6 +37,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`cbor.coseVerifiers` global map had no mutex — data race between
+  `RegisterVerifier` (write) and `Verify1` (read) under concurrent use
+  (thread safety / Go map invariant, Axis 27).** Go's built-in map is not
+  safe for concurrent reads and writes; concurrent access without
+  synchronisation is a data race that can manifest as corrupted map state,
+  infinite loops, or a runtime crash (`concurrent map read and map write`
+  fatal). `coseVerifiers` is a package-level map that `RegisterVerifier`
+  writes to and `Verify1` reads from; no mutex guarded either path. Any
+  server that registers an extension algorithm at startup (or dynamically for
+  crypto-agility) while handling concurrent COSE_Sign1 verifications would
+  trigger this race. Fixed: added `coseVerifiersMu sync.RWMutex`; writes in
+  `RegisterVerifier` acquire the exclusive lock, reads in `Verify1` acquire
+  the shared lock. The hot path (verify — no concurrent registrations) pays
+  only a single uncontended `RLock`/`RUnlock`. New test:
+  `TestRegisterVerifierConcurrentWithVerify1` — 200 concurrent
+  register/deregister cycles racing against 200 `Verify1` calls, passes
+  cleanly under `-race`.
+
 - **`replay.Detector.Close()` panicked on double-close — idempotency failure
   (reliability / Go channel pitfall, Axis 26).** `Close()` called `close(d.gcStop)`
   directly. In Go, closing an already-closed channel is an unconditional runtime
