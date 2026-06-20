@@ -655,6 +655,7 @@ func (iss *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 65536) // 64 KiB: ample for any token request
 	if err := r.ParseForm(); err != nil {
 		writeVCIError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return

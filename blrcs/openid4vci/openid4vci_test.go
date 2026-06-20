@@ -1624,6 +1624,30 @@ func TestHandleTokenInvalidCode(t *testing.T) {
 }
 
 // ============================================================================
+// handleToken — body exceeds MaxBytesReader limit (64 KiB)
+// ============================================================================
+
+func TestHandleTokenBodyTooLarge(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	// Body is just over 64 KiB — triggers http.MaxBytesReader error before ParseForm.
+	bigBody := "grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code&pre-authorized_code=" +
+		strings.Repeat("A", 65536)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/token", strings.NewReader(bigBody))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("oversized token body: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
 // handleCredential — body exceeds MaxBytesReader limit (1 MiB)
 // ============================================================================
 

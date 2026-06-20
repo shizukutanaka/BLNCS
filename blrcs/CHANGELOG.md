@@ -37,6 +37,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   disclose nothing, and default-off keeps `_sd` sized to the real claims.
 
 ### Fixed
+- **`openid4vci.Issuer` token endpoint missing `http.MaxBytesReader` — unbounded
+  request body DoS (security, Axis 41).** `handleToken` called `r.ParseForm()`
+  directly without first wrapping `r.Body` in `http.MaxBytesReader`. Unlike
+  `handleCredential`, which explicitly caps its body at 1 MiB, the token endpoint
+  had no read limit, allowing any client to stream an arbitrarily large
+  `application/x-www-form-urlencoded` body that would be buffered in full before
+  any application logic ran. The token endpoint only needs ≈200 bytes
+  (grant_type + pre-authorized_code + tx_code), so a 64 KiB cap is extremely
+  generous in practice. Fixed by inserting `r.Body = http.MaxBytesReader(w, r.Body,
+  65536)` before `r.ParseForm()`. Test: `TestHandleTokenBodyTooLarge` sends a
+  65537-byte POST and asserts HTTP 400.
+
 - **`didresolver.Resolver` cache unbounded — memory exhaustion via many distinct
   DID issuers (security / DoS, Axis 40).** The DID resolver's `cache
   map[string]cacheEntry` had no maximum size and no eviction policy. Expired entries
