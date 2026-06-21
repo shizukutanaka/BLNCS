@@ -195,13 +195,64 @@ func TestClientIPXRealIP(t *testing.T) {
 
 // TestClientIPIgnoresSpoofedXFFByDefault verifies the secure default: spoofed
 // proxy headers are ignored, so they cannot be used to bypass per-IP rate limits.
+// The returned value is the IP without the ephemeral port (see
+// TestClientIPStripsPort for why the port must be stripped).
 func TestClientIPIgnoresSpoofedXFFByDefault(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "192.0.2.50:1234"
 	req.Header.Set("X-Forwarded-For", "203.0.113.99")
 	req.Header.Set("X-Real-IP", "203.0.113.99")
-	if got := clientIP(req); got != "192.0.2.50:1234" {
+	if got := clientIP(req); got != "192.0.2.50" {
 		t.Errorf("spoofed headers should be ignored, got %s", got)
+	}
+}
+
+// TestClientIPStripsPort guards against a rate-limit bypass: Go's HTTP server
+// sets r.RemoteAddr to "IP:port" with an ephemeral source port that changes per
+// connection. If clientIP returned IP:port, the rate limiter would key
+// per-connection, so an attacker could open a new connection per request and get
+// a fresh token bucket each time. clientIP MUST return the bare IP.
+func TestClientIPStripsPort(t *testing.T) {
+	cases := []struct{ remote, want string }{
+		{"192.0.2.50:1234", "192.0.2.50"},
+		{"192.0.2.50:55555", "192.0.2.50"},   // same IP, different port → same key
+		{"[2001:db8::1]:443", "2001:db8::1"}, // IPv6 with port
+		{"203.0.113.7", "203.0.113.7"},       // already bare (no port) → unchanged
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = c.remote
+		if got := clientIP(req); got != c.want {
+			t.Errorf("clientIP(%q) = %q, want %q", c.remote, got, c.want)
+		}
+	}
+}
+
+// TestRateLimitKeyedPerIPNotPerConnection is the end-to-end regression: two
+// requests from the same IP but different ephemeral ports must share one token
+// bucket. Before the port-stripping fix they keyed separately, letting a client
+// double its effective rate simply by using a new source port.
+func TestRateLimitKeyedPerIPNotPerConnection(t *testing.T) {
+	rl := NewRateLimiter(1, 1) // 1 token, 1 rps → only the first request passes
+	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	do := func(remote string) int {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = remote
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if got := do("198.51.100.10:1000"); got != http.StatusOK {
+		t.Fatalf("first request from IP: want 200, got %d", got)
+	}
+	// Same IP, brand-new ephemeral port — must still be rate-limited (429),
+	// proving the bucket is keyed by IP, not by connection.
+	if got := do("198.51.100.10:2000"); got != http.StatusTooManyRequests {
+		t.Errorf("second request (new port, same IP): want 429, got %d", got)
 	}
 }
 

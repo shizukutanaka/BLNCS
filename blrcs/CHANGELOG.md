@@ -7,6 +7,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`httpmw` per-client rate limiter keyed on `IP:port`, not IP — per-connection
+  bypass (security, Axis 46).** `clientIP` returned `r.RemoteAddr` verbatim, and
+  Go's `net/http` server sets that to `IP:port` with a fresh ephemeral source
+  port per connection. The token-bucket limiter (`RateLimiter.Allow`) therefore
+  keyed each *connection* separately rather than each client IP: an attacker
+  opening a new connection per request (trivial — just don't reuse keep-alive)
+  got a brand-new full bucket every time, defeating the rate limit and
+  re-opening the per-IP memory-exhaustion vector the GC was meant to bound. The
+  package's own doc and the limiter comments claim "per client IP", and an
+  existing test even codified the buggy `192.0.2.50:1234` return value. Fixed by
+  stripping the port with `net.SplitHostPort` in `clientIP` (falling back to the
+  raw value for an already-bare host or Unix socket); the access-log `remote`
+  field is now a clean IP too. Spec gains §11 "Rate limiting & client identity".
+  Tests: `TestClientIPStripsPort` (IPv4/IPv6/bare cases) and
+  `TestRateLimitKeyedPerIPNotPerConnection` (same IP, different port → one
+  shared bucket → second request 429); the prior test was corrected to expect
+  the port-stripped IP.
 - **`didresolver` / `vctmeta` default HTTP fetchers followed redirects — SSRF
   (security, Axis 45).** Both packages' default clients were plain
   `&http.Client{Timeout: …}` with no `CheckRedirect`, so Go's stdlib defaults

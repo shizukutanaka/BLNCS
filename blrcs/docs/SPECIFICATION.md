@@ -164,6 +164,20 @@ Webhook delivery additionally enforces DNS-revalidating dial (`safeDialContext`
 in `webhook.Bus`) so an allowlisted host with a low-TTL record cannot rebind
 between the URL check and the connect (DNS-rebinding TOCTOU).
 
+## 11. Rate limiting & client identity
+- The per-client rate limiter (`httpmw.RateLimiter`) MUST key buckets on the
+  client **IP only**, never on `r.RemoteAddr` verbatim. Go's HTTP server sets
+  `RemoteAddr` to `IP:port` with a per-connection ephemeral port; keying on it
+  makes the limiter per-connection, so a client opening a new connection per
+  request gets a fresh bucket and bypasses the limit. `httpmw.clientIP` strips
+  the port.
+- Client-supplied forwarding headers (`X-Forwarded-For` / `X-Real-IP`) are
+  spoofable and MUST be ignored for the rate-limit key and access log unless the
+  server is explicitly configured to sit behind a trusted proxy
+  (`httpmw.TrustProxyHeaders`, default false).
+- The bucket map MUST be bounded by periodic GC of idle entries
+  (`RateLimiter.StartGC`/`GC`) so many distinct source IPs cannot exhaust memory.
+
 ---
 
 ## Conformance matrix

@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"time"
@@ -211,7 +212,7 @@ func AccessLog(next http.Handler) http.Handler {
 // that overwrites these headers.
 var TrustProxyHeaders = false
 
-// clientIP — 真のクライアント IP。TrustProxyHeaders=true のときのみ
+// clientIP — 真のクライアント IP (ポート無し)。TrustProxyHeaders=true のときのみ
 // X-Forwarded-For / X-Real-IP を尊重し、それ以外は r.RemoteAddr を使う。
 func clientIP(r *http.Request) string {
 	if TrustProxyHeaders {
@@ -227,6 +228,16 @@ func clientIP(r *http.Request) string {
 		if xr := r.Header.Get("X-Real-IP"); xr != "" {
 			return xr
 		}
+	}
+	// r.RemoteAddr is "IP:port" (Go's net/http server fills it). Strip the
+	// ephemeral port: keying the rate limiter on IP:port would make it
+	// per-connection rather than per-IP, so an attacker opening a fresh
+	// connection per request gets a new ephemeral port — hence a brand-new token
+	// bucket — and bypasses the limit entirely. Also keeps the access-log
+	// `remote` field a clean IP. SplitHostPort fails for an already-bare host
+	// (or a Unix socket); fall back to the raw value in that case.
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
 	return r.RemoteAddr
 }
