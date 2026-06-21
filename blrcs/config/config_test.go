@@ -232,6 +232,39 @@ func TestFromEnvMalformedTokens(t *testing.T) {
 	}
 }
 
+// TestFromEnvRejectsNegativeRateLimit verifies the loader runs Validate: a
+// negative rate limit parses as an int but is out of range, and must be rejected
+// rather than silently disabling the rate limiter (NewRateLimiter treats rps<=0
+// as off).
+func TestFromEnvRejectsNegativeRateLimit(t *testing.T) {
+	os.Setenv("BLRCS_RATE_LIMIT_RPS", "-1")
+	defer os.Unsetenv("BLRCS_RATE_LIMIT_RPS")
+	if _, err := FromEnv(); err == nil {
+		t.Fatal("negative BLRCS_RATE_LIMIT_RPS must be rejected at load time")
+	}
+}
+
+// TestFromEnvRejectsInvalidTLSMode verifies cross-field validation runs in the
+// loader (an unknown tlsMode is caught at startup, not deep in serving).
+func TestFromEnvRejectsInvalidTLSMode(t *testing.T) {
+	os.Setenv("BLRCS_TLS_MODE", "bogus")
+	defer os.Unsetenv("BLRCS_TLS_MODE")
+	if _, err := FromEnv(); err == nil {
+		t.Fatal("invalid BLRCS_TLS_MODE must be rejected at load time")
+	}
+}
+
+// TestFromJSONValidates verifies FromJSON rejects a structurally valid but
+// semantically invalid config (TLS cert without key).
+func TestFromJSONValidates(t *testing.T) {
+	if _, err := FromJSON([]byte(`{"tlsCert":"/c.pem"}`)); err == nil {
+		t.Fatal("FromJSON must reject tlsCert without tlsKey")
+	}
+	if _, err := FromJSON([]byte(`{"rateLimitRPS":-5}`)); err == nil {
+		t.Fatal("FromJSON must reject negative rateLimitRPS")
+	}
+}
+
 func TestFromEnvTLSFields(t *testing.T) {
 	os.Setenv("BLRCS_TLS_CERT", "/etc/tls/cert.pem")
 	os.Setenv("BLRCS_TLS_KEY", "/etc/tls/key.pem")

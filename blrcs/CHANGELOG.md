@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`config.FromEnv`/`FromJSON` never ran `Validate` — invalid config silently
+  accepted (security/correctness, Axis 53).** The `Config` type documents
+  "不正値は起動時拒否" (reject invalid values at startup) and ships a thorough
+  `Validate()` (paired TLS cert/key, known `tlsMode`/`logFormat`, non-negative
+  ranges) — but no loader and no caller ever invoked it, so `Validate` was dead
+  code and the contract unfulfilled. Concretely, `BLRCS_RATE_LIMIT_RPS=-1` parses
+  as a valid int, so the per-field fail-fast didn't catch it; `FromEnv` returned
+  a config with `RateLimitRPS=-1`, and `httpmw.NewRateLimiter` treats `rps<=0` as
+  **disabled** — a single-character config typo silently turns off the rate
+  limiter, the exact failure the inline fail-fast comment claims to prevent.
+  `FromEnv` and `FromJSON` now call `cfg.Validate()` before returning, so
+  out-of-range/inconsistent values (negative RPS, TLS cert without key, unknown
+  tlsMode/logFormat) are rejected at load. Tests: negative RPS, invalid tlsMode,
+  and TLS-cert-without-key are each rejected via the loaders.
 - **`mcp` HTTP session-GC goroutine could never stop — goroutine + ticker leak
   (resource, Axis 52).** `sessionStore.gcLoop` ran `for range t.C` with no stop
   channel, so the goroutine never exited and its `defer t.Stop()` was unreachable

@@ -145,6 +145,14 @@ func FromEnv() (*Config, error) {
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("config: invalid environment: %s", strings.Join(errs, "; "))
 	}
+	// Honor the documented "reject invalid values at startup" contract: run the
+	// full cross-field/range validation. Without this a value that parses but is
+	// out of range — e.g. BLRCS_RATE_LIMIT_RPS=-1 — would slip through and
+	// silently DISABLE the rate limiter (NewRateLimiter treats rps<=0 as off),
+	// the exact failure the per-field fail-fast above tries to prevent.
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -153,6 +161,10 @@ func FromJSON(data []byte) (*Config, error) {
 	cfg := Default()
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse: %w", err)
+	}
+	// Reject invalid values at load time (see FromEnv).
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }
