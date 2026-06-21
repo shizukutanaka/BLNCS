@@ -96,6 +96,11 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 - `ProcessResponse` MUST verify the vp_token per §3, bind it to the request
   `nonce`+`client_id` via KB-JWT when the credential is holder-bound, enforce all
   `RequiredClaims` are disclosed, and consume `state`.
+- HTTP responses carrying credentials, verified claims, access tokens, or
+  per-session secrets (nonce/state) MUST set `Cache-Control: no-store` so they
+  are never retained by a browser, shared proxy, or CDN (cf. RFC 6749 §5.1 for
+  token responses). This covers the OpenID4VCI `/token` and `/credential`
+  endpoints and the OpenID4VP authorize/callback handlers.
 
 ## 6. Transparency (SCITT)
 - `Register` MUST durably persist, then update the in-memory Merkle tree, then

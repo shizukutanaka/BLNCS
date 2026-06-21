@@ -54,6 +54,10 @@ func (v *Verifier) AuthorizeHandler() http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		// The response embeds the request URL (which carries the one-time nonce)
+		// and the session state. These are per-session secrets that a shared cache
+		// or CDN must never store and replay to another client.
+		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"requestURL": reqURL,
 			"state":      state,
@@ -113,6 +117,11 @@ func (v *Verifier) CallbackHandler(onSuccess func(*VerifiedPresentation)) http.H
 			onSuccess(vp)
 		}
 		w.Header().Set("Content-Type", "application/json")
+		// The body carries the holder's verified (and selectively-disclosed)
+		// claims — personal data. It MUST NOT be cached by the browser, a shared
+		// proxy, or a CDN (CDN request-collapsing could even replay it to another
+		// client). Mirror the OAuth token-endpoint rule (RFC 6749 §5.1).
+		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":  "success",
 			"subject": vp.Subject,
@@ -124,6 +133,9 @@ func (v *Verifier) CallbackHandler(onSuccess func(*VerifiedPresentation)) http.H
 
 func writeCallbackError(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
+	// Same no-store policy as the success path: the callback is a credential
+	// endpoint and its responses should never be cached.
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusBadRequest)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status": "failure",

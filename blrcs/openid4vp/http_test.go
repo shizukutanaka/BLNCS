@@ -36,6 +36,11 @@ func TestAuthorizeHandler(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
+	// Response carries the one-time nonce (in requestURL) and session state —
+	// must not be cached.
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control: want no-store, got %q", cc)
+	}
 	var out map[string]string
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
@@ -119,6 +124,11 @@ func TestCallbackHandlerFormPost(t *testing.T) {
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	// The callback returns the holder's verified claims (PII) — it MUST instruct
+	// caches not to store the response.
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control: want no-store, got %q", cc)
 	}
 	var out map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {

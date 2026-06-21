@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **OpenID4VP authorize/callback responses missing `Cache-Control: no-store`
+  (security, Axis 48).** `Verifier.CallbackHandler` returned the holder's
+  verified, selectively-disclosed claims (personal data) and `AuthorizeHandler`
+  returned the request URL (carrying the one-time nonce) plus session `state`,
+  both with only a `Content-Type` header. Without `Cache-Control: no-store`, a
+  browser, shared proxy, or CDN may store these responses — and a CDN
+  request-collapsing optimization could even replay one holder's claims to a
+  different client. The OpenID4VCI `/token` and `/credential` endpoints already
+  set `no-store` (per RFC 6749 §5.1); this extends the same policy to the
+  OpenID4VP handlers (success and error paths). Spec §5 updated with the general
+  rule. Tests assert `Cache-Control: no-store` on the authorize and callback
+  success responses.
 - **SD-JWT `exp`/`iat`/`nbf` fail-open on non-numeric type (security, Axis 47).**
   `VerifySDJWTWithBinding` read each RFC 7519 NumericDate claim with
   `payload["exp"].(float64)` and silently ignored the claim when the assertion
