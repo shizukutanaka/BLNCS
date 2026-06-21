@@ -82,6 +82,15 @@ func NewHTTPHandler(srv *Server, auth AuthVerifier, limiter RateLimiter) *HTTPHa
 	}
 }
 
+// Close stops the handler's background session-GC goroutine. Call it when the
+// handler is no longer needed (e.g. on server shutdown) to avoid leaking a
+// goroutine + ticker per handler. Safe to call multiple times; the handler must
+// not be used to serve requests afterward.
+func (h *HTTPHandler) Close() error {
+	h.sessions.close()
+	return nil
+}
+
 // SetMaxBody — 1リクエスト最大サイズ変更 (default 16MB)
 func (h *HTTPHandler) SetMaxBody(n int64) { h.maxBody = n }
 
@@ -252,6 +261,8 @@ type sessionStore struct {
 	mu          sync.Mutex
 	data        map[string]*sessionEntry
 	maxSessions int
+	stop        chan struct{}
+	stopOnce    sync.Once
 }
 
 type sessionEntry struct {
@@ -263,9 +274,15 @@ func newSessionStore() *sessionStore {
 	s := &sessionStore{
 		data:        make(map[string]*sessionEntry),
 		maxSessions: defaultMaxSessions,
+		stop:        make(chan struct{}),
 	}
 	go s.gcLoop()
 	return s
+}
+
+// close stops the background GC goroutine. Safe to call multiple times.
+func (s *sessionStore) close() {
+	s.stopOnce.Do(func() { close(s.stop) })
 }
 
 func (s *sessionStore) create(id, principal string) {
@@ -339,8 +356,17 @@ func (s *sessionStore) drop(id string) {
 func (s *sessionStore) gcLoop() {
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
-	for range t.C {
-		s.gc()
+	// Must select on s.stop: a bare `for range t.C` never terminates (the ticker
+	// channel is never closed), so the goroutine — and the ticker — would leak for
+	// the process lifetime and `defer t.Stop()` would be unreachable. Every other
+	// GC loop in the codebase (replay, openid4vp, httpmw) uses this stop pattern.
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-t.C:
+			s.gc()
+		}
 	}
 }
 

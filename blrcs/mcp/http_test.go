@@ -10,12 +10,52 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"blrcs/compliance"
 )
+
+// TestHTTPHandlerCloseStopsGCGoroutine verifies that Close stops the background
+// session-GC goroutine, so creating handlers does not leak a goroutine + ticker
+// each. Before the fix, gcLoop ran `for range t.C` with no stop channel and could
+// never exit.
+func TestHTTPHandlerCloseStopsGCGoroutine(t *testing.T) {
+	srv, err := NewServer("ts-gc", "did:web:gc.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Let the runtime settle, then take a baseline.
+	time.Sleep(20 * time.Millisecond)
+	before := runtime.NumGoroutine()
+
+	const n = 50
+	handlers := make([]*HTTPHandler, n)
+	for i := range handlers {
+		handlers[i] = NewHTTPHandler(srv, nil, nil) // each starts a gcLoop goroutine
+	}
+	for _, h := range handlers {
+		if err := h.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}
+
+	// Poll until the gcLoop goroutines have drained back toward the baseline.
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before+5 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := runtime.NumGoroutine(); got > before+5 {
+		t.Errorf("gcLoop goroutines did not drain after Close: before=%d after=%d (started %d handlers)", before, got, n)
+	}
+
+	// Close must be idempotent (no double-close panic).
+	if err := handlers[0].Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
+}
 
 func newTestHTTP(t *testing.T, auth AuthVerifier, lim RateLimiter) (*httptest.Server, *compliance.Issuer) {
 	t.Helper()

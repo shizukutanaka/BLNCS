@@ -118,7 +118,10 @@ func main() {
 	// Routes
 	mux := http.NewServeMux()
 	// Wrap MCP handler with panic recovery so a tool panic cannot crash the daemon.
-	mux.Handle("/mcp", httpmw.Recovery(mcp.NewHTTPHandler(srv, auth, limiter)))
+	mcpHandler := mcp.NewHTTPHandler(srv, auth, limiter)
+	// Stop the handler's background session-GC goroutine on shutdown.
+	defer func() { _ = mcpHandler.Close() }()
+	mux.Handle("/mcp", httpmw.Recovery(mcpHandler))
 	mux.Handle("/metrics", exp)
 	mux.Handle("/healthz", probe.Liveness())
 	mux.Handle("/readyz", probe.Readiness())

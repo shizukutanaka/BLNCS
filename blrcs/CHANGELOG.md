@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`mcp` HTTP session-GC goroutine could never stop — goroutine + ticker leak
+  (resource, Axis 52).** `sessionStore.gcLoop` ran `for range t.C` with no stop
+  channel, so the goroutine never exited and its `defer t.Stop()` was unreachable
+  dead code; `HTTPHandler` (which starts one gcLoop per `NewHTTPHandler`) had no
+  `Close`. Every handler therefore leaked a goroutine and a 5-minute ticker for
+  the process lifetime — unbounded when handlers are created repeatedly (tests,
+  reconfiguration, multi-tenant). Every other GC loop in the codebase (`replay`,
+  `openid4vp`, `httpmw`) already uses a stop channel; this brings `mcp` in line.
+  Added a `stop` channel + `stopOnce` to `sessionStore`, a `select` on it in
+  `gcLoop`, a `sessionStore.close()`, and an idempotent `HTTPHandler.Close()`;
+  the `blrcs-mcpd` daemon now defers `mcpHandler.Close()` on shutdown. Test:
+  `TestHTTPHandlerCloseStopsGCGoroutine` starts 50 handlers, closes them, and
+  asserts the goroutine count drains back to baseline (plus idempotent re-close).
 - **`healthprobe` swallowed panicking checks — readiness fail-open (availability,
   Axis 51).** A check that panicked was caught by `defer func() { _ = recover() }()`
   but the goroutine then returned **without appending any `CheckResult`**, so the
