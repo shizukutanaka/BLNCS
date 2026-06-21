@@ -1,6 +1,7 @@
 package didresolver
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -895,6 +896,47 @@ func TestInvalidateCacheEvictsEntry(t *testing.T) {
 	}
 	if hit != 2 {
 		t.Fatalf("expected 2 fetches after invalidation, got %d", hit)
+	}
+}
+
+// TestResolveAllReturnsPrivateCopy verifies the resolver does not hand out its
+// internal cached key slice: mutating the returned slice (or its key bytes) must
+// not corrupt what a later cache hit returns. Before the defensive copy, the
+// returned slice aliased the cache, so a caller's append/reorder/byte-write
+// silently poisoned the cached key material for every other goroutine.
+func TestResolveAllReturnsPrivateCopy(t *testing.T) {
+	x := testEd25519X(t)
+	r := New()
+	r.HTTPFetcher = func(_ context.Context, _ string) ([]byte, error) {
+		return []byte(`{"id":"did:web:copy.example","@context":["https://www.w3.org/ns/did/v1"],"verificationMethod":[{"id":"did:web:copy.example#k","type":"JsonWebKey2020","controller":"did:web:copy.example","publicKeyJwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}]}`), nil
+	}
+	ctx := context.Background()
+
+	first, err := r.ResolveAll(ctx, "did:web:copy.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 || len(first[0]) != ed25519.PublicKeySize {
+		t.Fatalf("unexpected first result: %v", first)
+	}
+	// Capture the legitimate key bytes, then vandalize the returned slice's key.
+	want := append(ed25519.PublicKey(nil), first[0]...)
+	for i := range first[0] {
+		first[0][i] ^= 0xFF // mutate every byte of the returned key
+	}
+
+	// A second resolve hits the cache. It must return the ORIGINAL key, proving
+	// the cache was not aliased by the first caller's mutation.
+	second, err := r.ResolveAll(ctx, "did:web:copy.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(second[0], want) {
+		t.Errorf("cache corrupted by caller mutation:\n got  %x\n want %x", second[0], want)
+	}
+	// And the two returned slices must not share backing storage.
+	if &first[0][0] == &second[0][0] {
+		t.Error("ResolveAll returned an aliased key slice (same backing array)")
 	}
 }
 

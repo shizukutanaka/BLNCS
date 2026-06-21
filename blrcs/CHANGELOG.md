@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`didresolver.ResolveAll` returned its internal cached key slice — aliasing /
+  data-race on cached key material (security, Axis 49).** Both the cache-hit and
+  fresh-resolve return paths handed back the very `[]ed25519.PublicKey` slice the
+  resolver stores in its cache. A caller that appended to, reordered, or wrote
+  into the returned keys (or their bytes) therefore mutated the cached key
+  material shared by every other goroutine hitting the same DID — silently
+  poisoning subsequent verifications, and racing with concurrent readers of the
+  cache (a `go test -race` hazard on a security-critical value). Fixed with a
+  `cloneKeys` deep copy (slice header *and* each key's bytes) on both return
+  paths, so the cache shares no storage with callers. Internal callers
+  (`Resolve`, `ResolveAndVerifyAll`) are unaffected. Test:
+  `TestResolveAllReturnsPrivateCopy` vandalizes the returned key and asserts a
+  later cache hit still yields the original, and that the two results don't share
+  a backing array.
 - **OpenID4VP authorize/callback responses missing `Cache-Control: no-store`
   (security, Axis 48).** `Verifier.CallbackHandler` returned the holder's
   verified, selectively-disclosed claims (personal data) and `AuthorizeHandler`

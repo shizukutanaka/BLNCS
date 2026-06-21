@@ -120,7 +120,7 @@ func (r *Resolver) ResolveAll(ctx context.Context, did string) ([]ed25519.Public
 	r.mu.RLock()
 	if e, ok := r.cache[did]; ok && time.Now().Before(e.expiresAt) {
 		r.mu.RUnlock()
-		return e.keys, nil
+		return cloneKeys(e.keys), nil
 	}
 	r.mu.RUnlock()
 
@@ -168,7 +168,25 @@ func (r *Resolver) ResolveAll(ctx context.Context, did string) ([]ed25519.Public
 		r.cache[did] = cacheEntry{keys: keys, expiresAt: time.Now().Add(r.CacheTTL)}
 	}
 	r.mu.Unlock()
-	return keys, nil
+	// Return a private copy: the slice just stored in the cache must not be
+	// reachable by the caller, or a later append/reorder/byte-mutation of the
+	// returned keys would corrupt the cached key material for every other
+	// goroutine that hits the same entry (an aliasing + data-race hazard on a
+	// security-critical value).
+	return cloneKeys(keys), nil
+}
+
+// cloneKeys deep-copies a slice of Ed25519 public keys (slice header *and* each
+// key's bytes) so the result shares no backing storage with the input. Used to
+// isolate the resolver cache from its callers.
+func cloneKeys(in []ed25519.PublicKey) []ed25519.PublicKey {
+	out := make([]ed25519.PublicKey, len(in))
+	for i, k := range in {
+		kc := make(ed25519.PublicKey, len(k))
+		copy(kc, k)
+		out[i] = kc
+	}
+	return out
 }
 
 // InvalidateCache — キャッシュ強制クリア (ローテーション後等)
