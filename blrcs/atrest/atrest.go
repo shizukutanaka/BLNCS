@@ -92,6 +92,12 @@ type Cipher struct {
 //
 // keyID: 4-byte 識別子 (例: time-based 又は version 番号、ローテーション識別用)
 // key: AES-256 鍵 (32 bytes)
+//
+// 注意: encryption カウンタ (NIST SP 800-38D nonce 上限の判定に使う) は 0 から
+// 始まる。すなわち上限はこの Cipher インスタンスの生存期間 (典型的には1プロセス)
+// 内でのみ強制される。鍵をプロセス再起動を跨いで使い回す場合、累積回数を
+// 鍵生存期間全体で強制するには NewCipherWithCount を使い、EncryptionCount() を
+// 永続化・復元すること。
 func NewCipher(keyID [keyIDSize]byte, key []byte) (*Cipher, error) {
 	if len(key) != KeySize {
 		return nil, ErrInvalidKey
@@ -105,6 +111,25 @@ func NewCipher(keyID [keyIDSize]byte, key []byte) (*Cipher, error) {
 		return nil, fmt.Errorf("atrest: gcm init: %w", err)
 	}
 	return &Cipher{keyID: keyID, gcm: gcm}, nil
+}
+
+// NewCipherWithCount is NewCipher with the encryption counter pre-seeded to
+// prior — the number of encryptions already performed under this key in earlier
+// process lifetimes.
+//
+// Use it to enforce the NIST SP 800-38D 2^32-encryption limit across restarts:
+// persist EncryptionCount() periodically (and on shutdown) and pass the last
+// persisted value here on the next start. Without this, a key reloaded from a
+// KMS/keyfile resets its counter to 0 each process, so the cumulative
+// per-key-lifetime bound is not enforced — only a per-process bound is. If prior
+// already meets or exceeds the limit, the first Encrypt returns ErrKeyExhausted.
+func NewCipherWithCount(keyID [keyIDSize]byte, key []byte, prior uint64) (*Cipher, error) {
+	c, err := NewCipher(keyID, key)
+	if err != nil {
+		return nil, err
+	}
+	c.encCount.Store(prior)
+	return c, nil
 }
 
 // Encrypt — payload を envelope 形式で暗号化
@@ -157,6 +182,15 @@ func (c *Cipher) Decrypt(envelope []byte) ([]byte, error) {
 // KeyID — このCipherの鍵識別子
 func (c *Cipher) KeyID() [keyIDSize]byte {
 	return c.keyID
+}
+
+// EncryptionCount returns how many encryptions have been counted under this key,
+// including any value seeded via NewCipherWithCount. Persist it to enforce the
+// NIST SP 800-38D nonce limit across process restarts (see NewCipherWithCount).
+// The count is incremented per Encrypt attempt, so it is a safe (never
+// under-counting) upper bound on the number of nonces drawn under the key.
+func (c *Cipher) EncryptionCount() uint64 {
+	return c.encCount.Load()
 }
 
 // ============================================================================

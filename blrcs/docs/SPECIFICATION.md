@@ -115,6 +115,12 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 - Zero external dependencies (stdlib + Ed25519 only). Crypto agility: additional
   JWS `alg`s MAY be registered via `RegisterJWSVerifier` without a core dep.
 - All HTTP servers SHOULD set Read/Write/Idle timeouts and body-size limits.
+- At-rest encryption (`atrest`) uses AES-256-GCM with random 96-bit nonces. An
+  encryptor MUST enforce the NIST SP 800-38D limit of 2^32 encryptions per key
+  (`ErrKeyExhausted`). Because the in-memory counter resets on restart, a key
+  reused across process lifetimes MUST persist and restore the count
+  (`NewCipherWithCount` / `EncryptionCount`) to keep the bound cumulative, or
+  rotate keys well before the limit.
 
 ## 9. Resource bounds (DoS resistance)
 Every parser that consumes attacker-influenced input MUST bound the work and

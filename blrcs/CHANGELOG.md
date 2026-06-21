@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`atrest` NIST nonce-limit enforcement across process restarts
+  (`NewCipherWithCount` / `Cipher.EncryptionCount`) — correctness/security,
+  Axis 44.** The package documents the NIST SP 800-38D random-nonce limit as
+  "同一鍵で 2^32 回以上の Encrypt は ErrKeyExhausted" (per *key*), but the
+  `encCount` guard is an in-memory `atomic.Uint64` that resets to 0 every time a
+  `Cipher` is reconstructed. For a key reloaded from a KMS/keyfile on each start,
+  the cumulative per-key-lifetime bound the doc promises was therefore only
+  enforced per-process: a long-lived key reused across many restarts could exceed
+  2^32 encryptions undetected, degrading AES-GCM's authentication guarantee and
+  risking nonce-collision plaintext recovery. Added `NewCipherWithCount(keyID,
+  key, prior)` to seed the counter from a persisted value and
+  `Cipher.EncryptionCount()` to read it for persistence, so operators can enforce
+  the cumulative bound across restarts (seeding at/over the limit makes the first
+  `Encrypt` return `ErrKeyExhausted`). `NewCipher`'s doc now states the
+  per-instance semantics explicitly and points to the cumulative path. Purely
+  additive — no envelope-format or API break. Tests: `EncryptionCount` tracks
+  each `Encrypt`; seeding resumes the count, enforces the limit on a fresh
+  cipher, and still rejects an invalid key.
 - **`revocation.IndexAllocator` — issuer-metric privacy via random status-list
   index assignment (privacy, Axis 43; spec §4 / backlog #11a).** A published
   Bitstring Status List is effectively public. Bit `0` ("not revoked") is the

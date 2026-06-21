@@ -424,6 +424,62 @@ func TestKeyringRotationAfterExhaustion(t *testing.T) {
 	}
 }
 
+// TestEncryptionCountTracks verifies EncryptionCount reflects each Encrypt call
+// so it can be persisted for cross-restart NIST-limit enforcement.
+func TestEncryptionCountTracks(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(KeyIDFromUint32(7), key)
+	if got := c.EncryptionCount(); got != 0 {
+		t.Fatalf("fresh cipher count: want 0, got %d", got)
+	}
+	for i := 1; i <= 5; i++ {
+		if _, err := c.Encrypt([]byte("x")); err != nil {
+			t.Fatalf("encrypt %d: %v", i, err)
+		}
+		if got := c.EncryptionCount(); got != uint64(i) {
+			t.Fatalf("after %d encrypts: want count %d, got %d", i, i, got)
+		}
+	}
+}
+
+// TestNewCipherWithCountResumesAndEnforcesLimit verifies that seeding the counter
+// (a) carries a prior count forward (cross-restart resumption) and (b) enforces
+// the cumulative NIST limit even on a freshly-reconstructed Cipher.
+func TestNewCipherWithCountResumesAndEnforcesLimit(t *testing.T) {
+	key, _ := GenerateKey()
+	keyID := KeyIDFromUint32(9)
+
+	// Resume from a prior count: the new Cipher continues counting from there.
+	c, err := NewCipherWithCount(keyID, key, 1000)
+	if err != nil {
+		t.Fatalf("NewCipherWithCount: %v", err)
+	}
+	if got := c.EncryptionCount(); got != 1000 {
+		t.Fatalf("seeded count: want 1000, got %d", got)
+	}
+	if _, err := c.Encrypt([]byte("resume")); err != nil {
+		t.Fatalf("encrypt after seed: %v", err)
+	}
+	if got := c.EncryptionCount(); got != 1001 {
+		t.Fatalf("count after one encrypt: want 1001, got %d", got)
+	}
+
+	// Seeding at the limit must make the very first Encrypt fail — the cumulative
+	// bound is enforced across restarts, not reset to zero.
+	exhausted, err := NewCipherWithCount(keyID, key, maxEncryptionsPerKey)
+	if err != nil {
+		t.Fatalf("NewCipherWithCount at limit: %v", err)
+	}
+	if _, err := exhausted.Encrypt([]byte("nope")); !errors.Is(err, ErrKeyExhausted) {
+		t.Fatalf("seeded-at-limit cipher: want ErrKeyExhausted, got %v", err)
+	}
+
+	// An invalid key is still rejected through the seeding constructor.
+	if _, err := NewCipherWithCount(keyID, []byte("short"), 0); !errors.Is(err, ErrInvalidKey) {
+		t.Fatalf("short key: want ErrInvalidKey, got %v", err)
+	}
+}
+
 // ============================================================================
 // Concurrent Keyring access (data-race guard)
 // ============================================================================
