@@ -28,7 +28,9 @@ backlog and references).
 - Selectively-disclosable claims MUST be salted (≥128-bit CSPRNG salt), digested
   with SHA-256, and listed in `_sd`; their disclosures are appended after `~`.
 - Holder binding (optional): when requested, the payload MUST carry `cnf.jwk`
-  (OKP/Ed25519) bound to the holder key.
+  (OKP/Ed25519) bound to the holder key. A verifier resolving `cnf.jwk` MUST pin
+  the key type (`kty="OKP"`, `crv="Ed25519"`) before using the `x` value — it
+  MUST NOT reinterpret the `x` of a different key type as an Ed25519 key.
 - Status (optional): when a status reference is given, the payload MUST carry
   `status.status_list` with `idx` and `uri` (draft-ietf-oauth-status-list).
 

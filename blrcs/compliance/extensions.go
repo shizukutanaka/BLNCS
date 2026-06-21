@@ -530,6 +530,19 @@ func extractHolderKey(payload map[string]any) ed25519.PublicKey {
 	if !ok {
 		return nil
 	}
+	// RFC 7800 cnf.jwk MUST be a well-formed JWK. Pin the key type: only an
+	// OKP/Ed25519 JWK is a valid holder key here. Without this check a cnf
+	// carrying e.g. {"kty":"EC","crv":"P-256","x":<32 bytes>} (or a JWK with no
+	// kty/crv at all) would have its `x` silently reinterpreted as an Ed25519
+	// public key — a cross-algorithm type confusion and a spec-conformance gap.
+	// (didresolver.jwkToEd25519 and mdoc.parseDeviceKey already pin kty/crv;
+	// this brings the holder-binding path in line.)
+	if kty, _ := jwk["kty"].(string); kty != "OKP" {
+		return nil
+	}
+	if crv, _ := jwk["crv"].(string); crv != "Ed25519" {
+		return nil
+	}
 	x, ok := jwk["x"].(string)
 	if !ok {
 		return nil

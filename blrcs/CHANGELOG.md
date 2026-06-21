@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **SD-JWT holder key (`cnf.jwk`) accepted any key type — missing `kty`/`crv`
+  pinning (correctness/conformance, Axis 50).** `extractHolderKey` validated only
+  the length of the JWK `x` value, so a `cnf.jwk` declaring a different key type —
+  e.g. `{"kty":"EC","crv":"P-256","x":<32 bytes>}`, or a JWK with no `kty`/`crv`
+  at all — had its `x` silently reinterpreted as an Ed25519 public key (a
+  cross-algorithm type confusion and an RFC 7800 conformance gap). It was not
+  exploitable because the KB-JWT `alg` is pinned to `EdDSA` and verification
+  fails closed, but the rest of the codebase (`didresolver.jwkToEd25519`,
+  `mdoc.parseDeviceKey`) already pins `kty`/`crv`; this brings the holder-binding
+  path in line. `extractHolderKey` now requires `kty="OKP"` and `crv="Ed25519"`.
+  BLRCS issuance already emits exactly that, so issued credentials are
+  unaffected. Spec §2 updated. Tests: EC/P-256, OKP/X25519, and missing-`kty`
+  JWKs are each rejected; a valid OKP/Ed25519 JWK still yields the key.
 - **`didresolver.ResolveAll` returned its internal cached key slice — aliasing /
   data-race on cached key material (security, Axis 49).** Both the cache-hit and
   fresh-resolve return paths handed back the very `[]ed25519.PublicKey` slice the

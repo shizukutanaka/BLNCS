@@ -727,6 +727,41 @@ func TestExtractHolderKeyEdgeCases(t *testing.T) {
 	if k := extractHolderKey(shortX); k != nil {
 		t.Error("jwk.x with wrong length should return nil")
 	}
+
+	// --- kty/crv pinning (RFC 7800 cnf.jwk MUST be a valid OKP/Ed25519 JWK) ---
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	validX := base64.RawURLEncoding.EncodeToString(pub)
+
+	// Wrong kty (EC P-256) with an otherwise valid 32-byte x must be rejected —
+	// no cross-algorithm reinterpretation of the x-coordinate as Ed25519.
+	wrongKty := map[string]any{"cnf": map[string]any{"jwk": map[string]any{
+		"kty": "EC", "crv": "P-256", "x": validX,
+	}}}
+	if k := extractHolderKey(wrongKty); k != nil {
+		t.Error("non-OKP kty must be rejected")
+	}
+
+	// Right kty, wrong crv (X25519, not a signature curve) must be rejected.
+	wrongCrv := map[string]any{"cnf": map[string]any{"jwk": map[string]any{
+		"kty": "OKP", "crv": "X25519", "x": validX,
+	}}}
+	if k := extractHolderKey(wrongCrv); k != nil {
+		t.Error("non-Ed25519 crv must be rejected")
+	}
+
+	// Missing kty entirely must be rejected (no kty ⇒ not a valid JWK).
+	noKty := map[string]any{"cnf": map[string]any{"jwk": map[string]any{"x": validX}}}
+	if k := extractHolderKey(noKty); k != nil {
+		t.Error("jwk without kty must be rejected")
+	}
+
+	// A fully valid OKP/Ed25519 JWK returns exactly the embedded key.
+	good := map[string]any{"cnf": map[string]any{"jwk": map[string]any{
+		"kty": "OKP", "crv": "Ed25519", "x": validX,
+	}}}
+	if k := extractHolderKey(good); string(k) != string(pub) {
+		t.Error("valid OKP/Ed25519 jwk must return the embedded key")
+	}
 }
 
 // ============================================================================
