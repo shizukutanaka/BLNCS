@@ -36,9 +36,17 @@ import (
 )
 
 const (
-	sessionHeader       = "Mcp-Session-Id"
-	sessionIdleTimeout  = 30 * time.Minute
-	sseHeartbeatPeriod  = 25 * time.Second
+	sessionHeader      = "Mcp-Session-Id"
+	sessionIdleTimeout = 30 * time.Minute
+	sseHeartbeatPeriod = 25 * time.Second
+	// sseWriteTimeout bounds each individual SSE write. The SSE server runs with
+	// http.Server WriteTimeout=0 (a global write timeout would kill long-lived
+	// streams), so without a per-write deadline a stuck/slow client — one whose
+	// TCP send buffer is full but whose connection is still open — would block
+	// Write/Flush forever, leaking this goroutine and the connection.
+	// r.Context().Done() does NOT fire for a slow-but-open client, so the deadline
+	// is the only way out. Set via http.ResponseController before each write.
+	sseWriteTimeout     = 10 * time.Second
 	defaultMaxBodyBytes = 16 * 1024 * 1024
 	// defaultMaxSessions bounds the in-memory session map. Sessions live up to
 	// sessionIdleTimeout (30m) and the background GC only sweeps every 5m, so
@@ -206,11 +214,11 @@ func (h *HTTPHandler) handleGet(w http.ResponseWriter, r *http.Request, principa
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	if _, ok := w.(http.Flusher); !ok {
 		writeHTTPError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
+	rc := http.NewResponseController(w)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -218,22 +226,42 @@ func (h *HTTPHandler) handleGet(w http.ResponseWriter, r *http.Request, principa
 	w.Header().Set("X-Accel-Buffering", "no") // nginx対策
 	w.WriteHeader(http.StatusOK)
 
+	// writeEvent writes one SSE frame under a bounded write deadline so a stuck or
+	// slow client cannot block this goroutine forever (the SSE server runs with
+	// WriteTimeout=0). Returns false on any write/flush error (deadline exceeded,
+	// broken pipe) so the caller stops the stream and releases the connection.
+	// SetWriteDeadline / Flush are best-effort: a ResponseWriter that doesn't
+	// support them (e.g. some test recorders) returns ErrNotSupported, which we
+	// treat as success rather than aborting the stream.
+	writeEvent := func(s string) bool {
+		_ = rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
+		if _, err := io.WriteString(w, s); err != nil {
+			return false
+		}
+		if err := rc.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return false
+		}
+		return true
+	}
+
 	// Heartbeat — 接続保持用コメント行
 	// 本MVPでは通知購読なし。heartbeatのみ。後でnotifications実装時にsubscribe層追加。
 	ticker := time.NewTicker(sseHeartbeatPeriod)
 	defer ticker.Stop()
 
 	// 初回確立通知
-	fmt.Fprintf(w, ": connected sid=%s\n\n", sid)
-	flusher.Flush()
+	if !writeEvent(fmt.Sprintf(": connected sid=%s\n\n", sid)) {
+		return
+	}
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			fmt.Fprint(w, ": heartbeat\n\n")
-			flusher.Flush()
+			if !writeEvent(": heartbeat\n\n") {
+				return
+			}
 			h.sessions.touch(sid, principal) // SSE継続中はアクティブ扱い
 		}
 	}

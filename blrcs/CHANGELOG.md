@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **MCP SSE stream had no per-write deadline — slow-client backpressure leak
+  (resource/DoS, Axis 54).** `handleGet` streams Server-Sent Events with the
+  daemon's `http.Server` `WriteTimeout=0` (a global write timeout would kill
+  long-lived streams). With no per-write deadline, a stuck or slow client — one
+  whose TCP send buffer is full but whose connection stays open — makes the
+  heartbeat `Write`/`Flush` block **forever**; `r.Context().Done()` does not fire
+  for a slow-but-open client, so the handler goroutine and its connection leak,
+  and enough such clients exhaust goroutines/FDs. Fixed by writing each SSE frame
+  through `http.NewResponseController(w)` with `SetWriteDeadline(now +
+  sseWriteTimeout)` (10s) per frame, via a `writeEvent` helper that returns the
+  stream on any write/flush error (deadline exceeded, broken pipe). The deadline
+  is best-effort — a writer without deadline/flush support (`ErrNotSupported`) is
+  treated as success — so behavior is unchanged for the happy path; the existing
+  `TestHTTP_SSEHeartbeat` covers it.
 - **`config.FromEnv`/`FromJSON` never ran `Validate` — invalid config silently
   accepted (security/correctness, Axis 53).** The `Config` type documents
   "不正値は起動時拒否" (reject invalid values at startup) and ships a thorough
