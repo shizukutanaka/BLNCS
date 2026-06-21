@@ -41,6 +41,15 @@ var (
 	// (misconfigured CDN, wrong-object response, or type-confusion attack): the
 	// wrong JSON Schema would then be applied to claim validation.
 	ErrVCTMismatch = errors.New("vctmeta: metadata vct does not match requested URL")
+	// ErrRedirectNotAllowed — the default HTTPFetcher refuses 3xx responses on
+	// Type Metadata GETs. The fetched bytes are bound by a `vct#integrity`
+	// SRI-style hash that pins the *URL → content* mapping, so a redirect
+	// silently breaks the binding (the integrity then guards a different URL
+	// than the one used at issuance), and worse, lets a malicious metadata host
+	// bounce the verifier into a private/loopback/metadata-IP target — turning
+	// metadata resolution into an SSRF primitive. A caller that genuinely needs
+	// to follow redirects can pass their own *http.Client to HTTPFetcher.
+	ErrRedirectNotAllowed = errors.New("vctmeta: type metadata fetch redirects are not permitted")
 )
 
 const (
@@ -65,10 +74,20 @@ type TypeMetadata struct {
 type FetchFunc func(ctx context.Context, url string) ([]byte, error)
 
 // HTTPFetcher — https GET で Type Metadata を取得する FetchFunc。client が nil なら
-// 10s タイムアウトの既定クライアントを使う。
+// 10s タイムアウトの SSRF-resistant 既定クライアント (3xx 拒否) を使う。
+// 呼び出し側が独自 *http.Client を渡した場合、その挙動 (redirect ポリシー含む) を尊重する。
 func HTTPFetcher(client *http.Client) FetchFunc {
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{
+			Timeout: 10 * time.Second,
+			// Refuse 3xx so a malicious metadata host cannot bounce the fetch into
+			// a private/loopback target (SSRF), and so the vct#integrity SRI hash
+			// keeps binding the requested URL to the fetched bytes — a redirect
+			// would let the integrity hash guard a different URL than was issued.
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return ErrRedirectNotAllowed
+			},
+		}
 	}
 	return func(ctx context.Context, url string) ([]byte, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

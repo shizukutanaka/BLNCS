@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`didresolver` / `vctmeta` default HTTP fetchers followed redirects — SSRF
+  (security, Axis 45).** Both packages' default clients were plain
+  `&http.Client{Timeout: …}` with no `CheckRedirect`, so Go's stdlib defaults
+  applied: up to 10 redirects, blindly followed across hosts. A malicious
+  `did:web` document host or SD-JWT-VC Type Metadata host could 302/301 the
+  fetch into any target — including `http://169.254.169.254/...` (cloud
+  metadata), `127.0.0.1:*` (internal services), or any cross-origin destination
+  — and the bytes returned by the redirect target would be parsed as the issuer's
+  DID document / type metadata. For `vctmeta` it also silently broke the
+  `vct#integrity` SRI binding the issuer pinned: the hash would then guard a
+  *different* URL than was used at issuance, defeating the whole point of the
+  integrity claim. Fixed by adding `CheckRedirect` on the default clients that
+  returns sentinel errors (`didresolver.ErrRedirectNotAllowed`,
+  `vctmeta.ErrRedirectNotAllowed`) so every 3xx is refused before the
+  follow-up request fires. The W3C did:web spec defines the document path
+  exactly (`/.well-known/did.json` or `<path>/did.json`), so a legitimate
+  did:web server has no reason to redirect. Caller-supplied `*http.Client`
+  instances on `vctmeta.HTTPFetcher` are still respected as-is — the caller is
+  in charge of their own policy. Spec gains a new §10 "Outbound HTTP (SSRF
+  resistance)" codifying the scheme/redirect/dial requirements across
+  `webhook`, `didresolver`, and `vctmeta`. Tests:
+  `TestDefaultHTTPFetchRejectsRedirect`,
+  `TestDefaultHTTPFetchRejectsRedirectChainToLoopback`,
+  `TestHTTPFetcherRejectsRedirect`, `TestHTTPFetcherCustomClientRespected`
+  exercise both the rejection and the custom-client respect paths.
+
 ### Added
 - **`atrest` NIST nonce-limit enforcement across process restarts
   (`NewCipherWithCount` / `Cipher.EncryptionCount`) — correctness/security,

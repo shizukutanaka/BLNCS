@@ -814,6 +814,55 @@ func TestDefaultHTTPFetchBadURL(t *testing.T) {
 	}
 }
 
+// TestDefaultHTTPFetchRejectsRedirect verifies the SSRF guard on did:web
+// resolution: a malicious DID document host that 302s to a private/loopback
+// address must not be followed, because the W3C did:web spec defines the
+// document path exactly and following a redirect would let an attacker pivot
+// the fetch into 169.254.169.254 (cloud metadata), 127.0.0.1, etc.
+func TestDefaultHTTPFetchRejectsRedirect(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Whatever the attacker wants to serve from the redirected destination.
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"did:web:attacker.example"}`))
+	}))
+	defer target.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/did.json", http.StatusFound) // 302
+	}))
+	defer redirector.Close()
+
+	_, err := defaultHTTPFetch(context.Background(), redirector.URL+"/did.json")
+	if err == nil {
+		t.Fatal("redirect should be refused, got no error")
+	}
+	if !errors.Is(err, ErrRedirectNotAllowed) {
+		t.Errorf("want ErrRedirectNotAllowed, got %v", err)
+	}
+}
+
+// TestDefaultHTTPFetchRejectsRedirectChainToLoopback is the explicit SSRF
+// scenario: a public-looking did:web host issues a 301 to a loopback target.
+// We use the redirector itself as the "loopback" stand-in since httptest binds
+// to 127.0.0.1 — Go's net/http would happily follow without the CheckRedirect
+// guard, so this asserts the guard actually fires.
+func TestDefaultHTTPFetchRejectsRedirectChainToLoopback(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/did.json" {
+			http.Redirect(w, r, "/follow-me", http.StatusMovedPermanently) // 301
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"did:web:redirected.example"}`))
+	}))
+	defer ts.Close()
+
+	_, err := defaultHTTPFetch(context.Background(), ts.URL+"/did.json")
+	if !errors.Is(err, ErrRedirectNotAllowed) {
+		t.Errorf("want ErrRedirectNotAllowed, got %v", err)
+	}
+}
+
 // ============================================================================
 // InvalidateCache
 // ============================================================================

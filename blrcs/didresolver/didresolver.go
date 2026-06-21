@@ -38,6 +38,15 @@ var (
 	ErrFetchFailed       = errors.New("didresolver: fetch failed")
 	ErrNoKey             = errors.New("didresolver: no usable public key in DID document")
 	ErrNotTrusted        = errors.New("didresolver: DID not in trust anchor list")
+	// ErrRedirectNotAllowed is returned when the default did:web fetcher receives
+	// a 3xx response. The W3C did:web spec defines an exact well-known path
+	// (`/.well-known/did.json` or `<path>/did.json`), so a legitimate server has
+	// no reason to redirect. Following a redirect would let a malicious DID
+	// document trigger SSRF: a 302 to `http://169.254.169.254/...` (cloud
+	// metadata), `127.0.0.1`, or an attacker-chosen cross-origin target would be
+	// fetched and parsed as "the issuer's DID document". The default fetcher
+	// therefore refuses every 3xx via CheckRedirect.
+	ErrRedirectNotAllowed = errors.New("didresolver: did:web fetch redirects are not permitted")
 )
 
 // ============================================================================
@@ -560,13 +569,24 @@ func ResolveAndVerifyAll(ctx context.Context, r *Resolver, t *TrustAnchor, did s
 // Default HTTP fetcher
 // ============================================================================
 
+// defaultClient is the shared, SSRF-hardened HTTP client used by defaultHTTPFetch.
+// It is built once: rebuilding per call costs an extra Transport allocation per
+// resolution. CheckRedirect refuses every 3xx so a malicious did:web document
+// cannot 302 the fetch into a private/loopback/metadata target.
+var defaultClient = &http.Client{
+	Timeout: 5 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return ErrRedirectNotAllowed
+	},
+}
+
 func defaultHTTPFetch(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/did+json, application/json")
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := defaultClient
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

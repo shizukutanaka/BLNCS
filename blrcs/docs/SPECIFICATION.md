@@ -145,6 +145,25 @@ bounds:
 - **Recursive decoders MUST bound depth.** CBOR (≤64), JCS (≤512), and JSON
   Schema `$ref` (≤64) enforce explicit depth/complexity ceilings.
 
+## 10. Outbound HTTP (SSRF resistance)
+All outbound HTTP fetchers that take attacker-controllable URLs (webhook
+delivery, `did:web` document resolution, SD-JWT-VC Type Metadata, schema-URI
+resolution) MUST:
+- restrict the scheme to `http`/`https`,
+- refuse 3xx redirects in their default client (`CheckRedirect` returning a
+  sentinel error such as `didresolver.ErrRedirectNotAllowed` /
+  `vctmeta.ErrRedirectNotAllowed`), because the canonical document path is
+  fixed by spec (W3C did:web well-known) or pinned by an integrity hash
+  (`vct#integrity`, SRI) — a redirect would either silently break the
+  URL→content binding the hash guards or let a malicious host bounce the fetch
+  into a private/loopback/cloud-metadata target,
+- where the caller may supply a custom `*http.Client`, respect that client's
+  redirect policy as-is (the caller is in charge).
+
+Webhook delivery additionally enforces DNS-revalidating dial (`safeDialContext`
+in `webhook.Bus`) so an allowlisted host with a low-TTL record cannot rebind
+between the URL check and the connect (DNS-rebinding TOCTOU).
+
 ---
 
 ## Conformance matrix

@@ -509,3 +509,46 @@ func TestResolveChainFetchErrorOnExtends(t *testing.T) {
 		t.Error("ResolveChain should return error when parent fetch fails")
 	}
 }
+
+// TestHTTPFetcherRejectsRedirect verifies the default HTTPFetcher refuses 3xx
+// responses. A malicious Type Metadata host that 302s could otherwise (a)
+// silently violate the vct#integrity URL → bytes binding (the SRI hash would
+// guard a different URL than was issued) and (b) pivot the verifier into a
+// private/loopback/metadata-IP target — an SSRF primitive.
+func TestHTTPFetcherRejectsRedirect(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/elsewhere", http.StatusFound)
+	}))
+	defer ts.Close()
+	fetcher := HTTPFetcher(nil) // default SSRF-hardened client
+	_, err := fetcher(context.Background(), ts.URL+"/metadata.json")
+	if err == nil {
+		t.Fatal("redirect should be refused")
+	}
+	if !errors.Is(err, ErrRedirectNotAllowed) {
+		t.Errorf("want ErrRedirectNotAllowed, got %v", err)
+	}
+}
+
+// TestHTTPFetcherCustomClientRespected verifies that when the caller supplies
+// their own *http.Client, we use it as-is and do NOT override its redirect
+// policy. The caller is in charge of whether to allow redirects.
+func TestHTTPFetcherCustomClientRespected(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"vct":"https://eu.example/final"}`))
+	}))
+	defer target.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+	// Caller-provided client with the default (follow-redirects) policy.
+	fetcher := HTTPFetcher(&http.Client{})
+	body, err := fetcher(context.Background(), redirector.URL+"/metadata.json")
+	if err != nil {
+		t.Fatalf("caller-provided client should follow redirects: %v", err)
+	}
+	if len(body) == 0 {
+		t.Error("expected body from redirected target")
+	}
+}
