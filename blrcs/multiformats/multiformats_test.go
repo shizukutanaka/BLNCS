@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 )
@@ -135,6 +136,35 @@ func TestJCSKeyOrdering(t *testing.T) {
 	want := `{"a":2,"b":1,"c":3}`
 	if string(got) != want {
 		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+// TestJCSNegativeZeroNormalized verifies RFC 8785 §3.2.2.3: negative zero
+// canonicalizes to "0", so -0 and 0 (and -0.0) produce identical canonical bytes
+// — otherwise two logically-equal numbers would sign/hash differently.
+func TestJCSNegativeZeroNormalized(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"a":-0}`, `{"a":0}`},
+		{`{"a":-0.0}`, `{"a":0}`},
+		{`{"a":0}`, `{"a":0}`},
+		{`{"a":0.0}`, `{"a":0}`},
+		{`{"a":-0e9}`, `{"a":0}`},
+	}
+	for _, c := range cases {
+		got, err := CanonicalizeJSON([]byte(c.in))
+		if err != nil {
+			t.Fatalf("%s: %v", c.in, err)
+		}
+		if string(got) != c.want {
+			t.Errorf("CanonicalizeJSON(%s) = %s, want %s", c.in, got, c.want)
+		}
+	}
+	// The in-memory path (used by did:webvh) must agree: -0.0 float and 0 int
+	// both canonicalize to "0".
+	negZero, _ := Canonicalize(map[string]any{"a": math.Copysign(0, -1)})
+	zeroInt, _ := Canonicalize(map[string]any{"a": 0})
+	if string(negZero) != string(zeroInt) {
+		t.Errorf("in-memory -0.0 (%s) != 0 (%s)", negZero, zeroInt)
 	}
 }
 

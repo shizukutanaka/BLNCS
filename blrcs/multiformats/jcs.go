@@ -260,6 +260,13 @@ func writeJCSString(buf *bytes.Buffer, s string) {
 func writeJCSNumber(buf *bytes.Buffer, s string) error {
 	// Integers (no '.', 'e', 'E') are emitted as-is — JCS keeps integer form.
 	if isIntegerLiteral(s) {
+		// RFC 8785 §3.2.2.3 / ECMAScript Number::toString: negative zero
+		// serializes as "0". Emitting "-0" would make the canonical form of -0
+		// differ from 0, so two logically-equal numbers would hash/sign
+		// differently — a canonicalization defect in signing-critical code.
+		if s == "-0" {
+			s = "0"
+		}
 		buf.WriteString(s)
 		return nil
 	}
@@ -267,6 +274,12 @@ func writeJCSNumber(buf *bytes.Buffer, s string) error {
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		return fmt.Errorf("%w: number %q", ErrJCSUnsupported, s)
+	}
+	// Normalize every zero (0.0, -0.0, 0e9, …) to "0": Go's FormatFloat renders
+	// -0.0 as "-0", but JCS/ECMAScript require "0".
+	if f == 0 {
+		buf.WriteString("0")
+		return nil
 	}
 	buf.WriteString(strconv.FormatFloat(f, 'g', -1, 64))
 	return nil

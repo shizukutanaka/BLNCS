@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **JCS canonicalization did not normalize negative zero (correctness, Axis 55).**
+  `multiformats` JCS emitted `-0` verbatim for the integer literal `-0` and `-0`
+  for the float `-0.0` (Go's `FormatFloat` renders negative zero as `-0`), but
+  RFC 8785 §3.2.2.3 / ECMAScript `Number::toString` require negative zero to
+  serialize as `0`. Two logically-equal numbers (`-0` vs `0`, or `-0.0` float vs
+  `0` int) therefore produced **different canonical bytes** — and JCS underpins
+  did:webvh SCID/entryHash and `eddsa-jcs-2022` Data Integrity proofs, so equal
+  values could hash/sign differently. `writeJCSNumber` now maps the `-0` integer
+  literal and every zero-valued float to `0`. Spec conformance note added. Tests:
+  `-0`, `-0.0`, `-0e9`, `0`, `0.0` all canonicalize to `0` via both the byte and
+  in-memory paths.
 - **MCP SSE stream had no per-write deadline — slow-client backpressure leak
   (resource/DoS, Axis 54).** `handleGet` streams Server-Sent Events with the
   daemon's `http.Server` `WriteTimeout=0` (a global write timeout would kill

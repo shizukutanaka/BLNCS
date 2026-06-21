@@ -217,7 +217,7 @@ between the URL check and the connect (DNS-rebinding TOCTOU).
 | §6 COSE_Sign1 receipts (IETF SCITT interop) | ✅ | **implemented** (`scitt.IssueCOSEReceipt`, `cbor` package) |
 | §6 witness cosigning (split-view defense) | ✅ | **implemented** (`scitt.Witness`) |
 | §1 multiformats: base58btc + multihash (sha2-256) | ✅ | **implemented** (`multiformats`, KAT-validated) — did:webvh foundation |
-| §1 JCS canonicalization (RFC 8785) | ✅ | **implemented** (`multiformats.CanonicalizeJSON`) — did:webvh / DI proofs foundation |
+| §1 JCS canonicalization (RFC 8785) | ✅ | **implemented** (`multiformats.CanonicalizeJSON`) — did:webvh / DI proofs foundation; integers verbatim, negative zero normalized to `0` (§3.2.2.3), arbitrary-float ES `Number::toString` is best-effort |
 | §8 CBOR encoder/decoder (RFC 8949, deterministic) | ✅ | **implemented** (`cbor` package) |
 | §8 COSE_Sign1 sign/verify (RFC 9052) | ✅ | **implemented** (`cbor.Sign1`, `cbor.Verify1`) |
 | §8 COSE algorithm agility (`RegisterVerifier`) | ✅ | **implemented** |
