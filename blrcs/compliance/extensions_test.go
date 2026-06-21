@@ -913,6 +913,59 @@ func TestVerifySDJWTTooManyDisclosures(t *testing.T) {
 	}
 }
 
+// TestVerifySDJWTRejectsStringExp guards against a fail-open: a credential whose
+// "exp" is a JSON string (rather than a NumericDate number) must be rejected, not
+// silently treated as non-expiring. Some non-conformant issuer libraries emit
+// string timestamps; before the fix the type assertion failed and expiry
+// enforcement was disabled.
+func TestVerifySDJWTRejectsStringExp(t *testing.T) {
+	iss, _ := NewIssuer("did:web:strexp.test")
+	payload := baseSDPayload(iss)
+	payload["exp"] = "1700000000" // string, not a number — non-conformant
+	sdjwt := craftSignedJWT(iss.privateKey, payload) + "~"
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTMalformed {
+		t.Errorf("string exp: want ErrSDJWTMalformed, got %v", err)
+	}
+}
+
+// TestVerifySDJWTRejectsNonNumericTimeClaims covers iat/nbf with wrong JSON types
+// (bool, string) — each must fail closed.
+func TestVerifySDJWTRejectsNonNumericTimeClaims(t *testing.T) {
+	iss, _ := NewIssuer("did:web:badtime.test")
+	for _, tc := range []struct {
+		name  string
+		key   string
+		value any
+	}{
+		{"iat as string", "iat", "1700000000"},
+		{"iat as bool", "iat", true},
+		{"nbf as string", "nbf", "1700000000"},
+		{"exp as array", "exp", []any{1.0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := baseSDPayload(iss)
+			payload[tc.key] = tc.value
+			sdjwt := craftSignedJWT(iss.privateKey, payload) + "~"
+			_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+			if err != ErrSDJWTMalformed {
+				t.Errorf("%s: want ErrSDJWTMalformed, got %v", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestVerifySDJWTAbsentTimeClaimsOK confirms the fix did not break the legitimate
+// "claim absent" path: a credential with no exp/nbf still verifies (no expiry).
+func TestVerifySDJWTAbsentTimeClaimsOK(t *testing.T) {
+	iss, _ := NewIssuer("did:web:noexp.test")
+	payload := baseSDPayload(iss) // has iat (number), no exp/nbf
+	sdjwt := craftSignedJWT(iss.privateKey, payload) + "~"
+	if _, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{}); err != nil {
+		t.Errorf("absent exp/nbf should verify, got %v", err)
+	}
+}
+
 // ============================================================================
 // verifyKBJWT — error paths (lines 470, 477, 481)
 // ============================================================================

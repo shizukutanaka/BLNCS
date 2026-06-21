@@ -373,14 +373,26 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	if v, ok := payload["vct"].(string); ok {
 		vc.VCT = v
 	}
-	if v, ok := payload["iat"].(float64); ok {
-		vc.IssuedAt = int64(v)
+	// RFC 7519 NumericDate claims (iat/exp/nbf). A claim that is PRESENT but not a
+	// JSON number must be a hard error, not a silent skip: a credential carrying
+	// e.g. "exp":"1700000000" (a string — emitted by some non-conformant issuer
+	// libraries) would otherwise have its expiry check disabled below
+	// (`vc.Expires == 0` ⇒ "no expiry"), a fail-open that lets an expired
+	// credential verify. Absent is fine (returns ok=false, no error).
+	if iat, ok, err := numericDateClaim(payload, "iat"); err != nil {
+		return nil, err
+	} else if ok {
+		vc.IssuedAt = iat
 	}
-	if v, ok := payload["exp"].(float64); ok {
-		vc.Expires = int64(v)
+	if exp, ok, err := numericDateClaim(payload, "exp"); err != nil {
+		return nil, err
+	} else if ok {
+		vc.Expires = exp
 	}
-	if v, ok := payload["nbf"].(float64); ok {
-		vc.NotBefore = int64(v)
+	if nbf, ok, err := numericDateClaim(payload, "nbf"); err != nil {
+		return nil, err
+	} else if ok {
+		vc.NotBefore = nbf
 	}
 	vc.HolderKey = extractHolderKey(payload)
 	vc.Status = extractStatus(payload)
@@ -484,6 +496,28 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 		vc.KeyBound = true
 	}
 	return vc, nil
+}
+
+// numericDateClaim extracts an RFC 7519 NumericDate claim (iat/exp/nbf) from a
+// decoded JWT payload. It returns:
+//   - (0, false, nil)               when the claim is absent — caller skips it,
+//   - (int64(v), true, nil)         when present as a JSON number,
+//   - (0, false, ErrSDJWTMalformed) when present but the wrong JSON type.
+//
+// The last case MUST be an error: silently ignoring a present-but-malformed
+// time claim is a fail-open (e.g. a string "exp" would disable expiry
+// enforcement). json.Unmarshal always decodes a conformant NumericDate as
+// float64, so a non-float64 value is genuinely non-conformant.
+func numericDateClaim(payload map[string]any, key string) (int64, bool, error) {
+	raw, present := payload[key]
+	if !present {
+		return 0, false, nil
+	}
+	f, ok := raw.(float64)
+	if !ok {
+		return 0, false, ErrSDJWTMalformed
+	}
+	return int64(f), true, nil
 }
 
 // extractHolderKey — cnf.jwk (OKP/Ed25519) から holder 公開鍵を復元 (無ければ nil)。

@@ -58,7 +58,10 @@ A verifier MUST:
    (`ErrSDJWTUnsupportedHashAlg`); absent `_sd_alg` defaults to sha-256.
 3. Require `vct` (SD-JWT-VC) → else `ErrSDJWTMissingVCT`.
 4. Enforce `exp`/`iat` with bounded clock skew (≤60s) →
-   `ErrSDJWTExpired` / `ErrSDJWTNotYetValid`.
+   `ErrSDJWTExpired` / `ErrSDJWTNotYetValid`. A NumericDate claim (`exp`/`iat`/
+   `nbf`) that is **present but not a JSON number** MUST be rejected as malformed
+   (`ErrSDJWTMalformed`), never silently ignored — ignoring a string-typed `exp`
+   would disable expiry enforcement (fail-open).
 5. Reject **duplicate digests** in `_sd` (`ErrSDJWTDuplicateDigest`); accept a
    disclosure only when its SHA-256 digest is present in `_sd`.
 6. When `cnf` is present (or key binding is required), require and verify a

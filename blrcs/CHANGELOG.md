@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **SD-JWT `exp`/`iat`/`nbf` fail-open on non-numeric type (security, Axis 47).**
+  `VerifySDJWTWithBinding` read each RFC 7519 NumericDate claim with
+  `payload["exp"].(float64)` and silently ignored the claim when the assertion
+  failed. A credential carrying a present-but-wrong-typed time claim — most
+  importantly `"exp":"1700000000"` as a JSON **string**, which some
+  non-conformant issuer libraries emit — therefore had its expiry check disabled
+  (`vc.Expires == 0` ⇒ "no expiry"): an expired credential would verify. Fixed
+  with a `numericDateClaim` helper that distinguishes absent (skip), numeric
+  (use), and present-but-wrong-type (reject with `ErrSDJWTMalformed`), applied to
+  `iat`/`exp`/`nbf`. The KB-JWT `iat` path was already fail-closed and is
+  unchanged. Spec §3.4 updated. Tests: string `exp`, plus `iat`/`nbf`/`exp` as
+  string/bool/array all rejected; absent `exp`/`nbf` still verifies.
 - **`httpmw` per-client rate limiter keyed on `IP:port`, not IP — per-connection
   bypass (security, Axis 46).** `clientIP` returned `r.RemoteAddr` verbatim, and
   Go's `net/http` server sets that to `IP:port` with a fresh ephemeral source
