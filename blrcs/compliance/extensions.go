@@ -333,10 +333,19 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 		return nil, ErrSDJWTMalformed
 	}
 	var hdr struct {
-		Alg string `json:"alg"`
+		Alg  string   `json:"alg"`
+		Crit []string `json:"crit"`
 	}
 	if err := json.Unmarshal(hdrBytes, &hdr); err != nil {
 		return nil, ErrSDJWTMalformed
+	}
+	// RFC 7515 §4.1.11: a `crit` header lists extension parameters the verifier
+	// MUST understand; if any is unsupported the JWS is invalid. BLRCS implements
+	// no JWS extensions, so a present `crit` (which by spec lists only extensions)
+	// means an unsupported critical parameter — reject rather than silently ignore
+	// the issuer's safety signal.
+	if len(hdr.Crit) > 0 {
+		return nil, ErrSDJWTCritUnsupported
 	}
 	verify, ok := lookupJWSVerifier(hdr.Alg)
 	if !ok {
@@ -580,10 +589,13 @@ func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, opts Veri
 		return ErrKeyBindingInvalid
 	}
 	var hdr struct {
-		Alg string `json:"alg"`
-		Typ string `json:"typ"`
+		Alg  string   `json:"alg"`
+		Typ  string   `json:"typ"`
+		Crit []string `json:"crit"`
 	}
-	if err := json.Unmarshal(hdrBytes, &hdr); err != nil || hdr.Typ != "kb+jwt" || hdr.Alg != "EdDSA" {
+	// Reject unknown critical params (RFC 7515 §4.1.11) along with the pinned
+	// typ/alg — BLRCS implements no KB-JWT header extensions.
+	if err := json.Unmarshal(hdrBytes, &hdr); err != nil || hdr.Typ != "kb+jwt" || hdr.Alg != "EdDSA" || len(hdr.Crit) > 0 {
 		return ErrKeyBindingInvalid
 	}
 	sigBytes, err := base64.RawURLEncoding.DecodeString(segs[2])

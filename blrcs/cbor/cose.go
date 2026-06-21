@@ -22,8 +22,9 @@ import (
 
 // Standard COSE header parameters (RFC 9052 §3.1).
 const (
-	HeaderAlg = 1 // algorithm
-	HeaderKid = 4 // key ID
+	HeaderAlg  = 1 // algorithm
+	HeaderCrit = 2 // critical headers (RFC 9052 §3.1)
+	HeaderKid  = 4 // key ID
 )
 
 // Algorithm identifiers (IANA COSE Algorithms registry).
@@ -42,6 +43,14 @@ var ErrCOSESigFailed = errors.New("cbor/cose: signature verification failed")
 
 // ErrCOSEUnsupportedAlg is returned for unknown or disallowed algorithms.
 var ErrCOSEUnsupportedAlg = errors.New("cbor/cose: unsupported algorithm")
+
+// ErrCOSECritUnsupported is returned when the protected header carries a `crit`
+// (label 2) field that lists a critical label this implementation does not
+// understand. RFC 9052 §3.1 requires processing to fail in that case. BLRCS
+// implements no critical header extensions, so any non-understood (or malformed)
+// crit entry is rejected rather than silently ignored — otherwise an issuer's
+// "you MUST understand this to use the token safely" signal would be bypassed.
+var ErrCOSECritUnsupported = errors.New("cbor/cose: unsupported critical header parameter")
 
 // ============================================================================
 // Algorithm registry (crypto-agility)
@@ -202,6 +211,11 @@ func Verify1(data []byte, pub ed25519.PublicKey, externalAAD []byte) (*Verify1Re
 		return nil, fmt.Errorf("cbor/cose: parse protected header: %w", err)
 	}
 
+	// RFC 9052 §3.1: reject any critical header parameter we do not understand.
+	if err := checkCrit(protected); err != nil {
+		return nil, err
+	}
+
 	// Determine algorithm
 	alg, err := headerAlg(protected)
 	if err != nil {
@@ -273,6 +287,30 @@ func parseHeader(data []byte) (Header, error) {
 		return nil, errors.New("header must be a CBOR map")
 	}
 	return Header(IntMap(rawMap)), nil
+}
+
+// checkCrit enforces RFC 9052 §3.1 critical-header handling. The `crit` field
+// (label 2), when present, MUST be a non-empty array of labels the processor is
+// required to understand. BLRCS understands only the algorithm label
+// (HeaderAlg); any other listed label — or a malformed/empty crit — is rejected.
+// String labels are always unsupported here (Header is keyed by integer label).
+func checkCrit(h Header) error {
+	critRaw, present := h[HeaderCrit]
+	if !present {
+		return nil
+	}
+	crit, ok := critRaw.([]any)
+	if !ok || len(crit) == 0 {
+		// crit MUST be a non-empty array (RFC 9052 §3.1).
+		return fmt.Errorf("%w: crit must be a non-empty array", ErrCOSECritUnsupported)
+	}
+	for _, lblRaw := range crit {
+		lbl, ok := GetInt(lblRaw)
+		if !ok || int(lbl) != HeaderAlg {
+			return fmt.Errorf("%w: %v", ErrCOSECritUnsupported, lblRaw)
+		}
+	}
+	return nil
 }
 
 func headerAlg(h Header) (int, error) {

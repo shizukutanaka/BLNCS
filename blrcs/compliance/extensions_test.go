@@ -1001,6 +1001,25 @@ func TestVerifySDJWTAbsentTimeClaimsOK(t *testing.T) {
 	}
 }
 
+// TestVerifySDJWTRejectsCritHeader verifies RFC 7515 §4.1.11: an issuer JWS
+// header carrying a `crit` list (extension params the verifier must understand)
+// is rejected, since BLRCS implements no JWS extensions.
+func TestVerifySDJWTRejectsCritHeader(t *testing.T) {
+	iss, _ := NewIssuer("did:web:crit.test")
+	payload := baseSDPayload(iss)
+	// Craft a signed JWT whose header includes a crit field.
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"vc+sd-jwt","crit":["x-custom"]}`))
+	payBytes, _ := json.Marshal(payload)
+	pay := base64.RawURLEncoding.EncodeToString(payBytes)
+	sig := ed25519.Sign(iss.privateKey, []byte(hdr+"."+pay))
+	sdjwt := hdr + "." + pay + "." + base64.RawURLEncoding.EncodeToString(sig) + "~"
+
+	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
+	if err != ErrSDJWTCritUnsupported {
+		t.Errorf("crit header: want ErrSDJWTCritUnsupported, got %v", err)
+	}
+}
+
 // ============================================================================
 // verifyKBJWT — error paths (lines 470, 477, 481)
 // ============================================================================

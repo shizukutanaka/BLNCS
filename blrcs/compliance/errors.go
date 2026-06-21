@@ -14,12 +14,17 @@ var (
 	ErrAttesterIDRequired   = errors.New("compliance: attester ID required")
 
 	// SD-JWT
-	ErrSDJWTEmpty              = errors.New("compliance: sd-jwt empty")
-	ErrSDJWTMalformed          = errors.New("compliance: sd-jwt malformed")
-	ErrSDJWTSigFailed          = errors.New("compliance: sd-jwt signature failed")
-	ErrSDJWTExpired            = errors.New("compliance: sd-jwt expired (exp in past)")
-	ErrSDJWTNotYetValid        = errors.New("compliance: sd-jwt not yet valid (iat in future)")
-	ErrSDJWTUnsupportedAlg     = errors.New("compliance: sd-jwt unsupported JWS alg")
+	ErrSDJWTEmpty          = errors.New("compliance: sd-jwt empty")
+	ErrSDJWTMalformed      = errors.New("compliance: sd-jwt malformed")
+	ErrSDJWTSigFailed      = errors.New("compliance: sd-jwt signature failed")
+	ErrSDJWTExpired        = errors.New("compliance: sd-jwt expired (exp in past)")
+	ErrSDJWTNotYetValid    = errors.New("compliance: sd-jwt not yet valid (iat in future)")
+	ErrSDJWTUnsupportedAlg = errors.New("compliance: sd-jwt unsupported JWS alg")
+	// ErrSDJWTCritUnsupported is returned when the issuer JWS header carries a
+	// `crit` (RFC 7515 §4.1.11) listing extension parameters this verifier does
+	// not implement. Silently ignoring crit would bypass the issuer's
+	// "must-understand" safety signal.
+	ErrSDJWTCritUnsupported    = errors.New("compliance: sd-jwt unsupported critical header parameter")
 	ErrSDJWTUnsupportedHashAlg = errors.New("compliance: sd-jwt unsupported _sd_alg (only sha-256)")
 	ErrSDJWTMissingVCT         = errors.New("compliance: sd-jwt-vc missing required vct claim")
 	ErrSDJWTDuplicateDigest    = errors.New("compliance: sd-jwt duplicate digest in _sd")

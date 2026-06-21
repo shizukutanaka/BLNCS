@@ -71,6 +71,9 @@ A verifier MUST:
    `sd_hash` = SHA-256 of the presentation up to and including the final `~`.
 7. Never let reserved claims (`_sd`, `_sd_alg`, `cnf`, `status`, …) leak into the
    returned claim set.
+8. Reject a JWS whose header carries a `crit` field (RFC 7515 §4.1.11) —
+   BLRCS implements no JWS extensions, so any critical parameter is unsupported
+   (`ErrSDJWTCritUnsupported`). The KB-JWT header is held to the same rule.
 A bare JWS without `~` MUST verify as a credential with no disclosures (no panic).
 
 ## 4. Status / revocation
@@ -120,6 +123,9 @@ A bare JWS without `~` MUST verify as a credential with no disclosures (no panic
 - `cbor.Sign1` / `cbor.Verify1` MUST use Sig_Structure (RFC 9052 §4.4) with
   algorithm pinning (reject absent or unknown `alg`). Additional algorithms MAY be
   registered via `cbor.RegisterVerifier` without modifying the core package.
+- `cbor.Verify1` MUST reject a protected-header `crit` field (RFC 9052 §3.1, label
+  2) that lists any label it does not understand, or that is malformed/empty
+  (`ErrCOSECritUnsupported`). BLRCS understands only the algorithm label.
 
 ## 7. Cross-cutting
 - Zero external dependencies (stdlib + Ed25519 only). Crypto agility: additional

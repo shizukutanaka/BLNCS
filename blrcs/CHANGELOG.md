@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **COSE and JWS verification ignored the `crit` (critical headers) field —
+  must-understand bypass (security/conformance, Axis 56).** `cbor.Verify1`
+  (COSE_Sign1) never inspected the protected-header `crit` field (RFC 9052 §3.1,
+  label 2), and the SD-JWT issuer-JWS / KB-JWT verification never inspected the
+  JWS `crit` header (RFC 7515 §4.1.11). Both specs mandate that if a signature
+  marks an extension parameter critical and the verifier doesn't understand it,
+  the signature MUST be rejected — `crit` is the issuer's "you must process this
+  to use the token safely" signal. BLRCS silently ignored it, so a credential or
+  receipt relying on an unimplemented critical extension would be accepted as if
+  the extension didn't exist. BLRCS implements no critical extensions, so it now
+  rejects any present `crit`: COSE accepts only a `crit` listing solely the
+  algorithm label and rejects unknown/string/empty/malformed crit
+  (`ErrCOSECritUnsupported`); the issuer JWS and KB-JWT reject any non-empty
+  `crit` (`ErrSDJWTCritUnsupported` / `ErrKeyBindingInvalid`). Spec §3 and §8
+  updated. Tests cover COSE (unknown int label, string label, empty array,
+  non-array, and the accepted alg-only case) and SD-JWT crit rejection.
 - **JCS canonicalization did not normalize negative zero (correctness, Axis 55).**
   `multiformats` JCS emitted `-0` verbatim for the integer literal `-0` and `-0`
   for the float `-0.0` (Go's `FormatFloat` renders negative zero as `-0`), but

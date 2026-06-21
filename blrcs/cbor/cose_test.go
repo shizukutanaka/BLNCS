@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"sync"
 	"testing"
 )
@@ -42,6 +43,47 @@ func TestCOSESign1Roundtrip(t *testing.T) {
 	alg, ok := GetInt(res.Protected[HeaderAlg])
 	if !ok || alg != AlgEdDSA {
 		t.Errorf("alg: %v", res.Protected[HeaderAlg])
+	}
+}
+
+// TestCOSEVerify1RejectsCrit verifies RFC 9052 §3.1: a COSE_Sign1 whose
+// protected header marks a critical label the verifier doesn't understand MUST
+// be rejected even though the signature is valid. We sign legitimately (so the
+// signature is genuine) with a crit field, then assert Verify1 refuses it.
+func TestCOSEVerify1RejectsCrit(t *testing.T) {
+	priv, pub := genKey(t)
+	payload := []byte("crit test")
+
+	cases := []struct {
+		name string
+		crit any
+	}{
+		{"unknown integer label", []any{int64(7)}},
+		{"string label", []any{"my-ext"}},
+		{"empty array", []any{}},
+		{"non-array", int64(7)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			protected := Header{HeaderAlg: AlgEdDSA, HeaderCrit: c.crit}
+			data, err := Sign1(protected, nil, payload, nil, priv)
+			if err != nil {
+				t.Fatalf("Sign1: %v", err)
+			}
+			if _, err := Verify1(data, pub, nil); !errors.Is(err, ErrCOSECritUnsupported) {
+				t.Errorf("want ErrCOSECritUnsupported, got %v", err)
+			}
+		})
+	}
+
+	// A crit listing only the alg label (which BLRCS understands) is accepted.
+	protected := Header{HeaderAlg: AlgEdDSA, HeaderCrit: []any{int64(HeaderAlg)}}
+	data, err := Sign1(protected, nil, payload, nil, priv)
+	if err != nil {
+		t.Fatalf("Sign1: %v", err)
+	}
+	if _, err := Verify1(data, pub, nil); err != nil {
+		t.Errorf("crit=[alg] should verify, got %v", err)
 	}
 }
 
