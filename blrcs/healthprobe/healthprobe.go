@@ -132,22 +132,32 @@ func (p *Probe) runChecks(ctx context.Context, checks map[string]Check) Report {
 		wg.Add(1)
 		go func(name string, check Check) {
 			defer wg.Done()
-			defer func() { _ = recover() }() // check panic → treated as failure
-			runCtx, cancel := context.WithTimeout(ctx, p.Timeout)
-			defer cancel()
 			start := time.Now()
-			err := check(runCtx)
-			dur := time.Since(start)
-			r := CheckResult{
-				Name:     name,
-				Duration: dur.String(),
-			}
-			if err != nil {
-				r.Status = "fail"
-				r.Error = err.Error()
-			} else {
-				r.Status = "ok"
-			}
+			r := CheckResult{Name: name}
+			// Run the check in an inner func so a panic is converted into a "fail"
+			// result rather than being swallowed. The previous code recovered the
+			// panic but then returned WITHOUT appending any result, so a panicking
+			// readiness check silently vanished from the report — and if the other
+			// checks passed, the endpoint returned 200 OK while a check was broken
+			// (fail-open: Kubernetes would keep routing traffic to the pod). Treat a
+			// panic as a failure, matching the documented intent.
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						r.Status = "fail"
+						r.Error = fmt.Sprintf("check panicked: %v", rec)
+					}
+				}()
+				runCtx, cancel := context.WithTimeout(ctx, p.Timeout)
+				defer cancel()
+				if err := check(runCtx); err != nil {
+					r.Status = "fail"
+					r.Error = err.Error()
+				} else {
+					r.Status = "ok"
+				}
+			}()
+			r.Duration = time.Since(start).String()
 			mu.Lock()
 			results = append(results, r)
 			mu.Unlock()

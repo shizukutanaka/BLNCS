@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`healthprobe` swallowed panicking checks — readiness fail-open (availability,
+  Axis 51).** A check that panicked was caught by `defer func() { _ = recover() }()`
+  but the goroutine then returned **without appending any `CheckResult`**, so the
+  check silently vanished from the report. The comment claimed "panic → treated
+  as failure," but the code did the opposite: if the other checks passed, the
+  endpoint returned **200 OK while a check was broken**, so a Kubernetes
+  readiness probe would keep routing traffic to a pod whose dependency check
+  paniced (e.g. a nil-map write). Fixed by running each check inside an inner
+  func whose deferred recover records a `fail` result (`"check panicked: …"`),
+  so a panicked check now counts as a failure and the endpoint returns 503
+  (fail-closed). The result is always appended, so no check is dropped. Test:
+  `TestPanickingCheckFailsClosed` asserts 503, report status `fail`, the panicked
+  check present as `fail`, and that both checks appear.
 - **SD-JWT holder key (`cnf.jwk`) accepted any key type — missing `kty`/`crv`
   pinning (correctness/conformance, Axis 50).** `extractHolderKey` validated only
   the length of the JWK `x` value, so a `cnf.jwk` declaring a different key type —

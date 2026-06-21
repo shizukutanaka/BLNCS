@@ -113,6 +113,55 @@ func TestSingleCheckFailsCausesNotOK(t *testing.T) {
 	}
 }
 
+// TestPanickingCheckFailsClosed verifies a check that panics is reported as a
+// failure (and the endpoint returns 503), rather than being silently dropped —
+// which previously let the probe return 200 OK while a check was broken.
+func TestPanickingCheckFailsClosed(t *testing.T) {
+	p := New()
+	p.AddReadiness("ok-check", AlwaysOK())
+	p.AddReadiness("panic-check", func(ctx context.Context) error {
+		panic("boom: nil map write or similar")
+	})
+
+	ts := httptest.NewServer(p.Readiness())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("panicking check must yield 503, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var report Report
+	json.Unmarshal(body, &report)
+	if report.Status != "fail" {
+		t.Errorf("report status: want fail, got %s", report.Status)
+	}
+	// The panicked check must appear in the report as a failure (not dropped).
+	found := false
+	for _, c := range report.Checks {
+		if c.Name == "panic-check" {
+			found = true
+			if c.Status != "fail" {
+				t.Errorf("panic-check status: want fail, got %s", c.Status)
+			}
+			if !strings.Contains(c.Error, "panic") {
+				t.Errorf("panic-check error should mention panic, got %q", c.Error)
+			}
+		}
+	}
+	if !found {
+		t.Error("panic-check missing from report — it was silently dropped")
+	}
+	// Both checks must be present (none dropped).
+	if len(report.Checks) != 2 {
+		t.Errorf("expected 2 checks in report, got %d", len(report.Checks))
+	}
+}
+
 // ============================================================================
 // Parallel execution
 // ============================================================================
