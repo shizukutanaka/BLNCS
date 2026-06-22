@@ -430,6 +430,46 @@ func TestVerifyStatusListTokenBadLst(t *testing.T) {
 	}
 }
 
+// TestVerifyStatusListTokenAt verifies that the injectable clock governs expiry
+// checks: a token past its exp at one time is still valid at an earlier time.
+func TestVerifyStatusListTokenAt(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	list := NewBitstringStatusList(PurposeRevocation, MinBitstringSize)
+	_ = list.SetStatus(5, true)
+	enc, _ := list.EncodedList()
+
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	expTime := base.Add(2 * time.Hour)
+
+	var claims statusListClaims
+	claims.Sub = "https://issuer.example/status/1"
+	claims.Iss = "did:web:issuer"
+	claims.Iat = base.Unix()
+	claims.Exp = expTime.Unix()
+	claims.TTL = int64((2 * time.Hour).Seconds())
+	claims.StatusList.Bits = 1
+	claims.StatusList.Lst = enc
+
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"statuslist+jwt"}`))
+	plBytes, _ := json.Marshal(claims)
+	pl := base64.RawURLEncoding.EncodeToString(plBytes)
+	sig := ed25519.Sign(priv, []byte(hdr+"."+pl))
+	token := hdr + "." + pl + "." + base64.RawURLEncoding.EncodeToString(sig)
+
+	// Before expiry: valid.
+	if _, _, err := VerifyStatusListTokenAt(token, pub, PurposeRevocation, base.Add(time.Hour)); err != nil {
+		t.Errorf("before expiry: %v", err)
+	}
+	// After expiry + leeway: expired.
+	if _, _, err := VerifyStatusListTokenAt(token, pub, PurposeRevocation, expTime.Add(2*time.Minute)); err != ErrTokenExpired {
+		t.Errorf("after expiry: want ErrTokenExpired, got %v", err)
+	}
+	// Within leeway window (expTime + 30s): still valid.
+	if _, _, err := VerifyStatusListTokenAt(token, pub, PurposeRevocation, expTime.Add(30*time.Second)); err != nil {
+		t.Errorf("within leeway: %v", err)
+	}
+}
+
 // TestLiveTokenHandlerIssueError covers lines 190-194: when IssueToken returns
 // an error (here: bad private key), the handler must respond 500.
 func TestLiveTokenHandlerIssueError(t *testing.T) {

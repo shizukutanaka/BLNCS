@@ -35,6 +35,10 @@ var (
 	ErrBadReceipt = errors.New("scitt: receipt invalid")
 	ErrBadProof   = errors.New("scitt: inclusion proof invalid")
 	ErrEmptyStmt  = errors.New("scitt: statement payload required")
+	// ErrStatementMalformed is returned by SignStatement when required fields are
+	// missing or the private key has the wrong length. A well-formed statement
+	// must carry a non-empty Issuer, Subject, ContentType, and a valid private key.
+	ErrStatementMalformed = errors.New("scitt: statement malformed")
 
 	// Checkpoint / witness cosigning
 	ErrCheckpointSig        = errors.New("scitt: checkpoint signature invalid")
@@ -287,6 +291,18 @@ func (l *Ledger) TSID() string                 { return l.tsID }
 // SignStatement — 発行者が自分のSigned Statementを作成
 // issuerPub は checkpointに埋込用 (後で検索可能)
 func SignStatement(issuerPriv ed25519.PrivateKey, issuerID, subject, contentType string, payload []byte) (Statement, error) {
+	if len(issuerPriv) != ed25519.PrivateKeySize {
+		return Statement{}, fmt.Errorf("%w: bad private key length", ErrStatementMalformed)
+	}
+	if issuerID == "" {
+		return Statement{}, fmt.Errorf("%w: missing issuer", ErrStatementMalformed)
+	}
+	if subject == "" {
+		return Statement{}, fmt.Errorf("%w: missing subject", ErrStatementMalformed)
+	}
+	if contentType == "" {
+		return Statement{}, fmt.Errorf("%w: missing content-type", ErrStatementMalformed)
+	}
 	if len(payload) == 0 {
 		return Statement{}, ErrEmptyStmt
 	}

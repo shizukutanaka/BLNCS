@@ -40,6 +40,36 @@ func TestSignVerifyStatement(t *testing.T) {
 	}
 }
 
+// TestSignStatementMalformed verifies that required fields are validated and
+// bad-length private keys do not cause a panic.
+func TestSignStatementMalformed(t *testing.T) {
+	priv, _ := mustIssuer(t, "did:web:ok")
+	cases := []struct {
+		name        string
+		priv        ed25519.PrivateKey
+		issuerID    string
+		subject     string
+		contentType string
+		payload     []byte
+		wantErr     error
+	}{
+		{"short key", priv[:32], "did:web:x", "s", "application/vc+json", []byte("p"), ErrStatementMalformed},
+		{"empty key", ed25519.PrivateKey(nil), "did:web:x", "s", "application/vc+json", []byte("p"), ErrStatementMalformed},
+		{"missing issuer", priv, "", "s", "application/vc+json", []byte("p"), ErrStatementMalformed},
+		{"missing subject", priv, "did:web:x", "", "application/vc+json", []byte("p"), ErrStatementMalformed},
+		{"missing content-type", priv, "did:web:x", "s", "", []byte("p"), ErrStatementMalformed},
+		{"empty payload", priv, "did:web:x", "s", "application/vc+json", nil, ErrEmptyStmt},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := SignStatement(tc.priv, tc.issuerID, tc.subject, tc.contentType, tc.payload)
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("want %v, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestRegisterAndVerifyReceipt(t *testing.T) {
 	ledger, err := NewLedger("did:web:ts.blrcs.example")
 	if err != nil {

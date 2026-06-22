@@ -44,6 +44,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   an end-to-end authorize-vs-counterfeit check.
 
 ### Fixed
+- **`revocation.VerifyStatusListToken` used a hard-coded `time.Now()` — no
+  injectable clock for expiry tests (testability, Axis 63).** Extracted a new
+  `VerifyStatusListTokenAt(token, pub, purpose, now)` that accepts an explicit
+  `time.Time`, consistent with `VerifyTrustListAt` and `VerifySDJWTAt`. The
+  original `VerifyStatusListToken` now delegates to it with `time.Now()`. One
+  new test (`TestVerifyStatusListTokenAt`) verifies expiry, leeway, and the
+  before-expiry happy path using a fixed reference clock.
+- **`scitt.SignStatement` accepted empty issuer/subject and could panic on a
+  wrong-length private key (correctness/panic-safety, Axis 62).** The function
+  called `issuerPriv.Public().(ed25519.PublicKey)` before checking key length —
+  a slice operation that panics when `len(issuerPriv) < 32`. An empty `issuerID`
+  or `subject` produced a signed statement with no issuer/subject identity in
+  the audit trail, weakening the SCITT transparency guarantee. Added upfront
+  checks (private key length, non-empty issuerID/subject/contentType) that
+  return `ErrStatementMalformed` before any key operation. 6 table-driven
+  subtests cover each malformed case (short key, nil key, missing issuer/subject/
+  content-type, empty payload).
 - **`openid4vp.randomB64` silently discarded CSPRNG errors — weak nonces on
   entropy failure (security, Axis 60).** `CreateRequest` and `CreateRequestDCQL`
   generate a 32-byte nonce and a 16-byte state token via `randomB64`, which

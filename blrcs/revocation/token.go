@@ -100,6 +100,12 @@ func (b *BitstringStatusList) IssueToken(issuer, sub string, priv ed25519.Privat
 //
 // 署名・exp (leeway 込み) を検証し、lst を復元する。purpose は呼び出し側が期待する用途。
 func VerifyStatusListToken(token string, pub ed25519.PublicKey, purpose StatusPurpose) (*BitstringStatusList, *TokenMeta, error) {
+	return VerifyStatusListTokenAt(token, pub, purpose, time.Now())
+}
+
+// VerifyStatusListTokenAt is VerifyStatusListToken with an injectable clock,
+// enabling deterministic tests for expiry and TTL scenarios.
+func VerifyStatusListTokenAt(token string, pub ed25519.PublicKey, purpose StatusPurpose, now time.Time) (*BitstringStatusList, *TokenMeta, error) {
 	if len(pub) != ed25519.PublicKeySize {
 		return nil, nil, ErrTokenSigFailed
 	}
@@ -136,7 +142,7 @@ func VerifyStatusListToken(token string, pub ed25519.PublicKey, purpose StatusPu
 	if claims.StatusList.Bits != 0 && claims.StatusList.Bits != 1 {
 		return nil, nil, ErrTokenMalformed
 	}
-	if claims.Exp != 0 && time.Now().After(time.Unix(claims.Exp, 0).Add(60*time.Second)) {
+	if claims.Exp != 0 && now.After(time.Unix(claims.Exp, 0).Add(60*time.Second)) {
 		return nil, nil, ErrTokenExpired
 	}
 	list, err := DecodeBitstringStatusList(purpose, claims.StatusList.Lst)
