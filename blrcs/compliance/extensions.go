@@ -334,6 +334,7 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	}
 	var hdr struct {
 		Alg  string   `json:"alg"`
+		Typ  string   `json:"typ"`
 		Crit []string `json:"crit"`
 	}
 	if err := json.Unmarshal(hdrBytes, &hdr); err != nil {
@@ -346,6 +347,15 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	// the issuer's safety signal.
 	if len(hdr.Crit) > 0 {
 		return nil, ErrSDJWTCritUnsupported
+	}
+	// SD-JWT-VC media type (draft-ietf-oauth-sd-jwt-vc §3.2.1): when the issuer
+	// JWS sets `typ`, it must be an SD-JWT-VC type (`vc+sd-jwt` or the newer
+	// `dc+sd-jwt`). Enforcing this prevents cross-JWT-type confusion — replaying a
+	// differently-typed JWS (e.g. statuslist+jwt, openid4vci-proof+jwt) signed by
+	// the same key as a credential. A missing typ is tolerated for interop (the
+	// required vct claim + _sd structure still gate it).
+	if hdr.Typ != "" && !isSDJWTVCType(hdr.Typ) {
+		return nil, ErrSDJWTUnsupportedType
 	}
 	verify, ok := lookupJWSVerifier(hdr.Alg)
 	if !ok {
@@ -505,6 +515,15 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 		vc.KeyBound = true
 	}
 	return vc, nil
+}
+
+// isSDJWTVCType reports whether typ is an accepted SD-JWT-VC media type. Per RFC
+// 7515 §4.1.9 the "application/" prefix may be omitted, so it is stripped before
+// comparison. Both the original (`vc+sd-jwt`) and current (`dc+sd-jwt`) draft
+// values are accepted for cross-draft interop.
+func isSDJWTVCType(typ string) bool {
+	typ = strings.TrimPrefix(typ, "application/")
+	return typ == "vc+sd-jwt" || typ == "dc+sd-jwt"
 }
 
 // numericDateClaim extracts an RFC 7519 NumericDate claim (iat/exp/nbf) from a

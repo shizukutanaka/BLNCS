@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **SD-JWT issuer JWS `typ` was never verified — cross-JWT-type confusion
+  (security/conformance, Axis 57).** The issuer sets `typ:"vc+sd-jwt"` and spec
+  §2 mandates it, but `VerifySDJWTWithBinding` only checked the KB-JWT `typ`,
+  never the issuer JWS `typ`. A differently-typed JWS signed by the same key
+  (e.g. `statuslist+jwt`, `openid4vci-proof+jwt`, a plain `JWT`) could thus be
+  presented as a credential, defended only implicitly by the `vct`/`_sd`
+  requirements. Verification now rejects an issuer JWS whose `typ`, when present,
+  is not an SD-JWT-VC media type — `vc+sd-jwt` or the newer `dc+sd-jwt`, with an
+  optional `application/` prefix per RFC 7515 §4.1.9 (`ErrSDJWTUnsupportedType`).
+  A missing `typ` is tolerated for interop (the `vct` + `_sd` structure still
+  gate it). Spec §2 updated. Tests: the accepted types (incl. prefixed and
+  absent) verify; `JWT`/`statuslist+jwt`/`openid4vci-proof+jwt`/`kb+jwt` are
+  rejected.
 - **COSE and JWS verification ignored the `crit` (critical headers) field —
   must-understand bypass (security/conformance, Axis 56).** `cbor.Verify1`
   (COSE_Sign1) never inspected the protected-header `crit` field (RFC 9052 §3.1,

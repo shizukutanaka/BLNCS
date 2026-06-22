@@ -1020,6 +1020,42 @@ func TestVerifySDJWTRejectsCritHeader(t *testing.T) {
 	}
 }
 
+// TestVerifySDJWTTypHeader covers issuer-JWS typ enforcement: accepted SD-JWT-VC
+// types verify, a foreign typ is rejected (cross-type confusion), and a missing
+// typ is tolerated.
+func TestVerifySDJWTTypHeader(t *testing.T) {
+	iss, _ := NewIssuer("did:web:typ.test")
+
+	craft := func(typ string) string {
+		payload := baseSDPayload(iss)
+		var hdrJSON string
+		if typ == "" {
+			hdrJSON = `{"alg":"EdDSA"}`
+		} else {
+			hdrJSON = `{"alg":"EdDSA","typ":"` + typ + `"}`
+		}
+		hdr := base64.RawURLEncoding.EncodeToString([]byte(hdrJSON))
+		payBytes, _ := json.Marshal(payload)
+		pay := base64.RawURLEncoding.EncodeToString(payBytes)
+		sig := ed25519.Sign(iss.privateKey, []byte(hdr+"."+pay))
+		return hdr + "." + pay + "." + base64.RawURLEncoding.EncodeToString(sig) + "~"
+	}
+
+	accepted := []string{"vc+sd-jwt", "dc+sd-jwt", "application/vc+sd-jwt", ""}
+	for _, typ := range accepted {
+		if _, err := VerifySDJWTWithBinding(craft(typ), iss.PublicKey(), VerifyOptions{}); err != nil {
+			t.Errorf("typ=%q should verify, got %v", typ, err)
+		}
+	}
+
+	rejected := []string{"JWT", "statuslist+jwt", "openid4vci-proof+jwt", "kb+jwt"}
+	for _, typ := range rejected {
+		if _, err := VerifySDJWTWithBinding(craft(typ), iss.PublicKey(), VerifyOptions{}); err != ErrSDJWTUnsupportedType {
+			t.Errorf("typ=%q: want ErrSDJWTUnsupportedType, got %v", typ, err)
+		}
+	}
+}
+
 // ============================================================================
 // verifyKBJWT — error paths (lines 470, 477, 481)
 // ============================================================================

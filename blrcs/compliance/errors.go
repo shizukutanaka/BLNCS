@@ -24,7 +24,12 @@ var (
 	// `crit` (RFC 7515 §4.1.11) listing extension parameters this verifier does
 	// not implement. Silently ignoring crit would bypass the issuer's
 	// "must-understand" safety signal.
-	ErrSDJWTCritUnsupported    = errors.New("compliance: sd-jwt unsupported critical header parameter")
+	ErrSDJWTCritUnsupported = errors.New("compliance: sd-jwt unsupported critical header parameter")
+	// ErrSDJWTUnsupportedType is returned when the issuer JWS `typ` header is
+	// present but is not an SD-JWT-VC media type (`vc+sd-jwt` / `dc+sd-jwt`).
+	// Enforcing typ blocks cross-JWT-type confusion (replaying a differently
+	// typed JWS signed by the same key as a credential).
+	ErrSDJWTUnsupportedType    = errors.New("compliance: sd-jwt issuer JWS typ is not an SD-JWT-VC type")
 	ErrSDJWTUnsupportedHashAlg = errors.New("compliance: sd-jwt unsupported _sd_alg (only sha-256)")
 	ErrSDJWTMissingVCT         = errors.New("compliance: sd-jwt-vc missing required vct claim")
 	ErrSDJWTDuplicateDigest    = errors.New("compliance: sd-jwt duplicate digest in _sd")

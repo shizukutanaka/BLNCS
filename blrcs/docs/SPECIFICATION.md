@@ -22,7 +22,11 @@ backlog and references).
 ## 2. Credential issuance (SD-JWT VC)
 - Issued credentials are SD-JWT VCs: a JWS over a JSON payload, `~`-separated
   disclosures, optional trailing KB-JWT.
-- The issuer JWT header MUST set `alg` (EdDSA) and `typ` (`vc+sd-jwt`).
+- The issuer JWT header MUST set `alg` (EdDSA) and `typ` (`vc+sd-jwt`). A verifier
+  MUST reject an issuer JWS whose `typ`, when present, is not an SD-JWT-VC media
+  type (`vc+sd-jwt` / `dc+sd-jwt`, optionally `application/`-prefixed) — this
+  blocks cross-JWT-type confusion. A missing `typ` is tolerated (the required
+  `vct` + `_sd` structure still gate it).
 - The payload MUST contain `iss`, `vct`, `iat`, and `_sd_alg` (`sha-256`); it
   MUST contain `exp` when a validity period is given.
 - Selectively-disclosable claims MUST be salted (≥128-bit CSPRNG salt), digested
