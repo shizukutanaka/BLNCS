@@ -12,6 +12,12 @@ var (
 	ErrBatteryIDRequired    = errors.New("compliance: batteryID required")
 	ErrDueDiligenceRequired = errors.New("compliance: due-diligence report required for EV/industrial batteries (Art.52)")
 	ErrAttesterIDRequired   = errors.New("compliance: attester ID required")
+	// ErrSubjectRequired is returned by Issuer.IssueSDJWT* when the subject
+	// parameter is the empty string. RFC 7519 §4.1.2 defines sub as a
+	// case-sensitive string; an empty subject is ill-formed and would produce a
+	// credential that fails VerifySDJWT* immediately, but the caller would get no
+	// diagnostic at issuance time. Rejected here to fail early and clearly.
+	ErrSubjectRequired = errors.New("compliance: subject (sub) required")
 
 	// SD-JWT
 	ErrSDJWTEmpty          = errors.New("compliance: sd-jwt empty")

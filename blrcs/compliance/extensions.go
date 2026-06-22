@@ -142,6 +142,12 @@ func (i *Issuer) IssueSDJWTVCBoundStatus(vct, subject string, sdClaims, clearCla
 // issueSDJWT — SD-JWT VC 発行の共通実装。holderPub が non-nil なら cnf.jwk を、
 // status が non-nil なら status_list claim を埋め込む。
 func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[string]any, holderPub ed25519.PublicKey, status *StatusRef, validFor time.Duration) (string, []Disclosure, error) {
+	if subject == "" {
+		return "", nil, ErrSubjectRequired
+	}
+	if vct == "" {
+		return "", nil, ErrSDJWTMissingVCT
+	}
 	now := time.Now().UTC()
 	payload := map[string]any{
 		"iss":     i.ID,

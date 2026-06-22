@@ -1234,3 +1234,26 @@ func TestVerifySDJWTExpectedIssuerMismatch(t *testing.T) {
 		t.Errorf("wrong key: want ErrSDJWTSigFailed, got %v", err)
 	}
 }
+
+// TestIssueSDJWTEmptySubjectRejected verifies that IssueSDJWT* rejects an
+// empty subject at issuance time. An empty sub violates RFC 7519 §4.1.2 and
+// would produce a credential that always fails VerifySDJWT*, but without a
+// diagnostic at issuance time (silent broken credential).
+func TestIssueSDJWTEmptySubjectRejected(t *testing.T) {
+	iss, _ := NewIssuer("did:web:test")
+	_, _, err := iss.IssueSDJWT("", nil, nil, time.Hour)
+	if !errors.Is(err, ErrSubjectRequired) {
+		t.Errorf("empty subject: want ErrSubjectRequired, got %v", err)
+	}
+}
+
+// TestIssueSDJWTVCEmptyVCTRejected verifies that IssueSDJWTVC rejects an empty
+// vct at issuance time. An empty vct would produce a credential that always
+// fails VerifySDJWT* with ErrSDJWTMissingVCT, with no diagnostic at issuance.
+func TestIssueSDJWTVCEmptyVCTRejected(t *testing.T) {
+	iss, _ := NewIssuer("did:web:test")
+	_, _, err := iss.IssueSDJWTVC("", "subject", nil, nil, time.Hour)
+	if !errors.Is(err, ErrSDJWTMissingVCT) {
+		t.Errorf("empty vct: want ErrSDJWTMissingVCT, got %v", err)
+	}
+}

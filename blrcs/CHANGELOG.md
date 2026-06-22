@@ -44,6 +44,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   an end-to-end authorize-vs-counterfeit check.
 
 ### Fixed
+- **SD-JWT issuance silently accepted empty `sub` and `vct` — broken credential
+  issued with no diagnostic (correctness, Axis 64).** `issueSDJWT` (the shared
+  internal helper for all `IssueSDJWT*` variants) set `"sub": subject` without
+  checking whether `subject` is non-empty; RFC 7519 §4.1.2 defines `sub` as a
+  non-empty case-sensitive string. Likewise, `IssueSDJWTVC` accepted an empty
+  `vct`. Both cases produce a credential that fails `VerifySDJWT*` at verify
+  time (`ErrSDJWTMissingVCT` / structural mismatch) but the caller of `Issue*`
+  gets no error — a silent broken credential. Added upfront guards: empty
+  `subject` → `ErrSubjectRequired` (new sentinel in `errors.go`); empty `vct`
+  → `ErrSDJWTMissingVCT` (existing sentinel). Two tests cover the two
+  rejection paths.
 - **`revocation.VerifyStatusListToken` used a hard-coded `time.Now()` — no
   injectable clock for expiry tests (testability, Axis 63).** Extracted a new
   `VerifyStatusListTokenAt(token, pub, purpose, now)` that accepts an explicit
