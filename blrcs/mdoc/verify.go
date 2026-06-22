@@ -120,6 +120,14 @@ func Verify(issuerSigned []byte, issuerPub ed25519.PublicKey, now time.Time) (*V
 					return nil, err
 				}
 				_ = digestID
+				// Two items in the same namespace with the same elementIdentifier
+				// both pass digest checks independently (different digestIDs) but
+				// the second would silently overwrite the first, hiding a
+				// collision from the caller's audit trail and potentially
+				// misrepresenting which value was actually disclosed.
+				if _, exists := out[id]; exists {
+					return nil, fmt.Errorf("%w: %q in %q", ErrDuplicateElement, id, ns)
+				}
 				out[id] = value
 			}
 			disclosed[ns] = out

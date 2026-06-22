@@ -107,6 +107,12 @@ var (
 	ErrExpired         = errors.New("mdoc: credential expired (validUntil)")
 	ErrUnsupportedMSO  = errors.New("mdoc: unsupported MSO version or digest algorithm")
 	ErrDocTypeMismatch = errors.New("mdoc: docType mismatch")
+	// ErrDuplicateElement is returned when two IssuerSigned items in the same
+	// namespace share the same elementIdentifier. Both items may have valid,
+	// distinct digestIDs and pass digest checks independently; without a
+	// uniqueness check the second silently overwrites the first, which could
+	// hide a collision from the caller's audit trail.
+	ErrDuplicateElement = errors.New("mdoc: duplicate elementIdentifier in namespace")
 )
 
 // Element is a single mdoc data element (claim) within a namespace.

@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mdoc.Verify`: reject duplicate `elementIdentifier` within a namespace
+  (security/correctness, Axis 71).** Two `IssuerSignedItem` entries in the same
+  namespace could share the same `elementIdentifier` while carrying distinct
+  `digestID`s and valid SHA-256 digests — both pass verification independently,
+  but the second silently overwrites the first in the output map, hiding a
+  collision from the caller's audit trail and potentially misrepresenting which
+  value was actually disclosed. Added a uniqueness check (`if _, exists :=
+  out[id]`) that returns the new `ErrDuplicateElement` sentinel on collision.
+  Also wired `VerifyOptions.ExpectedIssuer = claimedIss` in
+  `openid4vp.ProcessResponse` (replacing the post-hoc `&& vc.Issuer == claimedIss`
+  check) so issuer binding is enforced inside the cryptographic verification
+  path rather than as a separate string comparison — defense-in-depth.
+  2 new mdoc tests: duplicate-element rejection and normal-round-trip still
+  passes.
 - **`webhook`: `Bus.RequireSecret` and `SubscribeSecure` — enforce HMAC secret
   (security, Axis 70).** `deliverOnce` silently skipped HMAC signing when a
   subscriber had no `Secret` (the `if len(s.Secret) > 0` guard). The receiver-

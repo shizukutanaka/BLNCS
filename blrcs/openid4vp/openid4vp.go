@@ -491,7 +491,12 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 	// what establishes trust; iss is only used to select the key.
 	if claimedIss, ok := peekIssuer(resp.VPToken); ok {
 		if pubKey, known := acceptable[claimedIss]; known {
-			if vc, verr := compliance.VerifySDJWTWithBinding(resp.VPToken, ed25519.PublicKey(pubKey), opts); verr == nil && vc.Issuer == claimedIss {
+			// Wire ExpectedIssuer so the iss check is part of the cryptographic
+			// verification rather than a post-hoc string compare — defense-in-depth
+			// against key-confusion if VerifySDJWTWithBinding is later refactored.
+			optsWithIss := opts
+			optsWithIss.ExpectedIssuer = claimedIss
+			if vc, verr := compliance.VerifySDJWTWithBinding(resp.VPToken, ed25519.PublicKey(pubKey), optsWithIss); verr == nil {
 				verified = vc
 				usedIssuer = claimedIss
 			}

@@ -3,6 +3,7 @@ package mdoc
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"testing"
 	"time"
@@ -1097,5 +1098,121 @@ func TestVerifyMSOBadValueDigests(t *testing.T) {
 	_, err := Verify(cred, issuerPub, time.Now())
 	if !errors.Is(err, ErrMalformed) {
 		t.Errorf("bad valueDigests namespace key: want ErrMalformed, got %v", err)
+	}
+}
+
+// ============================================================================
+// Axis 71 — duplicate elementIdentifier rejection
+// ============================================================================
+
+// buildItemTag creates an IssuerSignedItemBytes (#6.24 wrapped) for the given
+// digestID and element. Returns the tag-24 CBOR and its SHA-256 digest.
+func buildItemTag(t *testing.T, digestID uint64, elementID string, value any) (cbor.Tag, []byte) {
+	t.Helper()
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		t.Fatal(err)
+	}
+	itemBytes, err := cbor.Marshal(map[string]any{
+		isiDigestID:   digestID,
+		isiRandom:     salt,
+		isiElementID:  elementID,
+		isiElementVal: value,
+	})
+	if err != nil {
+		t.Fatalf("marshal item: %v", err)
+	}
+	wrapped, err := cbor.Marshal(cbor.Tag{Number: tagEncodedCBOR, Content: itemBytes})
+	if err != nil {
+		t.Fatalf("tag-24 wrap: %v", err)
+	}
+	sum := sha256.Sum256(wrapped)
+	return cbor.Tag{Number: tagEncodedCBOR, Content: itemBytes}, sum[:]
+}
+
+// buildCredWithItems creates a complete IssuerSigned credential where the
+// given namespace maps to the provided items (already built by buildItemTag)
+// and the MSO records all supplied digests.
+func buildCredWithItems(t *testing.T, issuerPriv ed25519.PrivateKey, ns string, items []cbor.Tag, digests map[int]any) []byte {
+	t.Helper()
+	now := time.Now().UTC()
+	msoBytes, err := cbor.Marshal(map[string]any{
+		msoVersion:   MSOVersion,
+		msoDigestAlg: DigestAlgSHA256,
+		msoDocType:   "org.iso.18013.5.1.mDL",
+		msoValidityInfo: map[string]any{
+			viSigned:     cbor.Tag{Number: tagDateTime, Content: now.Format(time.RFC3339)},
+			viValidFrom:  cbor.Tag{Number: tagDateTime, Content: now.Add(-time.Hour).Format(time.RFC3339)},
+			viValidUntil: cbor.Tag{Number: tagDateTime, Content: now.Add(time.Hour).Format(time.RFC3339)},
+		},
+		msoValueDigests: map[string]any{ns: digests},
+	})
+	if err != nil {
+		t.Fatalf("marshal MSO: %v", err)
+	}
+	msoTagged, _ := cbor.Marshal(cbor.Tag{Number: tagEncodedCBOR, Content: msoBytes})
+	issuerAuth, err := cbor.Sign1(cbor.Header{cbor.HeaderAlg: cbor.AlgEdDSA}, nil, msoTagged, nil, issuerPriv)
+	if err != nil {
+		t.Fatalf("Sign1: %v", err)
+	}
+	nsItems := make([]any, len(items))
+	for i, it := range items {
+		nsItems[i] = it
+	}
+	cred, err := cbor.Marshal(map[string]any{
+		isNameSpaces: map[string]any{ns: nsItems},
+		isIssuerAuth: rawCBOR(issuerAuth),
+	})
+	if err != nil {
+		t.Fatalf("marshal IssuerSigned: %v", err)
+	}
+	return cred
+}
+
+// TestVerifyDuplicateElementIdentifierRejected confirms that two IssuerSigned
+// items in the same namespace with the same elementIdentifier are rejected.
+// Both items have distinct digestIDs and valid digests, so without the
+// uniqueness check the second would silently overwrite the first.
+func TestVerifyDuplicateElementIdentifierRejected(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	const ns = "org.iso.18013.5.1"
+
+	item0, digest0 := buildItemTag(t, 0, "family_name", "Tanaka")
+	item1, digest1 := buildItemTag(t, 1, "family_name", "INJECTED") // same ID, different value
+
+	cred := buildCredWithItems(t, issuerPriv, ns, []cbor.Tag{item0, item1}, map[int]any{
+		0: digest0,
+		1: digest1,
+	})
+
+	_, err := Verify(cred, issuerPub, time.Now())
+	if !errors.Is(err, ErrDuplicateElement) {
+		t.Fatalf("duplicate elementIdentifier: want ErrDuplicateElement, got %v", err)
+	}
+}
+
+// TestVerifyUniqueElementIdentifiersPass confirms that items with distinct
+// elementIdentifiers in the same namespace still verify correctly.
+func TestVerifyUniqueElementIdentifiersPass(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	const ns = "org.iso.18013.5.1"
+
+	item0, digest0 := buildItemTag(t, 0, "family_name", "Tanaka")
+	item1, digest1 := buildItemTag(t, 1, "given_name", "Shizuku")
+
+	cred := buildCredWithItems(t, issuerPriv, ns, []cbor.Tag{item0, item1}, map[int]any{
+		0: digest0,
+		1: digest1,
+	})
+
+	doc, err := Verify(cred, issuerPub, time.Now())
+	if err != nil {
+		t.Fatalf("unique identifiers: want success, got %v", err)
+	}
+	if doc.NameSpaces[ns]["family_name"] != "Tanaka" {
+		t.Error("family_name missing or wrong value")
+	}
+	if doc.NameSpaces[ns]["given_name"] != "Shizuku" {
+		t.Error("given_name missing or wrong value")
 	}
 }
