@@ -750,6 +750,8 @@ func (iss *Issuer) handleCredential(w http.ResponseWriter, r *http.Request) {
 			writeVCIError(w, http.StatusBadRequest, "invalid_proof", "proof validation failed")
 		case errors.Is(err, ErrUnknownConfig):
 			writeVCIError(w, http.StatusBadRequest, "invalid_request", "unknown credential configuration")
+		case errors.Is(err, ErrFormatMismatch):
+			writeVCIError(w, http.StatusBadRequest, "invalid_request", "credential format or configuration_id mismatch")
 		default:
 			writeVCIError(w, http.StatusInternalServerError, "server_error", "credential issuance failed")
 		}

@@ -2049,3 +2049,71 @@ func TestIssueCredentialFormatMismatchDoesNotConsumeToken(t *testing.T) {
 		t.Fatalf("retry with correct format: want success, got %v", err)
 	}
 }
+
+// ============================================================================
+// Axis 73 — ErrFormatMismatch HTTP error mapping
+// ============================================================================
+
+// TestHTTPCredentialFormatMismatch confirms that a credential endpoint request
+// whose format mismatches the offer configuration returns 400 (not 500).
+// Without explicit handling, ErrFormatMismatch would fall into the default
+// 500 "server_error" case in handleCredential — wrong for a client error.
+func TestHTTPCredentialFormatMismatch(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+	client := ts.Client()
+
+	// Get a valid access token.
+	tr := mustGetToken(t, iss)
+
+	// Request a credential with the wrong format.
+	body, _ := json.Marshal(CredentialRequest{Format: "ldp_vc"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	rawBody, _ := io.ReadAll(resp.Body)
+	respBody := string(rawBody)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("format mismatch: want 400, got %d: %s", resp.StatusCode, respBody)
+	}
+	if !strings.Contains(respBody, "invalid_request") {
+		t.Errorf("format mismatch response should contain invalid_request error: %s", respBody)
+	}
+}
+
+// TestHTTPCredentialConfigIDMismatch confirms that a credential endpoint request
+// with a mismatched credential_configuration_id returns 400 (not 500).
+func TestHTTPCredentialConfigIDMismatch(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+	client := ts.Client()
+
+	tr := mustGetToken(t, iss)
+
+	body, _ := json.Marshal(CredentialRequest{CredentialConfigurationID: "wrong-config-id"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	rawBody2, _ := io.ReadAll(resp.Body)
+	respBody2 := string(rawBody2)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("config_id mismatch: want 400, got %d: %s", resp.StatusCode, respBody2)
+	}
+	if !strings.Contains(respBody2, "invalid_request") {
+		t.Errorf("config_id mismatch response should contain invalid_request error: %s", respBody2)
+	}
+}

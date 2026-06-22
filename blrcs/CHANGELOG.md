@@ -6,6 +6,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`openid4vci` credential endpoint returned 500 for `ErrFormatMismatch`
+  instead of 400 (correctness, Axis 73).** The HTTP handler `handleCredential`
+  had a `switch` statement mapping errors to HTTP status codes. `ErrFormatMismatch`
+  (added in Axis 69) was not included in the switch, so it fell into the `default`
+  branch and returned 500 Internal Server Error. A format or configuration-id
+  mismatch is a client error (400 Bad Request), not a server error — returning 500
+  violates RFC 6749 §5.2 and OpenID4VCI §6.3. Added explicit case returning 400
+  `invalid_request`. Added 2 HTTP-level tests: format mismatch → 400 and
+  configuration-id mismatch → 400 (both confirmed to return the error code
+  `invalid_request`).
+
 ### Added
 - **`tlsharden.Modern`: disable session tickets by default and prefer X25519
   first (security, Axis 72).** `Modern()` returned a `tls.Config` with session
