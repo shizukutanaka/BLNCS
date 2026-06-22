@@ -82,6 +82,13 @@ type Bus struct {
 	// httptest など localhost を相手にするテスト/開発時のみ true。
 	AllowPrivateTargets bool
 
+	// RequireSecret — true のとき、Secret が空の subscriber への配信を
+	// ErrEmptySecret で失敗させる (secure-by-default 強制モード)。
+	// デフォルト false: 既存コードとの後方互換性を維持しつつ、新規 Bus では
+	// RequireSecret: true を推奨する。Subscribe 登録時ではなく配信時に検査する
+	// ため、既存の Subscribe() シグネチャ (error 無し) を変更しない。
+	RequireSecret bool
+
 	mu          sync.RWMutex
 	subscribers map[string][]Subscriber // event type → subscribers
 }
@@ -123,6 +130,13 @@ func NewBus(tel *telemetry.Telemetry) *Bus {
 // ErrBlockedTarget is returned when a subscriber URL resolves to a disallowed
 // (private/loopback/link-local) address or uses a non-http(s) scheme.
 var ErrBlockedTarget = errors.New("webhook: delivery target blocked (SSRF guard)")
+
+// ErrEmptySecret is returned by SubscribeSecure and by deliverOnce when
+// Bus.RequireSecret is true and the subscriber has no HMAC secret configured.
+// An unsigned delivery would defeat the integrity-protection guarantee that
+// the receiver side (VerifyRequest) enforces; requiring a non-empty secret
+// ensures both sides agree on the authentication model.
+var ErrEmptySecret = errors.New("webhook: subscriber secret must not be empty")
 
 // isBlockedIP reports whether an address is one delivery must never reach: any
 // non-public range. Covers loopback, RFC 1918 private, link-local (incl. the
@@ -209,6 +223,22 @@ func (b *Bus) Subscribe(eventType string, s Subscriber) {
 	b.mu.Lock()
 	b.subscribers[eventType] = append(b.subscribers[eventType], s)
 	b.mu.Unlock()
+}
+
+// SubscribeSecure — Secret が空の subscriber を登録時に拒否する安全版 Subscribe。
+//
+// 本番コードでは Subscribe より SubscribeSecure を推奨: Subscribe は後方互換のため
+// 空 secret を受け付けるが、空 secret の subscriber は HMAC 署名なしで配信される。
+// SubscribeSecure は ErrEmptySecret を返すことで誤設定を登録時に明示的に検知する。
+func (b *Bus) SubscribeSecure(eventType string, s Subscriber) error {
+	if len(s.Secret) == 0 {
+		return ErrEmptySecret
+	}
+	if s.URL == "" {
+		return errors.New("webhook: subscriber URL must not be empty")
+	}
+	b.Subscribe(eventType, s)
+	return nil
 }
 
 // Subscribers — 現在の購読者数 (テスト/監視用)
@@ -320,6 +350,13 @@ func (b *Bus) deliverOnce(ctx context.Context, s Subscriber, eventType string, p
 	req.Header.Set("X-BLRCS-Event", eventType)
 
 	// HMAC signature
+	// When RequireSecret is set, an empty secret is a configuration error: the
+	// receiver's VerifyRequest requires a secret, so delivering unsigned would
+	// silently bypass integrity verification. Fail here so the misconfiguration
+	// surfaces at delivery time rather than arriving as an unverifiable payload.
+	if b.RequireSecret && len(s.Secret) == 0 {
+		return ErrEmptySecret
+	}
 	timestamp := strconv.FormatInt(b.Now().Unix(), 10)
 	req.Header.Set("X-BLRCS-Timestamp", timestamp)
 	if len(s.Secret) > 0 {

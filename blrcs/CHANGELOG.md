@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`webhook`: `Bus.RequireSecret` and `SubscribeSecure` — enforce HMAC secret
+  (security, Axis 70).** `deliverOnce` silently skipped HMAC signing when a
+  subscriber had no `Secret` (the `if len(s.Secret) > 0` guard). The receiver-
+  side `VerifyRequest` correctly rejected empty secrets, but the sender gave no
+  indication that delivery was unsigned — a misconfigured subscriber receives
+  unsigned webhooks indefinitely without any error. Added two complementary
+  mechanisms: (1) `Bus.RequireSecret bool` (default false, backward-compatible):
+  when true, `deliverOnce` returns `ErrEmptySecret` immediately if the subscriber
+  has no secret, making unsigned delivery an explicit error at delivery time
+  rather than a silent security omission. (2) `SubscribeSecure(eventType,
+  Subscriber) error`: a secure-by-default registration helper that validates non-
+  empty `Secret` and `URL` at registration time and returns `ErrEmptySecret` /
+  URL error before the subscriber is added, catching the misconfiguration as
+  early as possible. `Subscribe` is unchanged (backward-compatible). 6 new tests.
 - **`openid4vci`: credential format/configuration-id mismatch validation
   (security/correctness, Axis 69).** `IssueCredentialWithProof` ignored
   `req.Format` and `req.CredentialConfigurationID` from the wallet's credential

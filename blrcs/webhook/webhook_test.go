@@ -719,3 +719,100 @@ func TestDeliverOnceBodyDrainIsBounded(t *testing.T) {
 		t.Error("deliverOnce hung on oversized response body (LimitReader not applied)")
 	}
 }
+
+// ============================================================================
+// Axis 70 — RequireSecret / SubscribeSecure validation
+// ============================================================================
+
+// TestRequireSecretBlocksEmptySecret confirms that Bus.RequireSecret=true causes
+// deliverOnce to return ErrEmptySecret when the subscriber has no HMAC secret.
+func TestRequireSecretBlocksEmptySecret(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	bus.RequireSecret = true
+
+	err := bus.deliverOnce(context.Background(), Subscriber{URL: server.URL}, "evt", []byte("{}"))
+	if !errors.Is(err, ErrEmptySecret) {
+		t.Fatalf("RequireSecret=true, empty secret: want ErrEmptySecret, got %v", err)
+	}
+}
+
+// TestRequireSecretAllowsNonemptySecret confirms that a non-empty secret passes
+// the RequireSecret check and delivery proceeds normally.
+func TestRequireSecretAllowsNonemptySecret(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	bus.RequireSecret = true
+
+	err := bus.deliverOnce(context.Background(), Subscriber{URL: server.URL, Secret: []byte("s3cr3t")}, "evt", []byte("{}"))
+	if err != nil {
+		t.Fatalf("RequireSecret=true, non-empty secret: unexpected error %v", err)
+	}
+}
+
+// TestRequireSecretFalseAllowsEmptySecret confirms backward-compatibility:
+// with RequireSecret=false (default), empty-secret subscribers still deliver.
+func TestRequireSecretFalseAllowsEmptySecret(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	bus.AllowPrivateTargets = true
+	// RequireSecret defaults to false
+
+	err := bus.deliverOnce(context.Background(), Subscriber{URL: server.URL}, "evt", []byte("{}"))
+	if err != nil {
+		t.Fatalf("RequireSecret=false, empty secret: should succeed, got %v", err)
+	}
+}
+
+// TestSubscribeSecureRejectsEmptySecret confirms SubscribeSecure returns
+// ErrEmptySecret when the subscriber has no HMAC secret configured.
+func TestSubscribeSecureRejectsEmptySecret(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	err := bus.SubscribeSecure("evt", Subscriber{URL: "https://example.com/hook"})
+	if !errors.Is(err, ErrEmptySecret) {
+		t.Fatalf("SubscribeSecure with empty secret: want ErrEmptySecret, got %v", err)
+	}
+	if len(bus.Subscribers("evt")) != 0 {
+		t.Error("subscriber should not have been registered after error")
+	}
+}
+
+// TestSubscribeSecureRejectsEmptyURL confirms SubscribeSecure returns an error
+// when the subscriber URL is empty.
+func TestSubscribeSecureRejectsEmptyURL(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	err := bus.SubscribeSecure("evt", Subscriber{Secret: []byte("s")})
+	if err == nil {
+		t.Fatal("SubscribeSecure with empty URL: want error, got nil")
+	}
+	if len(bus.Subscribers("evt")) != 0 {
+		t.Error("subscriber should not have been registered after error")
+	}
+}
+
+// TestSubscribeSecureRegistersValidSubscriber confirms a valid SubscribeSecure
+// call registers the subscriber and returns nil.
+func TestSubscribeSecureRegistersValidSubscriber(t *testing.T) {
+	bus := NewBus(telemetry.New(telemetry.NopRecorder{}))
+	err := bus.SubscribeSecure("evt", Subscriber{URL: "https://example.com/hook", Secret: []byte("s3cr3t")})
+	if err != nil {
+		t.Fatalf("SubscribeSecure with valid subscriber: unexpected error %v", err)
+	}
+	if len(bus.Subscribers("evt")) != 1 {
+		t.Error("subscriber should have been registered")
+	}
+}
