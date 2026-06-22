@@ -1,6 +1,7 @@
 package httpmw
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -487,6 +488,97 @@ func TestSanitizeRequestIDEmptyAfterFilter(t *testing.T) {
 	// All characters are illegal; result must be empty string.
 	if got := sanitizeRequestID("!!!???"); got != "" {
 		t.Errorf("want empty string, got %q", got)
+	}
+}
+
+// TestClientIPXFFInvalidIPIgnored verifies that a non-IP X-Forwarded-For value
+// (e.g. an injected domain name) is ignored when TrustProxyHeaders is true,
+// falling through to r.RemoteAddr — preventing rate-limit bypass and log forgery.
+func TestClientIPXFFInvalidIPIgnored(t *testing.T) {
+	old := TrustProxyHeaders
+	TrustProxyHeaders = true
+	defer func() { TrustProxyHeaders = old }()
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.1:51234"
+
+	req.Header.Set("X-Forwarded-For", "not-an-ip-address")
+	if ip := clientIP(req); ip != "10.0.0.1" {
+		t.Errorf("invalid XFF should fall through to RemoteAddr, got %q", ip)
+	}
+
+	req.Header.Del("X-Forwarded-For")
+	req.Header.Set("X-Real-IP", "user@corp.example")
+	if ip := clientIP(req); ip != "10.0.0.1" {
+		t.Errorf("invalid X-Real-IP should fall through to RemoteAddr, got %q", ip)
+	}
+
+	req.Header.Del("X-Real-IP")
+	req.Header.Set("X-Forwarded-For", "203.0.113.5, 10.0.0.2")
+	if ip := clientIP(req); ip != "203.0.113.5" {
+		t.Errorf("valid XFF first IP should be used, got %q", ip)
+	}
+}
+
+// TestMaxBodyBytesBlocks verifies that MaxBodyBytes causes reads beyond the
+// limit to return an error, exercised by the inner handler reading the body.
+func TestMaxBodyBytesBlocks(t *testing.T) {
+	body := make([]byte, 1025)
+	for i := range body {
+		body[i] = 'x'
+	}
+
+	var readErr error
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 2048)
+		_, readErr = r.Body.Read(buf)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := MaxBodyBytes(1024)(inner)
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if readErr == nil {
+		t.Error("MaxBodyBytes: expected read error when body exceeds limit")
+	}
+}
+
+// TestMaxBodyBytesAllowsSmallBody verifies that small bodies pass through.
+func TestMaxBodyBytesAllowsSmallBody(t *testing.T) {
+	body := bytes.NewReader([]byte(`{"ok":true}`))
+	called := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := MaxBodyBytes(1024)(inner)
+	req := httptest.NewRequest("POST", "/", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if !called {
+		t.Error("inner handler should be called for small body")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("want 200, got %d", rec.Code)
+	}
+}
+
+// TestMaxBodyBytesZeroDisablesCap verifies that limit≤0 passes all bodies.
+func TestMaxBodyBytesZeroDisablesCap(t *testing.T) {
+	body := make([]byte, 1024*1024)
+	called := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := MaxBodyBytes(0)(inner)
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if !called {
+		t.Error("inner handler should be called when limit is 0")
 	}
 }
 

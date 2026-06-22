@@ -250,7 +250,10 @@ func (iss *Issuer) CreateOfferWithOptions(configID, subject string, sdClaims, cl
 			return "", "", fmt.Errorf("%w: %s", ErrMissingClaims, c)
 		}
 	}
-	code := randomB64(32)
+	code, err := randomB64(32)
+	if err != nil {
+		return "", "", err
+	}
 	now := time.Now()
 	iss.mu.Lock()
 	iss.gcExpiredLocked(now) // 放置された期限切れ offer/token を退避 (無制限増加防止)
@@ -362,8 +365,14 @@ func (iss *Issuer) ExchangeCodeWithTxCode(code, txCode string) (*TokenResponse, 
 			return nil, ErrBadTxCode
 		}
 	}
-	accessToken := randomB64(32)
-	cNonce := randomB64(16)
+	accessToken, err := randomB64(32)
+	if err != nil {
+		return nil, err
+	}
+	cNonce, err := randomB64(16)
+	if err != nil {
+		return nil, err
+	}
 	entry.accessToken = accessToken
 	entry.tokenExpiresAt = time.Now().Add(iss.tokenTTL)
 	entry.cNonce = cNonce // Proof-of-Possession 用 nonce を保持
@@ -487,7 +496,10 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	// (multi-use token or deferred issuance) is bound to the new challenge.
 	// Without this write-back, newCNonce is dead code: the entry retains the old
 	// nonce indefinitely, making every retry use the same stale nonce.
-	newCNonce := randomB64(16)
+	newCNonce, err := randomB64(16)
+	if err != nil {
+		return nil, err
+	}
 	iss.mu.Lock()
 	entry.cNonce = newCNonce
 	iss.mu.Unlock()
@@ -739,10 +751,12 @@ func writeVCIError(w http.ResponseWriter, code int, errName, desc string) {
 // Helpers
 // ============================================================================
 
-func randomB64(n int) string {
+func randomB64(n int) (string, error) {
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("vci: CSPRNG failure: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func urlEscape(s string) string {

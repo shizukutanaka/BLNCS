@@ -7,6 +7,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`httpmw.MaxBodyBytes` middleware — request body size cap (DoS defense, Axis
+  68).** The default middleware chain (`Recovery → RequestID → SecurityHeaders →
+  AccessLog`) applied no per-request body limit; handlers using `io.ReadAll` or
+  `json.Decode` on the request body were vulnerable to DoS via unbounded memory
+  allocation (a client streams a multi-GB body, the handler allocates it all).
+  Added `MaxBodyBytes(limit int64) Middleware` which wraps the request body with
+  `http.MaxBytesReader`, causing reads past the limit to return an error and
+  optionally write 413 Request Entity Too Large before the inner handler is
+  invoked. Pass limit≤0 to disable (not recommended). 3 new tests cover:
+  over-limit body triggers read error, small body passes through, limit=0
+  disables the cap.
+
+### Fixed
+- **`httpmw.clientIP` accepted non-IP strings from X-Forwarded-For / X-Real-IP
+  — rate-limit bypass and log forgery (security, Axis 68).** When
+  `TrustProxyHeaders=true`, the extracted header candidate was returned
+  as-is without validating it is a parseable IP. An attacker could send
+  `X-Forwarded-For: BYPASS_ME` to get a unique rate-limit key per string
+  ("BYPASS_ME"), evading per-IP rate limiting. Added `net.ParseIP` validation:
+  invalid candidates are silently ignored and the code falls through to
+  `r.RemoteAddr`. Valid IPv4/IPv6 and comma-separated lists (first IP taken)
+  still work correctly. 1 new test covering invalid XFF, invalid X-Real-IP,
+  and valid multi-hop XFF.
+- **`openid4vci.randomB64` silently discarded CSPRNG errors — weak tokens on
+  entropy failure (security, Axis 67).** The same `_, _ = rand.Read(b)`
+  pattern fixed in `openid4vp` (Axis 60) existed independently in
+  `openid4vci`. Changed to return `(string, error)`; 4 callers (`CreateOffer`,
+  `ExchangeCodeWithTxCode` ×2, c_nonce rotation) propagate the error.
 - **`storage.FileStorage.AppendStatement` partial-write recovery via pre-write
   Stat + Truncate-on-failure (durability, Axis 66).** On disk full or an OS
   write error mid-frame, the previous implementation left a torn frame at the

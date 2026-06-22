@@ -214,19 +214,30 @@ var TrustProxyHeaders = false
 
 // clientIP — 真のクライアント IP (ポート無し)。TrustProxyHeaders=true のときのみ
 // X-Forwarded-For / X-Real-IP を尊重し、それ以外は r.RemoteAddr を使う。
+// Extracted IP candidates are validated with net.ParseIP: an invalid/spoofed
+// value (e.g. "BYPASS_ME" or "admin@corp.example") is rejected and the code
+// falls through to r.RemoteAddr, preventing rate-limit bypass and log forgery.
 func clientIP(r *http.Request) string {
 	if TrustProxyHeaders {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// 最初の値のみ (chained proxies)
+			// Use the first (left-most) value only: rightmost is the immediate
+			// upstream proxy (trusted), but the XFF spec sends the original
+			// client IP first. Strip trailing peers.
+			candidate := xff
 			for i := 0; i < len(xff); i++ {
 				if xff[i] == ',' || xff[i] == ' ' {
-					return xff[:i]
+					candidate = xff[:i]
+					break
 				}
 			}
-			return xff
+			if net.ParseIP(candidate) != nil {
+				return candidate
+			}
 		}
 		if xr := r.Header.Get("X-Real-IP"); xr != "" {
-			return xr
+			if net.ParseIP(xr) != nil {
+				return xr
+			}
 		}
 	}
 	// r.RemoteAddr is "IP:port" (Go's net/http server fills it). Strip the
@@ -293,4 +304,27 @@ func Chain(h http.Handler, mws ...Middleware) http.Handler {
 //	Recovery → RequestID → SecurityHeaders → AccessLog → handler
 func Default(handler http.Handler) http.Handler {
 	return Chain(handler, Recovery, RequestID, SecurityHeaders, AccessLog)
+}
+
+// ============================================================================
+// MaxBodyBytes — リクエストボディサイズ制限
+// ============================================================================
+
+// MaxBodyBytes returns a middleware that caps inbound request bodies at limit
+// bytes. Requests whose bodies exceed the limit receive 413 Request Entity Too
+// Large before the inner handler is invoked. Without this guard, handlers that
+// read the entire body (json.Decode, io.ReadAll) are vulnerable to DoS via
+// unbounded memory allocation on oversized payloads.
+//
+// Typical values: 1<<20 (1 MiB) for API endpoints, 50<<20 (50 MiB) for
+// file-upload endpoints. Use limit ≤ 0 to disable the cap (not recommended).
+func MaxBodyBytes(limit int64) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if limit > 0 && r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
