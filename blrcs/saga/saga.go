@@ -44,6 +44,11 @@ var (
 	ErrStepFailed       = errors.New("saga: step failed")
 	ErrCompensateFailed = errors.New("saga: compensate failed")
 	ErrNoSteps          = errors.New("saga: no steps registered")
+	// ErrAlreadyRunning is returned by Run when another goroutine is already
+	// executing the same saga against the same State. A State is not safe for
+	// concurrent saga executions: two concurrent runs would interleave their
+	// step side-effects and see each other's intermediate state values.
+	ErrAlreadyRunning = errors.New("saga: another run is already in progress on this state")
 )
 
 // ============================================================================
@@ -54,9 +59,14 @@ var (
 //
 // 中間結果や補正に必要な値 (例: created credential ID) を格納
 // 全 step は同じ State を読み書き可能
+//
+// A single State must not be passed to two concurrent Run calls: the steps
+// would interleave and share intermediate values. Run enforces this via
+// TryLock on runMu; the second caller receives ErrAlreadyRunning immediately.
 type State struct {
-	mu   sync.RWMutex
-	data map[string]any
+	mu    sync.RWMutex
+	runMu sync.Mutex // held for the duration of a Run() call
+	data  map[string]any
 }
 
 // NewState — 初期データから State 構築
@@ -185,6 +195,14 @@ func (s *Saga) Run(ctx context.Context, state *State) (*RunReport, error) {
 	if state == nil {
 		state = NewState(nil)
 	}
+	// Prevent concurrent execution on the same State object. Two goroutines
+	// running the same (or different) saga against a shared State would
+	// interleave step side-effects and observe each other's in-flight writes.
+	if !state.runMu.TryLock() {
+		return nil, ErrAlreadyRunning
+	}
+	defer state.runMu.Unlock()
+
 	start := time.Now()
 	report := &RunReport{
 		Name:             s.Name,

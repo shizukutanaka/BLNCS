@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`saga.Run`: concurrent calls on the same State cause step interleaving
+  (correctness/safety, Axis 79).** The `State` struct is designed to be shared
+  *among steps within a single Run* so that each step can read the previous
+  step's outputs. But nothing prevented two goroutines from calling `Run()` on
+  the same `State` concurrently. Both would see each other's in-flight `Set`
+  calls, re-execute idempotency-sensitive operations (credential issuance,
+  CAS write, SCITT registration), and produce inconsistent intermediate state
+  — while the per-operation `sync.RWMutex` inside `State` only protected
+  individual `Get`/`Set` calls, not the run lifecycle. Added a `runMu
+  sync.Mutex` field to `State`; `Run()` calls `state.runMu.TryLock()` at the
+  start and returns the new `ErrAlreadyRunning` sentinel immediately if another
+  goroutine is already inside `Run()` on the same state. The mutex is deferred-
+  unlocked on return, so sequential calls after a completed (or failed) run
+  succeed normally. Added `TestConcurrentRunReturnErrAlreadyRunning` which
+  uses a blocking step to hold the first run inside a step while a second
+  goroutine attempts to start — the second must get `ErrAlreadyRunning`; the
+  first must complete successfully after release; and a subsequent sequential
+  run on the same state must also succeed.
 - **`jsonschema`: unbounded allOf/anyOf/oneOf branch arrays — DoS via
   combinator explosion (security, Axis 78).** `Validate` had a global
   `maxValidateOps` budget but no per-combinator array length cap. An

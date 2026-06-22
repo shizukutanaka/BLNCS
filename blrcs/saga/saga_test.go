@@ -557,3 +557,57 @@ func TestCompensateErrorSummaryNoErrors(t *testing.T) {
 		t.Errorf("CompensateErrorSummary with no errors should be empty, got %q", got)
 	}
 }
+
+// ============================================================================
+// Concurrent execution guard — Axis 79
+// ============================================================================
+
+// TestConcurrentRunReturnErrAlreadyRunning — Axis 79
+//
+// Two goroutines calling Run() concurrently on the same State must not
+// interleave their steps. The second caller must receive ErrAlreadyRunning
+// immediately rather than racing through the steps.
+func TestConcurrentRunReturnErrAlreadyRunning(t *testing.T) {
+	// A step that blocks until a channel is closed, simulating a long-running
+	// side effect (e.g., an HTTP call to SCITT or CAS).
+	release := make(chan struct{})
+	started := make(chan struct{})
+	blockStep := func(ctx context.Context, s *State) error {
+		close(started) // signal that the first goroutine entered the step
+		<-release      // wait until the test releases it
+		return nil
+	}
+	saga := New("concurrent-test").Step("block", blockStep, nil)
+	state := NewState(nil)
+
+	// First goroutine: starts Run and blocks inside blockStep.
+	var g1err error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, g1err = saga.Run(context.Background(), state)
+	}()
+
+	// Wait for the first goroutine to enter the blocking step.
+	<-started
+
+	// Second goroutine: must get ErrAlreadyRunning immediately.
+	_, g2err := saga.Run(context.Background(), state)
+	if g2err != ErrAlreadyRunning {
+		t.Errorf("concurrent Run: want ErrAlreadyRunning, got %v", g2err)
+	}
+
+	// Let the first run finish, then verify it succeeded.
+	close(release)
+	<-done
+	if g1err != nil {
+		t.Errorf("first Run should succeed: %v", g1err)
+	}
+
+	// After completion the mutex is released: a subsequent sequential Run must work.
+	quickStep := func(ctx context.Context, s *State) error { return nil }
+	saga2 := New("after-concurrent").Step("quick", quickStep, nil)
+	if _, err := saga2.Run(context.Background(), state); err != nil {
+		t.Errorf("sequential Run after concurrent pair should succeed: %v", err)
+	}
+}
