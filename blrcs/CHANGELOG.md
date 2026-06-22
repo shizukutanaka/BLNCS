@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`tlsharden.Modern`: disable session tickets by default and prefer X25519
+  first (security, Axis 72).** `Modern()` returned a `tls.Config` with session
+  tickets enabled (the Go default). In multi-instance deployments each process
+  generates independent session-ticket keys: a ticket issued by instance A is
+  rejected by instance B (different key), causing a spurious full handshake.
+  Enabling tickets across instances without a shared key-rotation scheme also
+  breaks TLS session resumption entirely. The code comment already said "Disable
+  session tickets in cluster scenarios where keys aren't shared" but the code
+  didn't set `SessionTicketsDisabled: true`. Fixed — callers running a single-
+  instance server can re-enable with `cfg.SessionTicketsDisabled = false`.
+  Also reordered `CurvePreferences` to list X25519 first (was P-256 first): X25519
+  is faster, has no timing side-channel, and is the IETF-recommended preference.
+  `Strict()` already had X25519 first — `Modern()` now matches. `MutualTLS()`,
+  which inherits from `Modern()`, is updated transitively. 3 new tests.
 - **`mdoc.Verify`: reject duplicate `elementIdentifier` within a namespace
   (security/correctness, Axis 71).** Two `IssuerSignedItem` entries in the same
   namespace could share the same `elementIdentifier` while carrying distinct

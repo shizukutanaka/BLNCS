@@ -185,3 +185,41 @@ func TestMutualTLS(t *testing.T) {
 		t.Errorf("MinVersion too low: %d", cfg.MinVersion)
 	}
 }
+
+// ============================================================================
+// Axis 72 — session ticket and curve ordering tests
+// ============================================================================
+
+// TestModernSessionTicketsDisabled confirms that Modern() disables session
+// tickets by default. Per-process ticket keys differ across instances;
+// enabling tickets in a multi-instance deployment causes spurious full
+// handshakes when a ticket is presented to the wrong instance.
+func TestModernSessionTicketsDisabled(t *testing.T) {
+	cfg := Modern()
+	if !cfg.SessionTicketsDisabled {
+		t.Error("Modern: SessionTicketsDisabled should be true (secure-by-default)")
+	}
+}
+
+// TestModernPrefersX25519 confirms that Modern() lists X25519 first in
+// CurvePreferences. X25519 is the fastest ECDH curve and has no timing
+// side-channel; P-256 and P-384 follow as fallbacks.
+func TestModernPrefersX25519(t *testing.T) {
+	cfg := Modern()
+	if len(cfg.CurvePreferences) == 0 {
+		t.Fatal("CurvePreferences must not be empty")
+	}
+	if cfg.CurvePreferences[0] != tls.X25519 {
+		t.Errorf("Modern: first CurvePreference should be X25519, got %v", cfg.CurvePreferences[0])
+	}
+}
+
+// TestMutualTLSInheritsSessionTicketsDisabled confirms that MutualTLS (which
+// inherits from Modern) also has session tickets disabled.
+func TestMutualTLSInheritsSessionTicketsDisabled(t *testing.T) {
+	pool := x509.NewCertPool()
+	cfg := MutualTLS(pool)
+	if !cfg.SessionTicketsDisabled {
+		t.Error("MutualTLS: SessionTicketsDisabled should be inherited from Modern")
+	}
+}

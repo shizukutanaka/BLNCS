@@ -92,12 +92,16 @@ func Modern() *tls.Config {
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 		},
 		CurvePreferences: []tls.CurveID{
+			tls.X25519,    // prefer X25519 first: fastest, no timing side-channel
 			tls.CurveP256,
-			tls.X25519,
 			tls.CurveP384,
 		},
-		// Disable session tickets in cluster scenarios where keys aren't shared
-		// (caller can override if they manage rotation)
+		// Session ticket keys are generated fresh per-process. In a multi-instance
+		// deployment, tickets issued by one instance are rejected by another (different
+		// key), causing spurious full handshakes. Disable tickets by default; callers
+		// running a single-instance server can re-enable with:
+		//   cfg.SessionTicketsDisabled = false
+		SessionTicketsDisabled: true,
 	}
 }
 
