@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`multiformats.ParseMultihashSHA256`: codec-enforcing wrapper for
+  SHA-256-only callers (security, Axis 75).** `ParseMultihash` returns the
+  raw codec byte without validating its value. A caller using it to verify
+  supply-chain integrity (e.g. DID:webvh `entryHash`, SCITT receipt digests)
+  would accept a multihash with codec `0x11` (SHA-1) or `0x14` (SHA-512)
+  without realizing the algorithm changed — a hash-algorithm-substitution
+  attack where an attacker presents a collision-weak digest. Added
+  `ParseMultihashSHA256(mh []byte) (digest []byte, err error)` which enforces
+  `codec == 0x12` and `len(digest) == 32`, returning `ErrUnsupportedCodec`
+  for any other codec. `ParseMultihash` is unchanged (backward-compat).
+  3 new tests: happy path, wrong-codec rejection, short-digest rejection.
+
 ### Fixed
 - **`compose.IssueAndPublish`: silently discarded `json.Marshal` error on
   credential bytes (correctness, Axis 74).** The call `credBytes, _ :=

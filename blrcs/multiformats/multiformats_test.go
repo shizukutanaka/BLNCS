@@ -111,6 +111,43 @@ func TestParseMultihashBad(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Axis 75 — ParseMultihashSHA256 codec enforcement
+// ============================================================================
+
+func TestParseMultihashSHA256HappyPath(t *testing.T) {
+	mh := MultihashSHA256([]byte("test payload"))
+	digest, err := ParseMultihashSHA256(mh)
+	if err != nil {
+		t.Fatalf("valid SHA-256 multihash: want nil, got %v", err)
+	}
+	sum := sha256.Sum256([]byte("test payload"))
+	if !bytes.Equal(digest, sum[:]) {
+		t.Error("digest mismatch")
+	}
+}
+
+func TestParseMultihashSHA256RejectsWrongCodec(t *testing.T) {
+	// Craft a multihash with codec 0x11 (sha1) instead of 0x12 (sha2-256).
+	// The length byte is 20 (SHA-1 digest is 20 bytes).
+	fakeDigest := make([]byte, 20)
+	mh := append([]byte{0x11, 0x14}, fakeDigest...) // 0x14 = 20
+	_, err := ParseMultihashSHA256(mh)
+	if !errors.Is(err, ErrUnsupportedCodec) {
+		t.Fatalf("wrong codec: want ErrUnsupportedCodec, got %v", err)
+	}
+}
+
+func TestParseMultihashSHA256RejectsShortDigest(t *testing.T) {
+	// Codec 0x12 but digest length 16 instead of 32.
+	fakeDigest := make([]byte, 16)
+	mh := append([]byte{0x12, 0x10}, fakeDigest...)
+	_, err := ParseMultihashSHA256(mh)
+	if err == nil {
+		t.Error("short SHA-256 digest should be rejected")
+	}
+}
+
 func TestHashThenBase58Format(t *testing.T) {
 	// SHA-256 multihash base58btc always starts with "Qm" (0x1220 prefix).
 	got := HashThenBase58([]byte("did:webvh test entry"))
