@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`compose.IssueAndPublish`: silently discarded `json.Marshal` error on
+  credential bytes (correctness, Axis 74).** The call `credBytes, _ :=
+  json.Marshal(cred)` discarded the error, so if the `Credential` struct ever
+  gains a non-JSON-serializable field (function, channel, circular reference),
+  the error would be swallowed and `credBytes` would be `nil` or empty.
+  All downstream operations (CAS.Put, Provenance.Record, SCITT.Register) would
+  then silently receive empty bytes — storing a provenance record that points to
+  a zero-byte content hash, breaking supply-chain integrity without any visible
+  error. Fixed by propagating the error: `credBytes, err := json.Marshal(cred);
+  if err != nil { return nil, fmt.Errorf("compose: marshal credential: %w", err) }`.
 - **`openid4vci` credential endpoint returned 500 for `ErrFormatMismatch`
   instead of 400 (correctness, Axis 73).** The HTTP handler `handleCredential`
   had a `switch` statement mapping errors to HTTP status codes. `ErrFormatMismatch`

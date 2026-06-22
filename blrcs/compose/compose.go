@@ -28,6 +28,7 @@ package compose
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -117,7 +118,15 @@ func (c *Composer) IssueAndPublish(
 	res := &IssuanceResult{Credential: cred}
 
 	// Step 2: CAS save (optional)
-	credBytes, _ := json.Marshal(cred)
+	// Marshal failure here means the Credential struct contains a non-serializable
+	// field (e.g. a func or channel added in the future). Silently discarding the
+	// error would cause CAS, Provenance, and SCITT to record nil/empty bytes —
+	// a silent data loss that invalidates provenance integrity. Fail hard instead.
+	credBytes, err := json.Marshal(cred)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("compose: marshal credential: %w", err)
+	}
 	if c.opts.CAS != nil {
 		h, err := c.opts.CAS.Put(credBytes)
 		if err == nil {
