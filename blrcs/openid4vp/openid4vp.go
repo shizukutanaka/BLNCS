@@ -323,8 +323,14 @@ func (v *Verifier) CreateRequest(def PresentationDefinition) (requestURL string,
 			def.AcceptableDIDs = append(def.AcceptableDIDs, did)
 		}
 	}
-	nonce := randomB64(32)
-	state = randomB64(16)
+	nonce, err := randomB64(32)
+	if err != nil {
+		return "", "", err
+	}
+	state, err = randomB64(16)
+	if err != nil {
+		return "", "", err
+	}
 	req := &AuthorizationRequest{
 		ClientID:               v.ClientID,
 		ResponseType:           "vp_token",
@@ -356,8 +362,14 @@ func (v *Verifier) CreateRequestDCQL(query DCQLQuery) (requestURL string, state 
 	if err := query.Validate(); err != nil {
 		return "", "", err
 	}
-	nonce := randomB64(32)
-	state = randomB64(16)
+	nonce, err := randomB64(32)
+	if err != nil {
+		return "", "", err
+	}
+	state, err = randomB64(16)
+	if err != nil {
+		return "", "", err
+	}
 	req := &AuthorizationRequest{
 		ClientID:     v.ClientID,
 		ResponseType: "vp_token",
@@ -562,10 +574,12 @@ func peekIssuer(vpToken string) (string, bool) {
 	return claims.Iss, true
 }
 
-func randomB64(n int) string {
+func randomB64(n int) (string, error) {
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("openid4vp: CSPRNG failure: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // ParseResponseForm — HTTP POST form body (application/x-www-form-urlencoded) を parse

@@ -219,6 +219,52 @@ func (tl *TrustList) Authorizes(did string, pub ed25519.PublicKey) bool {
 	return false
 }
 
+// AuthorizesForScope is like Authorizes but additionally enforces the Scope
+// field when both wantScope and the entry's Scope are non-empty. This
+// implements the narrowing intent of scope: an issuer registered only for
+// scope="battery" must not be accepted as authorized for scope="textile".
+//
+// Rule:
+//   - entry has no Scope ("") → accepted for any wantScope (unrestricted issuer).
+//   - wantScope is ""         → scope check skipped (caller ignores scope).
+//   - both non-empty          → must be equal.
+func (tl *TrustList) AuthorizesForScope(did string, pub ed25519.PublicKey, wantScope string) bool {
+	for i := range tl.Entries {
+		e := &tl.Entries[i]
+		if e.DID != did || e.Status != IssuerActive {
+			continue
+		}
+		if wantScope != "" && e.Scope != "" && e.Scope != wantScope {
+			return false
+		}
+		if e.KeyHash == "" {
+			return true
+		}
+		sum := sha256.Sum256(pub)
+		return hex.EncodeToString(sum[:]) == e.KeyHash
+	}
+	return false
+}
+
+// ToTrustAnchorForScope returns a TrustAnchor containing only active entries
+// that satisfy the scope filter. An entry with no Scope is included for any
+// value of scope (it is unrestricted). Pass scope="" to include all active
+// entries regardless of scope (identical to ToTrustAnchor).
+func (tl *TrustList) ToTrustAnchorForScope(scope string) *TrustAnchor {
+	ta := NewTrustAnchor()
+	for i := range tl.Entries {
+		e := &tl.Entries[i]
+		if e.Status != IssuerActive {
+			continue
+		}
+		if scope != "" && e.Scope != "" && e.Scope != scope {
+			continue
+		}
+		ta.AddDID(e.DID)
+	}
+	return ta
+}
+
 // AddKeyHash trusts an Ed25519 public key by its SHA-256 hex digest without
 // needing the key bytes — used when loading pinned keys from a trust list. The
 // digest is lowercased to match AddKey's stored form.

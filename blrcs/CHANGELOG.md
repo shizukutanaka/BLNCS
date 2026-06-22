@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Trust List scope enforcement: `TrustList.AuthorizesForScope` and
+  `ToTrustAnchorForScope` (security/correctness, Axis 61).** The `Scope` field
+  on `TrustListEntry` was declared and validated but never enforced: an issuer
+  registered with `scope="battery"` could authorize any credential type. Added
+  `AuthorizesForScope(did, pub, wantScope)` which rejects the call when the
+  entry's `Scope` is non-empty and differs from `wantScope` (both are non-empty
+  — an entry with no scope remains unrestricted for any caller, and a caller
+  that passes `""` skips scope gating to match the existing `Authorizes`
+  behaviour). Added `ToTrustAnchorForScope(scope)` to build a DID allow-list
+  that excludes out-of-scope issuers when constructing a `TrustAnchor`. Both
+  are backward-compatible additions (`Authorizes` / `ToTrustAnchor` unchanged).
+  4 new tests: battery-scoped issuer rejected for "textile", unrestricted issuer
+  accepted for any scope, revoked issuer always rejected, scope-filtered anchor
+  excludes wrong-scope entries while including unrestricted ones.
 - **Signed Trust Lists for issuer authorization (`didresolver.TrustList`, Axis 59
   — new feature).** A valid issuer signature proves only *who* signed, never that
   the signer is an *authorized* DPP/Battery-Passport issuer; until now trust was
@@ -30,6 +44,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   an end-to-end authorize-vs-counterfeit check.
 
 ### Fixed
+- **`openid4vp.randomB64` silently discarded CSPRNG errors — weak nonces on
+  entropy failure (security, Axis 60).** `CreateRequest` and `CreateRequestDCQL`
+  generate a 32-byte nonce and a 16-byte state token via `randomB64`, which
+  called `rand.Read` and discarded its return value with `_, _ =`. On pre-1.20
+  Go or exotic platforms a CSPRNG failure would return all-zero bytes, producing
+  identical, predictable nonces/state values across requests — breaking the
+  replay-protection and state-binding these values provide. Changed `randomB64`
+  to return `(string, error)` and both callers propagate the error; a CSPRNG
+  failure now surfaces as a request-creation error rather than a silently
+  insecure token.
 - **DCQL claim-value matching could panic on composite JSON values
   (correctness/DoS, Axis 58).** `CredentialQuery.MatchClaims` compared a disclosed
   claim value against each DCQL `values` entry with `val == want` on two `any`

@@ -241,6 +241,83 @@ func TestTrustListVerifierRejectsBadSig(t *testing.T) {
 	}
 }
 
+// TestTrustListAuthorizesForScope verifies that the scope narrowing rule works:
+// an issuer registered only for scope="battery" must not authorize a different scope.
+func TestTrustListAuthorizesForScope(t *testing.T) {
+	batteryPub, _ := mustAuthority(t)
+	anyPub, _ := mustAuthority(t)
+
+	tl := &TrustList{
+		Authority: "did:web:reg",
+		Entries: []TrustListEntry{
+			{DID: "did:web:battery.example", Status: IssuerActive, Scope: "battery"},
+			{DID: "did:web:any.example", Status: IssuerActive},                  // no scope = unrestricted
+			{DID: "did:web:revoked.example", Status: IssuerRevoked, Scope: "battery"},
+		},
+	}
+
+	// Battery-scoped issuer: authorized for "battery", rejected for "textile".
+	if !tl.AuthorizesForScope("did:web:battery.example", batteryPub, "battery") {
+		t.Error("battery issuer should be authorized for scope=battery")
+	}
+	if tl.AuthorizesForScope("did:web:battery.example", batteryPub, "textile") {
+		t.Error("battery issuer must NOT be authorized for scope=textile")
+	}
+	// Caller ignoring scope (wantScope="") — existing Authorizes behaviour.
+	if !tl.AuthorizesForScope("did:web:battery.example", batteryPub, "") {
+		t.Error("battery issuer should be authorized when scope is not filtered")
+	}
+
+	// Unrestricted issuer: accepted for any non-empty scope.
+	if !tl.AuthorizesForScope("did:web:any.example", anyPub, "battery") {
+		t.Error("unrestricted issuer should be authorized for scope=battery")
+	}
+	if !tl.AuthorizesForScope("did:web:any.example", anyPub, "textile") {
+		t.Error("unrestricted issuer should be authorized for scope=textile")
+	}
+
+	// Revoked issuer: never authorized regardless of scope.
+	if tl.AuthorizesForScope("did:web:revoked.example", batteryPub, "battery") {
+		t.Error("revoked issuer must not be authorized")
+	}
+}
+
+// TestTrustListToTrustAnchorForScope verifies scope-filtered anchor building.
+func TestTrustListToTrustAnchorForScope(t *testing.T) {
+	tl := &TrustList{
+		Authority: "did:web:reg",
+		Entries: []TrustListEntry{
+			{DID: "did:web:battery.example", Status: IssuerActive, Scope: "battery"},
+			{DID: "did:web:textile.example", Status: IssuerActive, Scope: "textile"},
+			{DID: "did:web:any.example", Status: IssuerActive}, // no scope
+			{DID: "did:web:revoked.example", Status: IssuerRevoked, Scope: "battery"},
+		},
+	}
+
+	batteryAnchor := tl.ToTrustAnchorForScope("battery")
+	if !batteryAnchor.IsTrusted("did:web:battery.example", nil) {
+		t.Error("battery anchor should include battery-scoped issuer")
+	}
+	if batteryAnchor.IsTrusted("did:web:textile.example", nil) {
+		t.Error("battery anchor must NOT include textile-scoped issuer")
+	}
+	if !batteryAnchor.IsTrusted("did:web:any.example", nil) {
+		t.Error("battery anchor should include unrestricted issuer")
+	}
+	if batteryAnchor.IsTrusted("did:web:revoked.example", nil) {
+		t.Error("battery anchor must NOT include revoked issuer")
+	}
+
+	// scope="" behaves like ToTrustAnchor (all active entries).
+	allAnchor := tl.ToTrustAnchorForScope("")
+	if !allAnchor.IsTrusted("did:web:battery.example", nil) {
+		t.Error("all-scope anchor should include battery issuer")
+	}
+	if !allAnchor.IsTrusted("did:web:textile.example", nil) {
+		t.Error("all-scope anchor should include textile issuer")
+	}
+}
+
 // TestTrustListEndToEnd wires a verified trust list into ResolveAndVerify: an
 // issuer listed as active is accepted; one not on the list is rejected.
 func TestTrustListEndToEnd(t *testing.T) {
