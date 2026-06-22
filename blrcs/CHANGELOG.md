@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`didwebvh.Verify`: entries after deactivation silently accepted — DID
+  lifecycle bypass (security, Axis 77).** `Verify` tracked `deactivated=true`
+  after an entry with `Parameters.Deactivated=true` but then continued the
+  loop, fully verifying any subsequent entries. An attacker who captured the
+  current update key at the moment of deactivation could append a valid entry
+  (signed by that still-valid key) to un-deactivate or hijack the DID
+  post-mortem — exactly the scenario that the terminal deactivation state is
+  meant to prevent. Fixed by adding a guard at the start of each loop
+  iteration (after version sequence parsing): if `deactivated` is already
+  `true` (set by a previous entry), the current entry is rejected with
+  `ErrDeactivated` immediately. The deactivation entry itself continues to
+  pass; only subsequent entries are blocked. Added
+  `TestPostDeactivationEntryRejected` which builds a 3-entry log
+  (genesis → deactivation → post-deactivation update) and verifies the
+  third entry is rejected, while the 2-entry log (genesis + deactivation)
+  still resolves correctly with `Deactivated=true`.
+
 ### Added
 - **`integration.TestBearerCredentialRejectedByKeyBindingVerifier`: cross-
   package security contract test (security, Axis 76).** The compliance between

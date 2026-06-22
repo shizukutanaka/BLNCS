@@ -1087,3 +1087,57 @@ func TestVerifyGenesisEmptyUpdateKeys(t *testing.T) {
 		t.Fatalf("genesis with empty UpdateKeys: want ErrNoUpdateKeys, got %v", err)
 	}
 }
+
+// TestPostDeactivationEntryRejected — Axis 77
+//
+// A deactivated DID is a terminal state: an attacker who captured the update
+// key at deactivation time must not be able to append further entries. Before
+// the fix, Verify set deactivated=true and then continued the loop, accepting
+// entries appended by whoever held the key.
+func TestPostDeactivationEntryRejected(t *testing.T) {
+	updateKey, _ := genKey(t)
+	genesis, did, err := Create(CreateParams{DIDPath: "ex:p", UpdateKey: updateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := []LogEntry{*genesis}
+
+	// Entry 2: legitimate deactivation.
+	deact, err := Update(UpdateParams{
+		Log:         log,
+		SignKey:     updateKey,
+		NewState:    map[string]any{"id": did},
+		Deactivate:  true,
+		VersionTime: time.Now().Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log = append(log, *deact)
+
+	// Sanity: two-entry log (genesis + deactivation) still verifies fine.
+	res, err := Verify(log)
+	if err != nil {
+		t.Fatalf("deactivated log should verify: %v", err)
+	}
+	if !res.Deactivated {
+		t.Fatal("expected Deactivated=true")
+	}
+
+	// Entry 3: attacker (or compromised key holder) appends after deactivation.
+	postDeact, err := Update(UpdateParams{
+		Log:         log,
+		SignKey:     updateKey,
+		NewState:    map[string]any{"id": did, "evil": "hijacked"},
+		VersionTime: time.Now().Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log = append(log, *postDeact)
+
+	// Three-entry log must now be rejected.
+	if _, err := Verify(log); !errors.Is(err, ErrDeactivated) {
+		t.Fatalf("entry after deactivation: want ErrDeactivated, got %v", err)
+	}
+}

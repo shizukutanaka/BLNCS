@@ -213,7 +213,17 @@ func Verify(log []LogEntry) (*Resolution, error) {
 			return nil, fmt.Errorf("%w: got %d after %d", ErrVersionSequence, num, prevNum)
 		}
 
-		// 3. entryHash chaining.
+		// 3. Reject any entry appended after deactivation. A deactivated DID is
+		//    a terminal state: its update keys are no longer valid and no further
+		//    changes are permitted. Allowing entries after deactivation would let
+		//    an attacker who captured the last active update key un-deactivate the
+		//    DID or hijack it post-mortem. The deactivation entry itself passes;
+		//    only entries after it are blocked.
+		if deactivated {
+			return nil, fmt.Errorf("%w: entry %d appended after DID was deactivated", ErrDeactivated, num)
+		}
+
+		// 4. entryHash chaining.
 		eh, err := computeEntryHash(entry, predecessorVersionID)
 		if err != nil {
 			return nil, err
@@ -222,7 +232,7 @@ func Verify(log []LogEntry) (*Resolution, error) {
 			return nil, fmt.Errorf("%w: entry %d", ErrEntryHashMismatch, num)
 		}
 
-		// 4. versionTime monotonicity.
+		// 5. versionTime monotonicity.
 		t, err := time.Parse(time.RFC3339, entry.VersionTime)
 		if err != nil {
 			return nil, fmt.Errorf("%w: bad versionTime %q", ErrMalformedEntry, entry.VersionTime)
@@ -231,7 +241,7 @@ func Verify(log []LogEntry) (*Resolution, error) {
 			return nil, fmt.Errorf("%w: versionTime went backwards at entry %d", ErrMalformedEntry, num)
 		}
 
-		// 5. Determine the update keys authorized to sign THIS entry.
+		// 6. Determine the update keys authorized to sign THIS entry.
 		//    Genesis is self-authorizing; later entries are authorized by the
 		//    keys in effect from the previous entry.
 		authKeys := currentUpdateKeys
@@ -242,7 +252,7 @@ func Verify(log []LogEntry) (*Resolution, error) {
 			return nil, ErrNoUpdateKeys
 		}
 
-		// 6. Pre-rotation: if the predecessor committed nextKeyHashes, this entry
+		// 7. Pre-rotation: if the predecessor committed nextKeyHashes, this entry
 		//    MUST rotate to a pre-committed key. An attacker with the current key
 		//    must not be able to bypass the commitment by simply omitting
 		//    updateKeys (which would silently keep the compromised key in force).
@@ -256,7 +266,7 @@ func Verify(log []LogEntry) (*Resolution, error) {
 			}
 		}
 
-		// 7. Verify the entry proof against the authorized keys.
+		// 8. Verify the entry proof against the authorized keys.
 		signer, err := verifyEntryProof(entry, predecessorVersionID, authKeys)
 		if err != nil {
 			return nil, err
