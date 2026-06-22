@@ -397,6 +397,7 @@ type SignFunc func(payload []byte) ([]byte, error)
 // 用途: AWS KMS, GCP KMS, HashiCorp Vault, PKCS#11 HSM 等
 // PrivateKey() は意図的に実装しない (外部に出ない)
 type ExternalSigner struct {
+	mu     sync.RWMutex
 	id     string
 	pub    ed25519.PublicKey
 	signFn SignFunc
@@ -426,10 +427,13 @@ func (e *ExternalSigner) ID() string                   { return e.id }
 func (e *ExternalSigner) PublicKey() ed25519.PublicKey { return e.pub }
 
 func (e *ExternalSigner) Sign(payload []byte) ([]byte, error) {
-	if e.signFn == nil {
+	e.mu.RLock()
+	fn := e.signFn
+	e.mu.RUnlock()
+	if fn == nil {
 		return nil, errors.New("kms: external signer closed")
 	}
-	sig, err := e.signFn(payload)
+	sig, err := fn(payload)
 	if err != nil {
 		return nil, fmt.Errorf("kms: external sign: %w", err)
 	}
@@ -440,9 +444,13 @@ func (e *ExternalSigner) Sign(payload []byte) ([]byte, error) {
 }
 
 func (e *ExternalSigner) Close() error {
+	e.mu.Lock()
 	e.signFn = nil
-	if e.closer != nil {
-		return e.closer.Close()
+	closer := e.closer
+	e.closer = nil
+	e.mu.Unlock()
+	if closer != nil {
+		return closer.Close()
 	}
 	return nil
 }

@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`kms.ExternalSigner`: data race between `Sign()` and `Close()` (safety,
+  Axis 80).** `Close()` wrote `e.signFn = nil` without a lock; `Sign()` read
+  `e.signFn` and then called it without a lock. Two goroutines — one signing,
+  one closing — could race: `Sign()` sees a non-nil `e.signFn`, passes the nil
+  guard, then reads it again to call it (Go loads the value at the call site)
+  while `Close()` simultaneously zeroes it. The Go race detector catches this.
+  `FileSigner.Sign` and `FileSigner.Close` already use `f.mu sync.Mutex` for
+  exactly this pattern; `ExternalSigner` was missing equivalent protection.
+  Fixed by adding `mu sync.RWMutex` to `ExternalSigner`: `Sign()` copies the
+  function pointer under `RLock()` before releasing it (so the function is
+  called outside the lock, avoiding holding the lock across a potentially
+  long-running external KMS call); `Close()` zeroes both `signFn` and `closer`
+  under the write `Lock()`. Added `TestExternalSignerConcurrentSignClose` with
+  50 goroutines alternating Sign/Close — passes cleanly under `-race`.
 - **`saga.Run`: concurrent calls on the same State cause step interleaving
   (correctness/safety, Axis 79).** The `State` struct is designed to be shared
   *among steps within a single Run* so that each step can read the previous

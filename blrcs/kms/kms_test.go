@@ -659,3 +659,45 @@ func TestFileSignerSaveIsAtomic(t *testing.T) {
 		t.Error("reloaded public key does not match saved key")
 	}
 }
+
+// TestExternalSignerConcurrentSignClose — Axis 80
+//
+// Sign() reads e.signFn while Close() writes e.signFn=nil. Without a mutex
+// this is a data race detectable by the Go race detector. The test exercises
+// concurrent Sign and Close to prove the lock prevents the race.
+func TestExternalSignerConcurrentSignClose(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	signFn := func(payload []byte) ([]byte, error) {
+		return ed25519.Sign(priv, payload), nil
+	}
+	signer, err := NewExternalSigner("did:web:concurrent", pub, signFn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const goroutines = 50
+	done := make(chan error, goroutines)
+	payload := []byte("test-payload")
+
+	// Launch goroutines that alternate between Sign and Close.
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			if i%2 == 0 {
+				_, err := signer.Sign(payload)
+				// Either succeeds or returns "closed" — both are valid outcomes.
+				if err != nil && err.Error() != "kms: external signer closed" {
+					done <- err
+					return
+				}
+			} else {
+				_ = signer.Close()
+			}
+			done <- nil
+		}(i)
+	}
+	for i := 0; i < goroutines; i++ {
+		if err := <-done; err != nil {
+			t.Errorf("goroutine error: %v", err)
+		}
+	}
+}
