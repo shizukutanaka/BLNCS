@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`openid4vci`: credential format/configuration-id mismatch validation
+  (security/correctness, Axis 69).** `IssueCredentialWithProof` ignored
+  `req.Format` and `req.CredentialConfigurationID` from the wallet's credential
+  request entirely — the issuer always issued from the pre-auth offer's
+  `configID` regardless of what the wallet asked for. This allows
+  credential-format-confusion attacks: a wallet can request a different format
+  or configuration than the one the issuer registered, and the issuer silently
+  issues its own version without any signal to either party that the request was
+  malformed. Fixed by adding early validation (still under the mutex, before
+  `consumed=true` so no rollback is needed): non-empty `req.CredentialConfigurationID`
+  must equal `entry.configID`; non-empty `req.Format` must equal `cfg.Format`.
+  Mismatches return the new `ErrFormatMismatch` sentinel without consuming the
+  access token so the wallet may retry with the correct values. Empty fields
+  continue to succeed (backward-compatible). 4 new tests: wrong format rejected,
+  wrong config-id rejected, matching values pass (and empty fields pass), and
+  token-not-consumed-on-mismatch (retry succeeds).
 - **`httpmw.MaxBodyBytes` middleware — request body size cap (DoS defense, Axis
   68).** The default middleware chain (`Recovery → RequestID → SecurityHeaders →
   AccessLog`) applied no per-request body limit; handlers using `io.ReadAll` or

@@ -1941,3 +1941,111 @@ func TestHandleCredentialErrorsAreOpaque(t *testing.T) {
 		t.Errorf("bad proof response leaks internals: %s", body2)
 	}
 }
+
+// ============================================================================
+// Axis 69 — credential format / configuration_id mismatch validation
+// ============================================================================
+
+// TestIssueCredentialFormatMismatch confirms that a wallet requesting a format
+// that differs from the issuer's registered configuration is rejected.
+func TestIssueCredentialFormatMismatch(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-fmt-mismatch",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The registered config uses "vc+sd-jwt"; requesting a different format must fail.
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{
+		Format: "ldp_vc",
+	})
+	if err != ErrFormatMismatch {
+		t.Fatalf("wrong format: want ErrFormatMismatch, got %v", err)
+	}
+}
+
+// TestIssueCredentialConfigIDMismatch confirms that a wallet requesting a
+// credential_configuration_id that differs from the offer's binding is rejected.
+func TestIssueCredentialConfigIDMismatch(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-cfgid-mismatch",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Offer binds "eu-battery-passport-v1"; requesting a different id must fail.
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{
+		CredentialConfigurationID: "eu-dpp-v2",
+	})
+	if err != ErrFormatMismatch {
+		t.Fatalf("wrong config id: want ErrFormatMismatch, got %v", err)
+	}
+}
+
+// TestIssueCredentialConfigIDMatchPasses confirms that the correct
+// credential_configuration_id and format both pass, and the empty (omitted)
+// case also succeeds (backward-compatible).
+func TestIssueCredentialConfigIDMatchPasses(t *testing.T) {
+	iss, _ := setupIssuer(t)
+
+	tests := []struct {
+		name   string
+		req    CredentialRequest
+	}{
+		{"empty fields", CredentialRequest{}},
+		{"matching config id", CredentialRequest{CredentialConfigurationID: "eu-battery-passport-v1"}},
+		{"matching format", CredentialRequest{Format: "vc+sd-jwt"}},
+		{"both matching", CredentialRequest{Format: "vc+sd-jwt", CredentialConfigurationID: "eu-battery-passport-v1"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, code, _ := iss.CreateOffer(
+				"eu-battery-passport-v1", "bat-match-"+tc.name,
+				map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+			)
+			tr, err := iss.ExchangeCode(code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = iss.IssueCredentialWithProof(tr.AccessToken, tc.req)
+			if err != nil {
+				t.Fatalf("expected success, got %v", err)
+			}
+		})
+	}
+}
+
+// TestIssueCredentialFormatMismatchDoesNotConsumeToken confirms that a
+// format-mismatch error does NOT burn the access token — the wallet may
+// retry with the correct format.
+func TestIssueCredentialFormatMismatchDoesNotConsumeToken(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-fmt-retry",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First call: wrong format.
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Format: "ldp_vc"})
+	if err != ErrFormatMismatch {
+		t.Fatalf("first call: want ErrFormatMismatch, got %v", err)
+	}
+
+	// Second call: correct format — token must still be valid.
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Format: "vc+sd-jwt"})
+	if err != nil {
+		t.Fatalf("retry with correct format: want success, got %v", err)
+	}
+}

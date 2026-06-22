@@ -44,6 +44,13 @@ var (
 	ErrInvalidProof       = errors.New("vci: proof invalid")
 	ErrProofNonceMismatch = errors.New("vci: proof nonce mismatch")
 	ErrBadTxCode          = errors.New("vci: transaction code (tx_code) missing or incorrect")
+	// ErrFormatMismatch is returned when the wallet's credential_configuration_id or
+	// format field does not match the configuration bound to the pre-authorized offer.
+	// Accepting a mismatched format would allow credential-format-confusion attacks
+	// (a wallet requests a weaker/different format than the issuer configured, and
+	// the issuer silently issues its own format anyway — confusing both parties about
+	// what was actually bound).
+	ErrFormatMismatch = errors.New("vci: credential format or configuration_id mismatch")
 )
 
 // ============================================================================
@@ -428,6 +435,21 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	if !cfgOk {
 		iss.mu.Unlock()
 		return nil, ErrUnknownConfig
+	}
+	// Validate the wallet's format / configuration_id against the offer's binding.
+	// Must happen under the lock but before consumed=true so no rollback is needed.
+	// Accepting a mismatched value would allow credential-format-confusion: the wallet
+	// could request a different configuration or weaker format than the issuer set up,
+	// and the issuer would silently issue its own format — confusing both parties and
+	// undermining the pre-auth code binding that ties a specific credential type to
+	// each offer.
+	if req.CredentialConfigurationID != "" && req.CredentialConfigurationID != entry.configID {
+		iss.mu.Unlock()
+		return nil, ErrFormatMismatch
+	}
+	if req.Format != "" && req.Format != cfg.Format {
+		iss.mu.Unlock()
+		return nil, ErrFormatMismatch
 	}
 	// Optimistically consume under lock; restore on error below.
 	entry.consumed = true
