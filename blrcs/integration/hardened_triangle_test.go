@@ -252,3 +252,67 @@ func TestHardenedTriangle_RevocationLifecycle(t *testing.T) {
 		t.Fatalf("revoked credential: want ErrCredentialRevoked, got %v", err)
 	}
 }
+
+// TestBearerCredentialRejectedByKeyBindingVerifier — Axis 76
+//
+// Verifies the security contract: a bearer SD-JWT (issued without proof-of-
+// possession, no `cnf` claim) MUST be rejected by a verifier with
+// RequireKeyBinding=true. This integration test crosses openid4vci (bearer
+// issuance) and openid4vp (secure verifier) to ensure neither package alone
+// is responsible for enforcing the contract, and that they compose correctly.
+func TestBearerCredentialRejectedByKeyBindingVerifier(t *testing.T) {
+	// 1. Issue a bearer credential (no proof-of-possession, no cnf).
+	signer, _ := compliance.NewIssuer("did:web:bearer.test.example")
+	issuer := openid4vci.NewIssuer("https://bearer.test.example", signer)
+	issuer.RequireProof = false // explicitly allow bearer issuance
+	issuer.RegisterConfiguration(openid4vci.CredentialConfiguration{
+		ID:                "battery-v1",
+		CredentialType:    "BatteryPassport",
+		DisclosableClaims: []string{"carbonKgCO2e"},
+		ClearClaims:       []string{"batteryCategory"},
+		ValidForDays:      365,
+	})
+
+	_, code, _ := issuer.CreateOffer(
+		"battery-v1", "bat-bearer-test",
+		map[string]any{"carbonKgCO2e": 55.0}, map[string]any{"batteryCategory": "ev"},
+	)
+	tr, err := issuer.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := issuer.IssueCredential(tr.AccessToken)
+	if err != nil {
+		t.Fatalf("bearer issuance: %v", err)
+	}
+	bearerSDJWT := cr.Credential
+
+	// 2. Bearer credential is valid in permissive mode (no KB required).
+	if _, verr := compliance.VerifySDJWT(bearerSDJWT, signer.PublicKey()); verr != nil {
+		t.Fatalf("bearer credential must verify without KB: %v", verr)
+	}
+
+	// 3. Set up a secure verifier with RequireKeyBinding=true (the default).
+	verifier := openid4vp.NewVerifier("https://verifier.test.example", "https://verifier.test.example/cb", nil)
+	verifier.TrustedIssuers = map[string][]byte{signer.ID: signer.PublicKey()}
+	// RequireKeyBinding defaults to true — verify the secure-by-default contract.
+	if !verifier.RequireKeyBinding {
+		t.Fatal("verifier must require key binding by default")
+	}
+
+	// 4. Create a VP request so state/nonce tracking is initialized.
+	_, state, _ := verifier.CreateRequest(openid4vp.PresentationDefinition{
+		RequiredClaims: []string{"batteryCategory"},
+	})
+
+	// 5. Present the bearer SD-JWT (no KB-JWT suffix). The verifier must reject it
+	// because it carries no `cnf` holder key and no KB-JWT, so RequireKeyBinding
+	// cannot be satisfied — the bearer JWT is not equivalent to a key-bound one.
+	_, err = verifier.ProcessResponse(&openid4vp.AuthorizationResponse{
+		VPToken: bearerSDJWT,
+		State:   state,
+	})
+	if err == nil {
+		t.Fatal("bearer credential must be rejected by RequireKeyBinding=true verifier")
+	}
+}

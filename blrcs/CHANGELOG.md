@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`integration.TestBearerCredentialRejectedByKeyBindingVerifier`: cross-
+  package security contract test (security, Axis 76).** The compliance between
+  `openid4vci` bearer issuance and `openid4vp` key-binding enforcement had no
+  integration-level test. A bearer SD-JWT (issued without proof-of-possession,
+  no `cnf` claim) should be cryptographically rejected by any verifier running
+  `RequireKeyBinding=true` — but neither package alone could prove the composed
+  behavior. Added a test that: (1) issues a bearer credential via VCI with
+  `RequireProof=false`; (2) confirms it verifies in permissive mode (sanity);
+  (3) presents it to a verifier with `RequireKeyBinding=true` (the default);
+  (4) asserts the verifier returns an error. This validates the secure-by-
+  default contract: a bearer token can never satisfy a key-binding verifier
+  because it carries no `cnf` holder key and no KB-JWT suffix.
 - **`multiformats.ParseMultihashSHA256`: codec-enforcing wrapper for
   SHA-256-only callers (security, Axis 75).** `ParseMultihash` returns the
   raw codec byte without validating its value. A caller using it to verify
