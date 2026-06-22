@@ -825,3 +825,59 @@ func TestComplexityBudgetNormalSchemaUnaffected(t *testing.T) {
 		t.Fatalf("expected valid, got: %v", err)
 	}
 }
+
+// ============================================================================
+// Combinator branch-count limit — Axis 78
+// ============================================================================
+
+// buildWideCombinator builds a JSON schema with `keyword` and `branches` trivial
+// sub-schemas (each `true`), making an array longer than maxCombinatorBranches.
+func buildWideCombinator(keyword string, branches int) string {
+	subs := make([]string, branches)
+	for i := range subs {
+		subs[i] = "true"
+	}
+	branchJSON := "[" + strings.Join(subs, ",") + "]"
+	return `{"` + keyword + `":` + branchJSON + `}`
+}
+
+// TestTooManyCombinatorBranchesAllOf verifies that an allOf with more than
+// maxCombinatorBranches sub-schemas returns ErrTooManyCombinatorBranches.
+func TestTooManyCombinatorBranchesAllOf(t *testing.T) {
+	sch := compile(t, buildWideCombinator("allOf", maxCombinatorBranches+1))
+	err := sch.Validate("any-value")
+	if err != ErrTooManyCombinatorBranches {
+		t.Fatalf("allOf with %d branches: want ErrTooManyCombinatorBranches, got %v", maxCombinatorBranches+1, err)
+	}
+}
+
+// TestTooManyCombinatorBranchesAnyOf verifies that an anyOf with more than
+// maxCombinatorBranches sub-schemas returns ErrTooManyCombinatorBranches.
+func TestTooManyCombinatorBranchesAnyOf(t *testing.T) {
+	sch := compile(t, buildWideCombinator("anyOf", maxCombinatorBranches+1))
+	err := sch.Validate("any-value")
+	if err != ErrTooManyCombinatorBranches {
+		t.Fatalf("anyOf with %d branches: want ErrTooManyCombinatorBranches, got %v", maxCombinatorBranches+1, err)
+	}
+}
+
+// TestTooManyCombinatorBranchesOneOf verifies that a oneOf with more than
+// maxCombinatorBranches sub-schemas returns ErrTooManyCombinatorBranches.
+func TestTooManyCombinatorBranchesOneOf(t *testing.T) {
+	sch := compile(t, buildWideCombinator("oneOf", maxCombinatorBranches+1))
+	err := sch.Validate("any-value")
+	if err != ErrTooManyCombinatorBranches {
+		t.Fatalf("oneOf with %d branches: want ErrTooManyCombinatorBranches, got %v", maxCombinatorBranches+1, err)
+	}
+}
+
+// TestCombinatorBranchesAtLimitPassThrough verifies that a combinator with
+// exactly maxCombinatorBranches sub-schemas is NOT rejected (only strictly
+// greater than the limit triggers the error).
+func TestCombinatorBranchesAtLimitPassThrough(t *testing.T) {
+	// allOf with exactly maxCombinatorBranches true-schemas should pass.
+	sch := compile(t, buildWideCombinator("allOf", maxCombinatorBranches))
+	if err := sch.Validate("any"); err != nil {
+		t.Fatalf("allOf at limit should not be rejected: %v", err)
+	}
+}

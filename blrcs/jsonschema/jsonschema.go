@@ -42,6 +42,12 @@ const maxRefDepth = 64
 // × several combinator branches without triggering the limit in practice.
 const maxValidateOps = 1_000_000
 
+// maxCombinatorBranches caps the number of sub-schemas in allOf / anyOf / oneOf.
+// Legitimate schemas rarely need more than a handful; huge branch arrays in
+// externally-fetched Type Metadata (vctmeta) would multiply the work budget
+// before the global maxValidateOps guard fires.
+const maxCombinatorBranches = 32
+
 // Schema is a compiled JSON Schema ready for validation.
 type Schema struct {
 	root     map[string]any            // the parsed root document (for $ref resolution)
@@ -157,10 +163,16 @@ func walkPatterns(node any, dest map[string]*regexp.Regexp) error {
 // listing every violation, or nil if valid.
 // Returns ErrComplexityBudget if the schema requires more than maxValidateOps
 // node evaluations (adversarial exponential nesting).
+// Returns ErrTooManyCombinatorBranches if an allOf/anyOf/oneOf has more than
+// maxCombinatorBranches sub-schemas.
 func (s *Schema) Validate(instance any) error {
 	ops := 0
-	v := &validator{root: s.root, compiled: s.compiled, ops: &ops}
+	tooManyBranches := false
+	v := &validator{root: s.root, compiled: s.compiled, ops: &ops, tooManyBranches: &tooManyBranches}
 	v.validate(s.node, instance, "")
+	if *v.tooManyBranches {
+		return ErrTooManyCombinatorBranches
+	}
 	if ops > maxValidateOps {
 		return ErrComplexityBudget
 	}
@@ -175,11 +187,12 @@ func (s *Schema) Validate(instance any) error {
 // ============================================================================
 
 type validator struct {
-	root     map[string]any
-	compiled map[string]*regexp.Regexp
-	errs     []string
-	depth    int
-	ops      *int // shared across child validators; incremented on every validate call
+	root            map[string]any
+	compiled        map[string]*regexp.Regexp
+	errs            []string
+	depth           int
+	ops             *int  // shared across child validators; incremented on every validate call
+	tooManyBranches *bool // set to true if any combinator has > maxCombinatorBranches sub-schemas
 }
 
 func (v *validator) fail(path, format string, args ...any) {
@@ -528,7 +541,7 @@ func (v *validator) checkArray(sch map[string]any, inst any, path string) {
 	if c, ok := sch["contains"]; ok {
 		found := false
 		for _, el := range arr {
-			sub := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
+			sub := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops, tooManyBranches: v.tooManyBranches}
 			sub.validate(c, el, path)
 			if len(sub.errs) == 0 {
 				found = true
@@ -547,8 +560,12 @@ func (v *validator) checkArray(sch map[string]any, inst any, path string) {
 
 func (v *validator) checkCombinators(sch map[string]any, inst any, path string) {
 	if all, ok := sch["allOf"].([]any); ok {
+		if len(all) > maxCombinatorBranches {
+			*v.tooManyBranches = true
+			return
+		}
 		for i, sub := range all {
-			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
+			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops, tooManyBranches: v.tooManyBranches}
 			child.validate(sub, inst, path)
 			if len(child.errs) > 0 {
 				v.fail(path, "allOf[%d] failed: %s", i, strings.Join(child.errs, ", "))
@@ -556,9 +573,13 @@ func (v *validator) checkCombinators(sch map[string]any, inst any, path string) 
 		}
 	}
 	if any_, ok := sch["anyOf"].([]any); ok {
+		if len(any_) > maxCombinatorBranches {
+			*v.tooManyBranches = true
+			return
+		}
 		ok := false
 		for _, sub := range any_ {
-			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
+			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops, tooManyBranches: v.tooManyBranches}
 			child.validate(sub, inst, path)
 			if len(child.errs) == 0 {
 				ok = true
@@ -570,9 +591,13 @@ func (v *validator) checkCombinators(sch map[string]any, inst any, path string) 
 		}
 	}
 	if one, ok := sch["oneOf"].([]any); ok {
+		if len(one) > maxCombinatorBranches {
+			*v.tooManyBranches = true
+			return
+		}
 		matches := 0
 		for _, sub := range one {
-			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
+			child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops, tooManyBranches: v.tooManyBranches}
 			child.validate(sub, inst, path)
 			if len(child.errs) == 0 {
 				matches++
@@ -583,7 +608,7 @@ func (v *validator) checkCombinators(sch map[string]any, inst any, path string) 
 		}
 	}
 	if not, ok := sch["not"]; ok {
-		child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops}
+		child := &validator{root: v.root, compiled: v.compiled, depth: v.depth, ops: v.ops, tooManyBranches: v.tooManyBranches}
 		child.validate(not, inst, path)
 		if len(child.errs) == 0 {
 			v.fail(path, "value must not match 'not' schema")
@@ -703,3 +728,10 @@ var ErrUnknownFormat = errors.New("jsonschema: unknown format")
 // schemas reachable via vctmeta.ValidateClaims from externally-fetched
 // Type Metadata documents.
 var ErrComplexityBudget = errors.New("jsonschema: complexity budget exceeded")
+
+// ErrTooManyCombinatorBranches is returned by Validate when an allOf, anyOf,
+// or oneOf combinator carries more than maxCombinatorBranches sub-schemas.
+// It exists to reject adversarial schemas whose branch count alone (even with
+// trivial sub-schemas) can produce O(N^depth) work across nested combinators
+// before the global op-budget fires.
+var ErrTooManyCombinatorBranches = errors.New("jsonschema: too many combinator branches")

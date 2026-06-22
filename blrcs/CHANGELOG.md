@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`jsonschema`: unbounded allOf/anyOf/oneOf branch arrays — DoS via
+  combinator explosion (security, Axis 78).** `Validate` had a global
+  `maxValidateOps` budget but no per-combinator array length cap. An
+  adversarial externally-fetched Type Metadata schema (via `vctmeta`) could
+  provide an `allOf`/`anyOf`/`oneOf` with thousands of sub-schemas: each
+  sub-schema is `true` (O(1) per branch) but the total work is O(branches) ×
+  O(depth) — the budget is not exceeded until many iterations later. Added
+  `maxCombinatorBranches = 32` constant and a length check at the start of
+  each combinator path in `checkCombinators`. Schemas exceeding the limit
+  abort early and return the new sentinel `ErrTooManyCombinatorBranches`
+  (rather than a `ValidationError`, which is a schema-instance mismatch — not
+  a resource-exhaustion signal). Also propagated the shared `tooManyBranches`
+  flag through all child validator instantiations (`checkArray.contains`,
+  `checkCombinators` child validators) so nested combinators are also bounded.
+  4 new tests: allOf/anyOf/oneOf each with branches+1 return the sentinel;
+  a combinator at exactly the limit passes through.
 - **`didwebvh.Verify`: entries after deactivation silently accepted — DID
   lifecycle bypass (security, Axis 77).** `Verify` tracked `deactivated=true`
   after an entry with `Parameters.Deactivated=true` but then continued the
