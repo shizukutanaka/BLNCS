@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`conformance.ReferenceSuite`: three SD-JWT negative test vectors (security,
+  Axis 81).** The reference conformance suite had one SD-JWT test vector
+  (`sdjwt/basic-issue-verify`) — a positive "happy path" case. Third-party
+  implementations that pass only positive vectors could still accept tokens that
+  must be rejected (wrong key, malformed structure, truncated signature), making
+  their conformance claims misleading. Added three negative vectors under the
+  `"negative","security"` tags, all with `"verifyOK": false`:
+  1. `sdjwt/wrong-issuer-key-rejected` — a legitimately-issued SD-JWT verified
+     against a different key must be rejected. Uses the new `wrongKeyHex` input
+     field (an alternate Ed25519 seed) to supply the wrong public key to the
+     runner.
+  2. `sdjwt/malformed-token-rejected` — a token whose structure is not valid
+     base64url JWS (no decodable header/payload) must be rejected. Uses the new
+     `rawToken` input field to bypass issuance and verify a pre-crafted string.
+  3. `sdjwt/truncated-signature-rejected` — a syntactically 3-part JWT
+     (header.payload.sig) whose signature bytes are corrupt must be rejected.
+  Both `wrongKeyHex` and `rawToken` are backward-compatible additions to
+  `sdjwtIn` (`omitempty`); existing positive vectors are unaffected.
+  `TestReferenceSuiteAllPass` confirms all 3 new vectors pass the runner.
+
 ### Fixed
 - **`kms.ExternalSigner`: data race between `Sign()` and `Close()` (safety,
   Axis 80).** `Close()` wrote `e.signFn = nil` without a lock; `Sign()` read

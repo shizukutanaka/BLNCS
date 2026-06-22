@@ -223,6 +223,15 @@ type sdjwtIn struct {
 	Subject       string         `json:"subject"`
 	SDClaims      map[string]any `json:"sdClaims"`
 	ClearClaims   map[string]any `json:"clearClaims"`
+	// WrongKeyHex, if non-empty, is the seed (hex) of a DIFFERENT Ed25519 key
+	// to use as the verification key. This exercises the "wrong issuer key"
+	// rejection path: a valid SD-JWT verified against a different public key
+	// must fail. Third-party implementations must enforce this.
+	WrongKeyHex string `json:"wrongKeyHex,omitempty"`
+	// RawToken, if non-empty, bypasses issuance and is used as the SD-JWT
+	// token to verify (against the key derived from IssuerSeedHex). This
+	// exercises rejection of malformed or tampered tokens.
+	RawToken string `json:"rawToken,omitempty"`
 }
 type sdjwtOut struct {
 	// 検証可能であればOK (タイムスタンプ非決定的なので exact match 不可)
@@ -435,12 +444,33 @@ func runSDJWT(v TestVector) Result {
 		r.Reason = "issuer: " + issErr.Error()
 		return r
 	}
-	sdjwt, _, err := iss.IssueSDJWT(in.Subject, in.SDClaims, in.ClearClaims, 0)
-	if err != nil {
-		r.Reason = "issue: " + err.Error()
-		return r
+
+	// Determine which token to verify: either a pre-crafted raw token (for
+	// negative testing of malformed/tampered inputs) or a freshly issued one.
+	token := in.RawToken
+	if token == "" {
+		var issErr error
+		token, _, issErr = iss.IssueSDJWT(in.Subject, in.SDClaims, in.ClearClaims, 0)
+		if issErr != nil {
+			r.Reason = "issue: " + issErr.Error()
+			return r
+		}
 	}
-	vc, err := compliance.VerifySDJWT(sdjwt, iss.PublicKey())
+
+	// Determine which public key to verify against: either the issuer's own
+	// key (normal path) or a deliberately wrong key (negative test vector for
+	// "wrong issuer key must be rejected").
+	verifyKey := iss.PublicKey()
+	if in.WrongKeyHex != "" {
+		wrongSeed, hexErr := hex.DecodeString(in.WrongKeyHex)
+		if hexErr != nil || len(wrongSeed) != ed25519.SeedSize {
+			r.Reason = "bad wrongKeyHex"
+			return r
+		}
+		verifyKey = ed25519.NewKeyFromSeed(wrongSeed).Public().(ed25519.PublicKey)
+	}
+
+	vc, err := compliance.VerifySDJWT(token, verifyKey)
 	if err != nil {
 		if want.VerifyOK {
 			r.Reason = "verify: " + err.Error()
@@ -631,6 +661,52 @@ func ReferenceSuite() *VectorSuite {
 					"subjectInVC": "subject-1",
 					"vct":         compliance.VCTDigitalProductPassport,
 				}),
+			},
+			// SD-JWT negative vectors — Axis 81
+			// These exercise the rejection paths that third-party implementations
+			// must also enforce. A verifier that accepts any of these must be
+			// considered non-conformant.
+			{
+				ID:   "sdjwt/wrong-issuer-key-rejected",
+				Category: "sdjwt",
+				Desc: "SD-JWT verified with the wrong issuer public key must be rejected",
+				Tags: []string{"negative", "security"},
+				Input: raw(map[string]any{
+					"issuerSeedHex": "0001020304050607080910111213141516171819202122232425262728293031",
+					"issuerDID":     "did:web:test.example",
+					"subject":       "subject-neg-1",
+					"sdClaims":      map[string]any{"carbonKgCO2e": 1.0},
+					"clearClaims":   map[string]any{"productId": "P-neg-1"},
+					// wrongKeyHex: a different Ed25519 seed → wrong public key for verification
+					"wrongKeyHex": "3132333435363738393031323334353637383930313233343536373839303132",
+				}),
+				Expected: raw(map[string]any{"verifyOK": false}),
+			},
+			{
+				ID:   "sdjwt/malformed-token-rejected",
+				Category: "sdjwt",
+				Desc: "A malformed SD-JWT (not base64url-encoded JWS) must be rejected",
+				Tags: []string{"negative", "security"},
+				Input: raw(map[string]any{
+					"issuerSeedHex": "0001020304050607080910111213141516171819202122232425262728293031",
+					"issuerDID":     "did:web:test.example",
+					// rawToken bypasses issuance; this token has invalid structure
+					"rawToken": "not.a.valid.sdjwt~",
+				}),
+				Expected: raw(map[string]any{"verifyOK": false}),
+			},
+			{
+				ID:   "sdjwt/truncated-signature-rejected",
+				Category: "sdjwt",
+				Desc: "SD-JWT with a truncated (corrupt) signature must be rejected",
+				Tags: []string{"negative", "security"},
+				Input: raw(map[string]any{
+					"issuerSeedHex": "0001020304050607080910111213141516171819202122232425262728293031",
+					"issuerDID":     "did:web:test.example",
+					// A syntactically valid 3-part structure but with a truncated sig
+					"rawToken": "eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ0ZXN0In0.dHJ1bmNhdGVk~",
+				}),
+				Expected: raw(map[string]any{"verifyOK": false}),
 			},
 			// VC 2.0 (W3C Verifiable Credentials Data Model 2.0)
 			{
