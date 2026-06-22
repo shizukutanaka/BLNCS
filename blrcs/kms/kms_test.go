@@ -1,6 +1,7 @@
 package kms
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -531,6 +532,101 @@ func TestFileSignerLoadPubKeyMismatch(t *testing.T) {
 
 	if _, err := NewFileSigner("id", keyPath); err == nil {
 		t.Fatal("FileSigner should reject keyfile where pub != priv.Public()")
+	}
+}
+
+// ============================================================================
+// EncryptedFileSigner — AES-256-GCM at-rest key protection
+// ============================================================================
+
+func TestEncryptedFileSignerRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "enc.key")
+	masterKey, err := GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First open — generates and encrypts the key.
+	s1, err := NewEncryptedFileSigner("did:web:enc", path, masterKey)
+	if err != nil {
+		t.Fatalf("create encrypted signer: %v", err)
+	}
+	pub1 := s1.PublicKey()
+	sig, err := s1.Sign([]byte("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1.Close()
+
+	// Second open — decrypts and restores the same key.
+	s2, err := NewEncryptedFileSigner("did:web:enc", path, masterKey)
+	if err != nil {
+		t.Fatalf("reload encrypted signer: %v", err)
+	}
+	defer s2.Close()
+	if string(s2.PublicKey()) != string(pub1) {
+		t.Error("key not persisted across encrypted reload")
+	}
+	if !ed25519.Verify(s2.PublicKey(), []byte("payload"), sig) {
+		t.Error("cross-session sig verify failed")
+	}
+}
+
+func TestEncryptedFileSignerWrongMasterKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "enc.key")
+	masterKey, _ := GenerateMasterKey()
+	s, err := NewEncryptedFileSigner("id", path, masterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	// Open with a different master key — GCM authentication must fail.
+	wrongKey := make([]byte, 32)
+	wrongKey[0] = masterKey[0] ^ 0xFF
+	copy(wrongKey[1:], masterKey[1:])
+	if _, err := NewEncryptedFileSigner("id", path, wrongKey); err == nil {
+		t.Fatal("wrong master key should fail to decrypt")
+	}
+}
+
+func TestEncryptedFileSignerBadMasterKeyLength(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "enc.key")
+	if _, err := NewEncryptedFileSigner("id", path, []byte("tooshort")); err == nil {
+		t.Fatal("short master key should fail")
+	}
+}
+
+func TestEncryptedFileSignerPlaintextFileFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plain.key")
+	// Write a 96-byte plaintext key file (FileSigner format).
+	s, err := NewFileSigner("id", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	// Try to open as encrypted — size mismatch must fail.
+	masterKey, _ := GenerateMasterKey()
+	if _, err := NewEncryptedFileSigner("id", path, masterKey); err == nil {
+		t.Fatal("plaintext keyfile opened as encrypted should fail")
+	}
+}
+
+func TestGenerateMasterKey(t *testing.T) {
+	k1, err := GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(k1) != 32 {
+		t.Errorf("master key length: %d", len(k1))
+	}
+	// Two calls should produce different keys (negligible collision probability).
+	k2, _ := GenerateMasterKey()
+	if bytes.Equal(k1, k2) {
+		t.Error("two GenerateMasterKey() calls returned identical bytes")
 	}
 }
 

@@ -22,6 +22,8 @@ package kms
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -144,14 +146,19 @@ func (m *MemorySigner) Close() error {
 
 // FileSigner — ファイル保存 Ed25519 鍵
 //
-// ディスク鍵はファイルパーミッション 0600 のみ。
-// 起動時に鍵が無ければ生成、あれば復元。
+// Plaintext format (NewFileSigner): 96 raw bytes — [32-byte pub][64-byte priv].
+// Encrypted format (NewEncryptedFileSigner): [12-byte GCM nonce][96-byte AES-256-GCM
+// ciphertext of pub+priv], protected with a caller-supplied 32-byte master key.
+// The two formats are distinguished by file size (96 vs 108 bytes), so callers
+// must consistently use the same constructor for a given key file.
 type FileSigner struct {
-	id   string
-	path string
-	pub  ed25519.PublicKey
-	priv ed25519.PrivateKey
-	mu   sync.Mutex
+	id      string
+	path    string
+	pub     ed25519.PublicKey
+	priv    ed25519.PrivateKey
+	mu      sync.Mutex
+	encKey  [32]byte // AES-256 master key; zero value ⇒ plaintext
+	encrypt bool     // true ⇒ use AES-256-GCM for load/save
 }
 
 // NewFileSigner — 鍵を path から読込、無ければ生成
@@ -185,18 +192,83 @@ func NewFileSigner(id, path string) (*FileSigner, error) {
 	return fs, nil
 }
 
+// NewEncryptedFileSigner is like NewFileSigner but the private key is protected
+// at rest with AES-256-GCM using masterKey (must be exactly 32 bytes).
+// On-disk format: [12-byte random GCM nonce][96-byte ciphertext of pub+priv].
+// File size 108 bytes distinguishes it from the 96-byte plaintext format.
+// Use GenerateMasterKey() to create a cryptographically random master key.
+func NewEncryptedFileSigner(id, path string, masterKey []byte) (*FileSigner, error) {
+	if id == "" {
+		return nil, errors.New("kms: signer ID required")
+	}
+	if path == "" {
+		return nil, errors.New("kms: path required")
+	}
+	if len(masterKey) != 32 {
+		return nil, errors.New("kms: master key must be 32 bytes (AES-256)")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("kms: mkdir: %w", err)
+	}
+	fs := &FileSigner{id: id, path: path, encrypt: true}
+	copy(fs.encKey[:], masterKey)
+	if _, err := os.Stat(path); err == nil {
+		if err := fs.load(); err != nil {
+			return nil, err
+		}
+		return fs, nil
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("kms: keygen: %w", err)
+	}
+	fs.pub, fs.priv = pub, priv
+	if err := fs.save(); err != nil {
+		return nil, err
+	}
+	return fs, nil
+}
+
+// GenerateMasterKey returns a cryptographically random 32-byte AES-256 master
+// key suitable for NewEncryptedFileSigner.
+func GenerateMasterKey() ([]byte, error) {
+	k := make([]byte, 32)
+	if _, err := rand.Read(k); err != nil {
+		return nil, fmt.Errorf("kms: generate master key: %w", err)
+	}
+	return k, nil
+}
+
+const (
+	kmsNonceSize    = 12 // AES-GCM standard nonce
+	kmsPlainSize    = ed25519.PublicKeySize + ed25519.PrivateKeySize // 96
+	kmsEncryptedSize = kmsNonceSize + kmsPlainSize + 16              // 124 (96 plain + 16 GCM tag)
+)
+
 func (f *FileSigner) load() error {
 	b, err := os.ReadFile(f.path)
 	if err != nil {
 		return fmt.Errorf("kms: read keyfile: %w", err)
 	}
-	if len(b) != ed25519.PublicKeySize+ed25519.PrivateKeySize {
-		return fmt.Errorf("kms: bad keyfile size %d", len(b))
+	var plain []byte
+	if f.encrypt {
+		if len(b) != kmsEncryptedSize {
+			return fmt.Errorf("kms: encrypted keyfile: unexpected size %d (want %d)", len(b), kmsEncryptedSize)
+		}
+		plain, err = aesGCMDecrypt(f.encKey[:], b[:kmsNonceSize], b[kmsNonceSize:])
+		if err != nil {
+			return fmt.Errorf("kms: decrypt keyfile: %w", err)
+		}
+	} else {
+		if len(b) != kmsPlainSize {
+			return fmt.Errorf("kms: bad keyfile size %d", len(b))
+		}
+		plain = b
 	}
 	f.pub = make(ed25519.PublicKey, ed25519.PublicKeySize)
 	f.priv = make(ed25519.PrivateKey, ed25519.PrivateKeySize)
-	copy(f.pub, b[:ed25519.PublicKeySize])
-	copy(f.priv, b[ed25519.PublicKeySize:])
+	copy(f.pub, plain[:ed25519.PublicKeySize])
+	copy(f.priv, plain[ed25519.PublicKeySize:])
 	// Verify the stored public key is consistent with the private key. A mismatch
 	// means file corruption or tampering: Sign() would produce valid signatures
 	// under the derived public key but callers using f.pub would see failures.
@@ -208,9 +280,24 @@ func (f *FileSigner) load() error {
 
 func (f *FileSigner) save() error {
 	tmp := f.path + ".tmp"
-	buf := make([]byte, 0, ed25519.PublicKeySize+ed25519.PrivateKeySize)
-	buf = append(buf, f.pub...)
-	buf = append(buf, f.priv...)
+	plain := make([]byte, 0, kmsPlainSize)
+	plain = append(plain, f.pub...)
+	plain = append(plain, f.priv...)
+
+	var buf []byte
+	if f.encrypt {
+		nonce := make([]byte, kmsNonceSize)
+		if _, err := rand.Read(nonce); err != nil {
+			return fmt.Errorf("kms: nonce generation: %w", err)
+		}
+		ct, err := aesGCMEncrypt(f.encKey[:], nonce, plain)
+		if err != nil {
+			return fmt.Errorf("kms: encrypt keyfile: %w", err)
+		}
+		buf = append(nonce, ct...)
+	} else {
+		buf = plain
+	}
 
 	// Atomic write: write to tmp, fsync file data, rename, then fsync the
 	// directory entry. Without fsyncing (a) the file and (b) the directory,
@@ -237,6 +324,35 @@ func (f *FileSigner) save() error {
 		return fmt.Errorf("kms: rename keyfile: %w", err)
 	}
 	return syncDir(filepath.Dir(f.path))
+}
+
+// aesGCMEncrypt encrypts plaintext with AES-256-GCM using the given 32-byte key
+// and 12-byte nonce. Returns the ciphertext with the 16-byte authentication tag
+// appended (standard GCM Seal output).
+func aesGCMEncrypt(key, nonce, plaintext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	return gcm.Seal(nil, nonce, plaintext, nil), nil
+}
+
+// aesGCMDecrypt decrypts ciphertext (with appended GCM tag) using the given
+// 32-byte key and 12-byte nonce. Returns an error if authentication fails.
+func aesGCMDecrypt(key, nonce, ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	return gcm.Open(nil, nonce, ciphertext, nil)
 }
 
 func (f *FileSigner) ID() string                   { return f.id }

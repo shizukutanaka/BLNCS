@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`kms.EncryptedFileSigner` — AES-256-GCM at-rest key protection for file-
+  persisted signers (security, Axis 65).** `NewFileSigner` stores the Ed25519
+  private key as 96 raw bytes protected only by filesystem `0600` permissions;
+  a root-level attacker or backup leak exposes the key in plaintext, violating
+  FIPS 140-2 and SOC2 Type II requirements. Added `NewEncryptedFileSigner(id,
+  path, masterKey)` which wraps the same `FileSigner` type but stores the key
+  as `[12-byte GCM nonce][AES-256-GCM ciphertext + 16-byte auth tag]` (108
+  bytes total, vs. 96 for plaintext). The 12-byte nonce is re-randomized on
+  every save (new key generation; existing keys don't rotate nonce except on
+  explicit re-save). Added `GenerateMasterKey() ([]byte, error)` for a
+  cryptographically random 32-byte AES-256 key. The two file formats are
+  distinguished by size: opening a plaintext file as encrypted (or vice versa)
+  returns an immediate error rather than silently misinterpreting bytes. 5 new
+  tests cover: round-trip persist/reload, wrong-master-key (GCM auth failure),
+  bad key length, plaintext-file-as-encrypted rejection, and `GenerateMasterKey`
+  uniqueness. Stdlib only: `crypto/aes`, `crypto/cipher`.
 - **Trust List scope enforcement: `TrustList.AuthorizesForScope` and
   `ToTrustAnchorForScope` (security/correctness, Axis 61).** The `Scope` field
   on `TrustListEntry` was declared and validated but never enforced: an issuer
