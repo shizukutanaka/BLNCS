@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Signed Trust Lists for issuer authorization (`didresolver.TrustList`, Axis 59
+  — new feature).** A valid issuer signature proves only *who* signed, never that
+  the signer is an *authorized* DPP/Battery-Passport issuer; until now trust was
+  hard-coded into `TrustAnchor` in application code. New `TrustList` is an
+  authority-signed (Ed25519), versioned, expirable allow-list of issuer DIDs —
+  conceptually a minimal ETSI TS 119 612 Trusted List — that a verifier consumes
+  to populate a `TrustAnchor` without hard-coding keys. Security properties:
+  signature over the exact payload bytes (`SignTrustList`/`VerifyTrustList`,
+  `ErrTrustListSig`); `exp` freshness with leeway (`ErrTrustListExpired`);
+  per-issuer status with **only `active` entries trusted** (`suspended`/`revoked`
+  excluded, fail-closed); strict JSON decoding (`DisallowUnknownFields`),
+  duplicate-DID and status/keyHash validation; and rollback protection via a
+  monotonic `version` enforced by `TrustListVerifier` (`ErrTrustListRollback`)
+  so an old list that still trusts a since-revoked issuer cannot be replayed.
+  `ToTrustAnchor` deliberately registers DIDs only — a per-DID `keyHash` pin is
+  *not* flattened into a global key allow-list (which would trust that key under
+  any DID); binding-aware pin enforcement is via `TrustList.Authorizes(did,pub)`.
+  Spec §12 added. 10 tests cover round-trip, wrong-key/tamper/expiry rejection,
+  malformed-list validation, active-only anchor building, the per-DID pin
+  binding, rollback/idempotent-refresh, forged-list-doesn't-advance-version, and
+  an end-to-end authorize-vs-counterfeit check.
+
 ### Fixed
 - **DCQL claim-value matching could panic on composite JSON values
   (correctness/DoS, Axis 58).** `CredentialQuery.MatchClaims` compared a disclosed

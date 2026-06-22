@@ -198,6 +198,24 @@ between the URL check and the connect (DNS-rebinding TOCTOU).
 - The bucket map MUST be bounded by periodic GC of idle entries
   (`RateLimiter.StartGC`/`GC`) so many distinct source IPs cannot exhaust memory.
 
+## 12. Trust distribution (Trust Lists)
+A valid issuer signature proves only *who* signed, not that the signer is an
+*authorized* issuer. An authority (e.g. an EU DPP registry) MAY publish a signed
+**Trust List** (`didresolver.TrustList`) that a verifier consumes to decide which
+issuers to trust, instead of hard-coding keys:
+- The list is Ed25519-signed by the authority; verification covers the exact
+  transmitted payload bytes (`VerifyTrustList`) → `ErrTrustListSig` on mismatch.
+- It carries `exp` (freshness, with leeway → `ErrTrustListExpired`) and a
+  monotonic `version`.
+- Each entry has a status; **only `active` entries are trusted** — `suspended` /
+  `revoked` issuers are excluded (fail-closed) when building a `TrustAnchor`.
+- `ToTrustAnchor` registers DIDs only. A per-DID `keyHash` pin MUST NOT be
+  flattened into a global key allow-list (that would trust the key under any DID);
+  pin enforcement (key authorized only for its DID) is via `TrustList.Authorizes`.
+- A verifier holding version *N* MUST reject a presented list with version `< N`
+  (`TrustListVerifier`, `ErrTrustListRollback`) — a downgrade replaying an old
+  list that still trusts a since-revoked issuer.
+
 ---
 
 ## Conformance matrix
@@ -206,6 +224,7 @@ between the URL check and the connect (DNS-rebinding TOCTOU).
 | Requirement | Status | Notes |
 |---|---|---|
 | §1 did:web/key/jwk resolution | ✅ | |
+| §12 signed Trust List → TrustAnchor (status fail-closed, rollback-guarded) | ✅ | **new** (`didresolver.TrustList`, `TrustListVerifier`) |
 | §1 did:webvh verifiable history (SCID + hash chain + pre-rotation) | ✅ | **implemented** (`didwebvh`); wire-vector interop pending official vectors |
 | §2 SD-JWT VC issuance (vct/iat/exp/_sd_alg) | ✅ | |
 | §2 holder binding (cnf) | ✅ | |
