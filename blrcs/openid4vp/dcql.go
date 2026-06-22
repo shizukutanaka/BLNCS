@@ -10,6 +10,7 @@ package openid4vp
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 
 	"blrcs/compliance"
 )
@@ -153,7 +154,13 @@ func (cq *CredentialQuery) MatchClaims(presented map[string]any) bool {
 		if len(claim.Values) > 0 {
 			matched := false
 			for _, want := range claim.Values {
-				if val == want {
+				// reflect.DeepEqual, not ==: a disclosed claim value can be a JSON
+				// array/object (map[string]any / []any). The == operator panics when
+				// both operands share an uncomparable dynamic type — reachable when a
+				// verifier lists a composite value in DCQL `values` and a (possibly
+				// malicious) wallet discloses a same-typed composite claim. DeepEqual
+				// never panics and also matches composites structurally.
+				if reflect.DeepEqual(val, want) {
 					matched = true
 					break
 				}

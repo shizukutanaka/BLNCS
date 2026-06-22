@@ -145,6 +145,47 @@ func TestCredentialQueryMatchClaims(t *testing.T) {
 	}
 }
 
+// TestMatchClaimsCompositeValues exercises value matching where both the DCQL
+// `values` entry and the disclosed claim are composite JSON (array/object). The
+// previous `val == want` comparison panicked when both operands shared an
+// uncomparable dynamic type ([]any / map[string]any); reflect.DeepEqual must
+// instead match them structurally without panicking.
+func TestMatchClaimsCompositeValues(t *testing.T) {
+	cq := CredentialQuery{
+		ID:     "c",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{
+			{Path: []string{"roles"}, Values: []any{[]any{"admin", "user"}}},
+			{Path: []string{"meta"}, Values: []any{map[string]any{"k": "v"}}},
+		},
+	}
+	// Matching composites must satisfy the query (no panic, structural equality).
+	match := map[string]any{
+		"roles": []any{"admin", "user"},
+		"meta":  map[string]any{"k": "v"},
+	}
+	if !cq.MatchClaims(match) {
+		t.Error("composite values should match structurally")
+	}
+	// A different array value must NOT match (and must not panic).
+	noMatch := map[string]any{
+		"roles": []any{"admin"},
+		"meta":  map[string]any{"k": "v"},
+	}
+	if cq.MatchClaims(noMatch) {
+		t.Error("differing composite value should not match")
+	}
+	// A disclosed composite against a scalar allowed-value must not panic, just
+	// fail to match.
+	scalarQ := CredentialQuery{
+		ID: "s", Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{{Path: []string{"x"}, Values: []any{"scalar"}}},
+	}
+	if scalarQ.MatchClaims(map[string]any{"x": []any{"composite"}}) {
+		t.Error("composite claim vs scalar allowed-value should not match")
+	}
+}
+
 // TestMatchClaimsEmptyPathSkipped verifies that a claim with an empty Path is
 // skipped (treated as a non-constraint) rather than failing the match.
 func TestMatchClaimsEmptyPathSkipped(t *testing.T) {

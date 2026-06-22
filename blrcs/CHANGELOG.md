@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **DCQL claim-value matching could panic on composite JSON values
+  (correctness/DoS, Axis 58).** `CredentialQuery.MatchClaims` compared a disclosed
+  claim value against each DCQL `values` entry with `val == want` on two `any`
+  operands. Go's `==` panics when both operands share an *uncomparable* dynamic
+  type (`[]any`, `map[string]any`) — reachable when a verifier lists a composite
+  value in DCQL `values` and a (possibly malicious) wallet discloses a same-typed
+  composite claim; the panic surfaces as a 500 per crafted presentation. The
+  operator also can't structurally match JSON arrays/objects even when logically
+  equal. Switched to `reflect.DeepEqual`, which never panics and matches
+  composites structurally (scalar behavior unchanged). Test:
+  `TestMatchClaimsCompositeValues` covers matching/again-differing array & object
+  values and a composite-vs-scalar mismatch (all without panic).
 - **SD-JWT issuer JWS `typ` was never verified — cross-JWT-type confusion
   (security/conformance, Axis 57).** The issuer sets `typ:"vc+sd-jwt"` and spec
   §2 mandates it, but `VerifySDJWTWithBinding` only checked the KB-JWT `typ`,
