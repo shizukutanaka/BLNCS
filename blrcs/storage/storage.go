@@ -237,13 +237,31 @@ func (fs *FileStorage) AppendStatement(blob StatementBlob) (uint64, error) {
 	}
 	var header [frameHeaderSize]byte
 	binary.BigEndian.PutUint32(header[:], uint32(len(blob)))
-	// 単一 write で header+payload を atomicに近く書込 (POSIX単一writeは部分書込可能だが
-	// append mode + 小サイズでは実用上原子的扱い)
 	buf := make([]byte, 0, frameHeaderSize+len(blob))
 	buf = append(buf, header[:]...)
 	buf = append(buf, blob...)
-	if _, err := fs.file.Write(buf); err != nil {
-		return 0, fmt.Errorf("write: %w", err)
+
+	// Record the file offset before the write so we can truncate back on partial
+	// failure. With O_APPEND the OS atomically seeks to end-of-file before each
+	// write (POSIX), but a short write (e.g. disk full mid-frame) or a write error
+	// after partial bytes can leave a torn frame. Truncating to preSize undoes the
+	// partial write, keeping the log parseable for future appends and preventing
+	// rescanSize from returning ErrCorrupted on the next startup.
+	fi, err := fs.file.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("stat before write: %w", err)
+	}
+	preSize := fi.Size()
+
+	n, err := fs.file.Write(buf)
+	if err != nil || n < len(buf) {
+		// Best-effort rollback: truncate back to pre-write size to discard any
+		// partial frame. Ignore any truncate error (we're already in an error path).
+		_ = fs.file.Truncate(preSize)
+		if err != nil {
+			return 0, fmt.Errorf("write: %w", err)
+		}
+		return 0, fmt.Errorf("write: short write %d/%d", n, len(buf))
 	}
 	if err := fs.file.Sync(); err != nil {
 		return 0, fmt.Errorf("fsync: %w", err)

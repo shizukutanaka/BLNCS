@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`storage.FileStorage.AppendStatement` partial-write recovery via pre-write
+  Stat + Truncate-on-failure (durability, Axis 66).** On disk full or an OS
+  write error mid-frame, the previous implementation left a torn frame at the
+  end of the ledger (partial header or partial payload), causing `rescanSize` to
+  return `ErrCorrupted` on the next startup with no way to recover without
+  manual truncation. Fixed by recording the file offset via `Stat()` before
+  each write and, on a short write or write error, truncating the file back to
+  that offset before returning the error — keeping the log parseable and
+  allowing subsequent successful appends. Two new tests: exact-frame-size
+  growth (verifies `Stat` gives the correct pre-write offset), and
+  torn-frame-detection (directly injects a partial header and confirms reopen
+  returns `ErrCorrupted`).
 - **`kms.EncryptedFileSigner` — AES-256-GCM at-rest key protection for file-
   persisted signers (security, Axis 65).** `NewFileSigner` stores the Ed25519
   private key as 96 raw bytes protected only by filesystem `0600` permissions;

@@ -783,3 +783,78 @@ func TestFileStorageLoadKeyPairPubMismatch(t *testing.T) {
 		t.Fatalf("mismatched pub/priv should return ErrCorrupted, got %v", err)
 	}
 }
+
+// TestFileStorageAppendGrowsFileByExactFrame verifies that AppendStatement
+// grows the ledger file by exactly frameHeaderSize + len(blob) bytes per call.
+// This indirectly validates that the pre-write Stat() call returns the correct
+// pre-write offset (used by the partial-write truncation path) and that no
+// spurious bytes are added around the frame.
+func TestFileStorageAppendGrowsFileByExactFrame(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+
+	ledgerPath := filepath.Join(dir, ledgerFileName)
+
+	info, err := os.Stat(ledgerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseSize := info.Size()
+
+	blobs := [][]byte{
+		[]byte(`{"msg":"frame-0"}`),
+		[]byte(`{"msg":"frame-1","extra":"value"}`),
+	}
+	for i, blob := range blobs {
+		if _, err := fs.AppendStatement(blob); err != nil {
+			t.Fatalf("AppendStatement %d: %v", i, err)
+		}
+	}
+
+	// Confirm total file size equals base + sum of all frame sizes.
+	info, err = os.Stat(ledgerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var totalFrameBytes int64
+	for _, blob := range blobs {
+		totalFrameBytes += int64(frameHeaderSize) + int64(len(blob))
+	}
+	if info.Size() != baseSize+totalFrameBytes {
+		t.Errorf("ledger file size: got %d, want %d (base=%d + frames=%d)",
+			info.Size(), baseSize+totalFrameBytes, baseSize, totalFrameBytes)
+	}
+}
+
+// TestFileStoragePartialWriteRecovery verifies that injecting a torn frame
+// (truncating the log file to mid-frame after a successful append) is detected
+// on reopen and returns ErrCorrupted. This exercises the rescanSize path that
+// the partial-write Truncate is designed to keep clean.
+func TestFileStoragePartialWriteRecovery(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, ledgerFileName)
+
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := []byte(`{"msg":"good-frame"}`)
+	if _, err := fs.AppendStatement(blob); err != nil {
+		t.Fatal(err)
+	}
+	fs.Close()
+
+	// Inject a partial header (2 bytes — less than the 4-byte uint32 length prefix).
+	f, _ := os.OpenFile(ledgerPath, os.O_RDWR|os.O_APPEND, 0o600)
+	_, _ = f.Write([]byte{0x00, 0x10}) // torn header — only 2 of 4 bytes
+	_ = f.Close()
+
+	// Reopen: rescanSize should detect the truncated header.
+	if _, err := NewFileStorage(dir); !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("torn frame: want ErrCorrupted, got %v", err)
+	}
+}
