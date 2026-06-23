@@ -46,6 +46,12 @@ var (
 	ErrClientIDInvalid     = errors.New("openid4vp: invalid client_id (scheme/format)")
 	ErrDCQLUnsatisfied     = errors.New("openid4vp: presented credential satisfies no dcql_query credential")
 	ErrCredentialRevoked   = errors.New("openid4vp: presented credential is revoked")
+	// ErrDCQLQueryTooComplex is returned by Validate (and therefore ParseDCQL /
+	// MarshalDCQL) when a DCQL query exceeds any structural complexity bound.
+	// Without these caps, a crafted query with O(credentials × claims × path depth ×
+	// values) work forces O(10⁹+) iterations in enforceDCQLConstraints — server DoS
+	// via a single Authorization Request.
+	ErrDCQLQueryTooComplex = errors.New("openid4vp: dcql_query exceeds complexity limits")
 )
 
 // ============================================================================

@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`openid4vp.DCQLQuery.Validate`: structural complexity bounds to prevent
+  DCQL-driven DoS (security, Axis 85).** `MatchClaims` performs
+  O(credentials × claims × path depth × values) work per `ProcessResponse` call,
+  driven entirely by the `dcql_query` parameter in the Authorization Request.
+  `Validate()` (called by `ParseDCQL` and `MarshalDCQL`) previously checked
+  structural rules (IDs, formats, credential_set references) but imposed no upper
+  bound on any fanout dimension. A crafted query with
+  `{credentials: [32768 × {claims: [32768 × {path: [1024 segments], values: [1024]}]}]}`
+  forces O(10⁹+) iterations in a single `ProcessResponse`, enabling server DoS via
+  one Authorization Request. Closed the gap by adding four constants:
+  `dcqlMaxCredentials=32`, `dcqlMaxClaims=64`, `dcqlMaxPathDepth=16`,
+  `dcqlMaxValuesPerClaim=32` — all generous enough for any real credential scenario
+  and enforced in `Validate()`. Violations return the new sentinel
+  `ErrDCQLQueryTooComplex` (wrapping details for diagnosis). 7 new tests:
+  over-limit credentials, exactly-at-limit credentials (boundary), over-limit
+  claims, path-too-deep, over-limit values, all-at-limits happy path, and
+  `ParseDCQL` rejection of oversized JSON.
+
 - **`scitt.Ledger.RegisterTrustedIssuer`: trusted-issuer allowlist for the
   transparency log (security, Axis 84).** `Ledger.Register` previously called
   `VerifyStatement`, which only proves the signature is consistent with the

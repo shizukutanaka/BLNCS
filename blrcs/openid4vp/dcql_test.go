@@ -3,11 +3,29 @@ package openid4vp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"blrcs/compliance"
 )
+
+// helpers shared across complexity tests
+func makeCredQuery(id string, nClaims, pathDepth, nValues int) CredentialQuery {
+	claims := make([]ClaimQuery, nClaims)
+	for i := range claims {
+		path := make([]string, pathDepth)
+		for p := range path {
+			path[p] = "k"
+		}
+		vals := make([]any, nValues)
+		for v := range vals {
+			vals[v] = v
+		}
+		claims[i] = ClaimQuery{Path: path, Values: vals}
+	}
+	return CredentialQuery{ID: id, Format: "dc+sd-jwt", Claims: claims}
+}
 
 func TestDCQLValidateHappy(t *testing.T) {
 	q := DCQLQuery{
@@ -540,5 +558,101 @@ func TestCredentialSetRequiredDefault(t *testing.T) {
 	}
 	if q2.CredentialSets[0].Required {
 		t.Error("explicit `required:false` must be honored")
+	}
+}
+
+// ============================================================================
+// Axis 85 — DCQL query complexity bounds (DoS hardening)
+// ============================================================================
+
+// TestDCQLTooManyCredentials verifies that a query exceeding dcqlMaxCredentials
+// is rejected with ErrDCQLQueryTooComplex from Validate / ParseDCQL.
+func TestDCQLTooManyCredentials(t *testing.T) {
+	creds := make([]CredentialQuery, dcqlMaxCredentials+1)
+	for i := range creds {
+		creds[i] = CredentialQuery{ID: fmt.Sprintf("c%d", i), Format: "dc+sd-jwt"}
+	}
+	q := DCQLQuery{Credentials: creds}
+	err := q.Validate()
+	if !errors.Is(err, ErrDCQLQueryTooComplex) {
+		t.Fatalf("want ErrDCQLQueryTooComplex for %d credentials, got %v",
+			len(creds), err)
+	}
+}
+
+// TestDCQLAtMaxCredentials verifies that exactly dcqlMaxCredentials credentials
+// pass Validate (boundary: limit is inclusive).
+func TestDCQLAtMaxCredentials(t *testing.T) {
+	creds := make([]CredentialQuery, dcqlMaxCredentials)
+	for i := range creds {
+		creds[i] = CredentialQuery{ID: fmt.Sprintf("c%d", i), Format: "dc+sd-jwt"}
+	}
+	q := &DCQLQuery{Credentials: creds}
+	if err := q.Validate(); err != nil {
+		t.Fatalf("exactly %d credentials should pass: %v", dcqlMaxCredentials, err)
+	}
+}
+
+// TestDCQLTooManyClaims verifies that a credential query with more than
+// dcqlMaxClaims claim entries is rejected.
+func TestDCQLTooManyClaims(t *testing.T) {
+	q := DCQLQuery{Credentials: []CredentialQuery{
+		makeCredQuery("x", dcqlMaxClaims+1, 1, 0),
+	}}
+	err := q.Validate()
+	if !errors.Is(err, ErrDCQLQueryTooComplex) {
+		t.Fatalf("want ErrDCQLQueryTooComplex for %d claims, got %v",
+			dcqlMaxClaims+1, err)
+	}
+}
+
+// TestDCQLPathTooDeep verifies that a ClaimQuery.Path exceeding dcqlMaxPathDepth
+// is rejected.
+func TestDCQLPathTooDeep(t *testing.T) {
+	q := DCQLQuery{Credentials: []CredentialQuery{
+		makeCredQuery("x", 1, dcqlMaxPathDepth+1, 0),
+	}}
+	err := q.Validate()
+	if !errors.Is(err, ErrDCQLQueryTooComplex) {
+		t.Fatalf("want ErrDCQLQueryTooComplex for path depth %d, got %v",
+			dcqlMaxPathDepth+1, err)
+	}
+}
+
+// TestDCQLTooManyValues verifies that a ClaimQuery with more than
+// dcqlMaxValuesPerClaim allowed values is rejected.
+func TestDCQLTooManyValues(t *testing.T) {
+	q := DCQLQuery{Credentials: []CredentialQuery{
+		makeCredQuery("x", 1, 1, dcqlMaxValuesPerClaim+1),
+	}}
+	err := q.Validate()
+	if !errors.Is(err, ErrDCQLQueryTooComplex) {
+		t.Fatalf("want ErrDCQLQueryTooComplex for %d values, got %v",
+			dcqlMaxValuesPerClaim+1, err)
+	}
+}
+
+// TestDCQLAtLimitsHappyPath verifies a query right at every limit passes.
+func TestDCQLAtLimitsHappyPath(t *testing.T) {
+	q := DCQLQuery{Credentials: []CredentialQuery{
+		makeCredQuery("x", dcqlMaxClaims, dcqlMaxPathDepth, dcqlMaxValuesPerClaim),
+	}}
+	if err := q.Validate(); err != nil {
+		t.Fatalf("query at all limits should pass Validate: %v", err)
+	}
+}
+
+// TestParseDCQLRejectsTooComplex verifies ParseDCQL propagates ErrDCQLQueryTooComplex
+// from Validate so the parse boundary is fully protected.
+func TestParseDCQLRejectsTooComplex(t *testing.T) {
+	// Build a JSON query exceeding the credentials limit.
+	creds := make([]CredentialQuery, dcqlMaxCredentials+1)
+	for i := range creds {
+		creds[i] = CredentialQuery{ID: fmt.Sprintf("c%d", i), Format: "dc+sd-jwt"}
+	}
+	data, _ := json.Marshal(DCQLQuery{Credentials: creds})
+	_, err := ParseDCQL(data)
+	if !errors.Is(err, ErrDCQLQueryTooComplex) {
+		t.Fatalf("ParseDCQL should reject oversized query: got %v", err)
 	}
 }

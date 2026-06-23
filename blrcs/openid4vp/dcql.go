@@ -10,9 +10,20 @@ package openid4vp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 
 	"blrcs/compliance"
+)
+
+// DCQL complexity bounds — guard against DoS via crafted Authorization Requests.
+// Each limit is generous enough for any real credential wallet scenario while
+// bounding worst-case O(credentials × claims × depth × values) work in MatchClaims.
+const (
+	dcqlMaxCredentials  = 32  // max CredentialQuery entries per DCQLQuery
+	dcqlMaxClaims       = 64  // max ClaimQuery entries per CredentialQuery
+	dcqlMaxPathDepth    = 16  // max path segments in a single ClaimQuery.Path
+	dcqlMaxValuesPerClaim = 32 // max allowed Values entries in a single ClaimQuery
 )
 
 // DCQLQuery — dcql_query Authorization Request パラメータ (§6)。
@@ -79,6 +90,10 @@ func (q *DCQLQuery) Validate() error {
 	if len(q.Credentials) == 0 {
 		return errors.New("openid4vp: dcql_query.credentials must be non-empty")
 	}
+	if len(q.Credentials) > dcqlMaxCredentials {
+		return fmt.Errorf("%w: %d credentials exceeds limit of %d",
+			ErrDCQLQueryTooComplex, len(q.Credentials), dcqlMaxCredentials)
+	}
 	ids := map[string]bool{}
 	for _, c := range q.Credentials {
 		if c.ID == "" {
@@ -90,6 +105,20 @@ func (q *DCQLQuery) Validate() error {
 		ids[c.ID] = true
 		if c.Format == "" {
 			return errors.New("openid4vp: credential query missing format")
+		}
+		if len(c.Claims) > dcqlMaxClaims {
+			return fmt.Errorf("%w: credential %q has %d claims, limit is %d",
+				ErrDCQLQueryTooComplex, c.ID, len(c.Claims), dcqlMaxClaims)
+		}
+		for j, claim := range c.Claims {
+			if len(claim.Path) > dcqlMaxPathDepth {
+				return fmt.Errorf("%w: credential %q claim[%d] path depth %d exceeds limit of %d",
+					ErrDCQLQueryTooComplex, c.ID, j, len(claim.Path), dcqlMaxPathDepth)
+			}
+			if len(claim.Values) > dcqlMaxValuesPerClaim {
+				return fmt.Errorf("%w: credential %q claim[%d] has %d values, limit is %d",
+					ErrDCQLQueryTooComplex, c.ID, j, len(claim.Values), dcqlMaxValuesPerClaim)
+			}
 		}
 	}
 	// credential_sets の options は既知の id を参照すること
