@@ -1,6 +1,7 @@
 package cas
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -390,4 +391,81 @@ func (f *failPutStore) Has(_ Hash) bool            { return false }
 func (f *failPutStore) Size() int                  { return 0 }
 func (f *failPutStore) Iterate(_ func(h Hash) error) error {
 	return nil
+}
+
+// ============================================================================
+// Axis 87 — read-path integrity verification (GetVerified / ErrCorrupted)
+// ============================================================================
+
+// corruptingStore is a pluggable backend that returns bytes which do NOT hash to
+// the requested address — modeling disk bitrot, a tampered object store, or a
+// backend that ignores the content-addressed contract.
+type corruptingStore struct {
+	returns []byte
+}
+
+func (c *corruptingStore) Put(_ []byte) (Hash, error)         { return "", nil }
+func (c *corruptingStore) Get(_ Hash) ([]byte, error)         { return c.returns, nil }
+func (c *corruptingStore) Has(_ Hash) bool                    { return true }
+func (c *corruptingStore) Size() int                          { return 1 }
+func (c *corruptingStore) Iterate(_ func(h Hash) error) error { return nil }
+
+// TestGetVerifiedHappyPath confirms GetVerified returns the payload unchanged when
+// the backend honors the content-address contract.
+func TestGetVerifiedHappyPath(t *testing.T) {
+	store := NewMemoryStore()
+	payload := []byte("trusted content")
+	h, _ := store.Put(payload)
+	got, err := GetVerified(store, h)
+	if err != nil {
+		t.Fatalf("GetVerified on honest store: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("payload mismatch: %q", got)
+	}
+}
+
+// TestGetVerifiedDetectsCorruption is the core defense: a backend returning bytes
+// that do not match the requested hash must surface as ErrCorrupted, not silently
+// hand back wrong content.
+func TestGetVerifiedDetectsCorruption(t *testing.T) {
+	// Address of the *expected* content.
+	want := ComputeHash([]byte("original"))
+	// Backend hands back different bytes.
+	store := &corruptingStore{returns: []byte("tampered")}
+	_, err := GetVerified(store, want)
+	if !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("want ErrCorrupted for hash mismatch, got %v", err)
+	}
+}
+
+// TestGetVerifiedPropagatesNotFound confirms a backend Get error (e.g. not found)
+// propagates unchanged rather than being masked as ErrCorrupted.
+func TestGetVerifiedPropagatesNotFound(t *testing.T) {
+	store := NewMemoryStore()
+	_, err := GetVerified(store, ComputeHash([]byte("never stored")))
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+}
+
+// TestProvenanceLookupByIDDetectsCorruption verifies the audit-lookup path is now
+// integrity-checked end to end: a corrupted backend behind Provenance yields
+// ErrCorrupted from LookupByID.
+func TestProvenanceLookupByIDDetectsCorruption(t *testing.T) {
+	// Establish a mapping id → hash(original) using an honest store, then swap to
+	// a corrupting backend that returns tampered bytes for that hash.
+	honest := NewMemoryStore()
+	prov := NewProvenance(honest)
+	h, _ := prov.Record("audit-1", []byte("original"))
+
+	tampered := NewProvenance(&corruptingStore{returns: []byte("tampered")})
+	tampered.mu.Lock()
+	tampered.idToHash["audit-1"] = h
+	tampered.mu.Unlock()
+
+	_, _, err := tampered.LookupByID("audit-1")
+	if !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("LookupByID against corrupted backend: want ErrCorrupted, got %v", err)
+	}
 }

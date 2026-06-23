@@ -21,11 +21,21 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"sync"
 )
 
 // ErrNotFound — 指定 hash が存在しない
 var ErrNotFound = errors.New("cas: not found")
+
+// ErrCorrupted is returned by GetVerified / Provenance.LookupByID when a backend
+// returns a payload whose SHA-256 does not match the requested hash. This breaks
+// the sole CAS invariant — hash(content) == address — and signals backend
+// corruption (disk bitrot, a tampered object store, a buggy cache) or a backend
+// that does not honor the content-addressed contract. The in-memory store cannot
+// trigger this, but the Store interface is explicitly pluggable, so any read that
+// crosses a trust boundary must be integrity-checked rather than trusted.
+var ErrCorrupted = errors.New("cas: retrieved payload does not match requested hash")
 
 // Hash — 32-byte SHA-256 を hex 文字列で表現 (always 64 chars lowercase)
 type Hash string
@@ -156,6 +166,23 @@ func Verify(payload []byte, h Hash) bool {
 	return ComputeHash(payload) == h
 }
 
+// GetVerified retrieves a payload from the store and enforces the CAS invariant
+// before returning it: the payload's SHA-256 must equal the requested hash. Use
+// this — not the bare Store.Get — whenever the backend is not fully trusted
+// (file/network/object-store backends), so corruption or tampering surfaces as
+// ErrCorrupted instead of silently returning wrong bytes. With the in-memory
+// store the check always passes; the cost is one SHA-256 over the payload.
+func GetVerified(store Store, h Hash) ([]byte, error) {
+	payload, err := store.Get(h)
+	if err != nil {
+		return nil, err
+	}
+	if !Verify(payload, h) {
+		return nil, fmt.Errorf("%w: requested %s, got %s", ErrCorrupted, h, ComputeHash(payload))
+	}
+	return payload, nil
+}
+
 // ============================================================================
 // Provenance — content hash と外部 ID の対応
 //
@@ -212,6 +239,10 @@ func (p *Provenance) Record(externalID string, payload []byte) (Hash, error) {
 }
 
 // LookupByID — 外部 ID で payload を取得
+//
+// The payload is integrity-checked against its content hash before being
+// returned (GetVerified): a corrupted or tampered backend surfaces as
+// ErrCorrupted rather than silently returning wrong bytes for an audit lookup.
 func (p *Provenance) LookupByID(externalID string) ([]byte, Hash, error) {
 	p.mu.RLock()
 	h, ok := p.idToHash[externalID]
@@ -219,7 +250,7 @@ func (p *Provenance) LookupByID(externalID string) ([]byte, Hash, error) {
 	if !ok {
 		return nil, "", ErrNotFound
 	}
-	payload, err := p.store.Get(h)
+	payload, err := GetVerified(p.store, h)
 	if err != nil {
 		return nil, h, err
 	}

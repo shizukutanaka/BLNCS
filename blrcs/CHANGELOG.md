@@ -7,6 +7,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`cas.GetVerified` + read-path integrity check in `Provenance.LookupByID`
+  (security, Axis 87).** The package's sole invariant is `hash(content) == address`
+  and its `Store` interface is explicitly pluggable ("backend 差替可能"), yet the
+  exported `Verify(payload, h)` function was never used on the retrieval path:
+  `Provenance.LookupByID` returned `store.Get(h)` bytes without checking they hash
+  to `h`. With the in-memory store this is benign, but the moment a real backend is
+  swapped in (file/network/object-store), disk bitrot, a tampered object, or a
+  buggy cache would silently hand back wrong content for an audit-trail lookup —
+  defeating the entire point of content-addressed storage. Added
+  `GetVerified(store, h)` which fetches then enforces the content-address contract,
+  returning the new sentinel `ErrCorrupted` on mismatch (backend `Get` errors such
+  as `ErrNotFound` propagate unchanged). Wired `Provenance.LookupByID` to use it so
+  the SCITT-receipt→payload reverse lookup is integrity-checked end to end. The bare
+  `Store.Get` is unchanged (backward compatible). 4 new tests: happy path,
+  corruption detected via `ErrCorrupted`, `ErrNotFound` propagation, and
+  `LookupByID` against a corrupting backend.
+
 - **Test coverage uplift: `openid4vp`, `mdoc/deviceauth`, `MemoryStore.GC` (quality
   hardening).** Addressed three coverage clusters surfaced by `go tool cover -func`:
   (1) `openid4vp/jar.go` — `VerifyRequestObject` expired-JAR rejection and bad
