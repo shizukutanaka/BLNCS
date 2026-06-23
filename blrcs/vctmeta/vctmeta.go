@@ -34,6 +34,15 @@ var (
 	ErrNoSchema            = errors.New("vctmeta: type metadata has no embedded schema")
 	ErrExtendsChainTooDeep = errors.New("vctmeta: extends chain exceeds maximum depth")
 	ErrExtendsCycle        = errors.New("vctmeta: extends chain contains a cycle")
+	// ErrExtendsIntegrityRequired is returned by ResolveChain when an `extends`
+	// link is present but `extends#integrity` is absent. Without this binding,
+	// each parent node is fetched on trust — a CDN misconfiguration, DNS cache
+	// poisoning, or MITM can swap any intermediate node for a different schema or
+	// display claims without breaking the leaf's vct#integrity pin. Requiring
+	// integrity at every hop closes the chain fully: the credential's
+	// vct#integrity pins the leaf; the leaf's extends#integrity pins its parent;
+	// and so on back to the root.
+	ErrExtendsIntegrityRequired = errors.New("vctmeta: extends link is missing extends#integrity (full chain must be pinned)")
 	// ErrVCTMismatch — the fetched metadata's vct claim does not match the requested URL.
 	// IETF SD-JWT-VC §5: "the value of the vct claim in the metadata MUST be
 	// equal to the VC type identifier URL used to retrieve the metadata."
@@ -271,6 +280,13 @@ func ResolveChain(ctx context.Context, vct, expectedIntegrity string, fetch Fetc
 
 		if tm.Extends == "" {
 			break
+		}
+		// Require an integrity hash on every extends hop. Without it the parent
+		// node is fetched without cryptographic verification — the leaf's
+		// vct#integrity would only protect the leaf, not the full chain.
+		if tm.ExtendsIntegrity == "" {
+			return nil, fmt.Errorf("%w: node %q extends %q without integrity binding",
+				ErrExtendsIntegrityRequired, tm.VCT, tm.Extends)
 		}
 		cur, curIntegrity = tm.Extends, tm.ExtendsIntegrity
 	}

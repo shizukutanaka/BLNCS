@@ -7,6 +7,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`vctmeta.ResolveChain`: require `extends#integrity` on every hop (security,
+  Axis 83).** SD-JWT-VC Type Metadata documents may declare an `extends` parent
+  URL and an optional `extends#integrity` SRI hash. Previously `ResolveChain`
+  treated `extends#integrity` as genuinely optional and fetched parent nodes
+  without integrity verification when the field was absent — only the leaf's
+  `vct#integrity` was ever checked. This meant the credential's SRI pin protected
+  only the leaf document; any intermediate node could be silently substituted by a
+  CDN misconfiguration, DNS cache poisoning, or on-path attacker without breaking
+  the leaf's cryptographic binding. Closed the gap by requiring `extends#integrity`
+  at every link in the chain. `ResolveChain` now returns the new sentinel
+  `ErrExtendsIntegrityRequired` (wrapping the offending node's VCT and extends
+  URL for diagnosis) when a node has an `extends` link but no `extends#integrity`.
+  The integrity value itself is still verified by the existing `VerifyIntegrity`
+  path (wrong hash → `ErrIntegrityMismatch`). Single-node chains (no `extends`)
+  and chains with proper `extends#integrity` at every hop are unaffected. Note:
+  a genuine `extends` cycle cannot carry consistent integrity hashes (circular
+  hash dependency), so cycles now surface as `ErrExtendsIntegrityRequired` rather
+  than `ErrExtendsCycle`; `TestResolveChainCycle` updated to accept either error.
+  2 new tests: `TestResolveChainMissingExtendsIntegrity` and
+  `TestResolveChainExtendsIntegrityMismatch`; 3 existing chain tests updated to
+  use the new `chainFetcherWithIntegrity` helper.
 - **`compliance.VerifyOptions.AllowedAlgs`: per-verification JWS algorithm
   allowlist — crypto-agility downgrade defense (security, Axis 82).** The JWS
   verifier registry (`RegisterJWSVerifier`) lets a deployment add post-quantum

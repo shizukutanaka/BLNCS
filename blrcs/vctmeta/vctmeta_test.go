@@ -276,9 +276,31 @@ func TestResolveSchemaURITooLarge(t *testing.T) {
 // ResolveChain — extends chain resolution, depth limit, cycle detection
 // ============================================================================
 
-// chainFetcher builds a FetchFunc that serves a linear extends chain:
-// url0 → url1 → url2 → … with no extends on the last.
-func chainFetcher(urls []string) FetchFunc {
+// chainFetcherWithIntegrity builds a FetchFunc for a linear extends chain
+// where every hop includes a valid extends#integrity binding.
+// urls[0] is the starting (leaf) URL; urls[last] is the root (no extends).
+// Documents are built root-first so each node can embed the next node's hash.
+func chainFetcherWithIntegrity(urls []string) FetchFunc {
+	docs := make(map[string][]byte, len(urls))
+	for i := len(urls) - 1; i >= 0; i-- {
+		var extendsJSON string
+		if i+1 < len(urls) {
+			integ := Integrity(docs[urls[i+1]])
+			extendsJSON = `,"extends":"` + urls[i+1] + `","extends#integrity":"` + integ + `"`
+		}
+		docs[urls[i]] = []byte(`{"vct":"` + urls[i] + `"` + extendsJSON + `}`)
+	}
+	return func(_ context.Context, url string) ([]byte, error) {
+		if d, ok := docs[url]; ok {
+			return d, nil
+		}
+		return nil, &notFoundErr{url}
+	}
+}
+
+// chainFetcherNoIntegrity builds a FetchFunc like chainFetcherWithIntegrity
+// but omits extends#integrity — used to exercise ErrExtendsIntegrityRequired.
+func chainFetcherNoIntegrity(urls []string) FetchFunc {
 	docs := make(map[string][]byte, len(urls))
 	for i, u := range urls {
 		var extends string
@@ -319,7 +341,7 @@ func TestResolveChainMultipleNodes(t *testing.T) {
 		"https://eu.example/derived",
 		"https://eu.example/leaf",
 	}
-	chain, err := ResolveChain(context.Background(), urls[0], "", chainFetcher(urls))
+	chain, err := ResolveChain(context.Background(), urls[0], "", chainFetcherWithIntegrity(urls))
 	if err != nil {
 		t.Fatalf("multi-node chain: %v", err)
 	}
@@ -336,19 +358,22 @@ func TestResolveChainMultipleNodes(t *testing.T) {
 }
 
 func TestResolveChainTooDeep(t *testing.T) {
-	// Build a chain of maxExtendsDepth+1 nodes.
+	// Build a chain of maxExtendsDepth+1 nodes with proper integrity bindings.
 	urls := make([]string, maxExtendsDepth+1)
 	for i := range urls {
 		urls[i] = "https://eu.example/type" + string(rune('0'+i))
 	}
-	_, err := ResolveChain(context.Background(), urls[0], "", chainFetcher(urls))
+	_, err := ResolveChain(context.Background(), urls[0], "", chainFetcherWithIntegrity(urls))
 	if err != ErrExtendsChainTooDeep {
 		t.Fatalf("want ErrExtendsChainTooDeep, got %v", err)
 	}
 }
 
 func TestResolveChainCycle(t *testing.T) {
-	// A → B → A (cycle)
+	// A → B → A (cycle). A genuine cycle cannot carry consistent extends#integrity
+	// values (sha256(A) depends on sha256(B) and vice-versa — circular), so in
+	// practice the chain always fails with ErrExtendsIntegrityRequired before the
+	// cycle detector fires. Both sentinels are valid: the chain is rejected.
 	a := "https://eu.example/a"
 	b := "https://eu.example/b"
 	docs := map[string][]byte{
@@ -357,8 +382,52 @@ func TestResolveChainCycle(t *testing.T) {
 	}
 	fetch := func(_ context.Context, url string) ([]byte, error) { return docs[url], nil }
 	_, err := ResolveChain(context.Background(), a, "", fetch)
-	if err != ErrExtendsCycle {
-		t.Fatalf("want ErrExtendsCycle, got %v", err)
+	if !errors.Is(err, ErrExtendsCycle) && !errors.Is(err, ErrExtendsIntegrityRequired) {
+		t.Fatalf("want ErrExtendsCycle or ErrExtendsIntegrityRequired, got %v", err)
+	}
+}
+
+// TestResolveChainMissingExtendsIntegrity verifies that a chain node with an
+// `extends` link but no `extends#integrity` returns ErrExtendsIntegrityRequired.
+// Without this guard every intermediate node is fetched on trust (TOFU), so a
+// CDN misconfiguration or MITM can swap a parent schema without detection.
+func TestResolveChainMissingExtendsIntegrity(t *testing.T) {
+	urls := []string{
+		"https://eu.example/leaf",
+		"https://eu.example/root",
+	}
+	// chainFetcherNoIntegrity omits extends#integrity from every hop.
+	_, err := ResolveChain(context.Background(), urls[0], "", chainFetcherNoIntegrity(urls))
+	if !errors.Is(err, ErrExtendsIntegrityRequired) {
+		t.Fatalf("want ErrExtendsIntegrityRequired, got %v", err)
+	}
+}
+
+// TestResolveChainExtendsIntegrityMismatch verifies that a wrong extends#integrity
+// value (pointing to different bytes than the parent actually serves) is rejected
+// with ErrIntegrityMismatch. The root node is served with different content than
+// the leaf's extends#integrity hash covers.
+func TestResolveChainExtendsIntegrityMismatch(t *testing.T) {
+	root := "https://eu.example/root"
+	leaf := "https://eu.example/leaf"
+
+	rootDoc := []byte(`{"vct":"` + root + `"}`)
+	wrongInteg := Integrity([]byte(`{"vct":"` + root + `","tampered":true}`)) // hash of different bytes
+
+	leafDoc := []byte(`{"vct":"` + leaf + `","extends":"` + root + `","extends#integrity":"` + wrongInteg + `"}`)
+
+	fetch := func(_ context.Context, url string) ([]byte, error) {
+		switch url {
+		case leaf:
+			return leafDoc, nil
+		case root:
+			return rootDoc, nil
+		}
+		return nil, &notFoundErr{url}
+	}
+	_, err := ResolveChain(context.Background(), leaf, "", fetch)
+	if !errors.Is(err, ErrIntegrityMismatch) {
+		t.Fatalf("want ErrIntegrityMismatch, got %v", err)
 	}
 }
 
@@ -487,12 +556,17 @@ func TestResolveSchemaFetchError(t *testing.T) {
 	}
 }
 
-// TestResolveChainFetchErrorOnExtends covers vctmeta.go:234-236: Resolve
-// returns an error mid-chain (first node resolved OK, parent fetch fails).
+// TestResolveChainFetchErrorOnExtends covers the mid-chain fetch error path:
+// the child resolves OK but the parent fetch fails. The child must carry a
+// non-empty extends#integrity so we reach the parent Resolve call (the
+// integrity check happens after the fetch, so any placeholder hash works here
+// — the fetch fails first).
 func TestResolveChainFetchErrorOnExtends(t *testing.T) {
 	parent := "https://eu.example/parent"
 	child := "https://eu.example/child"
-	childDoc := []byte(`{"vct":"` + child + `","extends":"` + parent + `"}`)
+	// Any non-empty integrity string is fine: the fetch will fail before the
+	// integrity bytes are compared.
+	childDoc := []byte(`{"vct":"` + child + `","extends":"` + parent + `","extends#integrity":"sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}`)
 	fetchErr := errors.New("parent unreachable")
 	fetch := func(_ context.Context, url string) ([]byte, error) {
 		if url == child {
@@ -501,10 +575,6 @@ func TestResolveChainFetchErrorOnExtends(t *testing.T) {
 		return nil, fetchErr
 	}
 	_, err := ResolveChain(context.Background(), child, "", fetch)
-	if err == nil || err == fetchErr && err != fetchErr {
-		// either the wrapped or bare fetchErr is fine, but nil is not
-		t.Errorf("expected error propagating from Resolve on parent fetch, got nil")
-	}
 	if err == nil {
 		t.Error("ResolveChain should return error when parent fetch fails")
 	}
