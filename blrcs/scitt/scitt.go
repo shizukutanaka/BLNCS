@@ -39,6 +39,20 @@ var (
 	// missing or the private key has the wrong length. A well-formed statement
 	// must carry a non-empty Issuer, Subject, ContentType, and a valid private key.
 	ErrStatementMalformed = errors.New("scitt: statement malformed")
+	// ErrUntrustedIssuer is returned by Register when a trusted-issuer policy is
+	// configured (via RegisterTrustedIssuer) and the submitted statement's Issuer
+	// is not in the allowlist, or the embedded IssuerKey does not match the
+	// registered key for the claimed issuer ID.
+	//
+	// Without this guard VerifyStatement only proves that the signature is
+	// consistent with the embedded IssuerKey — it does NOT prove that the
+	// embedded key belongs to the entity named in the Issuer field. An attacker
+	// who calls SignStatement with their own private key and sets Issuer to a
+	// legitimate DID passes VerifyStatement: the signature is valid against their
+	// key, and their key is embedded in the statement. The result is an
+	// attestation-forgery: the log would contain a verified-looking statement
+	// from a DID the attacker does not control.
+	ErrUntrustedIssuer = errors.New("scitt: issuer not in trusted-issuer allowlist")
 
 	// Checkpoint / witness cosigning
 	ErrCheckpointSig        = errors.New("scitt: checkpoint signature invalid")
@@ -172,6 +186,12 @@ type Ledger struct {
 	tsPub      ed25519.PublicKey
 	tsID       string
 
+	// trustedIssuers is the optional issuer allowlist: issuerID → authorised
+	// Ed25519 public key. When non-empty, Register enforces that every submitted
+	// statement's Issuer ID appears in the map and its IssuerKey matches the
+	// registered key. When empty the ledger is in open mode (any issuer accepted).
+	trustedIssuers map[string]ed25519.PublicKey
+
 	// subtreeCache memoizes the hashes of completed perfect subtrees, keyed by
 	// (offset, size) with size a power of two. Such subtrees are immutable in an
 	// append-only log, so entries never need invalidation. This turns the per-
@@ -288,6 +308,20 @@ func (l *Ledger) Close() error {
 func (l *Ledger) PublicKey() ed25519.PublicKey { return l.tsPub }
 func (l *Ledger) TSID() string                 { return l.tsID }
 
+// RegisterTrustedIssuer adds an (issuerID, publicKey) entry to the ledger's
+// trusted-issuer allowlist. Once at least one entry is registered, Register
+// enforces that every submitted statement's Issuer ID is present in the map
+// and its embedded IssuerKey matches the registered public key for that ID.
+// Call at startup before accepting statements from external parties.
+func (l *Ledger) RegisterTrustedIssuer(issuerID string, pub ed25519.PublicKey) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.trustedIssuers == nil {
+		l.trustedIssuers = make(map[string]ed25519.PublicKey)
+	}
+	l.trustedIssuers[issuerID] = pub
+}
+
 // SignStatement — 発行者が自分のSigned Statementを作成
 // issuerPub は checkpointに埋込用 (後で検索可能)
 func SignStatement(issuerPriv ed25519.PrivateKey, issuerID, subject, contentType string, payload []byte) (Statement, error) {
@@ -357,6 +391,23 @@ func (l *Ledger) Register(stmt Statement) (*Receipt, error) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	// Trusted-issuer policy: when the allowlist is non-empty, the submitted
+	// statement's Issuer must be registered AND its embedded IssuerKey must
+	// match the registered public key. VerifyStatement (above) only proves that
+	// the signature is consistent with IssuerKey — it does not prove that IssuerKey
+	// belongs to the entity named in Issuer. Without this check any party can
+	// register statements as any issuer by embedding their own key.
+	if len(l.trustedIssuers) > 0 {
+		want, ok := l.trustedIssuers[stmt.Issuer]
+		if !ok {
+			return nil, fmt.Errorf("%w: %q not registered", ErrUntrustedIssuer, stmt.Issuer)
+		}
+		got, err := base64.StdEncoding.DecodeString(stmt.IssuerKey)
+		if err != nil || subtle.ConstantTimeCompare(got, want) != 1 {
+			return nil, fmt.Errorf("%w: IssuerKey mismatch for %q", ErrUntrustedIssuer, stmt.Issuer)
+		}
+	}
 
 	raw, err := json.Marshal(stmt)
 	if err != nil {

@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`scitt.Ledger.RegisterTrustedIssuer`: trusted-issuer allowlist for the
+  transparency log (security, Axis 84).** `Ledger.Register` previously called
+  `VerifyStatement`, which only proves the signature is consistent with the
+  statement's embedded `IssuerKey` — it does NOT prove the embedded key belongs
+  to the entity named in the `Issuer` field. Anyone could call `SignStatement`
+  with their own Ed25519 key, set `Issuer = "did:web:certified-lab.eu"`, and
+  pass `Register` unchallenged: the signature is valid against their key, which
+  they also embed. The result is attestation forgery — a certified-looking entry
+  from an authority the attacker does not control. Added
+  `Ledger.RegisterTrustedIssuer(issuerID string, pub ed25519.PublicKey)`: once
+  at least one entry is registered, `Register` enforces that the statement's
+  `Issuer` is present in the allowlist AND its embedded `IssuerKey` matches the
+  registered key (compared via `subtle.ConstantTimeCompare`). Mismatch returns
+  `ErrUntrustedIssuer`. When no trusted issuers are registered the ledger
+  remains in open mode (backward-compatible with existing tests and single-party
+  deployments). 4 new tests: open-policy backward-compat; unknown-issuer
+  rejected; wrong-key-for-known-issuer rejected; happy-path trusted acceptance.
+
 - **`vctmeta.ResolveChain`: require `extends#integrity` on every hop (security,
   Axis 83).** SD-JWT-VC Type Metadata documents may declare an `extends` parent
   URL and an optional `extends#integrity` SRI hash. Previously `ResolveChain`

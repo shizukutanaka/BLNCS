@@ -1287,3 +1287,104 @@ func TestRootMatchesCachedRoot(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Axis 84: trusted-issuer allowlist (attestation-forgery defense)
+// ============================================================================
+
+// TestRegisterOpenPolicyPreservedWithNoTrustedIssuers verifies backward
+// compatibility: when no trusted issuers are registered, Register accepts
+// statements from any party (open/legacy mode).
+func TestRegisterOpenPolicyPreservedWithNoTrustedIssuers(t *testing.T) {
+	ledger, _ := NewLedger("ts-open")
+	priv, _ := mustIssuer(t, "any-issuer")
+	stmt, _ := SignStatement(priv, "did:web:anyone", "sub", "c", []byte("payload"))
+	if _, err := ledger.Register(stmt); err != nil {
+		t.Errorf("open-policy ledger should accept any issuer: %v", err)
+	}
+}
+
+// TestRegisterUnknownIssuerRejectedWhenPolicySet verifies that once at least
+// one trusted issuer is registered, a statement from an unregistered issuer ID
+// is rejected with ErrUntrustedIssuer. This is the core attestation-forgery
+// defence: without it, anyone can log a statement claiming to be any issuer
+// (including certified labs and official authorities) by simply embedding their
+// own key in the statement.
+func TestRegisterUnknownIssuerRejectedWhenPolicySet(t *testing.T) {
+	ledger, _ := NewLedger("ts-policy")
+
+	// Register one legitimate issuer.
+	_, legitPub := mustIssuer(t, "did:web:legit")
+	ledger.RegisterTrustedIssuer("did:web:legit", legitPub)
+
+	// Attacker: their own key, but claiming to be the legitimate issuer.
+	attackerPriv, _ := mustIssuer(t, "attacker")
+	// SignStatement embeds attackerPriv.Public() as IssuerKey.
+	forged, err := SignStatement(attackerPriv, "did:web:legit", "product-xyz", "application/vc+json", []byte("fake-attestation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// VerifyStatement passes (signature is valid against the embedded attacker key).
+	if err := VerifyStatement(&forged); err != nil {
+		t.Fatalf("forged statement self-verifies (expected): %v", err)
+	}
+	// But Register must reject it: the embedded key does not match the trusted key for "did:web:legit".
+	_, err = ledger.Register(forged)
+	if !errors.Is(err, ErrUntrustedIssuer) {
+		t.Fatalf("forged statement must be rejected with ErrUntrustedIssuer, got: %v", err)
+	}
+
+	// A statement from an issuer ID not in the allowlist at all must also be rejected.
+	unknownPriv, _ := mustIssuer(t, "did:web:unknown")
+	stmt2, _ := SignStatement(unknownPriv, "did:web:unknown", "product", "c", []byte("data"))
+	if _, err := ledger.Register(stmt2); !errors.Is(err, ErrUntrustedIssuer) {
+		t.Fatalf("unknown issuer must be rejected with ErrUntrustedIssuer, got: %v", err)
+	}
+}
+
+// TestRegisterWrongKeyForTrustedIssuer verifies that a statement whose Issuer
+// ID is registered but whose embedded IssuerKey does not match the registered
+// public key is rejected with ErrUntrustedIssuer. This guards against key
+// substitution: an attacker could re-register an issuer ID they observed in the
+// log but use a key they control.
+func TestRegisterWrongKeyForTrustedIssuer(t *testing.T) {
+	ledger, _ := NewLedger("ts-wrongkey")
+
+	legitPriv, legitPub := mustIssuer(t, "did:web:lab")
+	ledger.RegisterTrustedIssuer("did:web:lab", legitPub)
+
+	// Legitimate statement must be accepted.
+	goodStmt, _ := SignStatement(legitPriv, "did:web:lab", "product-1", "c", []byte("data"))
+	if _, err := ledger.Register(goodStmt); err != nil {
+		t.Fatalf("legitimate statement rejected: %v", err)
+	}
+
+	// Same issuerID but signed with a different (attacker) key.
+	attackerPriv, _ := mustIssuer(t, "attacker2")
+	badStmt, _ := SignStatement(attackerPriv, "did:web:lab", "product-1", "c", []byte("fake"))
+	if _, err := ledger.Register(badStmt); !errors.Is(err, ErrUntrustedIssuer) {
+		t.Fatalf("wrong key for trusted issuer: want ErrUntrustedIssuer, got: %v", err)
+	}
+}
+
+// TestRegisterTrustedIssuerHappyPath verifies the end-to-end success case:
+// a statement from a registered issuer with the correct key is accepted and
+// a valid receipt is returned.
+func TestRegisterTrustedIssuerHappyPath(t *testing.T) {
+	ledger, _ := NewLedger("ts-happy")
+
+	priv, pub := mustIssuer(t, "did:web:certified-lab.eu")
+	ledger.RegisterTrustedIssuer("did:web:certified-lab.eu", pub)
+
+	stmt, err := SignStatement(priv, "did:web:certified-lab.eu", "battery-42", "application/vc+json", []byte("{\"result\":\"pass\"}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := ledger.Register(stmt)
+	if err != nil {
+		t.Fatalf("trusted issuer statement rejected: %v", err)
+	}
+	if err := VerifyReceipt(receipt, stmt, ledger.PublicKey()); err != nil {
+		t.Fatalf("receipt verify: %v", err)
+	}
+}
