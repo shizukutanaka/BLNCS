@@ -20,9 +20,9 @@ import (
 // Each limit is generous enough for any real credential wallet scenario while
 // bounding worst-case O(credentials × claims × depth × values) work in MatchClaims.
 const (
-	dcqlMaxCredentials  = 32  // max CredentialQuery entries per DCQLQuery
-	dcqlMaxClaims       = 64  // max ClaimQuery entries per CredentialQuery
-	dcqlMaxPathDepth    = 16  // max path segments in a single ClaimQuery.Path
+	dcqlMaxCredentials    = 32 // max CredentialQuery entries per DCQLQuery
+	dcqlMaxClaims         = 64 // max ClaimQuery entries per CredentialQuery
+	dcqlMaxPathDepth      = 16 // max path segments in a single ClaimQuery.Path
 	dcqlMaxValuesPerClaim = 32 // max allowed Values entries in a single ClaimQuery
 )
 

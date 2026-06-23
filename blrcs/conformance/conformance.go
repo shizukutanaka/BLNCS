@@ -667,10 +667,10 @@ func ReferenceSuite() *VectorSuite {
 			// must also enforce. A verifier that accepts any of these must be
 			// considered non-conformant.
 			{
-				ID:   "sdjwt/wrong-issuer-key-rejected",
+				ID:       "sdjwt/wrong-issuer-key-rejected",
 				Category: "sdjwt",
-				Desc: "SD-JWT verified with the wrong issuer public key must be rejected",
-				Tags: []string{"negative", "security"},
+				Desc:     "SD-JWT verified with the wrong issuer public key must be rejected",
+				Tags:     []string{"negative", "security"},
 				Input: raw(map[string]any{
 					"issuerSeedHex": "0001020304050607080910111213141516171819202122232425262728293031",
 					"issuerDID":     "did:web:test.example",
@@ -683,10 +683,10 @@ func ReferenceSuite() *VectorSuite {
 				Expected: raw(map[string]any{"verifyOK": false}),
 			},
 			{
-				ID:   "sdjwt/malformed-token-rejected",
+				ID:       "sdjwt/malformed-token-rejected",
 				Category: "sdjwt",
-				Desc: "A malformed SD-JWT (not base64url-encoded JWS) must be rejected",
-				Tags: []string{"negative", "security"},
+				Desc:     "A malformed SD-JWT (not base64url-encoded JWS) must be rejected",
+				Tags:     []string{"negative", "security"},
 				Input: raw(map[string]any{
 					"issuerSeedHex": "0001020304050607080910111213141516171819202122232425262728293031",
 					"issuerDID":     "did:web:test.example",
@@ -696,10 +696,10 @@ func ReferenceSuite() *VectorSuite {
 				Expected: raw(map[string]any{"verifyOK": false}),
 			},
 			{
-				ID:   "sdjwt/truncated-signature-rejected",
+				ID:       "sdjwt/truncated-signature-rejected",
 				Category: "sdjwt",
-				Desc: "SD-JWT with a truncated (corrupt) signature must be rejected",
-				Tags: []string{"negative", "security"},
+				Desc:     "SD-JWT with a truncated (corrupt) signature must be rejected",
+				Tags:     []string{"negative", "security"},
 				Input: raw(map[string]any{
 					"issuerSeedHex": "0001020304050607080910111213141516171819202122232425262728293031",
 					"issuerDID":     "did:web:test.example",

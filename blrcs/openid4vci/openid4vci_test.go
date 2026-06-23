@@ -1997,8 +1997,8 @@ func TestIssueCredentialConfigIDMatchPasses(t *testing.T) {
 	iss, _ := setupIssuer(t)
 
 	tests := []struct {
-		name   string
-		req    CredentialRequest
+		name string
+		req  CredentialRequest
 	}{
 		{"empty fields", CredentialRequest{}},
 		{"matching config id", CredentialRequest{CredentialConfigurationID: "eu-battery-passport-v1"}},

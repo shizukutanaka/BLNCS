@@ -240,9 +240,9 @@ func GenerateMasterKey() ([]byte, error) {
 }
 
 const (
-	kmsNonceSize    = 12 // AES-GCM standard nonce
-	kmsPlainSize    = ed25519.PublicKeySize + ed25519.PrivateKeySize // 96
-	kmsEncryptedSize = kmsNonceSize + kmsPlainSize + 16              // 124 (96 plain + 16 GCM tag)
+	kmsNonceSize     = 12                                             // AES-GCM standard nonce
+	kmsPlainSize     = ed25519.PublicKeySize + ed25519.PrivateKeySize // 96
+	kmsEncryptedSize = kmsNonceSize + kmsPlainSize + 16               // 124 (96 plain + 16 GCM tag)
 )
 
 func (f *FileSigner) load() error {

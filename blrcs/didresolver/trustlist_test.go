@@ -251,7 +251,7 @@ func TestTrustListAuthorizesForScope(t *testing.T) {
 		Authority: "did:web:reg",
 		Entries: []TrustListEntry{
 			{DID: "did:web:battery.example", Status: IssuerActive, Scope: "battery"},
-			{DID: "did:web:any.example", Status: IssuerActive},                  // no scope = unrestricted
+			{DID: "did:web:any.example", Status: IssuerActive}, // no scope = unrestricted
 			{DID: "did:web:revoked.example", Status: IssuerRevoked, Scope: "battery"},
 		},
 	}

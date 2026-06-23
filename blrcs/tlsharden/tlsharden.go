@@ -92,7 +92,7 @@ func Modern() *tls.Config {
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 		},
 		CurvePreferences: []tls.CurveID{
-			tls.X25519,    // prefer X25519 first: fastest, no timing side-channel
+			tls.X25519, // prefer X25519 first: fastest, no timing side-channel
 			tls.CurveP256,
 			tls.CurveP384,
 		},
