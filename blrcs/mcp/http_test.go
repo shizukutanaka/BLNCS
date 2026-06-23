@@ -237,6 +237,92 @@ func TestHTTP_RateLimiting(t *testing.T) {
 	}
 }
 
+// TestTokenBucketLimiterSelfBounds verifies the bucket map cannot grow without
+// bound: once at the cap, inserting a new principal opportunistically evicts
+// fully-refilled buckets. Without this, an AuthVerifier that derives principal
+// from client-supplied input lets an attacker exhaust memory through the very
+// limiter meant to prevent DoS.
+func TestTokenBucketLimiterSelfBounds(t *testing.T) {
+	lim := NewTokenBucketLimiter(1000, 1000) // refills fast → buckets go stale quickly
+	lim.maxBuckets = 8                       // tiny cap for the test
+
+	// Fill the map to the cap with distinct principals.
+	for i := 0; i < lim.maxBuckets; i++ {
+		lim.Allow(fmt.Sprintf("p%d", i))
+	}
+	// Backdate every existing bucket so it counts as fully refilled (stale).
+	lim.mu.Lock()
+	old := time.Now().Add(-time.Hour)
+	for _, b := range lim.buckets {
+		b.last = old
+	}
+	lim.mu.Unlock()
+
+	// Inserting a fresh principal at the cap must trigger eviction of the stale
+	// buckets, so the map does not exceed the cap.
+	lim.Allow("newcomer")
+	lim.mu.Lock()
+	n := len(lim.buckets)
+	lim.mu.Unlock()
+	if n > lim.maxBuckets {
+		t.Fatalf("map grew past cap: %d > %d", n, lim.maxBuckets)
+	}
+}
+
+// TestTokenBucketLimiterEvictionPreservesActive verifies a bucket that is NOT yet
+// fully refilled (still carrying live throttle state) is preserved across an
+// at-cap insert — eviction must be lossless.
+func TestTokenBucketLimiterEvictionPreservesActive(t *testing.T) {
+	lim := NewTokenBucketLimiter(1, 2) // slow refill: full window = 2s
+	lim.maxBuckets = 2
+
+	// "victim" exhausts its bucket and is therefore actively throttled.
+	if !lim.Allow("victim") {
+		t.Fatal("first victim request should pass")
+	}
+	if !lim.Allow("victim") {
+		t.Fatal("second victim request should pass (burst=2)")
+	}
+	if lim.Allow("victim") {
+		t.Fatal("third victim request should be throttled")
+	}
+
+	// Fill to cap then insert a newcomer, triggering an eviction sweep.
+	lim.Allow("filler")
+	lim.Allow("newcomer")
+
+	// victim must still be throttled — its live state was not evicted (it had not
+	// fully refilled within the ~instant test window).
+	if lim.Allow("victim") {
+		t.Fatal("victim's throttle state must survive eviction (not fully refilled)")
+	}
+}
+
+// TestTokenBucketLimiterGC verifies GC drops buckets older than ttl.
+func TestTokenBucketLimiterGC(t *testing.T) {
+	lim := NewTokenBucketLimiter(1, 2)
+	lim.Allow("a")
+	lim.Allow("b")
+
+	// Backdate "a" so it is older than the ttl.
+	lim.mu.Lock()
+	lim.buckets["a"].last = time.Now().Add(-time.Hour)
+	lim.mu.Unlock()
+
+	lim.GC(time.Minute)
+
+	lim.mu.Lock()
+	_, hasA := lim.buckets["a"]
+	_, hasB := lim.buckets["b"]
+	lim.mu.Unlock()
+	if hasA {
+		t.Error("stale bucket 'a' should have been GC'd")
+	}
+	if !hasB {
+		t.Error("fresh bucket 'b' should survive GC")
+	}
+}
+
 func TestHTTP_DeleteSession(t *testing.T) {
 	ts, _ := newTestHTTP(t, nil, nil)
 	resp, _ := doJSON(t, ts, "POST", "/mcp", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`, "", "")

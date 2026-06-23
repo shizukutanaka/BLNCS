@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mcp.TokenBucketLimiter`: self-bounding bucket map + `GC` (security,
+  Axis 86).** The per-principal rate limiter that guards the MCP HTTP server kept
+  one `*bucket` per distinct principal and never evicted any — unlike its sibling
+  `httpmw.RateLimiter`, which has `GC`/`StartGC`. When a deployment's
+  `AuthVerifier` derives `principal` from a client-supplied or per-tenant
+  identifier, an attacker can mint unbounded principals and exhaust memory through
+  the very component meant to *prevent* DoS. Closed the gap by making the map
+  self-bounding with zero operator action: `Allow` now caps the map at
+  `defaultMaxBuckets` (100k) and, on reaching the cap, opportunistically evicts
+  fully-refilled buckets (a bucket refilled to `burst` carries no live throttle
+  state, so eviction is lossless). Added a `GC(ttl)` method mirroring
+  `httpmw.RateLimiter.GC` for callers wanting eager reclamation. 3 new tests:
+  self-bounding under cap, eviction preserves still-throttled buckets, and `GC`
+  drops stale entries.
+
 - **`openid4vp.DCQLQuery.Validate`: structural complexity bounds to prevent
   DCQL-driven DoS (security, Axis 85).** `MatchClaims` performs
   O(credentials × claims × path depth × values) work per `ProcessResponse` call,

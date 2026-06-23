@@ -4,7 +4,7 @@
 
 ```
 stdlib + ed25519 only — zero external dependencies
-1700+ tests · 53 packages · ~18,000 LoC implementation · 21 fuzz targets
+1800+ tests · 53 packages · ~24,500 LoC implementation · 21 fuzz targets
 ```
 
 ## Status

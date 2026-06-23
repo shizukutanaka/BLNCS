@@ -465,12 +465,21 @@ func (b *BearerTokenAuth) Verify(_ context.Context, r *http.Request) (string, er
 // Default RateLimiter: token bucket per-principal
 // ============================================================================
 
+// defaultMaxBuckets caps the per-principal bucket map. Without a bound, a caller
+// whose AuthVerifier derives `principal` from a client-supplied or per-tenant
+// identifier lets an attacker mint unbounded principals — turning the very
+// component meant to *prevent* DoS into a memory-exhaustion vector. 100k buckets
+// (~a few MB) is far above any legitimate principal count while still bounding
+// worst-case memory.
+const defaultMaxBuckets = 100_000
+
 // TokenBucketLimiter — principal毎 N req/sec
 type TokenBucketLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]*bucket
-	rate    float64 // tokens per second
-	burst   float64
+	mu         sync.Mutex
+	buckets    map[string]*bucket
+	rate       float64 // tokens per second
+	burst      float64
+	maxBuckets int
 }
 
 type bucket struct {
@@ -480,9 +489,10 @@ type bucket struct {
 
 func NewTokenBucketLimiter(rate, burst float64) *TokenBucketLimiter {
 	return &TokenBucketLimiter{
-		buckets: make(map[string]*bucket),
-		rate:    rate,
-		burst:   burst,
+		buckets:    make(map[string]*bucket),
+		rate:       rate,
+		burst:      burst,
+		maxBuckets: defaultMaxBuckets,
 	}
 }
 
@@ -492,6 +502,13 @@ func (l *TokenBucketLimiter) Allow(principal string) bool {
 	now := time.Now()
 	b, ok := l.buckets[principal]
 	if !ok {
+		// Before inserting a new principal, opportunistically evict fully-refilled
+		// buckets if we're at the cap. A bucket that has refilled to `burst` is
+		// indistinguishable from a fresh one, so dropping it loses no rate-limiting
+		// state — this keeps the map self-bounding with zero operator action.
+		if l.maxBuckets > 0 && len(l.buckets) >= l.maxBuckets {
+			l.evictRefilled(now)
+		}
 		l.buckets[principal] = &bucket{tokens: l.burst - 1, last: now}
 		return true
 	}
@@ -506,4 +523,34 @@ func (l *TokenBucketLimiter) Allow(principal string) bool {
 	}
 	b.tokens--
 	return true
+}
+
+// evictRefilled removes buckets that have fully refilled to `burst` (i.e. carry no
+// live rate-limiting state). Caller must hold l.mu. rate<=0 means tokens never
+// refill, so eviction would be unsafe — in that degenerate config we skip it.
+func (l *TokenBucketLimiter) evictRefilled(now time.Time) {
+	if l.rate <= 0 {
+		return
+	}
+	// Seconds needed to refill from empty to burst.
+	fullWindow := l.burst / l.rate
+	for k, b := range l.buckets {
+		if now.Sub(b.last).Seconds() >= fullWindow {
+			delete(l.buckets, k)
+		}
+	}
+}
+
+// GC removes buckets whose last access is older than ttl. Optional: Allow already
+// self-bounds the map via evictRefilled, but a server may call GC periodically to
+// reclaim memory sooner. Mirrors httpmw.RateLimiter.GC for API parity.
+func (l *TokenBucketLimiter) GC(ttl time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cutoff := time.Now().Add(-ttl)
+	for k, b := range l.buckets {
+		if b.last.Before(cutoff) {
+			delete(l.buckets, k)
+		}
+	}
 }
