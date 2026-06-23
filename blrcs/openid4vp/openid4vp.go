@@ -247,6 +247,13 @@ type Verifier struct {
 	// (anti-replay はワンタイム state 消費のみに依存することになる)。
 	RequireKeyBinding bool
 
+	// AllowedAlgs — 非空なら、受理する発行者 JWS `alg` をこの集合に固定する
+	// (crypto-agility ダウングレード対策)。ML-DSA 等を RegisterJWSVerifier で
+	// 登録した環境で、特定の検証者を「ML-DSA のみ」や「EdDSA のみ」に固定できる。
+	// nil/空なら登録済みの任意 alg を受理 (後方互換)。compliance.VerifyOptions へ
+	// そのまま渡される。
+	AllowedAlgs []string
+
 	// TrustedIssuers — DCQL フロー用の DID→公開鍵マップ (JSON 非送信)。
 	// dcql_query は PresentationDefinition.AcceptableIssuers を持たないため、
 	// CreateRequestDCQL で発行した request の応答検証はこの集合を信頼アンカーとして
@@ -482,6 +489,7 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 		ExpectedAudience:  v.ClientID,
 		RequireKeyBinding: v.RequireKeyBinding,
 		MaxKBAge:          v.DefaultTTL,
+		AllowedAlgs:       v.AllowedAlgs,
 	}
 	var verified *compliance.VerifiedClaims
 	var usedIssuer string

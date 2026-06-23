@@ -50,6 +50,17 @@ var (
 	// This prevents key-confusion: a verifier who obtains a public key for a
 	// specific issuer should also confirm the credential claims that issuer.
 	ErrSDJWTIssuerMismatch = errors.New("compliance: sd-jwt issuer does not match expected issuer")
+	// ErrSDJWTAlgNotAllowed is returned by VerifySDJWTWithBinding when
+	// VerifyOptions.AllowedAlgs is non-empty and the issuer JWS `alg` is not in
+	// that allowlist. This is distinct from ErrSDJWTUnsupportedAlg (the alg is
+	// not registered at all): here the alg IS registered and supported, but the
+	// caller's per-verification policy excludes it. It defends against the
+	// algorithm-downgrade risk inherent to crypto-agility — once a second
+	// algorithm (e.g. ML-DSA) is registered globally, every verification would
+	// otherwise accept the weaker algorithm too, collapsing deployment security
+	// to the weakest registered algorithm. AllowedAlgs lets a post-quantum
+	// deployment pin "ML-DSA only" (or a legacy verifier pin "EdDSA only").
+	ErrSDJWTAlgNotAllowed = errors.New("compliance: sd-jwt JWS alg not in caller's allowlist")
 
 	// SD-JWT Key Binding (KB-JWT) — IETF SD-JWT / SD-JWT-VC holder binding
 	ErrHolderKeyRequired = errors.New("compliance: holder public key required for key binding")

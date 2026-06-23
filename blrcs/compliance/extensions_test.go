@@ -1235,6 +1235,71 @@ func TestVerifySDJWTExpectedIssuerMismatch(t *testing.T) {
 	}
 }
 
+// TestVerifySDJWTAllowedAlgs — Axis 82
+//
+// Crypto-agility downgrade defense: VerifyOptions.AllowedAlgs pins the set of
+// acceptable issuer JWS algorithms per verification. Without it, registering a
+// second algorithm globally (RegisterJWSVerifier) would silently make every
+// verification accept the weaker algorithm too.
+func TestVerifySDJWTAllowedAlgs(t *testing.T) {
+	iss, _ := NewIssuer("did:web:alg.example")
+	sdjwt, _, err := iss.IssueSDJWT("sub", map[string]any{"tier": "X"}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := iss.PublicKey()
+
+	// Case 1: empty AllowedAlgs — backward-compatible, accepts the EdDSA cred.
+	if _, err := VerifySDJWTWithBinding(sdjwt, pub, VerifyOptions{}); err != nil {
+		t.Fatalf("empty AllowedAlgs should accept: %v", err)
+	}
+
+	// Case 2: AllowedAlgs explicitly lists EdDSA — accepts.
+	if _, err := VerifySDJWTWithBinding(sdjwt, pub, VerifyOptions{
+		AllowedAlgs: []string{"EdDSA"},
+	}); err != nil {
+		t.Fatalf("AllowedAlgs=[EdDSA] should accept EdDSA cred: %v", err)
+	}
+
+	// Case 3: AllowedAlgs lists only ML-DSA — the (real, supported) EdDSA alg is
+	// rejected as a policy violation (downgrade defense), with the distinct
+	// ErrSDJWTAlgNotAllowed (not ErrSDJWTUnsupportedAlg, since EdDSA IS registered).
+	_, err = VerifySDJWTWithBinding(sdjwt, pub, VerifyOptions{
+		AllowedAlgs: []string{"ML-DSA"},
+	})
+	if !errors.Is(err, ErrSDJWTAlgNotAllowed) {
+		t.Errorf("AllowedAlgs=[ML-DSA] vs EdDSA cred: want ErrSDJWTAlgNotAllowed, got %v", err)
+	}
+
+	// Case 4: multiple allowed algs including EdDSA — accepts.
+	if _, err := VerifySDJWTWithBinding(sdjwt, pub, VerifyOptions{
+		AllowedAlgs: []string{"ML-DSA", "EdDSA"},
+	}); err != nil {
+		t.Fatalf("AllowedAlgs=[ML-DSA,EdDSA] should accept EdDSA cred: %v", err)
+	}
+}
+
+// TestVerifySDJWTAllowedAlgsDistinctFromUnsupported confirms the policy/
+// capability distinction: an alg that is neither registered nor in the
+// allowlist must still surface as the allowlist (policy) error first, because
+// the allowlist is checked before the registry lookup — the caller's intent
+// ("I only accept these algs") is the stronger signal.
+func TestVerifySDJWTAllowedAlgsCheckedBeforeRegistry(t *testing.T) {
+	iss, _ := NewIssuer("did:web:alg2.example")
+	sdjwt, _, err := iss.IssueSDJWT("sub", map[string]any{"a": 1}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// AllowedAlgs lists a never-registered alg; the credential is EdDSA. The
+	// EdDSA alg is not in the allowlist, so policy rejects it.
+	_, err = VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{
+		AllowedAlgs: []string{"some-unregistered-pq-alg"},
+	})
+	if !errors.Is(err, ErrSDJWTAlgNotAllowed) {
+		t.Errorf("want ErrSDJWTAlgNotAllowed, got %v", err)
+	}
+}
+
 // TestIssueSDJWTEmptySubjectRejected verifies that IssueSDJWT* rejects an
 // empty subject at issuance time. An empty sub violates RFC 7519 §4.1.2 and
 // would produce a credential that always fails VerifySDJWT*, but without a

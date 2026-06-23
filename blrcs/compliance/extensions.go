@@ -263,6 +263,15 @@ type VerifyOptions struct {
 	ExpectedIssuer    string
 	RequireKeyBinding bool          // true なら cnf 無し credential も拒否
 	MaxKBAge          time.Duration // >0 なら KB-JWT iat の最大許容経過時間 (freshness)
+	// AllowedAlgs — 非空なら、発行者 JWS の `alg` がこのリストに含まれること必須。
+	// 空 (ゼロ値) なら登録済みの任意 alg を受理 (後方互換)。
+	//
+	// crypto-agility のダウングレード対策: RegisterJWSVerifier で 2 つ目の alg
+	// (例: ML-DSA) を登録した瞬間、検証はグローバルに「EdDSA も ML-DSA も可」に
+	// なる。ポスト量子デプロイが「ML-DSA のみ」を、レガシ検証者が「EdDSA のみ」を
+	// 呼び出しごとに固定できるようにする。ErrSDJWTUnsupportedAlg (未登録) とは別の
+	// ErrSDJWTAlgNotAllowed を返す。
+	AllowedAlgs []string
 }
 
 const defaultLeeway = 60 * time.Second
@@ -362,6 +371,14 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	// required vct claim + _sd structure still gate it).
 	if hdr.Typ != "" && !isSDJWTVCType(hdr.Typ) {
 		return nil, ErrSDJWTUnsupportedType
+	}
+	// Per-verification algorithm allowlist (crypto-agility downgrade defense).
+	// When the caller pins AllowedAlgs, the issuer alg must be a member — checked
+	// BEFORE the global registry lookup so an excluded-but-registered alg is
+	// rejected as policy (ErrSDJWTAlgNotAllowed), not capability. Empty = any
+	// registered alg (backward-compatible).
+	if len(opts.AllowedAlgs) > 0 && !containsString(opts.AllowedAlgs, hdr.Alg) {
+		return nil, ErrSDJWTAlgNotAllowed
 	}
 	verify, ok := lookupJWSVerifier(hdr.Alg)
 	if !ok {
@@ -530,6 +547,18 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 func isSDJWTVCType(typ string) bool {
 	typ = strings.TrimPrefix(typ, "application/")
 	return typ == "vc+sd-jwt" || typ == "dc+sd-jwt"
+}
+
+// containsString reports whether s is in list. Used for the per-verification
+// algorithm allowlist (VerifyOptions.AllowedAlgs); allowlists are tiny, so a
+// linear scan is appropriate.
+func containsString(list []string, s string) bool {
+	for _, e := range list {
+		if e == s {
+			return true
+		}
+	}
+	return false
 }
 
 // numericDateClaim extracts an RFC 7519 NumericDate claim (iat/exp/nbf) from a

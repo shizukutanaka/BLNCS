@@ -7,6 +7,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`compliance.VerifyOptions.AllowedAlgs`: per-verification JWS algorithm
+  allowlist — crypto-agility downgrade defense (security, Axis 82).** The JWS
+  verifier registry (`RegisterJWSVerifier`) lets a deployment add post-quantum
+  algorithms (e.g. ML-DSA) without bundling them — but it introduced a downgrade
+  risk: once a second algorithm is registered globally, **every**
+  `VerifySDJWT*` call accepts **either** algorithm, collapsing deployment
+  security to the weakest registered algorithm. An attacker who breaks (or has
+  precomputed against) the legacy algorithm can still present a legacy-signed
+  credential and the verifier accepts it, because that algorithm remains in the
+  global registry. Closed the gap with `VerifyOptions.AllowedAlgs []string`:
+  when non-empty, the issuer JWS `alg` must be a member, checked **before** the
+  registry lookup so an excluded-but-registered algorithm is rejected as a
+  policy violation (new sentinel `ErrSDJWTAlgNotAllowed`) rather than a
+  capability gap (`ErrSDJWTUnsupportedAlg`). Empty/nil = accept any registered
+  algorithm (backward-compatible — `VerifySDJWT`, `VerifySDJWTAt`, and all
+  existing callers are unaffected). A post-quantum deployment can now pin
+  `AllowedAlgs: []string{"ML-DSA"}`; a legacy verifier can pin
+  `["EdDSA"]`. Also surfaced end-to-end via the new
+  `openid4vp.Verifier.AllowedAlgs` field, which passes straight through to
+  `compliance.VerifyOptions` in `ProcessResponse`. 3 new tests covering: empty
+  allowlist accepts; explicit EdDSA allowlist accepts; ML-DSA-only allowlist
+  rejects an EdDSA credential with `ErrSDJWTAlgNotAllowed`; multi-alg allowlist
+  accepts; and the policy-before-capability ordering.
 - **`conformance.ReferenceSuite`: three SD-JWT negative test vectors (security,
   Axis 81).** The reference conformance suite had one SD-JWT test vector
   (`sdjwt/basic-issue-verify`) — a positive "happy path" case. Third-party
