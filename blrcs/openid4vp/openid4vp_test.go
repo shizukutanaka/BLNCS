@@ -911,6 +911,51 @@ func TestVerifierCloseWithExternalStore(t *testing.T) {
 	}
 }
 
+// TestMemoryStoreGCEvictsExpired verifies that GC() sweeps all expired entries
+// in a single pass. This exercises the full-sweep path in gcLoop (which fires
+// the ticker every 5 minutes — too long to wait in tests) directly via GC().
+func TestMemoryStoreGCEvictsExpired(t *testing.T) {
+	ms := NewMemoryStoreWithCap(100)
+	defer ms.Close()
+
+	req := &AuthorizationRequest{ClientID: "https://v.example", Nonce: "n1"}
+	if err := ms.Save("live", req, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.Save("expired", req, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	// Let the "expired" entry's TTL elapse.
+	time.Sleep(5 * time.Millisecond)
+
+	ms.GC()
+
+	// Expired entry must be gone.
+	if _, err := ms.Load("expired"); !errors.Is(err, ErrStateNotFound) {
+		t.Fatalf("expired entry should be gone after GC, got: %v", err)
+	}
+	// Live entry must survive.
+	if _, err := ms.Load("live"); err != nil {
+		t.Fatalf("live entry should survive GC: %v", err)
+	}
+}
+
+// TestMemoryStoreGCIdempotent verifies calling GC() when the store is empty
+// or already clean does not panic or error.
+func TestMemoryStoreGCIdempotent(t *testing.T) {
+	ms := NewMemoryStoreWithCap(10)
+	defer ms.Close()
+	ms.GC() // empty store — must not panic
+	req := &AuthorizationRequest{ClientID: "x"}
+	if err := ms.Save("s", req, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	ms.GC() // no expired entries — must not delete live entry
+	if _, err := ms.Load("s"); err != nil {
+		t.Fatalf("live entry removed by GC with no expiry: %v", err)
+	}
+}
+
 type stubSessionStore struct{}
 
 func (s *stubSessionStore) Save(_ string, _ *AuthorizationRequest, _ time.Duration) error {

@@ -138,6 +138,104 @@ func TestVerifyDocumentMissingDeviceAuth(t *testing.T) {
 	}
 }
 
+// TestVerifyDocumentMissingIssuerSigned rejects a top-level CBOR map that has no
+// "issuerSigned" key. The absence of this field is structurally malformed — a
+// presentation without issuer-signed content cannot be verified.
+func TestVerifyDocumentMissingIssuerSigned(t *testing.T) {
+	// Build a minimal Document with only docType, no issuerSigned.
+	doc, err := cbor.Marshal(map[string]any{
+		docDocType: "org.iso.18013.5.1.mDL",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, privPub := testKeys(t)
+	if _, err := VerifyDocument(doc, privPub, []byte("t"), time.Now()); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("missing issuerSigned: want ErrMalformed, got %v", err)
+	}
+}
+
+// TestVerifyDocumentDeviceAuthNotMap rejects a Document where deviceSigned.deviceAuth
+// is present but not a CBOR map. The type assertion must fail gracefully and return
+// ErrDeviceAuthMissing rather than a nil-pointer panic or silent accept.
+func TestVerifyDocumentDeviceAuthNotMap(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	devicePriv, devicePub := testKeys(t)
+	cred, err := Issue(sampleParams(issuerPriv, devicePub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := Present(cred, map[string][]string{"org.iso.18013.5.1": {"family_name"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Craft a deviceSigned where deviceAuth is a string, not a map.
+	deviceNS, _ := cbor.Marshal(map[string]any{})
+	deviceSigned := map[string]any{
+		dsNameSpaces: cbor.Tag{Number: tagEncodedCBOR, Content: deviceNS},
+		dsDeviceAuth: "not-a-map", // wrong type: string instead of map
+	}
+	doc, err := cbor.Marshal(map[string]any{
+		docDocType:      "org.iso.18013.5.1.mDL",
+		docIssuerSigned: rawCBOR(filtered),
+		docDeviceSigned: deviceSigned,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// devicePriv is valid but we're injecting a bad structure.
+	_ = devicePriv
+	if _, err := VerifyDocument(doc, issuerPub, []byte("t"), time.Now()); !errors.Is(err, ErrDeviceAuthMissing) {
+		t.Fatalf("non-map deviceAuth: want ErrDeviceAuthMissing, got %v", err)
+	}
+}
+
+// TestVerifyDocumentDeviceSignatureMissing rejects a Document where deviceAuth is a
+// map but does not contain a "deviceSignature" key.
+func TestVerifyDocumentDeviceSignatureMissing(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	_, devicePub := testKeys(t)
+	cred, err := Issue(sampleParams(issuerPriv, devicePub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := Present(cred, map[string][]string{"org.iso.18013.5.1": {"family_name"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// deviceAuth is a map but has no deviceSignature entry.
+	deviceNS, _ := cbor.Marshal(map[string]any{})
+	deviceSigned := map[string]any{
+		dsNameSpaces: cbor.Tag{Number: tagEncodedCBOR, Content: deviceNS},
+		dsDeviceAuth: map[string]any{"not_device_signature": "x"},
+	}
+	doc, err := cbor.Marshal(map[string]any{
+		docDocType:      "org.iso.18013.5.1.mDL",
+		docIssuerSigned: rawCBOR(filtered),
+		docDeviceSigned: deviceSigned,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyDocument(doc, issuerPub, []byte("t"), time.Now()); !errors.Is(err, ErrDeviceAuthMissing) {
+		t.Fatalf("missing deviceSignature key: want ErrDeviceAuthMissing, got %v", err)
+	}
+}
+
+// TestPresentWithDeviceAuthMalformedInput verifies that passing a structurally
+// invalid issuerSigned blob to PresentWithDeviceAuth propagates the error from
+// Present rather than panicking or silently producing a broken Document.
+func TestPresentWithDeviceAuthMalformedInput(t *testing.T) {
+	devicePriv, _ := testKeys(t)
+	// Malformed issuerSigned (not valid CBOR)
+	_, err := PresentWithDeviceAuth([]byte("not-cbor"),
+		map[string][]string{"org.iso.18013.5.1": {"family_name"}},
+		"org.iso.18013.5.1.mDL", devicePriv, []byte("transcript"))
+	if err == nil {
+		t.Fatal("malformed issuerSigned should return an error")
+	}
+}
+
 // TestVerifyDocumentExpired confirms issuerSigned validity is still enforced inside
 // VerifyDocument (the device-auth wrapper does not bypass credential expiry).
 func TestVerifyDocumentExpired(t *testing.T) {

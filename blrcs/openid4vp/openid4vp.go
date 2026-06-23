@@ -217,16 +217,23 @@ func (m *MemoryStore) gcLoop() {
 	for {
 		select {
 		case <-t.C:
-			m.mu.Lock()
-			now := time.Now()
-			for k, e := range m.data {
-				if now.After(e.expires) {
-					delete(m.data, k)
-				}
-			}
-			m.mu.Unlock()
+			m.GC()
 		case <-m.stop:
 			return
+		}
+	}
+}
+
+// GC removes all expired entries from the store. gcLoop calls this on each
+// ticker fire; callers may also invoke it directly (e.g. in tests or when
+// memory pressure is observed). Safe to call concurrently.
+func (m *MemoryStore) GC() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for k, e := range m.data {
+		if now.After(e.expires) {
+			delete(m.data, k)
 		}
 	}
 }

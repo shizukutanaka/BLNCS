@@ -4,10 +4,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // signedVerifier returns a Verifier whose requests are JAR-signed, plus the
@@ -195,5 +197,60 @@ func TestJAR_BackCompatUnsigned(t *testing.T) {
 	u, _ := url.Parse(reqURL)
 	if u.Query().Get("request") != "" {
 		t.Error("unsigned verifier must not emit a request object")
+	}
+}
+
+// TestJAR_ExpiredRequestObjectRejected verifies that a JAR whose `exp` is in the
+// past (beyond the 60s leeway) is rejected. Without this, a stolen signed
+// Authorization Request remains valid forever — defeating the short-lived JAR
+// anti-replay property.
+func TestJAR_ExpiredRequestObjectRejected(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	// Build a JAR manually with exp in the far past (> 60s leeway).
+	pastExp := time.Now().UTC().Add(-10 * time.Minute).Unix()
+	payload := map[string]any{
+		"iss":           "https://v.example",
+		"client_id":     "https://v.example",
+		"response_type": "vp_token",
+		"response_uri":  "https://v.example/cb",
+		"nonce":         "n",
+		"state":         "s",
+		"exp":           pastExp,
+	}
+	payloadBytes, _ := json.Marshal(payload)
+	headerB64 := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"oauth-authz-req+jwt"}`))
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadBytes)
+	sigInput := headerB64 + "." + payloadB64
+	sig := ed25519.Sign(priv, []byte(sigInput))
+	jwt := sigInput + "." + base64.RawURLEncoding.EncodeToString(sig)
+
+	reqURL := "https://v.example/openid4vp?client_id=https%3A%2F%2Fv.example&request=" + url.QueryEscape(jwt)
+	if _, err := VerifyRequestObject(reqURL, pub); !errors.Is(err, ErrRequestObjectInvalid) {
+		t.Fatalf("expired JAR should fail, got: %v", err)
+	}
+}
+
+// TestJAR_BadVerifierKeyRejected verifies that passing an empty/nil verifier pub
+// key to VerifyRequestObject fails fast with ErrRequestObjectInvalid rather than
+// a silent accept or a panic.
+func TestJAR_BadVerifierKeyRejected(t *testing.T) {
+	ver, _ := signedVerifier(t)
+	reqURL, _, err := ver.CreateRequest(simplePD())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// zero-length key
+	if _, err := VerifyRequestObject(reqURL, ed25519.PublicKey{}); !errors.Is(err, ErrRequestObjectInvalid) {
+		t.Fatalf("zero-length pub key: want ErrRequestObjectInvalid, got %v", err)
+	}
+}
+
+// TestJAR_SignRequestObjectBadPrivateKey verifies signRequestObject returns an
+// error when handed a short/invalid private key, not a panic or silent success.
+func TestJAR_SignRequestObjectBadPrivateKey(t *testing.T) {
+	req := &AuthorizationRequest{ClientID: "https://v.example"}
+	_, err := signRequestObject(req, ed25519.PrivateKey{}, time.Minute)
+	if !errors.Is(err, ErrRequestObjectInvalid) {
+		t.Fatalf("bad private key: want ErrRequestObjectInvalid, got %v", err)
 	}
 }

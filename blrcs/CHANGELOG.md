@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Test coverage uplift: `openid4vp`, `mdoc/deviceauth`, `MemoryStore.GC` (quality
+  hardening).** Addressed three coverage clusters surfaced by `go tool cover -func`:
+  (1) `openid4vp/jar.go` — `VerifyRequestObject` expired-JAR rejection and bad
+  verifier-key paths were untested (regression risk for the JAR anti-replay
+  property); `signRequestObject` bad-private-key path untested. Added 3 new tests:
+  expired JAR (past `exp` + 60s leeway) rejected, zero-length verifier key
+  rejected, zero-length private key returns `ErrRequestObjectInvalid`.
+  (2) `openid4vp/openid4vp.go` — `MemoryStore.gcLoop` was at 45.5% because the
+  periodic eviction sweep fires every 5 minutes (untestable in unit tests). Extracted
+  a public `MemoryStore.GC()` method that `gcLoop` now delegates to; added 2 direct
+  tests verifying expired entries are swept and live entries survive. `gcLoop` now
+  83.3%; `GC()` 100%.
+  (3) `mdoc/deviceauth.go` — `VerifyDocument` had untested error branches for
+  malformed document structures: missing `issuerSigned` field, `deviceAuth` value
+  with wrong type (string instead of map), `deviceAuth` map with no
+  `deviceSignature` key, and `PresentWithDeviceAuth` with invalid input. Added 4
+  new tests; `VerifyDocument` 76.3%→84.2%, overall `mdoc` 92.6%→93.8%.
+  Cumulative: `openid4vp` 93.1%→94.7%.
+
 - **`mcp.TokenBucketLimiter`: self-bounding bucket map + `GC` (security,
   Axis 86).** The per-principal rate limiter that guards the MCP HTTP server kept
   one `*bucket` per distinct principal and never evicted any — unlike its sibling
