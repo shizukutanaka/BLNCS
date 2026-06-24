@@ -292,3 +292,46 @@ func TestPrintToSkippedCount(t *testing.T) {
 		t.Errorf("should mention skipped count in summary: %s", out)
 	}
 }
+
+// ============================================================================
+// New subsystem checks (revocation, mdoc) — exercised individually
+// ============================================================================
+
+// TestNewSubsystemChecksRegistered verifies the default suite now covers the
+// revocation and mdoc subsystems that the doctor's stated purpose ("全機能を実走行")
+// requires but previously omitted.
+func TestNewSubsystemChecksRegistered(t *testing.T) {
+	want := map[string]bool{
+		"revocation.SignedListRoundTrip": false,
+		"revocation.BitstringStatusList": false,
+		"mdoc.DeviceAuthRoundTrip":       false,
+	}
+	for _, c := range DefaultChecks() {
+		if _, ok := want[c.Name]; ok {
+			want[c.Name] = true
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("default check %q not registered", name)
+		}
+	}
+}
+
+func TestCheckRevocationSignedList(t *testing.T) {
+	if err := checkRevocationSignedList(context.Background()); err != nil {
+		t.Fatalf("checkRevocationSignedList: %v", err)
+	}
+}
+
+func TestCheckRevocationBitstring(t *testing.T) {
+	if err := checkRevocationBitstring(context.Background()); err != nil {
+		t.Fatalf("checkRevocationBitstring: %v", err)
+	}
+}
+
+func TestCheckMdocDeviceAuth(t *testing.T) {
+	if err := checkMdocDeviceAuth(context.Background()); err != nil {
+		t.Fatalf("checkMdocDeviceAuth: %v", err)
+	}
+}

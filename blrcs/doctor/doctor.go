@@ -33,6 +33,8 @@ import (
 	"time"
 
 	"blrcs/compliance"
+	"blrcs/mdoc"
+	"blrcs/revocation"
 	"blrcs/scitt"
 	"blrcs/storage"
 	"blrcs/telemetry"
@@ -109,6 +111,9 @@ func DefaultChecks() []Check {
 		{Name: "compliance.BatteryPassport", Fn: checkBatteryPassport},
 		{Name: "scitt.RegisterAndVerify", Fn: checkSCITTRoundTrip},
 		{Name: "scitt.InclusionProofGrowth", Fn: checkSCITTGrowth},
+		{Name: "revocation.SignedListRoundTrip", Fn: checkRevocationSignedList},
+		{Name: "revocation.BitstringStatusList", Fn: checkRevocationBitstring},
+		{Name: "mdoc.DeviceAuthRoundTrip", Fn: checkMdocDeviceAuth},
 		{Name: "storage.MemoryRoundTrip", Fn: checkStorageRoundTrip},
 		{Name: "telemetry.SnapshotEmpty", Fn: checkTelemetrySnapshot},
 	}
@@ -399,6 +404,118 @@ func checkSCITTGrowth(ctx context.Context) error {
 		return err
 	}
 	return scitt.VerifyReceipt(receipt, stmt, ledger.PublicKey())
+}
+
+func checkRevocationSignedList(ctx context.Context) error {
+	iss, err := compliance.NewIssuer("did:web:doctor.revocation")
+	if err != nil {
+		return err
+	}
+	list := revocation.New(iss.ID)
+	if _, err := list.Revoke("cred-doctor-1", revocation.ReasonRecall, "diagnostic recall"); err != nil {
+		return err
+	}
+	if !list.IsRevoked("cred-doctor-1") {
+		return fmt.Errorf("revoked credential not reported revoked")
+	}
+	if list.IsRevoked("cred-doctor-unknown") {
+		return fmt.Errorf("never-revoked credential reported revoked")
+	}
+	signed, err := list.Sign(iss.PrivateKey())
+	if err != nil {
+		return err
+	}
+	if err := revocation.Verify(signed, iss.PublicKey()); err != nil {
+		return fmt.Errorf("signed list verification failed: %w", err)
+	}
+	// Tamper detection: a different key must not verify.
+	otherPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	if err := revocation.Verify(signed, otherPub); err == nil {
+		return fmt.Errorf("CRITICAL: signed list verified under wrong key")
+	}
+	return nil
+}
+
+func checkRevocationBitstring(ctx context.Context) error {
+	list := revocation.NewBitstringStatusList(revocation.PurposeRevocation, revocation.MinBitstringSize)
+	if err := list.SetStatus(42, true); err != nil {
+		return err
+	}
+	on, err := list.GetStatus(42)
+	if err != nil {
+		return err
+	}
+	if !on {
+		return fmt.Errorf("bit 42 set but reads false")
+	}
+	encoded, err := list.EncodedList()
+	if err != nil {
+		return err
+	}
+	decoded, err := revocation.DecodeBitstringStatusList(revocation.PurposeRevocation, encoded)
+	if err != nil {
+		return fmt.Errorf("encode/decode round-trip failed: %w", err)
+	}
+	on2, err := decoded.GetStatus(42)
+	if err != nil {
+		return err
+	}
+	if !on2 {
+		return fmt.Errorf("bit 42 lost across encode/decode round-trip")
+	}
+	return nil
+}
+
+func checkMdocDeviceAuth(ctx context.Context) error {
+	issuerPub, issuerPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	devicePub, devicePriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	cred, err := mdoc.Issue(mdoc.IssueParams{
+		DocType: "org.iso.18013.5.1.mDL",
+		NameSpaces: map[string][]mdoc.Element{
+			"org.iso.18013.5.1": {
+				{Identifier: "family_name", Value: "Doctor"},
+				{Identifier: "age_over_18", Value: true},
+			},
+		},
+		Validity:   mdoc.ValidityInfo{Signed: now, ValidFrom: now, ValidUntil: now.Add(24 * time.Hour)},
+		DeviceKey:  devicePub,
+		IssuerPriv: issuerPriv,
+	})
+	if err != nil {
+		return err
+	}
+	transcript := []byte("doctor-session-transcript")
+	doc, err := mdoc.PresentWithDeviceAuth(cred,
+		map[string][]string{"org.iso.18013.5.1": {"family_name"}},
+		"org.iso.18013.5.1.mDL", devicePriv, transcript)
+	if err != nil {
+		return err
+	}
+	vd, err := mdoc.VerifyDocument(doc, issuerPub, transcript, now)
+	if err != nil {
+		return fmt.Errorf("device-authenticated document failed verification: %w", err)
+	}
+	if vd.NameSpaces["org.iso.18013.5.1"]["family_name"] != "Doctor" {
+		return fmt.Errorf("disclosed family_name missing/incorrect")
+	}
+	if _, leaked := vd.NameSpaces["org.iso.18013.5.1"]["age_over_18"]; leaked {
+		return fmt.Errorf("CRITICAL: undisclosed claim age_over_18 leaked")
+	}
+	// Replay against a different transcript must be rejected.
+	if _, err := mdoc.VerifyDocument(doc, issuerPub, []byte("attacker-transcript"), now); err == nil {
+		return fmt.Errorf("CRITICAL: device auth accepted under wrong session transcript")
+	}
+	return nil
 }
 
 func checkStorageRoundTrip(ctx context.Context) error {

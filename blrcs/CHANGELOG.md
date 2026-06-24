@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`doctor`: add revocation + mdoc subsystem self-checks (Axis 88).** The doctor's
+  stated purpose is to exercise *all* features as a pre-deploy/startup sanity check
+  ("全機能を実走行"), but the default suite covered only compliance, SCITT, storage,
+  and telemetry — leaving two core, security-critical subsystems unverified at
+  startup: credential revocation and ISO 18013-5 mdoc device authentication. A
+  deployment could boot "green" while its revocation or mdoc paths were broken.
+  Added three checks: `revocation.SignedListRoundTrip` (revoke → IsRevoked → sign →
+  verify, plus wrong-key rejection), `revocation.BitstringStatusList` (W3C bitstring
+  set/get + gzip encode/decode round-trip), and `mdoc.DeviceAuthRoundTrip`
+  (issue with device key → present with device auth → VerifyDocument, asserting
+  selective disclosure holds, undisclosed claims do not leak, and a replay under a
+  different session transcript is rejected). Default suite grows from 13 to 16
+  checks. 4 new tests.
+
 - **`cas.GetVerified` + read-path integrity check in `Provenance.LookupByID`
   (security, Axis 87).** The package's sole invariant is `hash(content) == address`
   and its `Store` interface is explicitly pluggable ("backend 差替可能"), yet the
