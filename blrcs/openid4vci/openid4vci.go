@@ -122,6 +122,7 @@ type Issuer struct {
 	mu       sync.Mutex
 	preAuths map[string]*preAuthEntry // code → entry
 	tokens   map[string]*preAuthEntry // access_token → same entry
+	nonces   map[string]time.Time     // Nonce Endpoint c_nonce → expiry (single-use)
 	lastGC   time.Time                // 最後に期限切れ掃除を実行した時刻
 }
 
@@ -168,6 +169,7 @@ func NewIssuer(url string, signer *compliance.Issuer) *Issuer {
 		configs:    make(map[string]CredentialConfiguration),
 		preAuths:   make(map[string]*preAuthEntry),
 		tokens:     make(map[string]*preAuthEntry),
+		nonces:     make(map[string]time.Time),
 		preAuthTTL: 10 * time.Minute,
 		tokenTTL:   5 * time.Minute,
 	}
@@ -472,12 +474,22 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 			iss.mu.Unlock()
 			return nil, ErrInvalidProof
 		}
-		pub, err := verifyProofJWT(proofEnv.JWT, cNonce, iss.URL)
+		pub, proofNonce, err := parseProofJWT(proofEnv.JWT, iss.URL)
 		if err != nil {
 			iss.mu.Lock()
 			entry.consumed = false
 			iss.mu.Unlock()
 			return nil, err
+		}
+		// The proof's nonce must be either the token-bound c_nonce or a fresh,
+		// single-use Nonce Endpoint nonce (consumed here so it cannot be replayed).
+		// Checking the token-bound value first avoids consuming a Nonce Endpoint
+		// nonce when the wallet used the legacy flow.
+		if proofNonce != cNonce && !iss.consumeNonce(proofNonce) {
+			iss.mu.Lock()
+			entry.consumed = false
+			iss.mu.Unlock()
+			return nil, ErrProofNonceMismatch
 		}
 		// The wallet proved possession of this key; bind the credential to it so
 		// the holder can later produce a KB-JWT (cnf) in OpenID4VP. Discarding the
@@ -535,16 +547,36 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 // verifyProofJWT — OpenID4VCI Draft 15 §5.1.2 の proof JWT を検証する。
 //
 // 対応アルゴリズム: EdDSA (Ed25519) のみ (ゼロ依存制約)。
-// header に jwk (OKP/Ed25519) が必須。
+// header に jwk (OKP/Ed25519) が必須。expectedNonce に proof の nonce を束縛する
+// (token-endpoint 由来の c_nonce 用)。Nonce Endpoint 由来の nonce を許容するには
+// parseProofJWT を直接呼び、nonce を呼び出し側で検証すること。
 func verifyProofJWT(proofJWT, expectedNonce, issuerURL string) (ed25519.PublicKey, error) {
+	pub, nonce, err := parseProofJWT(proofJWT, issuerURL)
+	if err != nil {
+		return nil, err
+	}
+	if nonce != expectedNonce {
+		return nil, ErrProofNonceMismatch
+	}
+	return pub, nil
+}
+
+// parseProofJWT verifies a proof JWT's structure, algorithm (EdDSA), embedded JWK
+// (OKP/Ed25519), signature, audience (== issuerURL), and iat freshness, returning
+// the holder public key and the proof's embedded nonce. It deliberately does NOT
+// validate the nonce value: the caller decides which nonces are acceptable — the
+// token-bound c_nonce, or a single-use Nonce Endpoint nonce — so the same parser
+// serves both the legacy token-endpoint flow and the dedicated Nonce Endpoint
+// (the OpenID4VCI mitigation for proof replay).
+func parseProofJWT(proofJWT, issuerURL string) (ed25519.PublicKey, string, error) {
 	parts := strings.SplitN(proofJWT, ".", 3)
 	if len(parts) != 3 {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
 	// header
 	hdrBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
 	var hdr struct {
 		Alg string          `json:"alg"`
@@ -552,7 +584,7 @@ func verifyProofJWT(proofJWT, expectedNonce, issuerURL string) (ed25519.PublicKe
 		JWK json.RawMessage `json:"jwk"`
 	}
 	if err := json.Unmarshal(hdrBytes, &hdr); err != nil || hdr.Alg != "EdDSA" || hdr.Typ != "openid4vci-proof+jwt" || len(hdr.JWK) == 0 {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
 	// JWK (OKP Ed25519)
 	var jwk struct {
@@ -561,25 +593,25 @@ func verifyProofJWT(proofJWT, expectedNonce, issuerURL string) (ed25519.PublicKe
 		X   string `json:"x"`
 	}
 	if err := json.Unmarshal(hdr.JWK, &jwk); err != nil || jwk.Kty != "OKP" || jwk.Crv != "Ed25519" {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
 	keyBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
 	if err != nil || len(keyBytes) != ed25519.PublicKeySize {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
 	pub := ed25519.PublicKey(keyBytes)
 	// signature
 	sigBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil || len(sigBytes) != ed25519.SignatureSize {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
 	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sigBytes) {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
 	// payload
 	plBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
 	var pl struct {
 		Nonce string `json:"nonce"`
@@ -587,21 +619,97 @@ func verifyProofJWT(proofJWT, expectedNonce, issuerURL string) (ed25519.PublicKe
 		Iat   int64  `json:"iat"`
 	}
 	if err := json.Unmarshal(plBytes, &pl); err != nil {
-		return nil, ErrInvalidProof
-	}
-	if pl.Nonce != expectedNonce {
-		return nil, ErrProofNonceMismatch
+		return nil, "", ErrInvalidProof
 	}
 	if pl.Aud != issuerURL {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
 	// iat freshness: ±5 分
 	iat := time.Unix(pl.Iat, 0)
 	now := time.Now()
 	if iat.After(now.Add(30*time.Second)) || iat.Before(now.Add(-5*time.Minute)) {
-		return nil, ErrInvalidProof
+		return nil, "", ErrInvalidProof
 	}
-	return pub, nil
+	return pub, pl.Nonce, nil
+}
+
+// ============================================================================
+// Nonce Endpoint (OpenID4VCI §7) — proof-replay mitigation
+// ============================================================================
+
+// maxNonces bounds the Nonce Endpoint store so an attacker hammering /nonce
+// cannot exhaust memory. Expired entries are swept on each issuance; if the live
+// set still exceeds this cap, IssueNonce fails closed (ErrNonceStoreFull) rather
+// than growing without bound.
+const maxNonces = 50_000
+
+// ErrNonceStoreFull is returned by IssueNonce when the live nonce set is at the
+// cap (after sweeping expired entries) — backpressure against /nonce flooding.
+var ErrNonceStoreFull = errors.New("vci: nonce store full")
+
+// IssueNonce mints a fresh, single-use c_nonce for the Nonce Endpoint
+// (OpenID4VCI §7). The wallet places it in a proof JWT's `nonce` claim; the
+// credential endpoint accepts it exactly once (see consumeNonce). Decoupling
+// nonce issuance from the token response is the spec's mitigation for proof
+// replay: every credential request can be bound to an unpredictable, server-
+// issued, single-use challenge. The nonce expires after tokenTTL.
+func (iss *Issuer) IssueNonce() (cNonce string, expiresIn int, err error) {
+	n, err := randomB64(16)
+	if err != nil {
+		return "", 0, err
+	}
+	iss.mu.Lock()
+	defer iss.mu.Unlock()
+	now := time.Now()
+	// Opportunistic sweep of expired nonces (also bounds memory).
+	for k, exp := range iss.nonces {
+		if now.After(exp) {
+			delete(iss.nonces, k)
+		}
+	}
+	if len(iss.nonces) >= maxNonces {
+		return "", 0, ErrNonceStoreFull
+	}
+	iss.nonces[n] = now.Add(iss.tokenTTL)
+	return n, int(iss.tokenTTL.Seconds()), nil
+}
+
+// consumeNonce reports whether n is a currently-valid Nonce Endpoint nonce,
+// removing it so it can never be replayed (single-use). An unknown or expired
+// nonce returns false. The delete-before-expiry-check makes even an expired-but-
+// present nonce one-shot.
+func (iss *Issuer) consumeNonce(n string) bool {
+	if n == "" {
+		return false
+	}
+	iss.mu.Lock()
+	defer iss.mu.Unlock()
+	exp, ok := iss.nonces[n]
+	if !ok {
+		return false
+	}
+	delete(iss.nonces, n)
+	return time.Now().Before(exp)
+}
+
+// handleNonce serves POST {issuer}/nonce, returning a fresh single-use c_nonce
+// (OpenID4VCI §7). Per spec the response is non-cacheable.
+func (iss *Issuer) handleNonce(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	n, expiresIn, err := iss.IssueNonce()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"c_nonce":            n,
+		"c_nonce_expires_in": expiresIn,
+	})
 }
 
 // ============================================================================
@@ -626,6 +734,7 @@ func (iss *Issuer) Metadata() map[string]any {
 		"credential_issuer":                   iss.URL,
 		"credential_endpoint":                 iss.URL + "/credential",
 		"token_endpoint":                      iss.URL + "/token",
+		"nonce_endpoint":                      iss.URL + "/nonce",
 		"credential_configurations_supported": configs,
 		"grant_types_supported":               []string{"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
 		"response_types_supported":            []string{"vp_token"},
@@ -662,6 +771,7 @@ func (iss *Issuer) Handler() http.Handler {
 	mux.HandleFunc("/.well-known/openid-credential-issuer", iss.handleMetadata)
 	mux.HandleFunc("/.well-known/jwks.json", iss.handleJWKS)
 	mux.HandleFunc("/token", iss.handleToken)
+	mux.HandleFunc("/nonce", iss.handleNonce)
 	mux.HandleFunc("/credential", iss.handleCredential)
 	return mux
 }

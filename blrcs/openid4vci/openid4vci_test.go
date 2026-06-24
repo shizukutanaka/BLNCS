@@ -2117,3 +2117,149 @@ func TestHTTPCredentialConfigIDMismatch(t *testing.T) {
 		t.Errorf("config_id mismatch response should contain invalid_request error: %s", respBody2)
 	}
 }
+
+// ============================================================================
+// Nonce Endpoint (OpenID4VCI §7) — proof-replay mitigation
+// ============================================================================
+
+// TestNonceEndpointIssuesFreshSingleUse verifies IssueNonce mints distinct
+// nonces and that consumeNonce accepts each exactly once (single-use).
+func TestNonceEndpointIssuesFreshSingleUse(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	n1, exp1, err := iss.IssueNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n1 == "" || exp1 <= 0 {
+		t.Fatalf("bad nonce/expiry: %q %d", n1, exp1)
+	}
+	n2, _, _ := iss.IssueNonce()
+	if n1 == n2 {
+		t.Fatal("nonces must be distinct")
+	}
+	// First consume succeeds; replay fails.
+	if !iss.consumeNonce(n1) {
+		t.Fatal("first consume of a valid nonce should succeed")
+	}
+	if iss.consumeNonce(n1) {
+		t.Fatal("replay of a consumed nonce must fail (single-use)")
+	}
+	// Unknown nonce fails.
+	if iss.consumeNonce("never-issued") {
+		t.Fatal("unknown nonce must not be accepted")
+	}
+}
+
+// TestCredentialAcceptsNonceEndpointNonce proves the end-to-end §7 flow: a wallet
+// obtains a nonce from the Nonce Endpoint, binds its proof to it, and the
+// credential endpoint accepts it.
+func TestCredentialAcceptsNonceEndpointNonce(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-ne",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Wallet fetches a fresh nonce from the Nonce Endpoint (NOT the token c_nonce).
+	freshNonce, _, err := iss.IssueNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, freshNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatalf("proof bound to Nonce Endpoint nonce should succeed: %v", err)
+	}
+	if cr.Credential == "" {
+		t.Error("credential must not be empty")
+	}
+}
+
+// TestCredentialRejectsReplayedNonceEndpointNonce is the core anti-replay
+// property: a Nonce Endpoint nonce works once, and a second credential request
+// reusing the same proof (same nonce) is rejected.
+func TestCredentialRejectsReplayedNonceEndpointNonce(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	mkToken := func(subject string) string {
+		_, code, _ := iss.CreateOffer(
+			"eu-battery-passport-v1", subject,
+			map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+		)
+		tr, err := iss.ExchangeCode(code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tr.AccessToken
+	}
+	freshNonce, _, _ := iss.IssueNonce()
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, freshNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	// First use (fresh access token) succeeds.
+	if _, err := iss.IssueCredentialWithProof(mkToken("ne-1"), CredentialRequest{Proof: proofJSON}); err != nil {
+		t.Fatalf("first use of nonce should succeed: %v", err)
+	}
+	// Replay the same proof with a *different* fresh access token — the nonce was
+	// consumed, so it must now be rejected.
+	if _, err := iss.IssueCredentialWithProof(mkToken("ne-2"), CredentialRequest{Proof: proofJSON}); err != ErrProofNonceMismatch {
+		t.Fatalf("replayed nonce must yield ErrProofNonceMismatch, got %v", err)
+	}
+}
+
+// TestNonceEndpointHTTP exercises the POST /nonce handler and asserts the
+// non-cacheable JSON response shape, plus method enforcement.
+func TestNonceEndpointHTTP(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	srv := httptest.NewServer(iss.Handler())
+	defer srv.Close()
+
+	// GET must be rejected.
+	getResp, err := http.Get(srv.URL + "/nonce")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = getResp.Body.Close()
+	if getResp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /nonce should be 405, got %d", getResp.StatusCode)
+	}
+
+	// POST returns a fresh nonce.
+	resp, err := http.Post(srv.URL+"/nonce", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /nonce should be 200, got %d", resp.StatusCode)
+	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("nonce response must be non-cacheable, got Cache-Control=%q", cc)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var out struct {
+		CNonce          string `json:"c_nonce"`
+		CNonceExpiresIn int    `json:"c_nonce_expires_in"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.CNonce == "" || out.CNonceExpiresIn <= 0 {
+		t.Errorf("bad nonce response: %s", body)
+	}
+}
+
+// TestMetadataAdvertisesNonceEndpoint confirms discovery advertises the endpoint.
+func TestMetadataAdvertisesNonceEndpoint(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	md := iss.Metadata()
+	if md["nonce_endpoint"] != iss.URL+"/nonce" {
+		t.Errorf("metadata must advertise nonce_endpoint, got %v", md["nonce_endpoint"])
+	}
+}

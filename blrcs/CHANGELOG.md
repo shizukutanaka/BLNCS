@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`openid4vci`: OpenID4VCI §7 Nonce Endpoint — proof-replay mitigation (security,
+  Axis 90).** Informed by deep-research into the Proof Replay attack on OID4VCI key
+  proofs (Takahiko Kawasaki, Qiita): the spec's own countermeasure is a dedicated
+  Nonce Endpoint that issues unpredictable, server-bound, **single-use** `c_nonce`
+  values, decoupled from the token response so every credential request can be
+  bound to a fresh challenge. Added `POST {issuer}/nonce` (`Issuer.handleNonce`)
+  returning a non-cacheable `{c_nonce, c_nonce_expires_in}`, backed by
+  `Issuer.IssueNonce()` (bounded store, capped at `maxNonces`=50k with opportunistic
+  expiry sweep + `ErrNonceStoreFull` backpressure) and `consumeNonce()` (delete-
+  before-expiry-check → strictly one-shot, no replay). The credential endpoint now
+  accepts a proof whose `nonce` is **either** the token-bound `c_nonce` (legacy,
+  unchanged) **or** a Nonce Endpoint nonce, which is consumed on use. Refactored the
+  proof verifier into a nonce-agnostic `parseProofJWT` (returns the embedded nonce)
+  with `verifyProofJWT` kept as a thin token-bound wrapper for backward compat
+  (existing tests/fuzz unaffected). `nonce_endpoint` is now advertised in issuer
+  metadata. The existing replay defenses (aud binding, iat freshness, single-use
+  access token) are unchanged; Ed25519 verification uses Go's stdlib (cofactorless,
+  no malleability), so the insecure-Ed25519 implementation pitfalls from the
+  research do not apply. 5 new tests: fresh/single-use issuance, end-to-end §7
+  acceptance, replay rejection, HTTP handler (405/200/no-store), metadata.
+
 ### Fixed
 - **`config.parseTokens`: reject empty principal and duplicate tokens (security,
   Axis 89).** `BLRCS_AUTH_TOKENS` is parsed as `token:principal` pairs. The parser
