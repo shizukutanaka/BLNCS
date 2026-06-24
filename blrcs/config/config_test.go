@@ -205,6 +205,13 @@ func TestParseTokens(t *testing.T) {
 		{"ok:user,badtoken,other:user", 0, true},
 		// Empty token part
 		{":principal", 0, true},
+		// Empty principal part — undermines per-principal session binding.
+		{"tok:", 0, true},
+		{"good:alice,tok:", 0, true},
+		// A principal may itself contain a colon (SplitN keeps it).
+		{"tok:realm:alice", 1, false},
+		// Duplicate token — last-wins would silently drop a mapping.
+		{"dup:alice,dup:bob", 0, true},
 	}
 	for _, c := range cases {
 		got, err := parseTokens(c.input)

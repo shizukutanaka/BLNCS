@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`config.parseTokens`: reject empty principal and duplicate tokens (security,
+  Axis 89).** `BLRCS_AUTH_TOKENS` is parsed as `token:principal` pairs. The parser
+  rejected an empty *token* but accepted an empty *principal* (e.g. the typo
+  `"tokA:,tokB:admin"`) and silently last-wins on duplicate tokens. Empty principals
+  are a real security footgun: the MCP server binds each session to its principal
+  and blocks cross-principal reuse by *comparing* principals — so two tokens both
+  authenticating to `""` could hijack each other's sessions, defeating that binding.
+  `parseTokens` now returns a startup error for an empty principal or a repeated
+  token, consistent with the package's documented "catch misconfiguration at
+  startup" contract. A principal containing a colon (`tok:realm:alice`) is still
+  accepted (SplitN keeps it). 4 new test cases.
+
 ### Added
 - **`doctor`: add revocation + mdoc subsystem self-checks (Axis 88).** The doctor's
   stated purpose is to exercise *all* features as a pre-deploy/startup sanity check

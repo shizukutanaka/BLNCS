@@ -214,9 +214,17 @@ func (c *Config) JSON() ([]byte, error) {
 // ============================================================================
 
 // parseTokens — "token1:principal1,token2:principal2" → map.
-// Returns an error for any pair that does not contain the required ':' separator
-// or that has an empty token part, so that misconfigured auth tokens are caught
-// at startup instead of being silently dropped.
+// Returns an error for any pair that does not contain the required ':' separator,
+// has an empty token part, has an empty principal part, or repeats a token —
+// so that misconfigured auth tokens are caught at startup instead of being
+// silently dropped.
+//
+// An empty principal is rejected because principal identity is load-bearing for
+// security downstream: the MCP server binds each session to its principal and
+// rejects cross-principal reuse by comparing principals. Two tokens configured
+// with an empty principal (e.g. the typo "tokA:,tokB:admin") would both
+// authenticate to "" and could therefore hijack each other's sessions. A repeated
+// token is rejected because last-wins silently discards one mapping.
 func parseTokens(s string) (map[string]string, error) {
 	tokens := map[string]string{}
 	for _, pair := range strings.Split(s, ",") {
@@ -227,6 +235,12 @@ func parseTokens(s string) (map[string]string, error) {
 		parts := strings.SplitN(pair, ":", 2)
 		if len(parts) != 2 || parts[0] == "" {
 			return nil, fmt.Errorf("config: malformed auth token pair %q (expected non-empty-token:principal)", pair)
+		}
+		if parts[1] == "" {
+			return nil, fmt.Errorf("config: auth token %q has an empty principal (principal identity is required for session binding)", parts[0])
+		}
+		if _, dup := tokens[parts[0]]; dup {
+			return nil, fmt.Errorf("config: duplicate auth token %q", parts[0])
 		}
 		tokens[parts[0]] = parts[1]
 	}
