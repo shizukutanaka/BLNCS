@@ -6,6 +6,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`jsonschema`: bound `uniqueItems` DoS + add `deepEqual` depth cap (security,
+  Axis 91).** `uniqueItems` validation ran an O(N²) loop of `deepEqual()` calls with
+  no accounting against the shared `maxValidateOps` budget. An adversarial Type
+  Metadata schema with `uniqueItems:true` on an array keyword could force the
+  validator into O(N²×depth) CPU work while the complexity budget remained at zero.
+  Fix: each pair comparison now increments `*v.ops` and returns early when the budget
+  is exhausted (`ErrComplexityBudget`). Additionally `deepEqual` now takes an explicit
+  depth parameter (`maxDeepEqualDepth=64`) and returns `false` at the limit rather
+  than recursing unboundedly into arbitrarily-nested credential claim values.  5 new
+  tests: `TestUniqueItemsBudgetCapped`, `TestUniqueItemsDepthCapNoPanic`,
+  `TestDeepEqualDepthZeroReturnsFalse`, `TestUniqueItemsSmallArrayUnique/Duplicate`.
+
+- **`scitt`: add `maxStatementPayloadBytes` cap in `SignStatement` (Axis 92).**
+  `SignStatement` accepted any payload length, performing a full SHA-256 over an
+  unbounded byte slice. An authenticated-but-misbehaving issuer could submit a
+  gigabyte payload, stalling the call for seconds and exhausting ledger storage.
+  Added `maxStatementPayloadBytes = 1 MiB` constant and `ErrPayloadTooLarge` sentinel;
+  payload is rejected before SHA-256 and before any ledger write. 2 new tests:
+  `TestSignStatementOversizedPayload`, `TestSignStatementAtLimitPayload`.
+
+- **`revocation`: add upper-bound guard in `NewBitstringStatusList` (Axis 93).**
+  `NewBitstringStatusList` accepted any positive `sizeBits`, so a caller could pass
+  `sizeBits = 2^31` and trigger a ~256 MiB allocation (or integer overflow on 32-bit
+  platforms in `(sizeBits+7)/8`). Added `maxBitstringBits = 512 Mi-entries` (64 MiB
+  of bits, matching `maxDecodedListBytes` to keep the allocator and the decompression
+  cap consistent) — `NewBitstringStatusList` returns `nil` for oversized requests.  2
+  new tests: `TestNewBitstringStatusListOversizeReturnsNil`,
+  `TestNewBitstringStatusListAtMaxAllowed`.
+
 ### Added
 - **`openid4vci`: OpenID4VCI §7 Nonce Endpoint — proof-replay mitigation (security,
   Axis 90).** Informed by deep-research into the Proof Replay attack on OID4VCI key
