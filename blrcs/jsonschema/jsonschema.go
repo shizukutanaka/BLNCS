@@ -48,6 +48,11 @@ const maxValidateOps = 1_000_000
 // before the global maxValidateOps guard fires.
 const maxCombinatorBranches = 32
 
+// maxDeepEqualDepth bounds the recursive deepEqual traversal. It prevents a
+// single pair-comparison in the uniqueItems O(N²) loop from consuming unbounded
+// stack/CPU when credential claim values are arbitrarily deeply nested.
+const maxDeepEqualDepth = 64
+
 // Schema is a compiled JSON Schema ready for validation.
 type Schema struct {
 	root     map[string]any            // the parsed root document (for $ref resolution)
@@ -334,13 +339,13 @@ func jsonType(inst any) string {
 
 func (v *validator) checkEnumConst(sch map[string]any, inst any, path string) {
 	if c, ok := sch["const"]; ok {
-		if !deepEqual(c, inst) {
+		if !deepEqual(c, inst, maxDeepEqualDepth) {
 			v.fail(path, "value must equal const %v", c)
 		}
 	}
 	if e, ok := sch["enum"].([]any); ok {
 		for _, opt := range e {
-			if deepEqual(opt, inst) {
+			if deepEqual(opt, inst, maxDeepEqualDepth) {
 				return
 			}
 		}
@@ -498,7 +503,15 @@ func (v *validator) checkArray(sch map[string]any, inst any, path string) {
 	if u, ok := sch["uniqueItems"].(bool); ok && u {
 		for i := 0; i < len(arr); i++ {
 			for j := i + 1; j < len(arr); j++ {
-				if deepEqual(arr[i], arr[j]) {
+				// Count each pair comparison against the shared ops budget.
+				// Without this, an adversarial schema with uniqueItems:true on a
+				// large array bypasses maxValidateOps: O(N²×depth) comparisons,
+				// all outside the validate() hot path that increments *v.ops.
+				*v.ops++
+				if *v.ops > maxValidateOps {
+					return
+				}
+				if deepEqual(arr[i], arr[j], maxDeepEqualDepth) {
 					v.fail(path, "items %d and %d are not unique", i, j)
 				}
 			}
@@ -635,7 +648,13 @@ func toFloat(v any) (float64, bool) {
 	return 0, false
 }
 
-func deepEqual(a, b any) bool {
+// deepEqual compares two JSON-decoded values for equality with a recursion
+// depth limit. depth must be > 0; at depth 0 the values are treated as unequal
+// (conservative: stops the recursion, never reports a false duplicate).
+func deepEqual(a, b any, depth int) bool {
+	if depth <= 0 {
+		return false
+	}
 	// Normalize numbers so 1 (int) == 1.0 (float64) etc.
 	if af, aok := toFloat(a); aok {
 		if bf, bok := toFloat(b); bok {
@@ -658,7 +677,7 @@ func deepEqual(a, b any) bool {
 			return false
 		}
 		for i := range av {
-			if !deepEqual(av[i], bv[i]) {
+			if !deepEqual(av[i], bv[i], depth-1) {
 				return false
 			}
 		}
@@ -670,7 +689,7 @@ func deepEqual(a, b any) bool {
 		}
 		for k, val := range av {
 			bval, present := bv[k]
-			if !present || !deepEqual(val, bval) {
+			if !present || !deepEqual(val, bval, depth-1) {
 				return false
 			}
 		}

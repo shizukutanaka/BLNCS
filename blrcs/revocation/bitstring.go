@@ -32,6 +32,13 @@ const (
 	maxDecodedListBytes = 64 << 20 // 64 MiB: 展開後の上限
 )
 
+// maxBitstringBits caps the size accepted by NewBitstringStatusList. Values
+// above this limit (≈512 million entries, 64 MiB of bits) would make a single
+// in-memory list unreasonably large and risk integer overflow in (sizeBits+7)/8
+// on 32-bit platforms. Callers needing larger lists should shard across multiple
+// BitstringStatusList instances.
+const maxBitstringBits = 64 << 20 * 8 // 512 Mi-entries
+
 // StatusPurpose — Bitstring Status List のエントリ用途。
 type StatusPurpose string
 
@@ -54,7 +61,11 @@ type BitstringStatusList struct {
 // NewBitstringStatusList — 指定 entry 数の status list を構築。
 //
 // sizeBits は MinBitstringSize 未満なら自動的に切り上げ (herd privacy)。
+// maxBitstringBits を超える場合は nil を返す (整数オーバーフロー防御 + メモリ枯渇防御)。
 func NewBitstringStatusList(purpose StatusPurpose, sizeBits int) *BitstringStatusList {
+	if sizeBits > maxBitstringBits {
+		return nil
+	}
 	if sizeBits < MinBitstringSize {
 		sizeBits = MinBitstringSize
 	}

@@ -31,10 +31,11 @@ import (
 )
 
 var (
-	ErrNotFound   = errors.New("scitt: statement not found")
-	ErrBadReceipt = errors.New("scitt: receipt invalid")
-	ErrBadProof   = errors.New("scitt: inclusion proof invalid")
-	ErrEmptyStmt  = errors.New("scitt: statement payload required")
+	ErrNotFound        = errors.New("scitt: statement not found")
+	ErrBadReceipt      = errors.New("scitt: receipt invalid")
+	ErrBadProof        = errors.New("scitt: inclusion proof invalid")
+	ErrEmptyStmt       = errors.New("scitt: statement payload required")
+	ErrPayloadTooLarge = errors.New("scitt: statement payload exceeds size limit")
 	// ErrStatementMalformed is returned by SignStatement when required fields are
 	// missing or the private key has the wrong length. A well-formed statement
 	// must carry a non-empty Issuer, Subject, ContentType, and a valid private key.
@@ -93,6 +94,12 @@ const (
 	leafPrefix byte = 0x00
 	nodePrefix byte = 0x01
 )
+
+// maxStatementPayloadBytes caps the payload accepted by SignStatement. A DPP/
+// Battery Passport payload (JSON-LD, SD-JWT-VC claims) is typically under 64 KiB;
+// 1 MiB provides generous headroom while preventing unbounded SHA-256 work and
+// downstream ledger storage exhaustion by an authenticated-but-misbehaving issuer.
+const maxStatementPayloadBytes = 1 << 20 // 1 MiB
 
 func hashLeaf(data []byte) []byte {
 	h := sha256.New()
@@ -339,6 +346,9 @@ func SignStatement(issuerPriv ed25519.PrivateKey, issuerID, subject, contentType
 	}
 	if len(payload) == 0 {
 		return Statement{}, ErrEmptyStmt
+	}
+	if len(payload) > maxStatementPayloadBytes {
+		return Statement{}, fmt.Errorf("%w: %d bytes (limit %d)", ErrPayloadTooLarge, len(payload), maxStatementPayloadBytes)
 	}
 	h := sha256.Sum256(payload)
 	stmt := Statement{

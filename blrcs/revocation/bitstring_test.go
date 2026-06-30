@@ -248,3 +248,30 @@ func TestDecodeBitstringStatusListDecompressionBomb(t *testing.T) {
 		t.Errorf("want 'decompression bomb' in error, got: %v", err)
 	}
 }
+
+// ============================================================================
+// Axis 91: NewBitstringStatusList max size cap
+// ============================================================================
+
+// TestNewBitstringStatusListOversizeReturnsNil verifies that requesting a
+// list larger than maxBitstringBits returns nil rather than attempting an
+// allocation that would exhaust memory or overflow int arithmetic.
+func TestNewBitstringStatusListOversizeReturnsNil(t *testing.T) {
+	tooBig := maxBitstringBits + 1
+	got := NewBitstringStatusList(PurposeRevocation, tooBig)
+	if got != nil {
+		t.Errorf("oversized list should return nil, got capacity %d", got.Capacity())
+	}
+}
+
+// TestNewBitstringStatusListAtMaxAllowed verifies the boundary: exactly
+// maxBitstringBits is accepted.
+func TestNewBitstringStatusListAtMaxAllowed(t *testing.T) {
+	got := NewBitstringStatusList(PurposeRevocation, maxBitstringBits)
+	if got == nil {
+		t.Fatal("list at maxBitstringBits limit should not return nil")
+	}
+	if got.Capacity() < maxBitstringBits {
+		t.Errorf("capacity %d < maxBitstringBits %d", got.Capacity(), maxBitstringBits)
+	}
+}

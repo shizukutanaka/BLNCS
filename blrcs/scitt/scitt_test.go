@@ -1388,3 +1388,34 @@ func TestRegisterTrustedIssuerHappyPath(t *testing.T) {
 		t.Fatalf("receipt verify: %v", err)
 	}
 }
+
+// ============================================================================
+// Axis 91: SignStatement payload size limit
+// ============================================================================
+
+// TestSignStatementOversizedPayload verifies that SignStatement rejects
+// payloads exceeding maxStatementPayloadBytes to prevent unbounded SHA-256 work
+// and downstream ledger storage exhaustion.
+func TestSignStatementOversizedPayload(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	oversized := make([]byte, maxStatementPayloadBytes+1)
+	_, err := SignStatement(priv, "did:web:lab.eu", "battery-1", "application/json", oversized)
+	if err == nil {
+		t.Fatal("oversized payload should be rejected")
+	}
+	if !errors.Is(err, ErrPayloadTooLarge) {
+		t.Fatalf("want ErrPayloadTooLarge, got: %v", err)
+	}
+}
+
+// TestSignStatementAtLimitPayload verifies that a payload exactly at the limit
+// is accepted (not off-by-one rejected).
+func TestSignStatementAtLimitPayload(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	exactly := make([]byte, maxStatementPayloadBytes)
+	exactly[0] = 0x01 // non-empty
+	_, err := SignStatement(priv, "did:web:lab.eu", "battery-1", "application/json", exactly)
+	if err != nil {
+		t.Fatalf("payload at limit should be accepted: %v", err)
+	}
+}
