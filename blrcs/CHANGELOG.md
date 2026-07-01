@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+- **README: fix doctor-check-count drift, document `BLRCS_ENCRYPTION_KEY`
+  (Axis 99).** "13 subsystems, ~7ms" was stale — `DefaultChecks()` now
+  returns 16 (Axis 88 added 3 checks). Verified against the built `blrcs`
+  binary: 16/16 passed in 7.6ms. Bumped "1800+ tests · ~24,500 LoC" to
+  "1900+ tests · ~25,000 LoC" (verified: 1906 test funcs, 25,054 impl LoC).
+  Added a `BLRCS_ENCRYPTION_KEY` quick-start example and an "Encryption at
+  rest" row to the feature status table — Axis 96/98 wired this into both
+  server binaries but the README never mentioned it.
+
 ### Added
 - **`cmd/blrcs-mcp`: extend encryption-at-rest to the stdio binary too (Axis
   98).** Axis 96 wired `storage.EncryptedStorage` into `cmd/blrcs-mcpd` (the
