@@ -81,6 +81,18 @@ type IssuanceResult struct {
 	Credential *compliance.Credential // 発行された VC
 	Hash       cas.Hash               // payload の content hash (CAS有効時)
 	Receipt    *scitt.Receipt         // SCITT receipt (Ledger有効時)
+
+	// StepFailures records non-fatal errors from optional side-effect steps
+	// (CAS.Put, Provenance.Record, scitt sign/register) that occurred *after*
+	// the credential itself was successfully issued. IssueAndPublish returns a
+	// nil error whenever Issue succeeds, even if a later step fails — Hash or
+	// Receipt then stay zero-valued for that step. StepFailures is how a
+	// caller detects that silent partial state instead of having to notice a
+	// suspiciously empty Hash/Receipt on its own. For a compliance system
+	// whose entire value is the SCITT audit trail, a failed registration that
+	// looks identical to "Ledger not configured" is a real integrity gap —
+	// check StepFailures whenever CAS/Provenance/Ledger are configured.
+	StepFailures []error
 }
 
 // IssueAndPublish — DPP発行と関連 side-effect を1コールで実行
@@ -132,6 +144,10 @@ func (c *Composer) IssueAndPublish(
 		if err == nil {
 			res.Hash = h
 			c.tel.Counter("compose.cas.stored").Inc()
+		} else {
+			span.RecordError(err)
+			c.tel.Counter("compose.cas.failed").Inc()
+			res.StepFailures = append(res.StepFailures, fmt.Errorf("compose: cas put: %w", err))
 		}
 	}
 	// Step 2b: Provenance index
@@ -139,6 +155,10 @@ func (c *Composer) IssueAndPublish(
 		_, err := c.opts.Provenance.Record(externalID, credBytes)
 		if err == nil {
 			c.tel.Counter("compose.provenance.recorded").Inc()
+		} else {
+			span.RecordError(err)
+			c.tel.Counter("compose.provenance.failed").Inc()
+			res.StepFailures = append(res.StepFailures, fmt.Errorf("compose: provenance record: %w", err))
 		}
 	}
 
@@ -151,11 +171,19 @@ func (c *Composer) IssueAndPublish(
 			"application/vc+json",
 			credBytes,
 		)
-		if sErr == nil {
+		if sErr != nil {
+			span.RecordError(sErr)
+			c.tel.Counter("compose.scitt.failed").Inc()
+			res.StepFailures = append(res.StepFailures, fmt.Errorf("compose: scitt sign statement: %w", sErr))
+		} else {
 			r, regErr := c.opts.Ledger.Register(stmt)
 			if regErr == nil {
 				res.Receipt = r
 				c.tel.Counter("compose.scitt.registered").Inc()
+			} else {
+				span.RecordError(regErr)
+				c.tel.Counter("compose.scitt.failed").Inc()
+				res.StepFailures = append(res.StepFailures, fmt.Errorf("compose: scitt register: %w", regErr))
 			}
 		}
 	}

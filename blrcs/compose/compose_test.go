@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -466,5 +467,89 @@ func TestLookupByExternalIDBadJSON(t *testing.T) {
 	}
 	if _, _, err := c.LookupByExternalID("bad-json-id"); err == nil {
 		t.Error("bad JSON payload should cause unmarshal error")
+	}
+}
+
+// ============================================================================
+// Axis 97: IssueAndPublish surfaces partial-step failures instead of
+// silently swallowing them.
+// ============================================================================
+
+// failingStore always fails Put, to simulate a CAS/Provenance backend outage.
+type failingStore struct{}
+
+func (failingStore) Put(payload []byte) (cas.Hash, error)    { return "", errFailingStore }
+func (failingStore) Get(h cas.Hash) ([]byte, error)          { return nil, errFailingStore }
+func (failingStore) Has(h cas.Hash) bool                     { return false }
+func (failingStore) Size() int                               { return 0 }
+func (failingStore) Iterate(fn func(h cas.Hash) error) error { return nil }
+
+var errFailingStore = errors.New("failingStore: simulated backend outage")
+
+// TestIssueAndPublishCASFailureSurfaced verifies that a CAS.Put failure is
+// reported via StepFailures rather than silently leaving res.Hash empty with
+// a nil error, which previously looked identical to "CAS not configured".
+func TestIssueAndPublishCASFailureSurfaced(t *testing.T) {
+	c, _, _ := setup(t)
+	c.opts.CAS = failingStore{}
+	c.opts.Provenance = nil // avoid a second failure from the same store
+
+	res, err := c.IssueAndPublish(context.Background(),
+		compliance.PassportClaim{ProductID: "P-CAS-FAIL"}, "id-cas-fail", time.Hour)
+	if err != nil {
+		t.Fatalf("Issue itself should still succeed: %v", err)
+	}
+	if res.Credential == nil {
+		t.Fatal("credential should still be issued despite CAS failure")
+	}
+	if res.Hash != "" {
+		t.Errorf("Hash should stay empty when CAS.Put fails, got %q", res.Hash)
+	}
+	if len(res.StepFailures) != 1 {
+		t.Fatalf("want 1 StepFailure, got %d: %v", len(res.StepFailures), res.StepFailures)
+	}
+	if !errors.Is(res.StepFailures[0], errFailingStore) {
+		t.Errorf("StepFailures[0] should wrap the CAS error, got %v", res.StepFailures[0])
+	}
+}
+
+// TestIssueAndPublishSCITTFailureSurfaced verifies that a rejected SCITT
+// registration (e.g. an issuer not on the ledger's trusted-issuer allowlist)
+// is reported via StepFailures rather than silently leaving res.Receipt nil
+// with a nil error — for a compliance system whose value is the audit trail,
+// a failed registration must not look identical to "Ledger not configured".
+func TestIssueAndPublishSCITTFailureSurfaced(t *testing.T) {
+	c, iss, _ := setup(t)
+	// Non-empty trusted-issuer allowlist that excludes our composer's issuer,
+	// so Ledger.Register deterministically rejects with ErrUntrustedIssuer.
+	c.opts.Ledger.RegisterTrustedIssuer("did:web:someone-else.example", iss.PublicKey())
+
+	res, err := c.IssueAndPublish(context.Background(),
+		compliance.PassportClaim{ProductID: "P-SCITT-FAIL"}, "id-scitt-fail", time.Hour)
+	if err != nil {
+		t.Fatalf("Issue itself should still succeed: %v", err)
+	}
+	if res.Receipt != nil {
+		t.Error("Receipt should stay nil when SCITT registration is rejected")
+	}
+	if len(res.StepFailures) != 1 {
+		t.Fatalf("want 1 StepFailure, got %d: %v", len(res.StepFailures), res.StepFailures)
+	}
+	if !errors.Is(res.StepFailures[0], scitt.ErrUntrustedIssuer) {
+		t.Errorf("StepFailures[0] should wrap ErrUntrustedIssuer, got %v", res.StepFailures[0])
+	}
+}
+
+// TestIssueAndPublishHappyPathNoStepFailures verifies the all-succeed path
+// leaves StepFailures nil (no regression on the common case).
+func TestIssueAndPublishHappyPathNoStepFailures(t *testing.T) {
+	c, _, _ := setup(t)
+	res, err := c.IssueAndPublish(context.Background(),
+		compliance.PassportClaim{ProductID: "P-OK"}, "id-ok", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.StepFailures) != 0 {
+		t.Errorf("happy path should have no StepFailures, got %v", res.StepFailures)
 	}
 }
