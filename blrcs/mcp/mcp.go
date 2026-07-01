@@ -14,10 +14,10 @@
 //	register_scitt      — 透明性ログ登録
 //	get_scitt_receipt   — 受領証取得
 //	ledger_checkpoint   — 署名済みtree head
-//	issue_sdjwt         — SD-JWT VC発行 (選択開示)
+//	issue_sdjwt         — SD-JWT VC発行 (選択開示、status_list claim 自動埋込み)
 //	verify_sdjwt        — SD-JWT VC検証 (exp/KB-JWT込み)
 //	check_revocation    — W3C Bitstring Status List 失効確認
-//	revoke_passport     — 発行済み DPP を失効
+//	revoke_passport     — 発行済み DPP/SD-JWT VC を失効
 //	get_revocation_list — 現在の署名済み Status List トークンを取得
 package mcp
 
@@ -402,7 +402,7 @@ func toolDefs() []tool {
 		},
 		{
 			Name:        "issue_sdjwt",
-			Description: "Issue an SD-JWT VC with selective disclosure. sdClaims become selectively disclosable; clearClaims are always visible. Returns the full SD-JWT token and a list of disclosures.",
+			Description: "Issue an SD-JWT VC with selective disclosure. sdClaims become selectively disclosable; clearClaims are always visible. Embeds a status_list claim (revocable via revoke_passport, checkable via check_revocation/get_revocation_list). Returns the full SD-JWT token, a list of disclosures, and the statusListIndex.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"subject":{"type":"string"},"sdClaims":{"type":"object","description":"Claims to make selectively disclosable"},"clearClaims":{"type":"object","description":"Claims always visible in the JWT"},"validForDays":{"type":"integer","default":365}},"required":["issuerId","subject","sdClaims"]}`),
 		},
 		{
@@ -417,8 +417,8 @@ func toolDefs() []tool {
 		},
 		{
 			Name:        "revoke_passport",
-			Description: "Revoke a previously-issued passport by its statusListIndex (from the credentialStatus of the credential returned by issue_passport). Idempotent — revoking an already-revoked index succeeds.",
-			InputSchema: rawJSON(`{"type":"object","properties":{"statusListIndex":{"type":"integer","minimum":0,"description":"statusListIndex from the credential's credentialStatus"}},"required":["statusListIndex"]}`),
+			Description: "Revoke a previously-issued passport or SD-JWT VC by its statusListIndex (from issue_passport's credentialStatus, or issue_sdjwt's statusListIndex field — both draw from the same status list). Idempotent — revoking an already-revoked index succeeds.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"statusListIndex":{"type":"integer","minimum":0,"description":"statusListIndex from issue_passport's credentialStatus or issue_sdjwt's response"}},"required":["statusListIndex"]}`),
 		},
 		{
 			Name:        "get_revocation_list",
@@ -781,7 +781,15 @@ func (s *Server) toolIssueSDJWT(args json.RawMessage) (string, error) {
 	if in.ClearClaims == nil {
 		in.ClearClaims = map[string]any{}
 	}
-	sdjwt, discs, err := iss.IssueSDJWT(in.Subject, in.SDClaims, in.ClearClaims, validFor)
+	// Draws from the same shared status-list index space as issue_passport —
+	// revoke_passport and check_revocation work identically regardless of
+	// which tool issued the credential.
+	index, err := s.allocateStatusIndex()
+	if err != nil {
+		return "", err
+	}
+	statusRef := &compliance.StatusRef{URI: s.selfIssuer.ID + "#revocation-list", Index: index}
+	sdjwt, discs, err := iss.IssueSDJWTStatus(in.Subject, in.SDClaims, in.ClearClaims, statusRef, validFor)
 	if err != nil {
 		return "", err
 	}
@@ -792,6 +800,7 @@ func (s *Server) toolIssueSDJWT(args json.RawMessage) (string, error) {
 	b, _ := json.Marshal(map[string]any{
 		"sdjwt":             sdjwt,
 		"disclosableFields": discNames,
+		"statusListIndex":   index,
 	})
 	return string(b), nil
 }
