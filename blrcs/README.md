@@ -4,7 +4,7 @@
 
 ```
 stdlib + ed25519 only — zero external dependencies
-1800+ tests · 53 packages · ~24,500 LoC implementation · 21 fuzz targets
+1900+ tests · 53 packages · ~25,000 LoC implementation · 21 fuzz targets
 ```
 
 ## Status
@@ -28,6 +28,7 @@ stdlib + ed25519 only — zero external dependencies
 | did:webvh (verifiable history + pre-rotation) | ✅ | didwebvh, multiformats |
 | Webhook outbound | ✅ | webhook |
 | Content-Addressed Storage | ✅ | cas |
+| Encryption at rest (AES-256-GCM, statement log) | ✅ | atrest, storage |
 | Privacy Manifest (PrivacyInfo equivalent) | ✅ | privacy |
 
 ## Quick start
@@ -37,7 +38,7 @@ go install ./cmd/blrcs/
 go install ./cmd/blrcs-mcpd/
 go install ./cmd/blrcs-demo/
 
-# Self-test: 13 subsystems, ~7ms
+# Self-test: 16 subsystems, ~7ms
 blrcs doctor
 
 # Live browser demo on Safari 26 / Chrome 141
@@ -46,6 +47,9 @@ blrcs-demo
 
 # MCP HTTP daemon
 BLRCS_DATA_DIR=/data BLRCS_AUTH_TOKENS=tok1:agent-1 blrcs-mcpd
+
+# ...with encryption at rest (AES-256-GCM) for the statement log
+BLRCS_DATA_DIR=/data BLRCS_ENCRYPTION_KEY=$(openssl rand -hex 32) blrcs-mcpd
 ```
 
 ## Library usage
