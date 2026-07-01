@@ -6,6 +6,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`mcp`, `storage`: `revoke_passport` / `get_revocation_list` — close the
+  issue-but-never-revoke gap (Axis 100).** Socratic-method review of the MCP
+  tool surface: `issue_passport` let an agent create trust artifacts, but
+  the only revocation-related tool, `check_revocation`, was a stateless
+  verifier taking an externally-supplied status list token as input — there
+  was no way for the same server that issued a passport to ever revoke it.
+  All the underlying building blocks already existed and were tested
+  (`revocation.BitstringStatusList`, `compliance.Issuer.IssueWithStatus`,
+  `Credential.Status`) — the same "part exists but isn't connected" shape as
+  Axis 95-98, just for a whole capability instead of a single fix. Added a
+  new optional `storage.BlobStorage` interface (`SaveBlob`/`LoadBlob`,
+  checked via type assertion so existing `Storage` implementations don't
+  break) implemented for `MemoryStorage`/`FileStorage`/`EncryptedStorage`
+  (pass-through). `Server` now owns a server-wide revocation list + a
+  persisted next-index counter, restored together on startup (restoring
+  only one would let a restarted server reassign an already-used index to a
+  new credential). `issue_passport` now embeds a `credentialStatus` into
+  every issued passport; new `revoke_passport` tool flips the bit (audited
+  on the SCITT ledger, same trust model as `issue_passport`); new
+  `get_revocation_list` tool serves a freshly-signed status list token
+  directly through the tool surface, since this server may run over stdio
+  with no HTTP endpoint to dereference a `statusListCredential` URL from.
+  Verified end-to-end against the built `blrcs-mcp` binary over its real
+  stdio JSON-RPC transport. 13 new tests, including a restart-persistence
+  test backed by real `FileStorage` that verifies both the revoked bit and
+  the index counter survive a process restart.
+
 ### Documentation
 - **README: fix doctor-check-count drift, document `BLRCS_ENCRYPTION_KEY`
   (Axis 99).** "13 subsystems, ~7ms" was stale — `DefaultChecks()` now
