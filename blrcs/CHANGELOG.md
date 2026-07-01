@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`cmd/blrcs-mcpd`: production daemon bypassed the hardened auth-token parser
+  (security, Axis 95).** The actual HTTP daemon entrypoint never imported the
+  `config` package — it read `BLRCS_AUTH_TOKENS` directly and parsed it with a
+  hand-rolled, unhardened `parseTokens()` that silently skipped malformed
+  pairs (missing `:`, empty principal) and let duplicate tokens silently
+  overwrite each other (last-wins), instead of failing startup. This is
+  exactly the vulnerability Axis 89 fixed in `config.parseTokens` — an
+  empty-principal token is a session-hijack risk since sessions are bound to
+  their principal — but that fix lived in a package the real daemon never
+  called, so it never reached production. Exported `config.ParseTokens` and
+  wired `cmd/blrcs-mcpd/main.go` to use it, `fatal()`-ing on error like the
+  existing `BLRCS_RATE_LIMIT_RPS` fail-fast path; deleted the dead local
+  copy. Verified against the built binary:
+  `BLRCS_AUTH_TOKENS="tokA:,tokB:admin"` now exits 1 with a clear error
+  instead of silently starting; valid tokens still work end-to-end. No other
+  `cmd/` entrypoint had this pattern. 1 new test: `TestParseTokensExported`.
+
 ### Testing
 - **`openid4vci`, `didresolver`: close coverage gaps in nonce-mismatch and
   key-hash pinning paths (Axis 94).** A fresh sweep of the remaining unaudited
