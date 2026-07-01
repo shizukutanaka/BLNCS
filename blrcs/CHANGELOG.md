@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Testing
+- **`openid4vci`, `didresolver`: close coverage gaps in nonce-mismatch and
+  key-hash pinning paths (Axis 94).** A fresh sweep of the remaining unaudited
+  packages (`httpmw`, `didresolver`, `mdoc`, `conformance`, `capability`,
+  `builder`, `compose`, `telemetry`, `metrics`, `i18n`, `apispec`, `openapi`)
+  found no new exploitable bugs — existing defenses (rate limiting, SSRF
+  guards, constant-time comparison, bounded caches) hold up. Coverage analysis
+  found two security-relevant functions under-tested: `verifyProofJWT`'s
+  nonce-match success path and `ErrProofNonceMismatch` rejection path (the
+  actual anti-replay check) were never exercised (only its parse-error
+  branches were); `TrustAnchor.AddKeyHash` (Ed25519 key pinning by SHA-256 hex
+  digest) was at 0% coverage. Both were correct on inspection — this closes
+  the verification gap with 5 new tests, no production code changed.
+
 ### Fixed
 - **`jsonschema`: bound `uniqueItems` DoS + add `deepEqual` depth cap (security,
   Axis 91).** `uniqueItems` validation ran an O(N²) loop of `deepEqual()` calls with
