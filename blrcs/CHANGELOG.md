@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`compose`: `IssueAndPublish` silently swallowed CAS/Provenance/SCITT step
+  failures (Axis 97).** The package's flagship "1-call" convenience API runs
+  Issue → CAS.Put → Provenance.Record → SCITT sign+register → Webhook. Every
+  step after Issue discarded its error on an `if err == nil { ... }` happy
+  path with no else branch: a failing `CAS.Put` left `res.Hash` empty, a
+  failing `Ledger.Register` left `res.Receipt` nil, and the function still
+  returned `(res, nil)` — indistinguishable from "CAS/Ledger not configured"
+  (both are documented optional/nil-to-skip fields). For a compliance system
+  whose value proposition is the SCITT audit trail, a silently failed
+  registration is a real integrity gap: the caller has no signal the
+  passport was issued but never actually logged. (Found while investigating
+  why `blrcs/saga` — built for exactly "Issue→CAS→SCITT→Webhook 失敗時
+  partial state" per its own doc — is never imported anywhere; its rollback
+  model doesn't obviously fit here since SCITT/CAS are append-only/
+  idempotent, not resources you compensate, so the narrower fix is to stop
+  hiding the failure rather than force-fit saga.) Added
+  `IssuanceResult.StepFailures []error`, populated for each non-fatal step
+  that fails after Issue succeeds, plus telemetry failure counters
+  (`compose.cas.failed`/`provenance.failed`/`scitt.failed`). Backward
+  compatible — Issue's own failure still returns a non-nil error as before;
+  existing callers ignoring the new field see identical behavior. 3 new
+  tests, including a real (non-mocked) `ErrUntrustedIssuer` SCITT rejection.
+
 ### Added
 - **`storage`, `cmd/blrcs-mcpd`: wire `atrest` encryption-at-rest into the
   daemon — previously fully disconnected (security, Axis 96).**
