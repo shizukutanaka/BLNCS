@@ -2263,3 +2263,48 @@ func TestMetadataAdvertisesNonceEndpoint(t *testing.T) {
 		t.Errorf("metadata must advertise nonce_endpoint, got %v", md["nonce_endpoint"])
 	}
 }
+
+// ============================================================================
+// Coverage uplift: verifyProofJWT — nonce match/mismatch success paths
+// (Axis 94: the underlying nonce checks were untested via this thin wrapper,
+// only via the internal IssueCredentialWithProof flow which now calls
+// parseProofJWT directly.)
+// ============================================================================
+
+// TestVerifyProofJWTNonceMatches verifies the happy path: a structurally valid
+// proof JWT whose embedded nonce matches expectedNonce returns the holder key.
+func TestVerifyProofJWTNonceMatches(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"the-nonce","aud":"https://issuer.example","iat":` + strconv.FormatInt(time.Now().Unix(), 10) + `}`))
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	proofJWT := hdr + "." + pl + "." + sig
+
+	gotPub, err := verifyProofJWT(proofJWT, "the-nonce", "https://issuer.example")
+	if err != nil {
+		t.Fatalf("matching nonce should verify: %v", err)
+	}
+	if !bytes.Equal(gotPub, pub) {
+		t.Error("returned public key does not match signer")
+	}
+}
+
+// TestVerifyProofJWTNonceMismatchRejected verifies that a structurally valid
+// proof JWT whose embedded nonce does NOT match expectedNonce is rejected with
+// ErrProofNonceMismatch — the core anti-replay check this wrapper exists for.
+func TestVerifyProofJWTNonceMismatchRejected(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"stolen-nonce","aud":"https://issuer.example","iat":` + strconv.FormatInt(time.Now().Unix(), 10) + `}`))
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	proofJWT := hdr + "." + pl + "." + sig
+
+	_, err := verifyProofJWT(proofJWT, "expected-nonce", "https://issuer.example")
+	if err != ErrProofNonceMismatch {
+		t.Fatalf("mismatched nonce: want ErrProofNonceMismatch, got %v", err)
+	}
+}

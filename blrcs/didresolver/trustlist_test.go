@@ -347,3 +347,47 @@ func TestTrustListEndToEnd(t *testing.T) {
 		t.Error("counterfeit issuer must not be trusted")
 	}
 }
+
+// ============================================================================
+// Coverage uplift: TrustAnchor.AddKeyHash (Axis 94)
+// ============================================================================
+
+// TestAddKeyHashTrustsMatchingKey verifies that a key registered via its
+// SHA-256 hex digest (rather than the raw key bytes via AddKey) is recognized
+// by IsTrusted under any DID — this is the path used when loading pinned key
+// hashes from an external trust list without holding the key bytes.
+func TestAddKeyHashTrustsMatchingKey(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	ta := NewTrustAnchor()
+	ta.AddKeyHash(keyHashHex(pub))
+
+	if !ta.IsTrusted("did:web:anything.example", pub) {
+		t.Error("key registered via AddKeyHash should be trusted")
+	}
+}
+
+// TestAddKeyHashIsCaseInsensitive verifies that AddKeyHash lowercases its
+// input to match AddKey's stored form (hex.EncodeToString is always lowercase),
+// so a caller supplying an uppercase-hex digest still matches at lookup time.
+func TestAddKeyHashIsCaseInsensitive(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	ta := NewTrustAnchor()
+	ta.AddKeyHash(strings.ToUpper(keyHashHex(pub)))
+
+	if !ta.IsTrusted("did:web:anything.example", pub) {
+		t.Error("uppercase-hex key hash should still match on lookup")
+	}
+}
+
+// TestAddKeyHashDoesNotTrustOtherKeys verifies a key NOT registered via
+// AddKeyHash remains untrusted.
+func TestAddKeyHashDoesNotTrustOtherKeys(t *testing.T) {
+	pub1, _, _ := ed25519.GenerateKey(rand.Reader)
+	pub2, _, _ := ed25519.GenerateKey(rand.Reader)
+	ta := NewTrustAnchor()
+	ta.AddKeyHash(keyHashHex(pub1))
+
+	if ta.IsTrusted("did:web:anything.example", pub2) {
+		t.Error("key not registered via AddKeyHash must not be trusted")
+	}
+}
