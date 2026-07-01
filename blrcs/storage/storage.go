@@ -387,3 +387,71 @@ func (fs *FileStorage) Close() error {
 	fs.closed = true
 	return fs.file.Close()
 }
+
+// ============================================================================
+// EncryptedStorage — envelope-encryption decorator (atrest integration)
+// ============================================================================
+
+// BlobCipher is the subset of atrest.Cipher / atrest.Keyring that
+// EncryptedStorage needs. Declared here (not by importing blrcs/atrest) so this
+// package stays decoupled from the encryption implementation; any type with
+// this shape works, including a Keyring for key-rotation support.
+type BlobCipher interface {
+	Encrypt(payload []byte) ([]byte, error)
+	Decrypt(envelope []byte) ([]byte, error)
+}
+
+// EncryptedStorage wraps another Storage and transparently encrypts every
+// statement blob with the given BlobCipher before delegating to it, and
+// decrypts on the way back out. It implements Storage, so it composes with
+// FileStorage, MemoryStorage, or any future backend without those backends
+// needing to know about encryption.
+//
+// Scope: only AppendStatement/IterateStatements (the statement log — the DPP/
+// Battery-Passport payloads, which may carry PII/confidential supply-chain
+// data) are encrypted. LoadKeyPair/SaveKeyPair pass through unchanged: the
+// Transparency Service's own Ed25519 signing key is a bootstrapping secret
+// (whatever key protects it would itself need protecting), and atrest is
+// explicitly designed to take its key from an external KMS/HSM rather than
+// hold a root key itself — see atrest's package doc. Signing-key-at-rest
+// protection belongs to that external KMS/HSM layer, not here.
+type EncryptedStorage struct {
+	underlying Storage
+	cipher     BlobCipher
+}
+
+// NewEncryptedStorage wraps underlying so every AppendStatement/
+// IterateStatements blob is encrypted/decrypted with cipher.
+func NewEncryptedStorage(underlying Storage, cipher BlobCipher) *EncryptedStorage {
+	return &EncryptedStorage{underlying: underlying, cipher: cipher}
+}
+
+func (e *EncryptedStorage) AppendStatement(blob StatementBlob) (uint64, error) {
+	ct, err := e.cipher.Encrypt(blob)
+	if err != nil {
+		return 0, fmt.Errorf("storage: encrypt statement: %w", err)
+	}
+	return e.underlying.AppendStatement(StatementBlob(ct))
+}
+
+func (e *EncryptedStorage) IterateStatements(fn func(idx uint64, blob StatementBlob) error) error {
+	return e.underlying.IterateStatements(func(idx uint64, ct StatementBlob) error {
+		pt, err := e.cipher.Decrypt(ct)
+		if err != nil {
+			return fmt.Errorf("storage: decrypt statement at leaf %d: %w", idx, err)
+		}
+		return fn(idx, StatementBlob(pt))
+	})
+}
+
+func (e *EncryptedStorage) Size() (uint64, error) { return e.underlying.Size() }
+
+func (e *EncryptedStorage) LoadKeyPair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
+	return e.underlying.LoadKeyPair()
+}
+
+func (e *EncryptedStorage) SaveKeyPair(pub ed25519.PublicKey, priv ed25519.PrivateKey) error {
+	return e.underlying.SaveKeyPair(pub, priv)
+}
+
+func (e *EncryptedStorage) Close() error { return e.underlying.Close() }

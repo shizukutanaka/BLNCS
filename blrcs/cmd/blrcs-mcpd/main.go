@@ -7,6 +7,7 @@
 //	BLRCS_TLS_CERT=cert.pem BLRCS_TLS_KEY=key.pem blrcs-mcpd     # HTTPS
 //	BLRCS_AUTH_TOKENS=token1:agent-1,token2:agent-2 blrcs-mcpd   # Bearer auth
 //	BLRCS_RATE_LIMIT_RPS=10 blrcs-mcpd                           # 10req/s per principal
+//	BLRCS_ENCRYPTION_KEY=<64 hex chars> BLRCS_DATA_DIR=/data blrcs-mcpd  # AES-256-GCM at rest
 //
 // エンドポイント:
 //
@@ -19,6 +20,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -27,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"blrcs/atrest"
 	"blrcs/compliance"
 	"blrcs/config"
 	"blrcs/healthprobe"
@@ -60,7 +63,28 @@ func main() {
 		}
 		// Persisted storage must be closed on shutdown to release the file handle.
 		defer func() { _ = store.Close() }()
-		srv, err = mcp.NewServerWithStorage(tsID, serverDID, store)
+
+		// Optional encryption at rest: BLRCS_ENCRYPTION_KEY wraps the statement
+		// log (DPP/Battery-Passport payloads, which may carry PII/confidential
+		// supply-chain data) in AES-256-GCM before it touches disk. Off by
+		// default so existing plaintext deployments are unaffected; the TS
+		// signing keypair itself is unaffected either way — see
+		// storage.EncryptedStorage's doc comment for why that's out of scope
+		// here (it belongs to an external KMS/HSM, per atrest's own design).
+		var backing storage.Storage = store
+		if keyHex := os.Getenv("BLRCS_ENCRYPTION_KEY"); keyHex != "" {
+			key, herr := hex.DecodeString(keyHex)
+			if herr != nil || len(key) != atrest.KeySize {
+				fatal("invalid BLRCS_ENCRYPTION_KEY:", fmt.Errorf("must be %d hex-encoded bytes (got %d)", atrest.KeySize*2, len(keyHex)))
+			}
+			cipher, cerr := atrest.NewCipher(atrest.KeyIDFromUint32(1), key)
+			if cerr != nil {
+				fatal("encryption init:", cerr)
+			}
+			backing = storage.NewEncryptedStorage(store, cipher)
+			fmt.Fprintln(os.Stderr, "storage: statement log encrypted at rest (AES-256-GCM)")
+		}
+		srv, err = mcp.NewServerWithStorage(tsID, serverDID, backing)
 	}
 	if err != nil {
 		fatal("server init:", err)
