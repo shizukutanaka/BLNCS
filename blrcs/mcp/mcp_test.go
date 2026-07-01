@@ -5,12 +5,14 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"blrcs/compliance"
 	"blrcs/scitt"
+	"blrcs/storage"
 )
 
 func setupServer(t *testing.T) (*Server, *compliance.Issuer, *compliance.SensorAttester) {
@@ -62,14 +64,14 @@ func TestToolsList(t *testing.T) {
 	resp := callRaw(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 	result := resp["result"].(map[string]any)
 	tools := result["tools"].([]any)
-	if len(tools) != 10 {
-		t.Fatalf("expected 10 tools, got %d", len(tools))
+	if len(tools) != 12 {
+		t.Fatalf("expected 12 tools, got %d", len(tools))
 	}
 	names := make(map[string]bool)
 	for _, tl := range tools {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
-	for _, want := range []string{"issue_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "issue_sdjwt", "verify_sdjwt", "check_revocation"} {
+	for _, want := range []string{"issue_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "issue_sdjwt", "verify_sdjwt", "check_revocation", "revoke_passport", "get_revocation_list"} {
 		if !names[want] {
 			t.Errorf("tool %s missing", want)
 		}
@@ -384,7 +386,7 @@ func TestSessionStoreGC(t *testing.T) {
 func TestBuildServerInvalidDID(t *testing.T) {
 	ledger, _ := scitt.NewLedger("did:web:ts.test")
 	// Empty serverDID → compliance.NewIssuer("") should fail
-	_, err := buildServer("did:web:ts.test", "", ledger)
+	_, err := buildServer("did:web:ts.test", "", ledger, storage.NewMemoryStorage())
 	if err == nil {
 		t.Fatal("empty serverDID should fail")
 	}
@@ -430,4 +432,255 @@ func itoa(n int) string {
 		buf = append([]byte{'-'}, buf...)
 	}
 	return string(buf)
+}
+
+// ============================================================================
+// Axis 100: revoke_passport / get_revocation_list lifecycle
+// ============================================================================
+
+// toolCall is a small helper for tools/call requests in the tests below.
+func toolCall(t *testing.T, srv *Server, id int, name string, args map[string]any) map[string]any {
+	t.Helper()
+	req := map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": "tools/call",
+		"params": map[string]any{"name": name, "arguments": args},
+	}
+	b, _ := json.Marshal(req)
+	resp := callRaw(t, srv, string(b))
+	return resp["result"].(map[string]any)
+}
+
+func toolCallText(t *testing.T, result map[string]any) string {
+	t.Helper()
+	if result["isError"].(bool) {
+		t.Fatalf("tool call failed: %v", result["content"])
+	}
+	return result["content"].([]any)[0].(map[string]any)["text"].(string)
+}
+
+// TestIssuePassportEmbedsCredentialStatus verifies issue_passport now embeds
+// a credentialStatus (W3C Bitstring Status List entry) into every issued
+// credential, so it's revocable.
+func TestIssuePassportEmbedsCredentialStatus(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	result := toolCall(t, srv, 1, "issue_passport", map[string]any{
+		"issuerId": "did:web:factory.example", "productId": "P-STATUS-1",
+	})
+	credJSON := toolCallText(t, result)
+	var cred compliance.Credential
+	if err := json.Unmarshal([]byte(credJSON), &cred); err != nil {
+		t.Fatal(err)
+	}
+	if cred.Status == nil {
+		t.Fatal("issued credential should carry a credentialStatus")
+	}
+	if cred.Status.StatusListIndex != "0" {
+		t.Errorf("first issued credential should get index 0, got %s", cred.Status.StatusListIndex)
+	}
+}
+
+// TestIssuePassportAllocatesDistinctIndices verifies successive issuances get
+// distinct, incrementing status-list indices (no index reuse/collision).
+func TestIssuePassportAllocatesDistinctIndices(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	seen := map[string]bool{}
+	for i := 0; i < 5; i++ {
+		result := toolCall(t, srv, i, "issue_passport", map[string]any{
+			"issuerId": "did:web:factory.example", "productId": "P-IDX-" + itoa(i),
+		})
+		credJSON := toolCallText(t, result)
+		var cred compliance.Credential
+		if err := json.Unmarshal([]byte(credJSON), &cred); err != nil {
+			t.Fatal(err)
+		}
+		idx := cred.Status.StatusListIndex
+		if seen[idx] {
+			t.Fatalf("index %s reused across issuances", idx)
+		}
+		seen[idx] = true
+	}
+}
+
+// TestRevokePassportEndToEnd exercises the full lifecycle: issue → check
+// (not revoked) → revoke → get_revocation_list → check (revoked).
+func TestRevokePassportEndToEnd(t *testing.T) {
+	srv, _, _ := setupServer(t)
+
+	issueResult := toolCall(t, srv, 1, "issue_passport", map[string]any{
+		"issuerId": "did:web:factory.example", "productId": "P-REVOKE-1",
+	})
+	credJSON := toolCallText(t, issueResult)
+	var cred compliance.Credential
+	if err := json.Unmarshal([]byte(credJSON), &cred); err != nil {
+		t.Fatal(err)
+	}
+	index := cred.Status.StatusListIndex
+
+	getList := func() (tokenJWT, keyB64 string) {
+		t.Helper()
+		listResult := toolCall(t, srv, 2, "get_revocation_list", map[string]any{})
+		var out struct {
+			StatusListTokenJWT     string `json:"statusListTokenJWT"`
+			StatusListIssuerKeyB64 string `json:"statusListIssuerKeyB64"`
+		}
+		if err := json.Unmarshal([]byte(toolCallText(t, listResult)), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.StatusListTokenJWT, out.StatusListIssuerKeyB64
+	}
+	checkRevoked := func() bool {
+		t.Helper()
+		tokenJWT, keyB64 := getList()
+		idxInt, _ := jsonNumberToInt(index)
+		checkResult := toolCall(t, srv, 3, "check_revocation", map[string]any{
+			"statusListTokenJWT": tokenJWT, "statusListIssuerKeyB64": keyB64, "statusIndex": idxInt,
+		})
+		var out struct {
+			Revoked bool `json:"revoked"`
+		}
+		if err := json.Unmarshal([]byte(toolCallText(t, checkResult)), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Revoked
+	}
+
+	if checkRevoked() {
+		t.Fatal("freshly issued credential should not be revoked")
+	}
+
+	idxInt, _ := jsonNumberToInt(index)
+	revokeResult := toolCall(t, srv, 4, "revoke_passport", map[string]any{"statusListIndex": idxInt})
+	toolCallText(t, revokeResult) // asserts not isError
+
+	if !checkRevoked() {
+		t.Fatal("credential should be revoked after revoke_passport")
+	}
+}
+
+// TestRevokePassportUnknownIndexRejected verifies an out-of-range index is
+// rejected rather than silently accepted.
+func TestRevokePassportUnknownIndexRejected(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	result := toolCall(t, srv, 1, "revoke_passport", map[string]any{"statusListIndex": 999999999})
+	if !result["isError"].(bool) {
+		t.Fatal("revoking an out-of-range index should error")
+	}
+}
+
+// TestRevokePassportNegativeIndexRejected verifies input validation.
+func TestRevokePassportNegativeIndexRejected(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	result := toolCall(t, srv, 1, "revoke_passport", map[string]any{"statusListIndex": -1})
+	if !result["isError"].(bool) {
+		t.Fatal("negative statusListIndex should error")
+	}
+}
+
+// TestRevokePassportIsAudited verifies revoke_passport calls are recorded to
+// the transparency log, like other mutating tools.
+func TestRevokePassportIsAudited(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	before := srv.Ledger().Size()
+
+	issueResult := toolCall(t, srv, 1, "issue_passport", map[string]any{
+		"issuerId": "did:web:factory.example", "productId": "P-AUDIT-1",
+	})
+	var cred compliance.Credential
+	_ = json.Unmarshal([]byte(toolCallText(t, issueResult)), &cred)
+	idxInt, _ := jsonNumberToInt(cred.Status.StatusListIndex)
+
+	toolCall(t, srv, 2, "revoke_passport", map[string]any{"statusListIndex": idxInt})
+
+	after := srv.Ledger().Size()
+	if after <= before+1 { // +1 for the issue_passport audit entry itself
+		t.Errorf("revoke_passport should add its own ledger entry: before=%d after=%d", before, after)
+	}
+}
+
+// TestRevocationPersistsAcrossRestart verifies revocation state (list +
+// index counter) survives a server restart when backed by FileStorage —
+// otherwise a revoked credential would silently un-revoke on every restart.
+func TestRevocationPersistsAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := storage.NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv1, err := NewServerWithStorage("did:web:ts.persist.test", "did:web:mcp.persist.test", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss, _ := compliance.NewIssuer("did:web:factory.persist.test")
+	srv1.RegisterIssuer(iss)
+
+	issueResult := toolCall(t, srv1, 1, "issue_passport", map[string]any{
+		"issuerId": "did:web:factory.persist.test", "productId": "P-PERSIST-1",
+	})
+	var cred compliance.Credential
+	_ = json.Unmarshal([]byte(toolCallText(t, issueResult)), &cred)
+	idxInt, _ := jsonNumberToInt(cred.Status.StatusListIndex)
+
+	revokeResult := toolCall(t, srv1, 2, "revoke_passport", map[string]any{"statusListIndex": idxInt})
+	toolCallText(t, revokeResult)
+	store.Close()
+
+	// Reopen against the same directory — simulates a process restart.
+	store2, err := storage.NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store2.Close()
+	srv2, err := NewServerWithStorage("did:web:ts.persist.test", "did:web:mcp.persist.test", store2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The revoked index must still read as revoked after restart.
+	getResult := toolCall(t, srv2, 3, "get_revocation_list", map[string]any{})
+	var out struct {
+		StatusListTokenJWT     string `json:"statusListTokenJWT"`
+		StatusListIssuerKeyB64 string `json:"statusListIssuerKeyB64"`
+	}
+	_ = json.Unmarshal([]byte(toolCallText(t, getResult)), &out)
+	checkResult := toolCall(t, srv2, 4, "check_revocation", map[string]any{
+		"statusListTokenJWT": out.StatusListTokenJWT, "statusListIssuerKeyB64": out.StatusListIssuerKeyB64, "statusIndex": idxInt,
+	})
+	var checkOut struct {
+		Revoked bool `json:"revoked"`
+	}
+	_ = json.Unmarshal([]byte(toolCallText(t, checkResult)), &checkOut)
+	if !checkOut.Revoked {
+		t.Fatal("revocation should survive a server restart")
+	}
+
+	// The index counter must also have survived: a second issuance after
+	// restart must not reuse index 0 (already assigned to P-PERSIST-1).
+	srv2.RegisterIssuer(iss)
+	issueResult2 := toolCall(t, srv2, 5, "issue_passport", map[string]any{
+		"issuerId": "did:web:factory.persist.test", "productId": "P-PERSIST-2",
+	})
+	var cred2 compliance.Credential
+	_ = json.Unmarshal([]byte(toolCallText(t, issueResult2)), &cred2)
+	if cred2.Status.StatusListIndex == cred.Status.StatusListIndex {
+		t.Fatal("status index counter should not reset across restart")
+	}
+}
+
+func jsonNumberToInt(s string) (int, error) {
+	n := 0
+	neg := false
+	for i, c := range s {
+		if i == 0 && c == '-' {
+			neg = true
+			continue
+		}
+		if c < '0' || c > '9' {
+			return 0, errors.New("not a number: " + s)
+		}
+		n = n*10 + int(c-'0')
+	}
+	if neg {
+		n = -n
+	}
+	return n, nil
 }

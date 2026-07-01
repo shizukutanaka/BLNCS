@@ -127,3 +127,27 @@ func TestEncryptedStorageSizeLoadSaveKeyPairPassThrough(t *testing.T) {
 		t.Errorf("Close: %v", err)
 	}
 }
+
+// TestEncryptedStorageBlobPassThrough verifies SaveBlob/LoadBlob delegate to
+// the underlying store unencrypted (Axis 100).
+func TestEncryptedStorageBlobPassThrough(t *testing.T) {
+	underlying := storage.NewMemoryStorage()
+	es := storage.NewEncryptedStorage(underlying, newTestCipher(t))
+
+	if err := es.SaveBlob("revocation-list", []byte("plain-data")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := es.LoadBlob("revocation-list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "plain-data" {
+		t.Errorf("got %q want plain-data", got)
+	}
+	// Confirm it's readable unencrypted from the underlying store too — blobs
+	// are explicitly out of scope for encryption.
+	rawGot, err := underlying.LoadBlob("revocation-list")
+	if err != nil || string(rawGot) != "plain-data" {
+		t.Errorf("underlying blob should be plaintext: %q, %v", rawGot, err)
+	}
+}

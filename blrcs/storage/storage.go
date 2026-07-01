@@ -58,6 +58,37 @@ type Storage interface {
 	Close() error
 }
 
+// BlobStorage is an optional additional capability: persisting small named
+// blobs across restarts for server-owned state that isn't a statement or the
+// TS keypair (e.g. a revocation status list). Declared separately from
+// Storage — rather than added to it — so existing Storage implementations
+// don't break; callers check for it with a type assertion
+// (`bs, ok := store.(BlobStorage)`) and fall back to in-memory-only behavior
+// for that feature when a backend doesn't implement it.
+type BlobStorage interface {
+	// SaveBlob durably stores data under name, overwriting any previous value.
+	SaveBlob(name string, data []byte) error
+	// LoadBlob retrieves a previously-saved blob. Returns ErrNotFound if name
+	// was never saved.
+	LoadBlob(name string) ([]byte, error)
+}
+
+// validateBlobName restricts blob names to a safe charset. FileStorage maps
+// name directly into a filename, so this also prevents path traversal
+// ("../../etc/passwd") from a careless or malicious caller.
+func validateBlobName(name string) error {
+	if name == "" {
+		return errors.New("storage: blob name must not be empty")
+	}
+	for _, c := range name {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' {
+			continue
+		}
+		return fmt.Errorf("storage: blob name %q contains invalid character %q (allowed: a-zA-Z0-9-_)", name, c)
+	}
+	return nil
+}
+
 // ============================================================================
 // MemoryStorage — テスト用
 // ============================================================================
@@ -68,6 +99,7 @@ type MemoryStorage struct {
 	pub    ed25519.PublicKey
 	priv   ed25519.PrivateKey
 	closed bool
+	blobs  map[string][]byte
 }
 
 func NewMemoryStorage() *MemoryStorage { return &MemoryStorage{} }
@@ -125,6 +157,36 @@ func (m *MemoryStorage) Close() error {
 	m.closed = true
 	m.mu.Unlock()
 	return nil
+}
+
+func (m *MemoryStorage) SaveBlob(name string, data []byte) error {
+	if err := validateBlobName(name); err != nil {
+		return err
+	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	m.mu.Lock()
+	if m.blobs == nil {
+		m.blobs = make(map[string][]byte)
+	}
+	m.blobs[name] = cp
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *MemoryStorage) LoadBlob(name string) ([]byte, error) {
+	if err := validateBlobName(name); err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	data, ok := m.blobs[name]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	return cp, nil
 }
 
 // ============================================================================
@@ -188,6 +250,35 @@ func syncDir(dir string) error {
 		return err
 	}
 	return d.Close()
+}
+
+// atomicWriteFile crash-safely (over)writes <dir>/<filename> with data:
+// (1) write + fsync a tmp file, (2) rename, (3) syncDir. os.WriteFile does not
+// fsync file data before close — a crash between write and rename can leave
+// the renamed file with zero/garbage bytes (page-cache flush not guaranteed).
+// syncDir alone makes the rename durable (directory entry), not the data.
+func atomicWriteFile(dir, filename string, data []byte) error {
+	tmp := filepath.Join(dir, filename+".tmp")
+	final := filepath.Join(dir, filename)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		return err
+	}
+	return syncDir(dir)
 }
 
 func (fs *FileStorage) rescanSize() error {
@@ -344,38 +435,10 @@ func (fs *FileStorage) SaveKeyPair(pub ed25519.PublicKey, priv ed25519.PrivateKe
 	if len(pub) != ed25519.PublicKeySize || len(priv) != ed25519.PrivateKeySize {
 		return errors.New("storage: keypair wrong size")
 	}
-	// Crash-safe atomic write: (1) write + fsync tmp file, (2) rename, (3) syncDir.
-	// os.WriteFile does not fsync file data before close — a crash between WriteFile
-	// and Rename can leave the renamed keypair.bin with zero/garbage bytes (page-cache
-	// flush not guaranteed), silently destroying the private key.
-	// syncDir alone makes the rename durable (directory entry), not the data.
-	tmp := filepath.Join(fs.dir, keypairFileName+".tmp")
-	final := filepath.Join(fs.dir, keypairFileName)
 	buf := make([]byte, 0, ed25519.PublicKeySize+ed25519.PrivateKeySize)
 	buf = append(buf, pub...)
 	buf = append(buf, priv...)
-
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(buf); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, final); err != nil {
-		return err
-	}
-	// fsync the directory so the rename (the keypair's directory entry) is
-	// durable on crash — otherwise a reported-successful SaveKeyPair can be lost.
-	return syncDir(fs.dir)
+	return atomicWriteFile(fs.dir, keypairFileName, buf)
 }
 
 func (fs *FileStorage) Close() error {
@@ -386,6 +449,24 @@ func (fs *FileStorage) Close() error {
 	}
 	fs.closed = true
 	return fs.file.Close()
+}
+
+func (fs *FileStorage) SaveBlob(name string, data []byte) error {
+	if err := validateBlobName(name); err != nil {
+		return err
+	}
+	return atomicWriteFile(fs.dir, "blob-"+name+".bin", data)
+}
+
+func (fs *FileStorage) LoadBlob(name string) ([]byte, error) {
+	if err := validateBlobName(name); err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(filepath.Join(fs.dir, "blob-"+name+".bin"))
+	if os.IsNotExist(err) {
+		return nil, ErrNotFound
+	}
+	return b, err
 }
 
 // ============================================================================
@@ -455,3 +536,24 @@ func (e *EncryptedStorage) SaveKeyPair(pub ed25519.PublicKey, priv ed25519.Priva
 }
 
 func (e *EncryptedStorage) Close() error { return e.underlying.Close() }
+
+// SaveBlob/LoadBlob pass through to the underlying store unencrypted (only
+// AppendStatement/IterateStatements are in scope for encryption — see the
+// EncryptedStorage doc comment), and only if the underlying store implements
+// BlobStorage; otherwise they report that the capability is unavailable so
+// callers can fall back rather than silently no-op.
+func (e *EncryptedStorage) SaveBlob(name string, data []byte) error {
+	bs, ok := e.underlying.(BlobStorage)
+	if !ok {
+		return fmt.Errorf("storage: underlying %T does not support blob storage", e.underlying)
+	}
+	return bs.SaveBlob(name, data)
+}
+
+func (e *EncryptedStorage) LoadBlob(name string) ([]byte, error) {
+	bs, ok := e.underlying.(BlobStorage)
+	if !ok {
+		return nil, fmt.Errorf("storage: underlying %T does not support blob storage", e.underlying)
+	}
+	return bs.LoadBlob(name)
+}

@@ -7,16 +7,18 @@
 //
 // 公開ツール:
 //
-//	issue_passport     — EU DPP発行
-//	verify_passport    — DPP検証
-//	attest_range       — センサ範囲証明 (値非開示)
-//	verify_range       — 範囲証明検証
-//	register_scitt     — 透明性ログ登録
-//	get_scitt_receipt  — 受領証取得
-//	ledger_checkpoint  — 署名済みtree head
-//	issue_sdjwt        — SD-JWT VC発行 (選択開示)
-//	verify_sdjwt       — SD-JWT VC検証 (exp/KB-JWT込み)
-//	check_revocation   — W3C Bitstring Status List 失効確認
+//	issue_passport      — EU DPP発行 (credentialStatus 自動埋込み)
+//	verify_passport     — DPP検証
+//	attest_range        — センサ範囲証明 (値非開示)
+//	verify_range        — 範囲証明検証
+//	register_scitt      — 透明性ログ登録
+//	get_scitt_receipt   — 受領証取得
+//	ledger_checkpoint   — 署名済みtree head
+//	issue_sdjwt         — SD-JWT VC発行 (選択開示)
+//	verify_sdjwt        — SD-JWT VC検証 (exp/KB-JWT込み)
+//	check_revocation    — W3C Bitstring Status List 失効確認
+//	revoke_passport     — 発行済み DPP を失効
+//	get_revocation_list — 現在の署名済み Status List トークンを取得
 package mcp
 
 import (
@@ -28,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"sync"
 	"time"
 
@@ -134,14 +137,30 @@ type Server struct {
 	ledger     *scitt.Ledger
 	selfIssuer *compliance.Issuer
 	limiter    *ToolLimiter // per-tool rate limiter; nil = unlimited
+
+	// Revocation: a single server-wide W3C Bitstring Status List that
+	// issue_passport embeds into every issued credential's credentialStatus,
+	// and revoke_passport mutates. Persisted via storage.BlobStorage when the
+	// backing Storage supports it (both cmd/blrcs-mcp and cmd/blrcs-mcpd's
+	// FileStorage do); falls back to in-memory-only (volatile) otherwise,
+	// same as the rest of the ephemeral-mode contract.
+	revocationList  *revocation.BitstringStatusList
+	nextStatusIndex uint64
+	revocationStore storage.BlobStorage // nil if the backing Storage doesn't support blobs
 }
 
+const (
+	revocationListBlobName  = "revocation-list"
+	revocationIndexBlobName = "revocation-next-index"
+)
+
 func NewServer(tsID, serverDID string) (*Server, error) {
-	ledger, err := scitt.NewLedger(tsID)
-	if err != nil {
-		return nil, err
-	}
-	return buildServer(tsID, serverDID, ledger)
+	// Route through NewServerWithStorage (backed by an explicit MemoryStorage)
+	// rather than scitt.NewLedger's own internal storage.NewMemoryStorage — the
+	// Server needs a handle on the Storage to persist revocation state (via
+	// BlobStorage) using the same code path as the persistent case, keeping
+	// ephemeral and persistent mode structurally identical.
+	return NewServerWithStorage(tsID, serverDID, storage.NewMemoryStorage())
 }
 
 // NewServerWithStorage — 永続化層付き (プロダクション向け)
@@ -150,20 +169,111 @@ func NewServerWithStorage(tsID, serverDID string, store storage.Storage) (*Serve
 	if err != nil {
 		return nil, err
 	}
-	return buildServer(tsID, serverDID, ledger)
+	return buildServer(tsID, serverDID, ledger, store)
 }
 
-func buildServer(tsID, serverDID string, ledger *scitt.Ledger) (*Server, error) {
+func buildServer(tsID, serverDID string, ledger *scitt.Ledger, store storage.Storage) (*Server, error) {
 	selfIss, err := compliance.NewIssuer(serverDID)
 	if err != nil {
 		return nil, err
 	}
-	return &Server{
+	s := &Server{
 		issuers:    make(map[string]*compliance.Issuer),
 		attesters:  make(map[string]*compliance.SensorAttester),
 		ledger:     ledger,
 		selfIssuer: selfIss,
-	}, nil
+	}
+	if err := s.initRevocation(store); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// initRevocation restores the revocation list and index counter from store
+// (if it supports BlobStorage), or starts fresh otherwise. Both must be
+// restored together: replaying only the list would let a freshly-restarted
+// server reassign an already-used status index to a new credential, silently
+// aliasing the new credential's revocation status to whatever the old one's
+// bit happened to be.
+func (s *Server) initRevocation(store storage.Storage) error {
+	s.revocationList = revocation.NewBitstringStatusList(revocation.PurposeRevocation, revocation.MinBitstringSize)
+	bs, ok := store.(storage.BlobStorage)
+	if !ok {
+		return nil
+	}
+	s.revocationStore = bs
+	switch encoded, err := bs.LoadBlob(revocationListBlobName); {
+	case err == nil:
+		list, derr := revocation.DecodeBitstringStatusList(revocation.PurposeRevocation, string(encoded))
+		if derr != nil {
+			return fmt.Errorf("mcp: restore revocation list: %w", derr)
+		}
+		s.revocationList = list
+	case errors.Is(err, storage.ErrNotFound):
+		// no prior state — fresh list is correct
+	default:
+		return fmt.Errorf("mcp: load revocation list: %w", err)
+	}
+	switch idxBytes, err := bs.LoadBlob(revocationIndexBlobName); {
+	case err == nil:
+		n, perr := strconv.ParseUint(string(idxBytes), 10, 64)
+		if perr != nil {
+			return fmt.Errorf("mcp: restore revocation index: %w", perr)
+		}
+		s.nextStatusIndex = n
+	case errors.Is(err, storage.ErrNotFound):
+		// no prior state — start at 0
+	default:
+		return fmt.Errorf("mcp: load revocation index: %w", err)
+	}
+	return nil
+}
+
+// allocateStatusIndex reserves the next status-list bit for a newly-issued
+// credential and durably persists the advanced counter before returning it —
+// so a crash between allocation and the caller using the index can never
+// replay the same index for two different credentials.
+func (s *Server) allocateStatusIndex() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := s.nextStatusIndex
+	if idx >= uint64(s.revocationList.Capacity()) {
+		return 0, errors.New("mcp: revocation list capacity exhausted")
+	}
+	next := idx + 1
+	if s.revocationStore != nil {
+		if err := s.revocationStore.SaveBlob(revocationIndexBlobName, []byte(strconv.FormatUint(next, 10))); err != nil {
+			return 0, fmt.Errorf("mcp: persist revocation index: %w", err)
+		}
+	}
+	s.nextStatusIndex = next
+	return int(idx), nil
+}
+
+// revokeByIndex marks index as revoked and durably persists the updated list.
+// On a persist failure the in-memory bit is rolled back so the reported error
+// matches the actual (unchanged) durable state — otherwise a caller retrying
+// after "persist failed" would find the index already marked revoked
+// in-memory and skip the retry, while disk still shows it as active.
+func (s *Server) revokeByIndex(index int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.revocationList.SetStatus(index, true); err != nil {
+		return err
+	}
+	if s.revocationStore == nil {
+		return nil
+	}
+	encoded, err := s.revocationList.EncodedList()
+	if err != nil {
+		_ = s.revocationList.SetStatus(index, false)
+		return fmt.Errorf("mcp: encode revocation list: %w", err)
+	}
+	if err := s.revocationStore.SaveBlob(revocationListBlobName, []byte(encoded)); err != nil {
+		_ = s.revocationList.SetStatus(index, false)
+		return fmt.Errorf("mcp: persist revocation list: %w", err)
+	}
+	return nil
 }
 
 func (s *Server) Ledger() *scitt.Ledger { return s.ledger }
@@ -305,6 +415,16 @@ func toolDefs() []tool {
 			Description: "Check whether a credential is revoked using a W3C Bitstring Status List token. Returns {revoked:bool}.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"statusListTokenJWT":{"type":"string","description":"Status list token (application/statuslist+jwt)"},"statusListIssuerKeyB64":{"type":"string","description":"Base64-encoded Ed25519 public key of status list issuer"},"statusIndex":{"type":"integer","minimum":0,"description":"Bit index of the credential in the status list"}},"required":["statusListTokenJWT","statusListIssuerKeyB64","statusIndex"]}`),
 		},
+		{
+			Name:        "revoke_passport",
+			Description: "Revoke a previously-issued passport by its statusListIndex (from the credentialStatus of the credential returned by issue_passport). Idempotent — revoking an already-revoked index succeeds.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"statusListIndex":{"type":"integer","minimum":0,"description":"statusListIndex from the credential's credentialStatus"}},"required":["statusListIndex"]}`),
+		},
+		{
+			Name:        "get_revocation_list",
+			Description: "Fetch a freshly-signed W3C Bitstring Status List token for this server's current revocation state, plus the issuer key needed to verify it — feed both directly into check_revocation.",
+			InputSchema: rawJSON(`{"type":"object","properties":{}}`),
+		},
 	}
 }
 
@@ -356,10 +476,11 @@ func (s *Server) handleToolCall(id json.RawMessage, params json.RawMessage) *rpc
 // auditableTool lists the state-changing tools whose calls are recorded to the
 // transparency log. Read-only tools are intentionally excluded.
 var auditableTool = map[string]bool{
-	"issue_passport": true,
-	"attest_range":   true,
-	"register_scitt": true,
-	"issue_sdjwt":    true,
+	"issue_passport":  true,
+	"attest_range":    true,
+	"register_scitt":  true,
+	"issue_sdjwt":     true,
+	"revoke_passport": true,
 }
 
 func (s *Server) auditToolCall(name string, args json.RawMessage) {
@@ -403,6 +524,10 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolVerifySDJWT(args)
 	case "check_revocation":
 		return s.toolCheckRevocation(args)
+	case "revoke_passport":
+		return s.toolRevokePassport(args)
+	case "get_revocation_list":
+		return s.toolGetRevocationList(args)
 	}
 	return "", fmt.Errorf("unknown tool: %s", name)
 }
@@ -445,14 +570,24 @@ func (s *Server) toolIssuePassport(args json.RawMessage) (string, error) {
 	if in.ValidForDays == 0 {
 		validFor = 365 * 24 * time.Hour
 	}
-	cred, err := iss.Issue(compliance.PassportClaim{
+	// Every issued passport is revocable: allocate a status-list bit and embed
+	// a credentialStatus so revoke_passport can later flip it and
+	// get_revocation_list can serve a token that check_revocation verifies.
+	// statusListURL is a stable self-identifier, not a dereferenceable HTTP
+	// URL — this server may run as stdio (cmd/blrcs-mcp) with no HTTP surface
+	// at all, so the list is fetched via the get_revocation_list tool instead.
+	index, err := s.allocateStatusIndex()
+	if err != nil {
+		return "", err
+	}
+	cred, err := iss.IssueWithStatus(compliance.PassportClaim{
 		ProductID:     in.ProductID,
 		Category:      in.Category,
 		OriginCountry: in.OriginCountry,
 		Manufacturer:  in.IssuerID,
 		CarbonKgCO2e:  in.CarbonKgCO2e,
 		Recyclability: in.Recyclability,
-	}, validFor)
+	}, validFor, s.selfIssuer.ID+"#revocation-list", index, string(revocation.PurposeRevocation))
 	if err != nil {
 		return "", err
 	}
@@ -720,5 +855,48 @@ func (s *Server) toolCheckRevocation(args json.RawMessage) (string, error) {
 		return "", fmt.Errorf("status index out of range: %w", err)
 	}
 	b, _ := json.Marshal(map[string]bool{"revoked": revoked})
+	return string(b), nil
+}
+
+// toolRevokePassport marks a previously-issued passport's status-list index as
+// revoked. Uses the same trust model as every other mutating tool in this
+// server (issue_passport, register_scitt, etc.): any caller authenticated at
+// the transport layer (bearer token) may call it — there is no additional
+// per-issuer authorization check here, matching issue_passport's existing
+// precedent of trusting the caller-supplied issuerId without cryptographic
+// proof of ownership.
+func (s *Server) toolRevokePassport(args json.RawMessage) (string, error) {
+	var in struct {
+		StatusListIndex int `json:"statusListIndex"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.StatusListIndex < 0 {
+		return "", errors.New("mcp: statusListIndex must be non-negative")
+	}
+	if err := s.revokeByIndex(in.StatusListIndex); err != nil {
+		return "", err
+	}
+	return `{"revoked":true}`, nil
+}
+
+// toolGetRevocationList issues a freshly-signed status list token for the
+// server's current revocation state — the counterpart callers need to
+// actually exercise check_revocation, since this server may run over stdio
+// (cmd/blrcs-mcp) with no HTTP endpoint to dereference a statusListCredential
+// URL from.
+func (s *Server) toolGetRevocationList(args json.RawMessage) (string, error) {
+	s.mu.RLock()
+	list := s.revocationList
+	s.mu.RUnlock()
+	token, err := list.IssueToken(s.selfIssuer.ID, "blrcs-revocation-list", s.selfIssuer.PrivateKey(), 24*time.Hour)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]string{
+		"statusListTokenJWT":     token,
+		"statusListIssuerKeyB64": base64.StdEncoding.EncodeToString(s.selfIssuer.PublicKey()),
+	})
 	return string(b), nil
 }

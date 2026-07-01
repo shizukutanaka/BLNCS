@@ -858,3 +858,120 @@ func TestFileStoragePartialWriteRecovery(t *testing.T) {
 		t.Fatalf("torn frame: want ErrCorrupted, got %v", err)
 	}
 }
+
+// ============================================================================
+// BlobStorage — MemoryStorage and FileStorage (Axis 100)
+// ============================================================================
+
+func TestMemoryStorageBlobRoundTrip(t *testing.T) {
+	m := NewMemoryStorage()
+	if err := m.SaveBlob("mykey", []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.LoadBlob("mykey")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("got %q want %q", got, "hello")
+	}
+}
+
+func TestMemoryStorageBlobNotFound(t *testing.T) {
+	m := NewMemoryStorage()
+	if _, err := m.LoadBlob("absent"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestMemoryStorageBlobOverwrite(t *testing.T) {
+	m := NewMemoryStorage()
+	_ = m.SaveBlob("k", []byte("v1"))
+	_ = m.SaveBlob("k", []byte("v2"))
+	got, _ := m.LoadBlob("k")
+	if string(got) != "v2" {
+		t.Errorf("overwrite: got %q want v2", got)
+	}
+}
+
+func TestMemoryStorageBlobInvalidName(t *testing.T) {
+	m := NewMemoryStorage()
+	if err := m.SaveBlob("", []byte("x")); err == nil {
+		t.Error("empty blob name should be rejected")
+	}
+	if err := m.SaveBlob("../etc/passwd", []byte("x")); err == nil {
+		t.Error("path-traversal-shaped blob name should be rejected")
+	}
+}
+
+func TestFileStorageBlobRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+
+	if err := fs.SaveBlob("revocation-list", []byte("bitstring-data")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fs.LoadBlob("revocation-list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "bitstring-data" {
+		t.Errorf("got %q want %q", got, "bitstring-data")
+	}
+}
+
+func TestFileStorageBlobPersistsAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.SaveBlob("state", []byte("persisted")); err != nil {
+		t.Fatal(err)
+	}
+	fs.Close()
+
+	fs2, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs2.Close()
+	got, err := fs2.LoadBlob("state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "persisted" {
+		t.Errorf("got %q want persisted", got)
+	}
+}
+
+func TestFileStorageBlobNotFound(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+	if _, err := fs.LoadBlob("never-saved"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestFileStorageBlobInvalidName(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+	if err := fs.SaveBlob("../../escape", []byte("x")); err == nil {
+		t.Error("path-traversal-shaped blob name should be rejected")
+	}
+	if _, err := fs.LoadBlob("has spaces"); err == nil {
+		t.Error("blob name with spaces should be rejected")
+	}
+}
