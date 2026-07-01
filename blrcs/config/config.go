@@ -213,6 +213,16 @@ func (c *Config) JSON() ([]byte, error) {
 // helpers
 // ============================================================================
 
+// ParseTokens is the exported form of parseTokens below, for callers that need
+// BLRCS_AUTH_TOKENS-style parsing without going through FromEnv (e.g. a daemon
+// entrypoint that assembles its own config by hand instead of using this
+// package's Config type). Exporting this ensures every caller gets the same
+// fail-fast contract instead of hand-rolling a lenient parser that silently
+// drops malformed entries or lets duplicate tokens overwrite each other.
+func ParseTokens(s string) (map[string]string, error) {
+	return parseTokens(s)
+}
+
 // parseTokens — "token1:principal1,token2:principal2" → map.
 // Returns an error for any pair that does not contain the required ':' separator,
 // has an empty token part, has an empty principal part, or repeats a token —

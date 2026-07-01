@@ -24,11 +24,11 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"blrcs/compliance"
+	"blrcs/config"
 	"blrcs/healthprobe"
 	"blrcs/httpmw"
 	"blrcs/mcp"
@@ -75,7 +75,15 @@ func main() {
 	// Auth
 	var auth mcp.AuthVerifier
 	if authTokens != "" {
-		tokens := parseTokens(authTokens)
+		// Use config.ParseTokens rather than a hand-rolled parser: it fails fast
+		// on a malformed pair, an empty principal, or a duplicate token instead of
+		// silently dropping or overwriting entries. An empty principal is a real
+		// hijack risk here — sessions are bound to their principal, so two tokens
+		// both authenticating to "" could hijack each other's sessions.
+		tokens, terr := config.ParseTokens(authTokens)
+		if terr != nil {
+			fatal("invalid BLRCS_AUTH_TOKENS:", terr)
+		}
 		auth = &mcp.BearerTokenAuth{Tokens: tokens}
 		fmt.Fprintf(os.Stderr, "auth: bearer (%d tokens)\n", len(tokens))
 	}
@@ -166,20 +174,6 @@ func envOr(k, d string) string {
 		return v
 	}
 	return d
-}
-
-// parseTokens — "token1:principal1,token2:principal2" → map
-func parseTokens(s string) map[string]string {
-	m := make(map[string]string)
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		idx := strings.Index(part, ":")
-		if idx <= 0 || idx == len(part)-1 {
-			continue
-		}
-		m[part[:idx]] = part[idx+1:]
-	}
-	return m
 }
 
 func fatal(args ...any) {

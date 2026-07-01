@@ -312,3 +312,25 @@ func TestFromEnvRejectsMalformedInt(t *testing.T) {
 		t.Fatal("malformed BLRCS_RATE_LIMIT_RPS should fail fast, not silently default")
 	}
 }
+
+// TestParseTokensExported verifies the exported ParseTokens wrapper delegates
+// to the same hardened parser as FromEnv (Axis 95): cmd/blrcs-mcpd previously
+// hand-rolled its own lenient token parser that silently dropped malformed
+// pairs and let duplicate tokens overwrite each other, bypassing the fail-fast
+// contract this package enforces. ParseTokens gives every caller — including
+// daemon entrypoints that don't go through FromEnv — the same guarantees.
+func TestParseTokensExported(t *testing.T) {
+	got, err := ParseTokens("tok1:alice,tok2:bob")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 || got["tok1"] != "alice" || got["tok2"] != "bob" {
+		t.Errorf("got %v", got)
+	}
+	if _, err := ParseTokens("dup:a,dup:b"); err == nil {
+		t.Error("ParseTokens should reject duplicate tokens like the internal parser does")
+	}
+	if _, err := ParseTokens("tok:"); err == nil {
+		t.Error("ParseTokens should reject an empty principal like the internal parser does")
+	}
+}
