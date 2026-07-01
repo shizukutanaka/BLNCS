@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`mcp`: `issue_sdjwt` now embeds `status_list` too — closes the same gap
+  for the second issuance tool (Axis 101).** Continuing the Socratic-method
+  review from Axis 100: since `issue_passport` now embeds a
+  `credentialStatus`, the natural next question is whether `issue_sdjwt`
+  does the same. It didn't — `toolIssueSDJWT` called `iss.IssueSDJWT` (no
+  status), not `IssueSDJWTStatus`, even though `compliance` already has
+  that variant fully implemented and tested, plus a purpose-built
+  `CheckRevokedToken` verification helper. SD-JWT VCs issued via MCP were
+  unrevocable while plain-VC passports (as of Axis 100) were not — an
+  inconsistency between the two issuance tools. Since Axis 100 built all
+  the hard infrastructure, this fix is small: `toolIssueSDJWT` now
+  allocates a status index via the same `s.allocateStatusIndex()` and calls
+  `IssueSDJWTStatus`. Both issuance tools draw from the same shared index
+  space, so the existing `revoke_passport`/`check_revocation`/
+  `get_revocation_list` tools work unchanged for SD-JWT-issued credentials
+  too — no new tools needed. Added `statusListIndex` to `issue_sdjwt`'s
+  JSON response so callers don't have to decode the JWT payload to find
+  their index. 3 new tests, including a full issue→check→revoke→check
+  lifecycle for an SD-JWT VC using the shared `revoke_passport` tool.
+
 ### Added
 - **`mcp`, `storage`: `revoke_passport` / `get_revocation_list` — close the
   issue-but-never-revoke gap (Axis 100).** Socratic-method review of the MCP
