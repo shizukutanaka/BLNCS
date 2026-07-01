@@ -6,6 +6,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`storage`, `cmd/blrcs-mcpd`: wire `atrest` encryption-at-rest into the
+  daemon — previously fully disconnected (security, Axis 96).**
+  `atrest/atrest.go`'s own package doc states its purpose: "解決する短所:
+  Storage encryption at rest無 — FileStorage は平文 (PII/機密含む可能性)".
+  But nothing in the codebase imported `blrcs/atrest` outside its own test
+  file — the package was fully implemented and tested in isolation, and
+  never wired to `storage.FileStorage` or any `cmd/` entrypoint. Every
+  persisted DPP/Battery-Passport statement (product IDs, supplier names,
+  sensor readings) was written to disk in plaintext, protected only by
+  filesystem permissions. Same shape of gap as Axis 95 — a hardening feature
+  that exists but was never connected to the real code path. Added
+  `storage.EncryptedStorage`, a `Storage` decorator that encrypts/decrypts
+  `StatementBlob` via a small `BlobCipher` interface (satisfied by both
+  `atrest.Cipher` and `atrest.Keyring`, keeping `storage` decoupled from the
+  encryption implementation); scoped to the statement log only — the TS
+  signing keypair passes through unchanged since it's a bootstrapping secret
+  that belongs to an external KMS/HSM per `atrest`'s own design. Added an
+  optional `BLRCS_ENCRYPTION_KEY` env var (64 hex chars = 32 bytes) to
+  `cmd/blrcs-mcpd`: when set, wraps the persisted storage in
+  `EncryptedStorage` before handing it to the server; a malformed key
+  `fatal()`s at startup like the existing fail-fast env vars. Off by
+  default — fully backward compatible. Verified against the built binary
+  (malformed key → exit 1; valid key → "encrypted at rest" log line + normal
+  startup). 4 new integration tests against the real `atrest.Cipher`,
+  including one that asserts the plaintext never reaches the underlying
+  unwrapped store.
+
 ### Fixed
 - **`cmd/blrcs-mcpd`: production daemon bypassed the hardened auth-token parser
   (security, Axis 95).** The actual HTTP daemon entrypoint never imported the
