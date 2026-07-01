@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`cmd/blrcs-mcp`: extend encryption-at-rest to the stdio binary too (Axis
+  98).** Axis 96 wired `storage.EncryptedStorage` into `cmd/blrcs-mcpd` (the
+  HTTP daemon) via `BLRCS_ENCRYPTION_KEY`. `cmd/blrcs-mcp` — the stdio binary
+  used by Claude Desktop / Cursor / VS Code MCP clients, whose own doc
+  comment explicitly documents `BLRCS_DATA_DIR` as "永続モード
+  (プロダクション)" — had the identical gap: it called
+  `storage.NewFileStorage` directly with no encryption option, so any real
+  deployment using this binary in persistent mode still wrote DPP/Battery-
+  Passport statements to disk in plaintext. Mirrors the `blrcs-mcpd` wiring
+  exactly. Verified against the built binary: a truncated key exits 1 with
+  a clear error; a valid key logs "encrypted at rest" and starts normally.
+  No new tests needed — reuses `storage.EncryptedStorage`/`atrest.NewCipher`,
+  already covered by Axis 96.
+
 ### Fixed
 - **`compose`: `IssueAndPublish` silently swallowed CAS/Provenance/SCITT step
   failures (Axis 97).** The package's flagship "1-call" convenience API runs
