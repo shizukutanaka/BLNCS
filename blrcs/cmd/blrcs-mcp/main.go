@@ -4,6 +4,7 @@
 //
 //	blrcs-mcp                                # 揮発モード (テスト/デモ)
 //	BLRCS_DATA_DIR=/var/lib/blrcs blrcs-mcp  # 永続モード (プロダクション)
+//	BLRCS_DATA_DIR=/var/lib/blrcs BLRCS_ENCRYPTION_KEY=<64 hex chars> blrcs-mcp  # AES-256-GCM at rest
 //
 // Claude Desktop / Cursor / VS Code MCP拡張 等から:
 //
@@ -11,15 +12,18 @@
 //
 // 環境変数:
 //
-//	BLRCS_TS_ID      — Transparency Service DID (default: did:web:blrcs.example/ts)
-//	BLRCS_SERVER_DID — Server self DID        (default: did:web:blrcs.example/mcp)
-//	BLRCS_DATA_DIR   — 永続化ディレクトリ。未設定なら揮発
+//	BLRCS_TS_ID          — Transparency Service DID (default: did:web:blrcs.example/ts)
+//	BLRCS_SERVER_DID     — Server self DID        (default: did:web:blrcs.example/mcp)
+//	BLRCS_DATA_DIR       — 永続化ディレクトリ。未設定なら揮発
+//	BLRCS_ENCRYPTION_KEY — 64桁hex (32 bytes)。設定時、statement log を AES-256-GCM で暗号化
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 
+	"blrcs/atrest"
 	"blrcs/compliance"
 	"blrcs/mcp"
 	"blrcs/storage"
@@ -42,7 +46,25 @@ func main() {
 			os.Exit(1)
 		}
 		defer func() { _ = store.Close() }()
-		srv, err = mcp.NewServerWithStorage(tsID, serverDID, store)
+
+		// Optional encryption at rest — see storage.EncryptedStorage's doc
+		// comment for scope (statement log only, not the TS signing keypair).
+		var backing storage.Storage = store
+		if keyHex := os.Getenv("BLRCS_ENCRYPTION_KEY"); keyHex != "" {
+			key, herr := hex.DecodeString(keyHex)
+			if herr != nil || len(key) != atrest.KeySize {
+				fmt.Fprintf(os.Stderr, "invalid BLRCS_ENCRYPTION_KEY: must be %d hex-encoded bytes (got %d)\n", atrest.KeySize*2, len(keyHex))
+				os.Exit(1)
+			}
+			cipher, cerr := atrest.NewCipher(atrest.KeyIDFromUint32(1), key)
+			if cerr != nil {
+				fmt.Fprintln(os.Stderr, "encryption init:", cerr)
+				os.Exit(1)
+			}
+			backing = storage.NewEncryptedStorage(store, cipher)
+			fmt.Fprintln(os.Stderr, "storage: statement log encrypted at rest (AES-256-GCM)")
+		}
+		srv, err = mcp.NewServerWithStorage(tsID, serverDID, backing)
 		fmt.Fprintf(os.Stderr, "blrcs-mcp: mode=persistent dir=%s\n", dataDir)
 	}
 	if err != nil {
