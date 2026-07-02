@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`mcp`: `issue_battery_passport` — closes the last major "issue-but-can't-
+  issue" gap (Axis 102).** README lists "EU Battery Passport (Reg 2023/1542)
+  ✅" as a headline feature, but the MCP tool surface — the primary
+  agent-facing interface — had no way to issue one.
+  `compliance.BatteryPassportClaim` (25 fields, full Annex XIII coverage)
+  and `compliance.IssueBatteryPassport` were fully implemented and tested,
+  just never exposed as a tool. Wired `issue_battery_passport` into
+  `toolDefs()`/`dispatch()`/`auditableTool`. Added
+  `compliance.IssueBatteryPassportWithStatus` (refactored
+  `IssueBatteryPassport` into a shared `issueBatteryPassport` helper) so
+  Battery Passports embed a `credentialStatus` and draw from the same
+  shared revocation index space as `issue_passport`/`issue_sdjwt` —
+  `revoke_passport`/`check_revocation`/`get_revocation_list` work unchanged
+  for Battery Passports, no new revocation tools needed. Verified
+  end-to-end against the built `blrcs-mcp` binary: an EV battery with a
+  due-diligence URL produces a signed credential with the `BatteryPassport`
+  type marker and an embedded `credentialStatus`. 10 new tests (3
+  compliance, 7 mcp) covering the happy path, Art.52 due-diligence
+  enforcement, malformed-date rejection, and the full revoke/check
+  lifecycle. `TestToolsList` updated for the tool count (12 → 13).
+
 ### Fixed
 - **`mcp`: `issue_sdjwt` now embeds `status_list` too — closes the same gap
   for the second issuance tool (Axis 101).** Continuing the Socratic-method
