@@ -8,6 +8,7 @@
 // 公開ツール:
 //
 //	issue_passport      — EU DPP発行 (credentialStatus 自動埋込み)
+//	issue_battery_passport — EU Battery Passport発行 (Reg 2023/1542 Annex XIII)
 //	verify_passport     — DPP検証
 //	attest_range        — センサ範囲証明 (値非開示)
 //	verify_range        — 範囲証明検証
@@ -371,6 +372,11 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"productId":{"type":"string"},"category":{"type":"string"},"originCountry":{"type":"string"},"carbonKgCO2e":{"type":"number"},"recyclability":{"type":"number","minimum":0,"maximum":1},"validForDays":{"type":"integer","default":365}},"required":["issuerId","productId"]}`),
 		},
 		{
+			Name:        "issue_battery_passport",
+			Description: "Issue an EU Battery Passport (Regulation (EU) 2023/1542, Annex XIII). EV and industrial batteries over 2kWh require dueDiligenceReportUrl (Art.52) or issuance is rejected. Embeds a credentialStatus, same as issue_passport.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"batteryId":{"type":"string"},"gtin":{"type":"string"},"serialNo":{"type":"string"},"category":{"type":"string","enum":["ev","lmt","industrial","sli","portable"]},"chemistry":{"type":"string","enum":["nmc","nca","lfp","lto","lco"]},"capacityKWh":{"type":"number"},"voltageV":{"type":"number"},"weightKg":{"type":"number"},"placeOfManufacture":{"type":"string"},"modelId":{"type":"string"},"dateOfManufacture":{"type":"string","description":"RFC3339"},"commissioningDate":{"type":"string","description":"RFC3339"},"carbonFootprintKgCO2ePerKWh":{"type":"number"},"carbonFootprintClass":{"type":"string"},"recycledContent":{"type":"object","properties":{"cobalt":{"type":"number"},"lithium":{"type":"number"},"nickel":{"type":"number"},"lead":{"type":"number"}}},"renewableContentPct":{"type":"number"},"hazardousSubstances":{"type":"array","items":{"type":"string"}},"stateOfHealthPct":{"type":"number"},"cycleCount":{"type":"integer"},"expectedLifetimeYears":{"type":"number"},"euDeclarationOfConformityUrl":{"type":"string"},"dueDiligenceReportUrl":{"type":"string","description":"Required for EV/industrial batteries >2kWh (Art.52)"},"separateCollection":{"type":"boolean"},"recyclable":{"type":"boolean"},"validForDays":{"type":"integer","default":365}},"required":["issuerId","batteryId","category"]}`),
+		},
+		{
 			Name:        "verify_passport",
 			Description: "Verify DPP signature and expiration against an issuer public key.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"credentialJson":{"type":"string"},"issuerPublicKeyB64":{"type":"string"}},"required":["credentialJson","issuerPublicKeyB64"]}`),
@@ -476,11 +482,12 @@ func (s *Server) handleToolCall(id json.RawMessage, params json.RawMessage) *rpc
 // auditableTool lists the state-changing tools whose calls are recorded to the
 // transparency log. Read-only tools are intentionally excluded.
 var auditableTool = map[string]bool{
-	"issue_passport":  true,
-	"attest_range":    true,
-	"register_scitt":  true,
-	"issue_sdjwt":     true,
-	"revoke_passport": true,
+	"issue_passport":         true,
+	"issue_battery_passport": true,
+	"attest_range":           true,
+	"register_scitt":         true,
+	"issue_sdjwt":            true,
+	"revoke_passport":        true,
 }
 
 func (s *Server) auditToolCall(name string, args json.RawMessage) {
@@ -506,6 +513,8 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 	switch name {
 	case "issue_passport":
 		return s.toolIssuePassport(args)
+	case "issue_battery_passport":
+		return s.toolIssueBatteryPassport(args)
 	case "verify_passport":
 		return s.toolVerifyPassport(args)
 	case "attest_range":
@@ -605,22 +614,22 @@ func (s *Server) toolIssuePassport(args json.RawMessage) (string, error) {
 // unset (matches the Go struct's omitempty semantics).
 func (s *Server) toolIssueBatteryPassport(args json.RawMessage) (string, error) {
 	var in struct {
-		IssuerID                      string  `json:"issuerId"`
-		BatteryID                     string  `json:"batteryId"`
-		GTIN                          string  `json:"gtin"`
-		SerialNo                      string  `json:"serialNo"`
-		Category                      string  `json:"category"`
-		Chemistry                     string  `json:"chemistry"`
-		CapacityKWh                   float32 `json:"capacityKWh"`
-		VoltageV                      float32 `json:"voltageV"`
-		WeightKg                      float32 `json:"weightKg"`
-		PlaceOfManufacture            string  `json:"placeOfManufacture"`
-		ModelID                       string  `json:"modelId"`
-		DateOfManufacture             string  `json:"dateOfManufacture"`
-		CommissioningDate             string  `json:"commissioningDate"`
-		CarbonFootprintKgCO2ePerKWh   float32 `json:"carbonFootprintKgCO2ePerKWh"`
-		CarbonFootprintClass          string  `json:"carbonFootprintClass"`
-		RecycledContent               *struct {
+		IssuerID                    string  `json:"issuerId"`
+		BatteryID                   string  `json:"batteryId"`
+		GTIN                        string  `json:"gtin"`
+		SerialNo                    string  `json:"serialNo"`
+		Category                    string  `json:"category"`
+		Chemistry                   string  `json:"chemistry"`
+		CapacityKWh                 float32 `json:"capacityKWh"`
+		VoltageV                    float32 `json:"voltageV"`
+		WeightKg                    float32 `json:"weightKg"`
+		PlaceOfManufacture          string  `json:"placeOfManufacture"`
+		ModelID                     string  `json:"modelId"`
+		DateOfManufacture           string  `json:"dateOfManufacture"`
+		CommissioningDate           string  `json:"commissioningDate"`
+		CarbonFootprintKgCO2ePerKWh float32 `json:"carbonFootprintKgCO2ePerKWh"`
+		CarbonFootprintClass        string  `json:"carbonFootprintClass"`
+		RecycledContent             *struct {
 			Cobalt  float32 `json:"cobalt"`
 			Lithium float32 `json:"lithium"`
 			Nickel  float32 `json:"nickel"`
@@ -635,7 +644,7 @@ func (s *Server) toolIssueBatteryPassport(args json.RawMessage) (string, error) 
 		DueDiligenceReportURL        string   `json:"dueDiligenceReportUrl"`
 		SeparateCollection           bool     `json:"separateCollection"`
 		Recyclable                   bool     `json:"recyclable"`
-		ValidForDays                  int     `json:"validForDays"`
+		ValidForDays                 int      `json:"validForDays"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
@@ -655,29 +664,29 @@ func (s *Server) toolIssueBatteryPassport(args json.RawMessage) (string, error) 
 		return "", fmt.Errorf("mcp: commissioningDate: %w", err)
 	}
 	claim := compliance.BatteryPassportClaim{
-		BatteryID:                     in.BatteryID,
-		GTIN:                          in.GTIN,
-		SerialNo:                      in.SerialNo,
-		Category:                      compliance.BatteryCategory(in.Category),
-		Chemistry:                     compliance.BatteryChemistry(in.Chemistry),
-		CapacityKWh:                   in.CapacityKWh,
-		VoltageV:                      in.VoltageV,
-		WeightKg:                      in.WeightKg,
-		PlaceOfMfr:                    in.PlaceOfManufacture,
-		ModelID:                       in.ModelID,
-		DateOfMfr:                     dateOfMfr,
-		CommissioningDate:             commissioningDate,
-		CarbonFootprintKgCO2ePerKWh:   in.CarbonFootprintKgCO2ePerKWh,
-		CarbonFootprintClass:          in.CarbonFootprintClass,
-		RenewableContentPct:           in.RenewableContentPct,
-		HazardousSubstances:           in.HazardousSubstances,
-		StateOfHealthPct:              in.StateOfHealthPct,
-		CycleCount:                    in.CycleCount,
-		ExpectedLifetimeYears:         in.ExpectedLifetimeYears,
-		EUDeclarationOfConformityURL:  in.EUDeclarationOfConformityURL,
-		DueDiligenceReportURL:         in.DueDiligenceReportURL,
-		SeparateCollection:            in.SeparateCollection,
-		Recyclable:                    in.Recyclable,
+		BatteryID:                    in.BatteryID,
+		GTIN:                         in.GTIN,
+		SerialNo:                     in.SerialNo,
+		Category:                     compliance.BatteryCategory(in.Category),
+		Chemistry:                    compliance.BatteryChemistry(in.Chemistry),
+		CapacityKWh:                  in.CapacityKWh,
+		VoltageV:                     in.VoltageV,
+		WeightKg:                     in.WeightKg,
+		PlaceOfMfr:                   in.PlaceOfManufacture,
+		ModelID:                      in.ModelID,
+		DateOfMfr:                    dateOfMfr,
+		CommissioningDate:            commissioningDate,
+		CarbonFootprintKgCO2ePerKWh:  in.CarbonFootprintKgCO2ePerKWh,
+		CarbonFootprintClass:         in.CarbonFootprintClass,
+		RenewableContentPct:          in.RenewableContentPct,
+		HazardousSubstances:          in.HazardousSubstances,
+		StateOfHealthPct:             in.StateOfHealthPct,
+		CycleCount:                   in.CycleCount,
+		ExpectedLifetimeYears:        in.ExpectedLifetimeYears,
+		EUDeclarationOfConformityURL: in.EUDeclarationOfConformityURL,
+		DueDiligenceReportURL:        in.DueDiligenceReportURL,
+		SeparateCollection:           in.SeparateCollection,
+		Recyclable:                   in.Recyclable,
 	}
 	if in.RecycledContent != nil {
 		claim.RecycledContent = compliance.RecycledContent{

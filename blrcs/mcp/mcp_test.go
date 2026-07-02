@@ -64,14 +64,14 @@ func TestToolsList(t *testing.T) {
 	resp := callRaw(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 	result := resp["result"].(map[string]any)
 	tools := result["tools"].([]any)
-	if len(tools) != 12 {
-		t.Fatalf("expected 12 tools, got %d", len(tools))
+	if len(tools) != 13 {
+		t.Fatalf("expected 13 tools, got %d", len(tools))
 	}
 	names := make(map[string]bool)
 	for _, tl := range tools {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
-	for _, want := range []string{"issue_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "issue_sdjwt", "verify_sdjwt", "check_revocation", "revoke_passport", "get_revocation_list"} {
+	for _, want := range []string{"issue_passport", "issue_battery_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "issue_sdjwt", "verify_sdjwt", "check_revocation", "revoke_passport", "get_revocation_list"} {
 		if !names[want] {
 			t.Errorf("tool %s missing", want)
 		}

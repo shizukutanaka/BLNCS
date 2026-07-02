@@ -1322,3 +1322,53 @@ func TestIssueSDJWTVCEmptyVCTRejected(t *testing.T) {
 		t.Errorf("empty vct: want ErrSDJWTMissingVCT, got %v", err)
 	}
 }
+
+// ============================================================================
+// Axis 102: IssueBatteryPassportWithStatus (revocable Battery Passports)
+// ============================================================================
+
+func TestIssueBatteryPassportWithStatusHappyPath(t *testing.T) {
+	iss, _ := NewIssuer("did:web:battery.status.factory")
+	cred, err := iss.IssueBatteryPassportWithStatus(BatteryPassportClaim{
+		BatteryID:   "BAT-STATUS-1",
+		Category:    BatteryCategoryPortable,
+		Chemistry:   ChemistryLFP,
+		CapacityKWh: 0.5,
+	}, time.Hour, "did:web:mcp.example#revocation-list", 3, "revocation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cred.Status == nil {
+		t.Fatal("IssueBatteryPassportWithStatus should embed credentialStatus")
+	}
+	if cred.Status.StatusListIndex != "3" {
+		t.Errorf("index: got %s want 3", cred.Status.StatusListIndex)
+	}
+	if err := Verify(cred, iss.PublicKey()); err != nil {
+		t.Fatalf("status-bearing battery passport fails verify: %v", err)
+	}
+}
+
+func TestIssueBatteryPassportWithStatusRejectsEmptyURL(t *testing.T) {
+	iss, _ := NewIssuer("did:web:test")
+	_, err := iss.IssueBatteryPassportWithStatus(BatteryPassportClaim{
+		BatteryID: "BAT-X", Category: BatteryCategoryPortable,
+	}, time.Hour, "", 0, "revocation")
+	if err == nil {
+		t.Fatal("empty statusListURL should be rejected")
+	}
+}
+
+// TestIssueBatteryPassportWithStatusStillEnforcesDueDiligence verifies the
+// status-aware variant doesn't bypass Art.52 validation.
+func TestIssueBatteryPassportWithStatusStillEnforcesDueDiligence(t *testing.T) {
+	iss, _ := NewIssuer("did:web:dd.status.factory")
+	_, err := iss.IssueBatteryPassportWithStatus(BatteryPassportClaim{
+		BatteryID:   "EV-STATUS-NO-DD",
+		Category:    BatteryCategoryEV,
+		CapacityKWh: 75.0,
+	}, time.Hour, "did:web:mcp.example#revocation-list", 0, "revocation")
+	if !errors.Is(err, ErrDueDiligenceRequired) {
+		t.Errorf("want ErrDueDiligenceRequired, got %v", err)
+	}
+}
