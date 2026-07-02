@@ -595,6 +595,126 @@ func (s *Server) toolIssuePassport(args json.RawMessage) (string, error) {
 	return string(b), nil
 }
 
+// toolIssueBatteryPassport issues an EU Battery Passport (Regulation (EU)
+// 2023/1542, Annex XIII). compliance.BatteryPassportClaim/
+// IssueBatteryPassport already implement this fully and are tested — this
+// tool exposes that existing capability on the MCP surface, since previously
+// an agent could only issue a plain compliance.PassportClaim via
+// issue_passport (no chemistry, capacity, recycled content, due-diligence, or
+// any other Annex XIII field). Date fields are RFC3339 strings; empty means
+// unset (matches the Go struct's omitempty semantics).
+func (s *Server) toolIssueBatteryPassport(args json.RawMessage) (string, error) {
+	var in struct {
+		IssuerID                      string  `json:"issuerId"`
+		BatteryID                     string  `json:"batteryId"`
+		GTIN                          string  `json:"gtin"`
+		SerialNo                      string  `json:"serialNo"`
+		Category                      string  `json:"category"`
+		Chemistry                     string  `json:"chemistry"`
+		CapacityKWh                   float32 `json:"capacityKWh"`
+		VoltageV                      float32 `json:"voltageV"`
+		WeightKg                      float32 `json:"weightKg"`
+		PlaceOfManufacture            string  `json:"placeOfManufacture"`
+		ModelID                       string  `json:"modelId"`
+		DateOfManufacture             string  `json:"dateOfManufacture"`
+		CommissioningDate             string  `json:"commissioningDate"`
+		CarbonFootprintKgCO2ePerKWh   float32 `json:"carbonFootprintKgCO2ePerKWh"`
+		CarbonFootprintClass          string  `json:"carbonFootprintClass"`
+		RecycledContent               *struct {
+			Cobalt  float32 `json:"cobalt"`
+			Lithium float32 `json:"lithium"`
+			Nickel  float32 `json:"nickel"`
+			Lead    float32 `json:"lead"`
+		} `json:"recycledContent"`
+		RenewableContentPct          float32  `json:"renewableContentPct"`
+		HazardousSubstances          []string `json:"hazardousSubstances"`
+		StateOfHealthPct             float32  `json:"stateOfHealthPct"`
+		CycleCount                   int      `json:"cycleCount"`
+		ExpectedLifetimeYears        float32  `json:"expectedLifetimeYears"`
+		EUDeclarationOfConformityURL string   `json:"euDeclarationOfConformityUrl"`
+		DueDiligenceReportURL        string   `json:"dueDiligenceReportUrl"`
+		SeparateCollection           bool     `json:"separateCollection"`
+		Recyclable                   bool     `json:"recyclable"`
+		ValidForDays                  int     `json:"validForDays"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	s.mu.RLock()
+	iss, ok := s.issuers[in.IssuerID]
+	s.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("unknown issuer: %s", in.IssuerID)
+	}
+	dateOfMfr, err := parseOptionalRFC3339(in.DateOfManufacture)
+	if err != nil {
+		return "", fmt.Errorf("mcp: dateOfManufacture: %w", err)
+	}
+	commissioningDate, err := parseOptionalRFC3339(in.CommissioningDate)
+	if err != nil {
+		return "", fmt.Errorf("mcp: commissioningDate: %w", err)
+	}
+	claim := compliance.BatteryPassportClaim{
+		BatteryID:                     in.BatteryID,
+		GTIN:                          in.GTIN,
+		SerialNo:                      in.SerialNo,
+		Category:                      compliance.BatteryCategory(in.Category),
+		Chemistry:                     compliance.BatteryChemistry(in.Chemistry),
+		CapacityKWh:                   in.CapacityKWh,
+		VoltageV:                      in.VoltageV,
+		WeightKg:                      in.WeightKg,
+		PlaceOfMfr:                    in.PlaceOfManufacture,
+		ModelID:                       in.ModelID,
+		DateOfMfr:                     dateOfMfr,
+		CommissioningDate:             commissioningDate,
+		CarbonFootprintKgCO2ePerKWh:   in.CarbonFootprintKgCO2ePerKWh,
+		CarbonFootprintClass:          in.CarbonFootprintClass,
+		RenewableContentPct:           in.RenewableContentPct,
+		HazardousSubstances:           in.HazardousSubstances,
+		StateOfHealthPct:              in.StateOfHealthPct,
+		CycleCount:                    in.CycleCount,
+		ExpectedLifetimeYears:         in.ExpectedLifetimeYears,
+		EUDeclarationOfConformityURL:  in.EUDeclarationOfConformityURL,
+		DueDiligenceReportURL:         in.DueDiligenceReportURL,
+		SeparateCollection:            in.SeparateCollection,
+		Recyclable:                    in.Recyclable,
+	}
+	if in.RecycledContent != nil {
+		claim.RecycledContent = compliance.RecycledContent{
+			Cobalt:  in.RecycledContent.Cobalt,
+			Lithium: in.RecycledContent.Lithium,
+			Nickel:  in.RecycledContent.Nickel,
+			Lead:    in.RecycledContent.Lead,
+		}
+	}
+	validFor := time.Duration(in.ValidForDays) * 24 * time.Hour
+	if in.ValidForDays == 0 {
+		validFor = 365 * 24 * time.Hour
+	}
+	// Same revocability treatment as issue_passport/issue_sdjwt — shares the
+	// same status-list index space.
+	index, err := s.allocateStatusIndex()
+	if err != nil {
+		return "", err
+	}
+	cred, err := iss.IssueBatteryPassportWithStatus(claim, validFor, s.selfIssuer.ID+"#revocation-list", index, string(revocation.PurposeRevocation))
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(cred)
+	return string(b), nil
+}
+
+// parseOptionalRFC3339 parses s as RFC3339 if non-empty; an empty string
+// yields the zero time.Time (matching BatteryPassportClaim's omitempty date
+// fields — "not specified", not "epoch").
+func parseOptionalRFC3339(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, s)
+}
+
 func (s *Server) toolVerifyPassport(args json.RawMessage) (string, error) {
 	var in struct {
 		CredentialJson     string `json:"credentialJson"`

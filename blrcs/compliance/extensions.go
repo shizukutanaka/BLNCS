@@ -932,6 +932,23 @@ type BatteryPassportClaim struct {
 
 // IssueBatteryPassport — EU Battery Passport VC 発行
 func (i *Issuer) IssueBatteryPassport(claim BatteryPassportClaim, validFor time.Duration) (*Credential, error) {
+	return i.issueBatteryPassport(claim, validFor, "", 0, "")
+}
+
+// IssueBatteryPassportWithStatus is IssueBatteryPassport with an embedded
+// credentialStatus (see IssueWithStatus for the field semantics), so the
+// resulting Battery Passport is revocable.
+func (i *Issuer) IssueBatteryPassportWithStatus(claim BatteryPassportClaim, validFor time.Duration, statusListURL string, index int, purpose string) (*Credential, error) {
+	if statusListURL == "" {
+		return nil, fmt.Errorf("compliance: statusListCredential URL required")
+	}
+	return i.issueBatteryPassport(claim, validFor, statusListURL, index, purpose)
+}
+
+// issueBatteryPassport is the shared implementation. statusListURL == "" means
+// "no status" (IssueBatteryPassport's contract); non-empty routes through
+// IssueWithStatus instead of Issue for the initial credential.
+func (i *Issuer) issueBatteryPassport(claim BatteryPassportClaim, validFor time.Duration, statusListURL string, index int, purpose string) (*Credential, error) {
 	if claim.BatteryID == "" {
 		return nil, ErrBatteryIDRequired
 	}
@@ -948,7 +965,13 @@ func (i *Issuer) IssueBatteryPassport(claim BatteryPassportClaim, validFor time.
 		Manufacturer:   claim.Manufacturer,
 		LifecyclePhase: "manufacture",
 	}
-	cred, err := i.Issue(pc, validFor)
+	var cred *Credential
+	var err error
+	if statusListURL != "" {
+		cred, err = i.IssueWithStatus(pc, validFor, statusListURL, index, purpose)
+	} else {
+		cred, err = i.Issue(pc, validFor)
+	}
 	if err != nil {
 		return nil, err
 	}
