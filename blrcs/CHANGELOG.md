@@ -7,6 +7,35 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mcp`, `cmd/blrcs-mcpd`: wire `openid4vci` — reachable from zero
+  binaries despite full Axis 90 hardening (Axis 103).** README lists
+  "OpenID4VCI Issuer ✅", and `openid4vci` is one of the most heavily
+  hardened packages in this codebase (Axis 90's full §7 Nonce Endpoint
+  proof-replay mitigation), but it was reachable from zero `cmd/` binaries
+  — not even `cmd/blrcs-demo`, which wires `openid4vp`+`dcapi` but never
+  imports `openid4vci`. Wallets had no way to reach this protocol from any
+  shipped binary. Added `Server.RegisterVCIIssuer` + a new
+  `create_credential_offer` MCP tool wrapping
+  `openid4vci.Issuer.CreateOfferWithOptions`, drawing from the same shared
+  revocation index space as `issue_passport`/`issue_sdjwt`/
+  `issue_battery_passport` (`revoke_passport`/`check_revocation` work
+  unchanged for VCI-issued credentials). Added an optional `BLRCS_VCI_URL`
+  env var to `cmd/blrcs-mcpd`: when set, mounts
+  `openid4vci.Issuer.Handler()` (its own `/.well-known/...`, `/token`,
+  `/nonce`, `/credential` routes) alongside the existing `/mcp` endpoint.
+  Off by default — unlike the MCP tool surface, these are unauthenticated
+  endpoints a real wallet talks to directly per spec, so enabling them is
+  an explicit operator choice. Not wired into `cmd/blrcs-mcp` (stdio) —
+  OpenID4VCI needs a real externally-reachable HTTP base URL for wallets to
+  redeem offers against, which a stdio-only process can't provide. Verified
+  end-to-end against the built `blrcs-mcpd` binary over its real HTTP
+  transport: `GET /.well-known/openid-credential-issuer` returns real
+  metadata; a `create_credential_offer` tool call over `POST /mcp` returns
+  a redeemable offer; the returned pre-authorized code is successfully
+  exchanged against `POST /token` for a real access token. 9 new tests.
+  `TestToolsList` updated for the tool count (13 → 14).
+
+### Added
 - **`mcp`: `issue_battery_passport` — closes the last major "issue-but-can't-
   issue" gap (Axis 102).** README lists "EU Battery Passport (Reg 2023/1542)
   ✅" as a headline feature, but the MCP tool surface — the primary
