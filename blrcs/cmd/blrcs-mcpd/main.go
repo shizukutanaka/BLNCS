@@ -8,6 +8,7 @@
 //	BLRCS_AUTH_TOKENS=token1:agent-1,token2:agent-2 blrcs-mcpd   # Bearer auth
 //	BLRCS_RATE_LIMIT_RPS=10 blrcs-mcpd                           # 10req/s per principal
 //	BLRCS_ENCRYPTION_KEY=<64 hex chars> BLRCS_DATA_DIR=/data blrcs-mcpd  # AES-256-GCM at rest
+//	BLRCS_VCI_URL=https://issue.example blrcs-mcpd               # enable OpenID4VCI issuer
 //
 // エンドポイント:
 //
@@ -16,6 +17,14 @@
 //	DELETE /mcp        — session close
 //	GET /healthz       — liveness probe
 //	GET /readyz        — readiness probe
+//
+// BLRCS_VCI_URL 設定時のみ (OpenID4VCI, wallet向け):
+//
+//	GET  /.well-known/openid-credential-issuer
+//	GET  /.well-known/jwks.json
+//	POST /token
+//	POST /nonce
+//	POST /credential
 package main
 
 import (
@@ -36,6 +45,7 @@ import (
 	"blrcs/httpmw"
 	"blrcs/mcp"
 	"blrcs/metrics"
+	"blrcs/openid4vci"
 	"blrcs/storage"
 	"blrcs/telemetry"
 )
@@ -95,6 +105,27 @@ func main() {
 	demoSensor, _ := compliance.NewSensorAttester("did:device:blrcs-demo-sensor")
 	srv.RegisterIssuer(demoIssuer)
 	srv.RegisterAttester(demoSensor)
+
+	// Optional OpenID4VCI issuer: the openid4vci package is fully implemented
+	// and tested (including the §7 Nonce Endpoint proof-replay mitigation),
+	// but ships its own http.Handler that nothing was mounting — off by
+	// default (no wallet-facing endpoints unless BLRCS_VCI_URL is set) since,
+	// unlike the MCP tool surface, this exposes unauthenticated endpoints a
+	// real wallet talks to directly per spec.
+	vciURL := os.Getenv("BLRCS_VCI_URL")
+	var vciIssuer *openid4vci.Issuer
+	if vciURL != "" {
+		vciIssuer = openid4vci.NewIssuer(vciURL, demoIssuer)
+		vciIssuer.RegisterConfiguration(openid4vci.CredentialConfiguration{
+			ID:                "eu-dpp-v1",
+			CredentialType:    "DigitalProductPassport",
+			Format:            "vc+sd-jwt",
+			DisclosableClaims: []string{"carbonKgCO2e"},
+			ClearClaims:       []string{"productId", "category"},
+			ValidForDays:      365,
+		})
+		srv.RegisterVCIIssuer(vciIssuer)
+	}
 
 	// Auth
 	var auth mcp.AuthVerifier
@@ -157,6 +188,14 @@ func main() {
 	mux.Handle("/metrics", exp)
 	mux.Handle("/healthz", probe.Liveness())
 	mux.Handle("/readyz", probe.Readiness())
+	if vciIssuer != nil {
+		// Mounted at "/" (catch-all): openid4vci.Issuer.Handler() owns its own
+		// absolute paths (/.well-known/..., /token, /nonce, /credential) per
+		// spec — none collide with /mcp, /metrics, /healthz, /readyz above,
+		// which win on ServeMux's longest-match regardless of registration order.
+		mux.Handle("/", httpmw.Recovery(vciIssuer.Handler()))
+		fmt.Fprintf(os.Stderr, "openid4vci: issuer enabled at %s\n", vciURL)
+	}
 
 	httpSrv := &http.Server{
 		Addr:              listen,

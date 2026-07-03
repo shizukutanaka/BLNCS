@@ -20,6 +20,7 @@
 //	check_revocation    — W3C Bitstring Status List 失効確認
 //	revoke_passport     — 発行済み DPP/SD-JWT VC を失効
 //	get_revocation_list — 現在の署名済み Status List トークンを取得
+//	create_credential_offer — OpenID4VCI pre-authorized offer 発行 (要 RegisterVCIIssuer)
 package mcp
 
 import (
@@ -36,6 +37,7 @@ import (
 	"time"
 
 	"blrcs/compliance"
+	"blrcs/openid4vci"
 	"blrcs/revocation"
 	"blrcs/scitt"
 	"blrcs/storage"
@@ -138,6 +140,13 @@ type Server struct {
 	ledger     *scitt.Ledger
 	selfIssuer *compliance.Issuer
 	limiter    *ToolLimiter // per-tool rate limiter; nil = unlimited
+
+	// vciIssuer, when registered via RegisterVCIIssuer, lets create_credential_offer
+	// mint real OpenID4VCI pre-authorized offers a wallet can redeem against the
+	// issuer's HTTP endpoints (openid4vci.Issuer.Handler(), mounted separately by
+	// the caller — this Server has no HTTP surface of its own in stdio mode).
+	// nil means the tool is unavailable (dispatch returns an error).
+	vciIssuer *openid4vci.Issuer
 
 	// Revocation: a single server-wide W3C Bitstring Status List that
 	// issue_passport embeds into every issued credential's credentialStatus,
@@ -291,6 +300,17 @@ func (s *Server) RegisterAttester(a *compliance.SensorAttester) {
 	s.mu.Unlock()
 }
 
+// RegisterVCIIssuer wires an openid4vci.Issuer into this server so
+// create_credential_offer can mint real pre-authorized offers. The caller is
+// responsible for separately mounting iss.Handler() on an HTTP mux so a
+// wallet can actually redeem the offer this tool returns — this Server has
+// no HTTP surface of its own (e.g. it may run over stdio).
+func (s *Server) RegisterVCIIssuer(iss *openid4vci.Issuer) {
+	s.mu.Lock()
+	s.vciIssuer = iss
+	s.mu.Unlock()
+}
+
 // ============================================================================
 // Transport — stdio (改行区切りJSON)
 // ============================================================================
@@ -431,6 +451,11 @@ func toolDefs() []tool {
 			Description: "Fetch a freshly-signed W3C Bitstring Status List token for this server's current revocation state, plus the issuer key needed to verify it — feed both directly into check_revocation.",
 			InputSchema: rawJSON(`{"type":"object","properties":{}}`),
 		},
+		{
+			Name:        "create_credential_offer",
+			Description: "Mint an OpenID4VCI pre-authorized credential offer a real wallet can redeem (returns openid-credential-offer:// URI + pre-authorized code). Requires the server to have a registered OpenID4VCI issuer; errors otherwise.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"configId":{"type":"string","description":"Registered CredentialConfiguration ID"},"subject":{"type":"string"},"sdClaims":{"type":"object","description":"Selectively disclosable claims"},"clearClaims":{"type":"object","description":"Always-visible claims"}},"required":["configId","subject"]}`),
+		},
 	}
 }
 
@@ -482,12 +507,13 @@ func (s *Server) handleToolCall(id json.RawMessage, params json.RawMessage) *rpc
 // auditableTool lists the state-changing tools whose calls are recorded to the
 // transparency log. Read-only tools are intentionally excluded.
 var auditableTool = map[string]bool{
-	"issue_passport":         true,
-	"issue_battery_passport": true,
-	"attest_range":           true,
-	"register_scitt":         true,
-	"issue_sdjwt":            true,
-	"revoke_passport":        true,
+	"issue_passport":          true,
+	"issue_battery_passport":  true,
+	"attest_range":            true,
+	"register_scitt":          true,
+	"issue_sdjwt":             true,
+	"revoke_passport":         true,
+	"create_credential_offer": true,
 }
 
 func (s *Server) auditToolCall(name string, args json.RawMessage) {
@@ -537,6 +563,8 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolRevokePassport(args)
 	case "get_revocation_list":
 		return s.toolGetRevocationList(args)
+	case "create_credential_offer":
+		return s.toolCreateCredentialOffer(args)
 	}
 	return "", fmt.Errorf("unknown tool: %s", name)
 }
@@ -1035,6 +1063,57 @@ func (s *Server) toolGetRevocationList(args json.RawMessage) (string, error) {
 	b, _ := json.Marshal(map[string]string{
 		"statusListTokenJWT":     token,
 		"statusListIssuerKeyB64": base64.StdEncoding.EncodeToString(s.selfIssuer.PublicKey()),
+	})
+	return string(b), nil
+}
+
+// toolCreateCredentialOffer mints a real OpenID4VCI pre-authorized offer that
+// a wallet can redeem against the issuer's HTTP endpoints
+// (openid4vci.Issuer.Handler(), mounted separately by whoever called
+// RegisterVCIIssuer). Requires a VCI issuer to have been registered — without
+// this the openid4vci package existed and was fully tested but was reachable
+// from zero cmd/ binaries, so this tool would have had nothing to call.
+// Embeds a status reference from the same shared index space as
+// issue_passport/issue_sdjwt/issue_battery_passport, so revoke_passport/
+// check_revocation/get_revocation_list work for VCI-issued credentials too.
+func (s *Server) toolCreateCredentialOffer(args json.RawMessage) (string, error) {
+	var in struct {
+		ConfigID    string         `json:"configId"`
+		Subject     string         `json:"subject"`
+		SDClaims    map[string]any `json:"sdClaims"`
+		ClearClaims map[string]any `json:"clearClaims"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	s.mu.RLock()
+	vci := s.vciIssuer
+	s.mu.RUnlock()
+	if vci == nil {
+		return "", errors.New("mcp: no OpenID4VCI issuer registered for this server")
+	}
+	if in.Subject == "" {
+		return "", errors.New("mcp: subject is required")
+	}
+	if in.SDClaims == nil {
+		in.SDClaims = map[string]any{}
+	}
+	if in.ClearClaims == nil {
+		in.ClearClaims = map[string]any{}
+	}
+	index, err := s.allocateStatusIndex()
+	if err != nil {
+		return "", err
+	}
+	status := &compliance.StatusRef{URI: s.selfIssuer.ID + "#revocation-list", Index: index}
+	offerURL, code, err := vci.CreateOfferWithOptions(in.ConfigID, in.Subject, in.SDClaims, in.ClearClaims, openid4vci.OfferOptions{Status: status})
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]any{
+		"offerUrl":          offerURL,
+		"preAuthorizedCode": code,
+		"statusListIndex":   index,
 	})
 	return string(b), nil
 }
