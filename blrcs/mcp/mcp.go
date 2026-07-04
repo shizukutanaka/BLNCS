@@ -21,6 +21,8 @@
 //	revoke_passport     — 発行済み DPP/SD-JWT VC を失効
 //	get_revocation_list — 現在の署名済み Status List トークンを取得
 //	create_credential_offer — OpenID4VCI pre-authorized offer 発行 (要 RegisterVCIIssuer)
+//	issue_mdoc          — ISO 18013-5 mdoc/mDL発行 (IssuerSigned + MSO)
+//	verify_mdoc         — mdoc署名検証
 package mcp
 
 import (
@@ -37,6 +39,7 @@ import (
 	"time"
 
 	"blrcs/compliance"
+	"blrcs/mdoc"
 	"blrcs/openid4vci"
 	"blrcs/revocation"
 	"blrcs/scitt"
@@ -456,6 +459,16 @@ func toolDefs() []tool {
 			Description: "Mint an OpenID4VCI pre-authorized credential offer a real wallet can redeem (returns openid-credential-offer:// URI + pre-authorized code). Requires the server to have a registered OpenID4VCI issuer; errors otherwise.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"configId":{"type":"string","description":"Registered CredentialConfiguration ID"},"subject":{"type":"string"},"sdClaims":{"type":"object","description":"Selectively disclosable claims"},"clearClaims":{"type":"object","description":"Always-visible claims"}},"required":["configId","subject"]}`),
 		},
+		{
+			Name:        "issue_mdoc",
+			Description: "Issue an ISO 18013-5 mdoc/mDL (IssuerSigned + MSO, COSE_Sign1). nameSpaces maps namespace to a flat object of elementIdentifier→value. Returns the IssuerSigned CBOR, base64-encoded.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"docType":{"type":"string","description":"e.g. org.iso.18013.5.1.mDL or eu.europa.ec.dpp.1"},"nameSpaces":{"type":"object","description":"namespace -> {elementIdentifier: value}"},"validForDays":{"type":"integer","default":365},"deviceKeyB64":{"type":"string","description":"Optional base64 Ed25519 device public key to bind the credential to a holder device"}},"required":["issuerId","docType","nameSpaces"]}`),
+		},
+		{
+			Name:        "verify_mdoc",
+			Description: "Verify an ISO 18013-5 mdoc's IssuerSigned/MSO signature against an issuer public key. Returns {valid, docType, nameSpaces} or {valid:false, reason}.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"issuerSignedB64":{"type":"string"},"issuerPublicKeyB64":{"type":"string"}},"required":["issuerSignedB64","issuerPublicKeyB64"]}`),
+		},
 	}
 }
 
@@ -514,6 +527,7 @@ var auditableTool = map[string]bool{
 	"issue_sdjwt":             true,
 	"revoke_passport":         true,
 	"create_credential_offer": true,
+	"issue_mdoc":              true,
 }
 
 func (s *Server) auditToolCall(name string, args json.RawMessage) {
@@ -565,6 +579,10 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolGetRevocationList(args)
 	case "create_credential_offer":
 		return s.toolCreateCredentialOffer(args)
+	case "issue_mdoc":
+		return s.toolIssueMdoc(args)
+	case "verify_mdoc":
+		return s.toolVerifyMdoc(args)
 	}
 	return "", fmt.Errorf("unknown tool: %s", name)
 }
@@ -774,6 +792,104 @@ func (s *Server) toolVerifyPassport(args json.RawMessage) (string, error) {
 		return verifyResult(false, err.Error()), nil //nolint:nilerr
 	}
 	return `{"valid":true}`, nil
+}
+
+// toolIssueMdoc issues an ISO 18013-5 mdoc (IssuerSigned + MSO), previously
+// only reachable via the mdoc package directly (exercised by doctor's
+// self-check, never exposed as an MCP tool). Namespaces arrive as nested JSON
+// objects (namespace → elementIdentifier → value) and are converted to
+// mdoc.IssueParams's []Element form. Returns the IssuerSigned CBOR, base64
+// encoded so it travels over JSON-RPC.
+func (s *Server) toolIssueMdoc(args json.RawMessage) (string, error) {
+	var in struct {
+		IssuerID     string                    `json:"issuerId"`
+		DocType      string                    `json:"docType"`
+		NameSpaces   map[string]map[string]any `json:"nameSpaces"`
+		ValidForDays int                       `json:"validForDays"`
+		DeviceKeyB64 string                    `json:"deviceKeyB64"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.DocType == "" {
+		return "", errors.New("mcp: docType is required")
+	}
+	s.mu.RLock()
+	iss, ok := s.issuers[in.IssuerID]
+	s.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("unknown issuer: %s", in.IssuerID)
+	}
+	nameSpaces := make(map[string][]mdoc.Element, len(in.NameSpaces))
+	for ns, elems := range in.NameSpaces {
+		els := make([]mdoc.Element, 0, len(elems))
+		for id, val := range elems {
+			els = append(els, mdoc.Element{Identifier: id, Value: val})
+		}
+		nameSpaces[ns] = els
+	}
+	var deviceKey ed25519.PublicKey
+	if in.DeviceKeyB64 != "" {
+		dk, derr := base64.StdEncoding.DecodeString(in.DeviceKeyB64)
+		if derr != nil || len(dk) != ed25519.PublicKeySize {
+			return "", errors.New("mcp: bad deviceKeyB64")
+		}
+		deviceKey = dk
+	}
+	validFor := time.Duration(in.ValidForDays) * 24 * time.Hour
+	if in.ValidForDays == 0 {
+		validFor = 365 * 24 * time.Hour
+	}
+	now := time.Now().UTC()
+	doc, err := mdoc.Issue(mdoc.IssueParams{
+		DocType:    in.DocType,
+		NameSpaces: nameSpaces,
+		Validity: mdoc.ValidityInfo{
+			Signed:     now,
+			ValidFrom:  now,
+			ValidUntil: now.Add(validFor),
+		},
+		DeviceKey:  deviceKey,
+		IssuerPriv: iss.PrivateKey(),
+	})
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]string{
+		"issuerSignedB64": base64.StdEncoding.EncodeToString(doc),
+	})
+	return string(b), nil
+}
+
+// toolVerifyMdoc verifies an ISO 18013-5 mdoc against an issuer public key.
+// Structural/signature failures return a structured {"valid":false,...}
+// result rather than a Go error, matching verify_passport's contract.
+func (s *Server) toolVerifyMdoc(args json.RawMessage) (string, error) {
+	var in struct {
+		IssuerSignedB64    string `json:"issuerSignedB64"`
+		IssuerPublicKeyB64 string `json:"issuerPublicKeyB64"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	doc, err := base64.StdEncoding.DecodeString(in.IssuerSignedB64)
+	if err != nil {
+		return "", errors.New("mcp: bad issuerSignedB64")
+	}
+	pub, err := base64.StdEncoding.DecodeString(in.IssuerPublicKeyB64)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return "", errors.New("mcp: bad public key")
+	}
+	verified, err := mdoc.Verify(doc, ed25519.PublicKey(pub), time.Now().UTC())
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	b, _ := json.Marshal(map[string]any{
+		"valid":      true,
+		"docType":    verified.DocType,
+		"nameSpaces": verified.NameSpaces,
+	})
+	return string(b), nil
 }
 
 // verifyResult builds a structured {"valid":..,"reason":..} result with the
