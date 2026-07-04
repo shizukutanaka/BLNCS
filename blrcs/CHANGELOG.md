@@ -7,6 +7,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mcp`, `cmd/blrcs-mcpd`: wire `openid4vp` verifier — closes the last
+  major deficiency from the feature-gap review (Axis 105).** README lists
+  "OpenID4VP Verifier ✅", and the package's production HTTP integration
+  (`AuthorizeHandler`/`CallbackHandler`) was fully implemented and tested,
+  but reachable only from `cmd/blrcs-demo` (a throwaway demo binary using a
+  demo-specific wrapper), never `cmd/blrcs-mcpd`. Same shape as Axis 103's
+  `openid4vci` gap, this time for the verifier side. Added
+  `Server.RegisterVPVerifier` + a bounded presentation-results cache (10k
+  entries / 15min TTL), a new `create_presentation_request` tool (wraps
+  `CreateRequest`; added a JSON-facing `acceptableIssuerKeys` field since
+  `PresentationDefinition.AcceptableIssuers` is deliberately `json:"-"`),
+  and `get_presentation_result` (retrieves a completed verification by
+  state — the agent that created the request has no other way to learn the
+  result, since the wallet's response arrives over HTTP outside the MCP
+  tool-calling loop). Added an optional `BLRCS_VP_CLIENT_ID` env var to
+  `cmd/blrcs-mcpd`: when set, mounts `AuthorizeHandler` at
+  `/openid4vp/authorize` and `CallbackHandler` (wired to
+  `RecordPresentationResult`) at `/openid4vp/callback` — off by default,
+  same reasoning as `BLRCS_VCI_URL`. Verified end-to-end against the built
+  `blrcs-mcpd` binary: a `create_presentation_request` tool call returns a
+  well-formed `openid4vp://authorize` URL whose `response_uri` correctly
+  points at the mounted callback endpoint. 6 new tests, including a full
+  lifecycle test using `openid4vp`'s own `MockWallet` test double.
+  `TestToolsList` updated for the tool count (16 → 18).
+
+### Added
 - **`mcp`: `issue_mdoc` / `verify_mdoc` — ISO 18013-5 previously reachable
   from zero tools (Axis 104).** README lists "ISO 18013-5 mdoc / mDL
   (IssuerSigned + MSO) ✅", and the `mdoc` package is fully implemented and
