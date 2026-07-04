@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mcp`: `issue_mdoc` / `verify_mdoc` — ISO 18013-5 previously reachable
+  from zero tools (Axis 104).** README lists "ISO 18013-5 mdoc / mDL
+  (IssuerSigned + MSO) ✅", and the `mdoc` package is fully implemented and
+  tested, but its only caller anywhere was `doctor`'s self-check — no MCP
+  tool, no `cmd/` wiring. Added `issue_mdoc` (maps a nested JSON
+  `nameSpaces` object to `mdoc.IssueParams`'s `[]Element` form, returns
+  base64-encoded IssuerSigned CBOR) and `verify_mdoc` (mirrors
+  `verify_passport`'s `{"valid":false,"reason":...}` contract on failure).
+  No status/revocation embedding — ISO 18013-5's `IssueParams` has no
+  status field and mDLs conventionally use short validity windows rather
+  than this server's W3C-style status list, so this doesn't force a
+  non-standard extension onto the format. Verified end-to-end against the
+  built `blrcs-mcp` binary: issuing an mDL with `family_name`/`given_name`/
+  `age_over_18` namespace elements produces valid IssuerSigned CBOR. 7 new
+  tests, including a full issue→verify round-trip confirming revealed
+  claim values match what was issued. `TestToolsList` updated (14 → 16).
+
+### Added
 - **`mcp`, `cmd/blrcs-mcpd`: wire `openid4vci` — reachable from zero
   binaries despite full Axis 90 hardening (Axis 103).** README lists
   "OpenID4VCI Issuer ✅", and `openid4vci` is one of the most heavily
