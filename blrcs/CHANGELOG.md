@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mcp`: `build_gs1_link` / `parse_gs1_link` — GS1 Digital Link previously
+  reachable from zero tools (Axis 106).** README lists "GS1 Digital Link
+  (ISO/IEC 18975) ✅", and `compliance.BuildDLURI`/`ParseDLURI` (GTIN
+  validation, serial/batch application identifiers) are fully implemented
+  and tested, but had zero MCP wiring — same shape as the `mdoc` gap (Axis
+  104), just smaller. Both tools are pure/read-only (no ledger side
+  effects), so neither is in `auditableTool`. Verified end-to-end against
+  the built `blrcs-mcp` binary: building a link for GTIN
+  `04012345678901` with a serial produces
+  `https://example.com/01/04012345678901/21/SN-1`. 6 new tests, including
+  a build→parse round-trip and confirmation these tools don't grow the
+  SCITT ledger. `TestToolsList` updated (18 → 20).
+
+### Added
 - **`mcp`, `cmd/blrcs-mcpd`: wire `openid4vp` verifier — closes the last
   major deficiency from the feature-gap review (Axis 105).** README lists
   "OpenID4VP Verifier ✅", and the package's production HTTP integration
