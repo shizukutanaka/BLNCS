@@ -9,6 +9,7 @@
 //	BLRCS_RATE_LIMIT_RPS=10 blrcs-mcpd                           # 10req/s per principal
 //	BLRCS_ENCRYPTION_KEY=<64 hex chars> BLRCS_DATA_DIR=/data blrcs-mcpd  # AES-256-GCM at rest
 //	BLRCS_VCI_URL=https://issue.example blrcs-mcpd               # enable OpenID4VCI issuer
+//	BLRCS_VP_CLIENT_ID=https://verify.example blrcs-mcpd         # enable OpenID4VP verifier
 //
 // エンドポイント:
 //
@@ -25,6 +26,11 @@
 //	POST /token
 //	POST /nonce
 //	POST /credential
+//
+// BLRCS_VP_CLIENT_ID 設定時のみ (OpenID4VP, wallet向け):
+//
+//	POST /openid4vp/authorize — request 生成
+//	POST /openid4vp/callback  — wallet からの vp_token 受付
 package main
 
 import (
@@ -46,6 +52,7 @@ import (
 	"blrcs/mcp"
 	"blrcs/metrics"
 	"blrcs/openid4vci"
+	"blrcs/openid4vp"
 	"blrcs/storage"
 	"blrcs/telemetry"
 )
@@ -127,6 +134,21 @@ func main() {
 		srv.RegisterVCIIssuer(vciIssuer)
 	}
 
+	// Optional OpenID4VP verifier: same shape of gap as openid4vci — the
+	// package's request/response protocol (CreateRequest/ProcessResponse) and
+	// its production HTTP handlers (AuthorizeHandler/CallbackHandler) were
+	// fully implemented and tested, but previously reachable only from
+	// cmd/blrcs-demo (a throwaway demo binary), never this daemon. Off by
+	// default for the same reason as VCI: these are unauthenticated endpoints
+	// a real wallet talks to directly per spec.
+	vpClientID := os.Getenv("BLRCS_VP_CLIENT_ID")
+	var vpVerifier *openid4vp.Verifier
+	if vpClientID != "" {
+		responseURI := vpClientID + "/openid4vp/callback"
+		vpVerifier = openid4vp.NewVerifier(vpClientID, responseURI, nil)
+		srv.RegisterVPVerifier(vpVerifier)
+	}
+
 	// Auth
 	var auth mcp.AuthVerifier
 	if authTokens != "" {
@@ -195,6 +217,11 @@ func main() {
 		// which win on ServeMux's longest-match regardless of registration order.
 		mux.Handle("/", httpmw.Recovery(vciIssuer.Handler()))
 		fmt.Fprintf(os.Stderr, "openid4vci: issuer enabled at %s\n", vciURL)
+	}
+	if vpVerifier != nil {
+		mux.Handle("/openid4vp/authorize", httpmw.Recovery(vpVerifier.AuthorizeHandler()))
+		mux.Handle("/openid4vp/callback", httpmw.Recovery(vpVerifier.CallbackHandler(srv.RecordPresentationResult)))
+		fmt.Fprintf(os.Stderr, "openid4vp: verifier enabled at %s\n", vpClientID)
 	}
 
 	httpSrv := &http.Server{

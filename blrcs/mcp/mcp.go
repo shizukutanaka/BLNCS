@@ -23,6 +23,8 @@
 //	create_credential_offer — OpenID4VCI pre-authorized offer 発行 (要 RegisterVCIIssuer)
 //	issue_mdoc          — ISO 18013-5 mdoc/mDL発行 (IssuerSigned + MSO)
 //	verify_mdoc         — mdoc署名検証
+//	create_presentation_request — OpenID4VP authorization request 発行 (要 RegisterVPVerifier)
+//	get_presentation_result     — 提示要求の結果取得 (state で問合せ)
 package mcp
 
 import (
@@ -41,6 +43,7 @@ import (
 	"blrcs/compliance"
 	"blrcs/mdoc"
 	"blrcs/openid4vci"
+	"blrcs/openid4vp"
 	"blrcs/revocation"
 	"blrcs/scitt"
 	"blrcs/storage"
@@ -151,6 +154,16 @@ type Server struct {
 	// nil means the tool is unavailable (dispatch returns an error).
 	vciIssuer *openid4vci.Issuer
 
+	// vpVerifier, when registered via RegisterVPVerifier, lets
+	// create_presentation_request mint real OpenID4VP authorization requests.
+	// The wallet's response arrives out-of-band over HTTP (openid4vp.Verifier's
+	// CallbackHandler, mounted separately by the caller) and its result is
+	// recorded via RecordPresentationResult, retrievable later through
+	// get_presentation_result — the agent that created the request has no
+	// other way to learn a stdio/tool-only server's results.
+	vpVerifier  *openid4vp.Verifier
+	presResults map[string]*presentationResult
+
 	// Revocation: a single server-wide W3C Bitstring Status List that
 	// issue_passport embeds into every issued credential's credentialStatus,
 	// and revoke_passport mutates. Persisted via storage.BlobStorage when the
@@ -161,6 +174,21 @@ type Server struct {
 	nextStatusIndex uint64
 	revocationStore storage.BlobStorage // nil if the backing Storage doesn't support blobs
 }
+
+// presentationResult caches one completed (successful) OpenID4VP verification,
+// keyed by request state. Failures are intentionally not cached — CallbackHandler
+// already returns the failure synchronously to the wallet's own HTTP client, and
+// its error detail is deliberately opaque (CWE-209) so there is nothing extra a
+// polling agent should learn beyond "not found".
+type presentationResult struct {
+	vp        *openid4vp.VerifiedPresentation
+	expiresAt time.Time
+}
+
+const (
+	maxPresentationResults = 10_000
+	presentationResultTTL  = 15 * time.Minute
+)
 
 const (
 	revocationListBlobName  = "revocation-list"
@@ -312,6 +340,61 @@ func (s *Server) RegisterVCIIssuer(iss *openid4vci.Issuer) {
 	s.mu.Lock()
 	s.vciIssuer = iss
 	s.mu.Unlock()
+}
+
+// RegisterVPVerifier wires an openid4vp.Verifier into this server so
+// create_presentation_request can mint real authorization requests. The
+// caller is responsible for separately mounting the verifier's
+// CallbackHandler on an HTTP mux — wired to call RecordPresentationResult on
+// success — so a wallet can actually respond to the request this tool
+// returns.
+func (s *Server) RegisterVPVerifier(v *openid4vp.Verifier) {
+	s.mu.Lock()
+	s.vpVerifier = v
+	s.mu.Unlock()
+}
+
+// RecordPresentationResult caches a completed OpenID4VP verification so
+// get_presentation_result can retrieve it later — the agent that called
+// create_presentation_request has no other way to learn whether/how a
+// wallet responded, since the response arrives over HTTP outside the MCP
+// tool-calling loop. Wire this as the onSuccess callback passed to
+// openid4vp.Verifier.CallbackHandler.
+func (s *Server) RecordPresentationResult(vp *openid4vp.VerifiedPresentation) {
+	if vp == nil || vp.State == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.presResults == nil {
+		s.presResults = make(map[string]*presentationResult)
+	}
+	now := time.Now()
+	// Opportunistic expiry sweep, then evict the entry closest to expiring if
+	// still at capacity — mirrors the pattern already used for revocation/
+	// rate-limit state elsewhere in this package, so an unauthenticated flood
+	// of wallet callbacks can't grow this map without bound. Evicting by
+	// soonest-to-expire (rather than tracking insertion order separately,
+	// which would itself leak entries removed by this same sweep) needs no
+	// extra state to stay consistent.
+	for state, entry := range s.presResults {
+		if now.After(entry.expiresAt) {
+			delete(s.presResults, state)
+		}
+	}
+	if len(s.presResults) >= maxPresentationResults {
+		var oldestState string
+		var oldestExpiry time.Time
+		for state, entry := range s.presResults {
+			if oldestState == "" || entry.expiresAt.Before(oldestExpiry) {
+				oldestState, oldestExpiry = state, entry.expiresAt
+			}
+		}
+		if oldestState != "" {
+			delete(s.presResults, oldestState)
+		}
+	}
+	s.presResults[vp.State] = &presentationResult{vp: vp, expiresAt: now.Add(presentationResultTTL)}
 }
 
 // ============================================================================
@@ -469,6 +552,16 @@ func toolDefs() []tool {
 			Description: "Verify an ISO 18013-5 mdoc's IssuerSigned/MSO signature against an issuer public key. Returns {valid, docType, nameSpaces} or {valid:false, reason}.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"issuerSignedB64":{"type":"string"},"issuerPublicKeyB64":{"type":"string"}},"required":["issuerSignedB64","issuerPublicKeyB64"]}`),
 		},
+		{
+			Name:        "create_presentation_request",
+			Description: "Mint an OpenID4VP authorization request a real wallet can respond to (returns openid4vp:// request URL + state). Requires the server to have a registered OpenID4VP verifier; errors otherwise. Poll get_presentation_result with the returned state to see the wallet's response.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"presentationDefinition":{"type":"object","description":"DIF Presentation Exchange 2.0 PresentationDefinition (id, purpose, requiredClaims, format)"},"acceptableIssuerKeys":{"type":"object","description":"issuer DID -> base64 Ed25519 public key, the trust anchor ProcessResponse verifies the presented credential's signature against"}},"required":["presentationDefinition"]}`),
+		},
+		{
+			Name:        "get_presentation_result",
+			Description: "Retrieve a previously-created presentation request's result by state. Returns {status:\"pending\"} until a wallet responds and verification succeeds, or {status:\"success\", subject, issuer, claims}.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"state":{"type":"string"}},"required":["state"]}`),
+		},
 	}
 }
 
@@ -520,14 +613,15 @@ func (s *Server) handleToolCall(id json.RawMessage, params json.RawMessage) *rpc
 // auditableTool lists the state-changing tools whose calls are recorded to the
 // transparency log. Read-only tools are intentionally excluded.
 var auditableTool = map[string]bool{
-	"issue_passport":          true,
-	"issue_battery_passport":  true,
-	"attest_range":            true,
-	"register_scitt":          true,
-	"issue_sdjwt":             true,
-	"revoke_passport":         true,
-	"create_credential_offer": true,
-	"issue_mdoc":              true,
+	"issue_passport":              true,
+	"issue_battery_passport":      true,
+	"attest_range":                true,
+	"register_scitt":              true,
+	"issue_sdjwt":                 true,
+	"revoke_passport":             true,
+	"create_credential_offer":     true,
+	"issue_mdoc":                  true,
+	"create_presentation_request": true,
 }
 
 func (s *Server) auditToolCall(name string, args json.RawMessage) {
@@ -583,6 +677,10 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolIssueMdoc(args)
 	case "verify_mdoc":
 		return s.toolVerifyMdoc(args)
+	case "create_presentation_request":
+		return s.toolCreatePresentationRequest(args)
+	case "get_presentation_result":
+		return s.toolGetPresentationResult(args)
 	}
 	return "", fmt.Errorf("unknown tool: %s", name)
 }
@@ -1230,6 +1328,86 @@ func (s *Server) toolCreateCredentialOffer(args json.RawMessage) (string, error)
 		"offerUrl":          offerURL,
 		"preAuthorizedCode": code,
 		"statusListIndex":   index,
+	})
+	return string(b), nil
+}
+
+// toolCreatePresentationRequest mints a real OpenID4VP authorization request
+// a wallet can respond to. Requires a VP verifier to have been registered —
+// without this the openid4vp package's request/response protocol existed
+// and was fully tested but was reachable only from cmd/blrcs-demo (a
+// throwaway demo binary), never cmd/blrcs-mcpd.
+func (s *Server) toolCreatePresentationRequest(args json.RawMessage) (string, error) {
+	var in struct {
+		PresentationDefinition json.RawMessage `json:"presentationDefinition"`
+		// AcceptableIssuerKeys maps issuer DID -> base64 Ed25519 public key.
+		// PresentationDefinition.AcceptableIssuers is `json:"-"` (deliberately
+		// excluded from JSON, since it's meant to be built from trusted Go code
+		// rather than deserialized) — this is the JSON-facing equivalent so a
+		// tool caller can still supply it.
+		AcceptableIssuerKeys map[string]string `json:"acceptableIssuerKeys"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	s.mu.RLock()
+	vp := s.vpVerifier
+	s.mu.RUnlock()
+	if vp == nil {
+		return "", errors.New("mcp: no OpenID4VP verifier registered for this server")
+	}
+	if len(in.PresentationDefinition) == 0 {
+		return "", errors.New("mcp: presentationDefinition is required")
+	}
+	var def openid4vp.PresentationDefinition
+	if err := json.Unmarshal(in.PresentationDefinition, &def); err != nil {
+		return "", fmt.Errorf("mcp: bad presentationDefinition: %w", err)
+	}
+	if len(in.AcceptableIssuerKeys) > 0 {
+		def.AcceptableIssuers = make(map[string][]byte, len(in.AcceptableIssuerKeys))
+		for did, keyB64 := range in.AcceptableIssuerKeys {
+			key, kerr := base64.StdEncoding.DecodeString(keyB64)
+			if kerr != nil || len(key) != ed25519.PublicKeySize {
+				return "", fmt.Errorf("mcp: acceptableIssuerKeys[%q]: bad public key", did)
+			}
+			def.AcceptableIssuers[did] = key
+		}
+	}
+	reqURL, state, err := vp.CreateRequest(def)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]string{"requestUrl": reqURL, "state": state})
+	return string(b), nil
+}
+
+// toolGetPresentationResult retrieves a previously-completed OpenID4VP
+// verification by state. Returns {"status":"pending"} for a state that has
+// not (yet, or ever) completed successfully — including a state that failed
+// verification, since the failure detail is deliberately not surfaced here
+// (CallbackHandler already returned it directly to the wallet, opaquely, at
+// response time; a polling agent gets no additional oracle).
+func (s *Server) toolGetPresentationResult(args json.RawMessage) (string, error) {
+	var in struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.State == "" {
+		return "", errors.New("mcp: state is required")
+	}
+	s.mu.RLock()
+	entry, ok := s.presResults[in.State]
+	s.mu.RUnlock()
+	if !ok {
+		return `{"status":"pending"}`, nil
+	}
+	b, _ := json.Marshal(map[string]any{
+		"status":  "success",
+		"subject": entry.vp.Subject,
+		"issuer":  entry.vp.Issuer,
+		"claims":  entry.vp.Claims,
 	})
 	return string(b), nil
 }
