@@ -23,6 +23,8 @@
 //	create_credential_offer — OpenID4VCI pre-authorized offer 発行 (要 RegisterVCIIssuer)
 //	issue_mdoc          — ISO 18013-5 mdoc/mDL発行 (IssuerSigned + MSO)
 //	verify_mdoc         — mdoc署名検証
+//	build_gs1_link      — GS1 Digital Link URI 構築
+//	parse_gs1_link      — GS1 Digital Link URI 解析
 //	create_presentation_request — OpenID4VP authorization request 発行 (要 RegisterVPVerifier)
 //	get_presentation_result     — 提示要求の結果取得 (state で問合せ)
 package mcp
@@ -553,6 +555,16 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{"issuerSignedB64":{"type":"string"},"issuerPublicKeyB64":{"type":"string"}},"required":["issuerSignedB64","issuerPublicKeyB64"]}`),
 		},
 		{
+			Name:        "build_gs1_link",
+			Description: "Build a GS1 Digital Link URI (ISO/IEC 18975) from a domain and GTIN (+ optional serial/batch).",
+			InputSchema: rawJSON(`{"type":"object","properties":{"domain":{"type":"string","description":"e.g. example.com"},"gtin":{"type":"string","description":"8/12/13/14-digit GTIN"},"serial":{"type":"string"},"batch":{"type":"string"}},"required":["domain","gtin"]}`),
+		},
+		{
+			Name:        "parse_gs1_link",
+			Description: "Parse a GS1 Digital Link URI back into its domain, GTIN, serial, and batch.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"uri":{"type":"string"}},"required":["uri"]}`),
+		},
+		{
 			Name:        "create_presentation_request",
 			Description: "Mint an OpenID4VP authorization request a real wallet can respond to (returns openid4vp:// request URL + state). Requires the server to have a registered OpenID4VP verifier; errors otherwise. Poll get_presentation_result with the returned state to see the wallet's response.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"presentationDefinition":{"type":"object","description":"DIF Presentation Exchange 2.0 PresentationDefinition (id, purpose, requiredClaims, format)"},"acceptableIssuerKeys":{"type":"object","description":"issuer DID -> base64 Ed25519 public key, the trust anchor ProcessResponse verifies the presented credential's signature against"}},"required":["presentationDefinition"]}`),
@@ -677,6 +689,10 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolIssueMdoc(args)
 	case "verify_mdoc":
 		return s.toolVerifyMdoc(args)
+	case "build_gs1_link":
+		return s.toolBuildGS1Link(args)
+	case "parse_gs1_link":
+		return s.toolParseGS1Link(args)
 	case "create_presentation_request":
 		return s.toolCreatePresentationRequest(args)
 	case "get_presentation_result":
@@ -986,6 +1002,49 @@ func (s *Server) toolVerifyMdoc(args json.RawMessage) (string, error) {
 		"valid":      true,
 		"docType":    verified.DocType,
 		"nameSpaces": verified.NameSpaces,
+	})
+	return string(b), nil
+}
+
+// toolBuildGS1Link builds a GS1 Digital Link URI (ISO/IEC 18975) from a
+// domain and key (GTIN/serial/batch) — previously only reachable via the
+// compliance package directly, with no MCP wiring despite README listing
+// "GS1 Digital Link (ISO/IEC 18975) ✅" as a shipped feature.
+func (s *Server) toolBuildGS1Link(args json.RawMessage) (string, error) {
+	var in struct {
+		Domain string `json:"domain"`
+		GTIN   string `json:"gtin"`
+		Serial string `json:"serial"`
+		Batch  string `json:"batch"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	uri, err := compliance.BuildDLURI(in.Domain, compliance.GS1Key{GTIN: in.GTIN, Serial: in.Serial, Batch: in.Batch})
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]string{"uri": uri})
+	return string(b), nil
+}
+
+// toolParseGS1Link parses a GS1 Digital Link URI back into its domain and key.
+func (s *Server) toolParseGS1Link(args json.RawMessage) (string, error) {
+	var in struct {
+		URI string `json:"uri"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	domain, key, err := compliance.ParseDLURI(in.URI)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]string{
+		"domain": domain,
+		"gtin":   key.GTIN,
+		"serial": key.Serial,
+		"batch":  key.Batch,
 	})
 	return string(b), nil
 }
