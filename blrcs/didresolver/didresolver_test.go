@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -778,14 +779,31 @@ func TestResolveServicesCancelled(t *testing.T) {
 // defaultHTTPFetch — coverage for the real HTTP fetcher paths
 // ============================================================================
 
+// testFetchClient has the same CheckRedirect policy as defaultClient but no
+// custom DialContext, so it can reach an httptest.Server (always loopback).
+// Used to test the request/redirect/body-limit mechanics in fetchWithClient
+// in isolation from the SSRF dial restriction, which is covered separately
+// by TestDefaultClientBlocksLoopback below (via the real defaultHTTPFetch).
+func testFetchClient() *http.Client {
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return ErrRedirectNotAllowed
+		},
+	}
+}
+
 func TestDefaultHTTPFetchNon200(t *testing.T) {
 	// Use a real httptest server returning 404 to exercise the HTTP != 200 path.
+	// fetchWithClient + testFetchClient (not defaultHTTPFetch) so the SSRF dial
+	// guard doesn't short-circuit before the 404 is ever reached — that guard
+	// has its own dedicated test (TestDefaultClientBlocksLoopback).
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
 	defer ts.Close()
 
-	_, err := defaultHTTPFetch(context.Background(), ts.URL+"/did.json")
+	_, err := fetchWithClient(context.Background(), ts.URL+"/did.json", testFetchClient())
 	if err == nil {
 		t.Fatal("non-200 response should return error")
 	}
@@ -799,7 +817,7 @@ func TestDefaultHTTPFetchSuccess(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	got, err := defaultHTTPFetch(context.Background(), ts.URL+"/did.json")
+	got, err := fetchWithClient(context.Background(), ts.URL+"/did.json", testFetchClient())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -833,7 +851,7 @@ func TestDefaultHTTPFetchRejectsRedirect(t *testing.T) {
 	}))
 	defer redirector.Close()
 
-	_, err := defaultHTTPFetch(context.Background(), redirector.URL+"/did.json")
+	_, err := fetchWithClient(context.Background(), redirector.URL+"/did.json", testFetchClient())
 	if err == nil {
 		t.Fatal("redirect should be refused, got no error")
 	}
@@ -858,9 +876,60 @@ func TestDefaultHTTPFetchRejectsRedirectChainToLoopback(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := defaultHTTPFetch(context.Background(), ts.URL+"/did.json")
+	_, err := fetchWithClient(context.Background(), ts.URL+"/did.json", testFetchClient())
 	if !errors.Is(err, ErrRedirectNotAllowed) {
 		t.Errorf("want ErrRedirectNotAllowed, got %v", err)
+	}
+}
+
+// ============================================================================
+// SSRF: direct (non-redirect) resolution to a private/loopback address
+// ============================================================================
+
+// TestDefaultClientBlocksLoopback is the core regression test for the SSRF
+// gap this axis fixes: a did:web identifier resolving *directly* (no redirect
+// involved) to a loopback address must be refused by the real production
+// fetcher (defaultHTTPFetch/defaultClient), not just by the CheckRedirect
+// guard that only covers the redirect vector. Before the fix, this reached
+// the local httptest.Server successfully — exactly the SSRF this closes.
+func TestDefaultClientBlocksLoopback(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"did:web:should-not-be-reached.example"}`))
+	}))
+	defer ts.Close()
+
+	_, err := defaultHTTPFetch(context.Background(), ts.URL+"/did.json")
+	if !errors.Is(err, ErrBlockedTarget) {
+		t.Fatalf("want ErrBlockedTarget, got %v", err)
+	}
+}
+
+func TestIsBlockedIP(t *testing.T) {
+	cases := []struct {
+		ip      string
+		blocked bool
+	}{
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"10.0.0.5", true},
+		{"172.16.0.1", true},
+		{"192.168.1.1", true},
+		{"169.254.169.254", true}, // cloud metadata service
+		{"100.64.0.1", true},      // RFC 6598 carrier-grade NAT
+		{"0.0.0.0", true},
+		{"8.8.8.8", false},
+		{"1.1.1.1", false},
+		{"93.184.216.34", false},
+	}
+	for _, c := range cases {
+		ip := net.ParseIP(c.ip)
+		if ip == nil {
+			t.Fatalf("bad test IP %q", c.ip)
+		}
+		if got := isBlockedIP(ip); got != c.blocked {
+			t.Errorf("isBlockedIP(%s): got %v want %v", c.ip, got, c.blocked)
+		}
 	}
 }
 
