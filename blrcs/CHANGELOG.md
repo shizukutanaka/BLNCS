@@ -6,6 +6,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **`didresolver`: SSRF via direct did:web resolution to private/loopback/
+  metadata addresses (Axis 107).** The default did:web fetcher blocked
+  *redirects* to a private/loopback/metadata address (`CheckRedirect`
+  refuses all 3xx) but had no protection against resolving *directly* to
+  one — a DID like `did:web:169.254.169.254` needs no redirect at all.
+  This is live and reachable today: `compose.Composer.VerifyByDID`/
+  `VerifySDJWTByDID` resolve a credential's issuer DID over the network
+  *before* checking the trust anchor (trust is only checked on the
+  result), and the issuer DID is exactly the untrusted input from a
+  credential being verified. Fixed by mirroring `webhook.Bus`'s existing
+  `isBlockedIP`/`safeDialContext` pattern into `didresolver`, wired as
+  `defaultClient`'s `Transport.DialContext` — every did:web fetch through
+  the default fetcher now validates the resolved IP before connecting.
+  Callers needing internal-network did:web resolution keep their existing
+  escape hatch: inject a custom `Resolver.HTTPFetcher`. 7 new/updated
+  tests, including a dedicated regression test proving the real
+  production path now refuses a loopback target it would previously have
+  reached successfully.
+
 ### Added
 - **`mcp`: `build_gs1_link` / `parse_gs1_link` — GS1 Digital Link previously
   reachable from zero tools (Axis 106).** README lists "GS1 Digital Link
