@@ -26,6 +26,7 @@
 //	build_gs1_link      — GS1 Digital Link URI 構築
 //	parse_gs1_link      — GS1 Digital Link URI 解析
 //	resolve_did         — did:web/did:key/did:jwk を公開鍵に解決 (SSRF対策済み)
+//	discover_did_services — did:web の DID Document から service endpoint 群を取得
 //	create_presentation_request — OpenID4VP authorization request 発行 (要 RegisterVPVerifier)
 //	get_presentation_result     — 提示要求の結果取得 (state で問合せ)
 package mcp
@@ -581,6 +582,11 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{"did":{"type":"string"}},"required":["did"]}`),
 		},
 		{
+			Name:        "discover_did_services",
+			Description: "Resolve a did:web identifier's DID Document and return its declared service endpoints (e.g. a wallet's credential-offer or presentation endpoint).",
+			InputSchema: rawJSON(`{"type":"object","properties":{"did":{"type":"string"}},"required":["did"]}`),
+		},
+		{
 			Name:        "create_presentation_request",
 			Description: "Mint an OpenID4VP authorization request a real wallet can respond to (returns openid4vp:// request URL + state). Requires the server to have a registered OpenID4VP verifier; errors otherwise. Poll get_presentation_result with the returned state to see the wallet's response.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"presentationDefinition":{"type":"object","description":"DIF Presentation Exchange 2.0 PresentationDefinition (id, purpose, requiredClaims, format)"},"acceptableIssuerKeys":{"type":"object","description":"issuer DID -> base64 Ed25519 public key, the trust anchor ProcessResponse verifies the presented credential's signature against"}},"required":["presentationDefinition"]}`),
@@ -711,6 +717,8 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolParseGS1Link(args)
 	case "resolve_did":
 		return s.toolResolveDID(args)
+	case "discover_did_services":
+		return s.toolDiscoverDIDServices(args)
 	case "create_presentation_request":
 		return s.toolCreatePresentationRequest(args)
 	case "get_presentation_result":
@@ -1093,6 +1101,38 @@ func (s *Server) toolResolveDID(args json.RawMessage) (string, error) {
 		b64Keys[i] = base64.StdEncoding.EncodeToString(k)
 	}
 	b, _ := json.Marshal(map[string]any{"publicKeysB64": b64Keys})
+	return string(b), nil
+}
+
+// toolDiscoverDIDServices resolves a did:web identifier's DID Document and
+// returns its declared service endpoints (e.g. a wallet's credential-offer
+// or presentation endpoint) — the complementary read to resolve_did (keys)
+// for the service-discovery half of a DID Document. Same SSRF-hardened
+// fetcher as resolve_did; no TrustAnchor gating for the same reason
+// resolve_did has none (the caller decides what to do with the result).
+func (s *Server) toolDiscoverDIDServices(args json.RawMessage) (string, error) {
+	var in struct {
+		DID string `json:"did"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.DID == "" {
+		return "", errors.New("mcp: did is required")
+	}
+	services, err := s.didResolver.ResolveServices(context.Background(), in.DID)
+	if err != nil {
+		return "", err
+	}
+	out := make([]map[string]string, len(services))
+	for i, svc := range services {
+		out[i] = map[string]string{
+			"id":              svc.ID,
+			"type":            svc.Type,
+			"serviceEndpoint": svc.ServiceEndpoint,
+		}
+	}
+	b, _ := json.Marshal(map[string]any{"services": out})
 	return string(b), nil
 }
 

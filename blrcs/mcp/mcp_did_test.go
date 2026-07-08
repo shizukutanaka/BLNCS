@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -82,5 +83,78 @@ func TestResolveDIDNotAudited(t *testing.T) {
 	after := srv.Ledger().Size()
 	if after != before {
 		t.Errorf("resolve_did should not be audited: before=%d after=%d", before, after)
+	}
+}
+
+// ============================================================================
+// discover_did_services
+// ============================================================================
+
+// TestDiscoverDIDServicesHappyPath verifies the MCP surface can fetch a
+// did:web document's service endpoints — previously only reachable via the
+// didresolver package directly. Injects a mock HTTPFetcher on the server's
+// didResolver (same package, so the unexported field is accessible) to avoid
+// a real network round-trip.
+func TestDiscoverDIDServicesHappyPath(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	srv.didResolver.HTTPFetcher = func(ctx context.Context, url string) ([]byte, error) {
+		return []byte(`{
+			"id": "did:web:factory.example",
+			"verificationMethod": [],
+			"service": [
+				{"id":"did:web:factory.example#dpp","type":"DPPService","serviceEndpoint":"https://factory.example/dpp"}
+			]
+		}`), nil
+	}
+
+	result := toolCall(t, srv, 1, "discover_did_services", map[string]any{"did": "did:web:factory.example"})
+	text := toolCallText(t, result)
+	var out struct {
+		Services []struct {
+			ID              string `json:"id"`
+			Type            string `json:"type"`
+			ServiceEndpoint string `json:"serviceEndpoint"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(out.Services))
+	}
+	if out.Services[0].Type != "DPPService" {
+		t.Errorf("type: got %s", out.Services[0].Type)
+	}
+	if out.Services[0].ServiceEndpoint != "https://factory.example/dpp" {
+		t.Errorf("endpoint: got %s", out.Services[0].ServiceEndpoint)
+	}
+}
+
+// TestDiscoverDIDServicesMissingDID verifies required-field validation.
+func TestDiscoverDIDServicesMissingDID(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	result := toolCall(t, srv, 1, "discover_did_services", map[string]any{})
+	if !result["isError"].(bool) {
+		t.Fatal("missing did should error")
+	}
+}
+
+// TestDiscoverDIDServicesEmptyResult verifies a DID document with no service
+// field returns an empty (not nil-crashing) services list.
+func TestDiscoverDIDServicesEmptyResult(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	srv.didResolver.HTTPFetcher = func(ctx context.Context, url string) ([]byte, error) {
+		return []byte(`{"id":"did:web:no-services.example","verificationMethod":[]}`), nil
+	}
+	result := toolCall(t, srv, 1, "discover_did_services", map[string]any{"did": "did:web:no-services.example"})
+	text := toolCallText(t, result)
+	var out struct {
+		Services []any `json:"services"`
+	}
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Services) != 0 {
+		t.Errorf("expected 0 services, got %d", len(out.Services))
 	}
 }
