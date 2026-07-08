@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`mcp`: `resolve_did` — DID resolution previously reachable from zero
+  tools (Axis 108).** `didresolver.Resolver.ResolveAll` (did:web/did:key/
+  did:jwk → Ed25519 public key) had zero MCP wiring, leaving no way for an
+  agent to go from "I have a DID" to "I have a key to verify against" for
+  `verify_passport`/`verify_sdjwt`/`verify_mdoc`, which all require a raw
+  base64 public key. Only safe to add now that Axis 107 hardened
+  `didresolver`'s default fetcher against SSRF — verified end-to-end that
+  `resolve_did` against `did:web:169.254.169.254` (cloud metadata) is
+  correctly refused by the real production path. Deliberately does not
+  gate on a `TrustAnchor`; the caller decides whether to trust the
+  returned key(s), matching how `verify_passport`/`verify_mdoc` already
+  work. 4 new tests. `TestToolsList` updated (20 → 21).
+
 ### Security
 - **`didresolver`: SSRF via direct did:web resolution to private/loopback/
   metadata addresses (Axis 107).** The default did:web fetcher blocked
