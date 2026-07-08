@@ -10,6 +10,7 @@
 //	BLRCS_ENCRYPTION_KEY=<64 hex chars> BLRCS_DATA_DIR=/data blrcs-mcpd  # AES-256-GCM at rest
 //	BLRCS_VCI_URL=https://issue.example blrcs-mcpd               # enable OpenID4VCI issuer
 //	BLRCS_VP_CLIENT_ID=https://verify.example blrcs-mcpd         # enable OpenID4VP verifier
+//	BLRCS_TRUSTED_DIDS=did:web:a.example,did:web:b.example       # restrict verify_*_by_did trust
 //
 // エンドポイント:
 //
@@ -41,12 +42,14 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"blrcs/atrest"
 	"blrcs/compliance"
 	"blrcs/config"
+	"blrcs/didresolver"
 	"blrcs/healthprobe"
 	"blrcs/httpmw"
 	"blrcs/mcp"
@@ -147,6 +150,24 @@ func main() {
 		responseURI := vpClientID + "/openid4vp/callback"
 		vpVerifier = openid4vp.NewVerifier(vpClientID, responseURI, nil)
 		srv.RegisterVPVerifier(vpVerifier)
+	}
+
+	// Optional trust anchor restriction for verify_passport_by_did/
+	// verify_sdjwt_by_did: by default the server accepts whatever key a DID
+	// resolves to (the same posture as an agent manually chaining
+	// resolve_did -> verify_passport, which has no allowlist either). Setting
+	// BLRCS_TRUSTED_DIDS opts into a real PKI-style restriction — only
+	// credentials from these specific issuer DIDs verify via the *_by_did
+	// tools, regardless of what any DID resolves to.
+	if trustedDIDs := os.Getenv("BLRCS_TRUSTED_DIDS"); trustedDIDs != "" {
+		anchor := didresolver.NewTrustAnchor()
+		for _, did := range strings.Split(trustedDIDs, ",") {
+			if did = strings.TrimSpace(did); did != "" {
+				anchor.AddDID(did)
+			}
+		}
+		srv.RegisterTrustAnchor(anchor)
+		fmt.Fprintf(os.Stderr, "trust anchor: restricted to %d DID(s)\n", len(strings.Split(trustedDIDs, ",")))
 	}
 
 	// Auth

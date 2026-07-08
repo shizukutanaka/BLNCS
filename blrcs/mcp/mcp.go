@@ -27,6 +27,8 @@
 //	parse_gs1_link      — GS1 Digital Link URI 解析
 //	resolve_did         — did:web/did:key/did:jwk を公開鍵に解決 (SSRF対策済み)
 //	discover_did_services — did:web の DID Document から service endpoint 群を取得
+//	verify_passport_by_did — DPP検証 (issuer DID から鍵解決)
+//	verify_sdjwt_by_did — SD-JWT検証 (issuer DID から鍵解決)
 //	create_presentation_request — OpenID4VP authorization request 発行 (要 RegisterVPVerifier)
 //	get_presentation_result     — 提示要求の結果取得 (state で問合せ)
 package mcp
@@ -177,6 +179,15 @@ type Server struct {
 	// (see didresolver.defaultClient) so this is safe by default.
 	didResolver *didresolver.Resolver
 
+	// trustAnchor gates verify_passport_by_did/verify_sdjwt_by_did: which
+	// issuer DIDs' resolved keys this server accepts as trust roots. Defaults
+	// to AllowAll() (any resolved key is trusted) — the exact same security
+	// posture as an agent manually chaining resolve_did -> verify_passport
+	// today, since neither step currently checks an allowlist. An operator
+	// wanting a real PKI-style restriction registers a stricter TrustAnchor
+	// via RegisterTrustAnchor (see cmd/blrcs-mcpd's BLRCS_TRUSTED_DIDS).
+	trustAnchor *didresolver.TrustAnchor
+
 	// Revocation: a single server-wide W3C Bitstring Status List that
 	// issue_passport embeds into every issued credential's credentialStatus,
 	// and revoke_passport mutates. Persisted via storage.BlobStorage when the
@@ -231,12 +242,15 @@ func buildServer(tsID, serverDID string, ledger *scitt.Ledger, store storage.Sto
 	if err != nil {
 		return nil, err
 	}
+	defaultTrust := didresolver.NewTrustAnchor()
+	defaultTrust.AllowAll()
 	s := &Server{
 		issuers:     make(map[string]*compliance.Issuer),
 		attesters:   make(map[string]*compliance.SensorAttester),
 		ledger:      ledger,
 		selfIssuer:  selfIss,
 		didResolver: didresolver.New(),
+		trustAnchor: defaultTrust,
 	}
 	if err := s.initRevocation(store); err != nil {
 		return nil, err
@@ -365,6 +379,16 @@ func (s *Server) RegisterVCIIssuer(iss *openid4vci.Issuer) {
 func (s *Server) RegisterVPVerifier(v *openid4vp.Verifier) {
 	s.mu.Lock()
 	s.vpVerifier = v
+	s.mu.Unlock()
+}
+
+// RegisterTrustAnchor replaces this server's default (allow-all) trust
+// anchor for verify_passport_by_did/verify_sdjwt_by_did. Pass a TrustAnchor
+// built with AddDID/AddKey (no AllowAll call) to restrict trust to a
+// specific issuer allowlist instead of accepting whatever a DID resolves to.
+func (s *Server) RegisterTrustAnchor(t *didresolver.TrustAnchor) {
+	s.mu.Lock()
+	s.trustAnchor = t
 	s.mu.Unlock()
 }
 
@@ -537,6 +561,16 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{"sdjwt":{"type":"string","description":"Full SD-JWT presentation string (header.payload.sig~disc...~[kb-jwt])"},"issuerPublicKeyB64":{"type":"string","description":"Base64-encoded Ed25519 issuer public key"},"expectedNonce":{"type":"string","description":"Expected KB-JWT nonce (for OpenID4VP)"},"expectedAudience":{"type":"string","description":"Expected KB-JWT audience"}},"required":["sdjwt","issuerPublicKeyB64"]}`),
 		},
 		{
+			Name:        "verify_passport_by_did",
+			Description: "Verify a credential using its issuer field's DID as the trust root, instead of supplying the raw public key directly (verify_passport's contract). Resolves the DID and only accepts keys the server's trust anchor allows for it (default: any resolved key).",
+			InputSchema: rawJSON(`{"type":"object","properties":{"credentialJson":{"type":"string"}},"required":["credentialJson"]}`),
+		},
+		{
+			Name:        "verify_sdjwt_by_did",
+			Description: "verify_sdjwt's DID-resolving counterpart: same nonce/audience binding options, but the issuer public key comes from resolving+trust-checking issuerDid instead of being supplied directly.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"sdjwt":{"type":"string"},"issuerDid":{"type":"string"},"expectedNonce":{"type":"string"},"expectedAudience":{"type":"string"}},"required":["sdjwt","issuerDid"]}`),
+		},
+		{
 			Name:        "check_revocation",
 			Description: "Check whether a credential is revoked using a W3C Bitstring Status List token. Returns {revoked:bool}.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"statusListTokenJWT":{"type":"string","description":"Status list token (application/statuslist+jwt)"},"statusListIssuerKeyB64":{"type":"string","description":"Base64-encoded Ed25519 public key of status list issuer"},"statusIndex":{"type":"integer","minimum":0,"description":"Bit index of the credential in the status list"}},"required":["statusListTokenJWT","statusListIssuerKeyB64","statusIndex"]}`),
@@ -699,6 +733,10 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolIssueSDJWT(args)
 	case "verify_sdjwt":
 		return s.toolVerifySDJWT(args)
+	case "verify_passport_by_did":
+		return s.toolVerifyPassportByDID(args)
+	case "verify_sdjwt_by_did":
+		return s.toolVerifySDJWTByDID(args)
 	case "check_revocation":
 		return s.toolCheckRevocation(args)
 	case "revoke_passport":
@@ -1134,6 +1172,89 @@ func (s *Server) toolDiscoverDIDServices(args json.RawMessage) (string, error) {
 	}
 	b, _ := json.Marshal(map[string]any{"services": out})
 	return string(b), nil
+}
+
+// toolVerifyPassportByDID verifies a credential using its issuer field's DID
+// as the trust root, instead of requiring the caller to already have the
+// issuer's raw public key (verify_passport's contract) — resolves via
+// s.didResolver, then only accepts keys s.trustAnchor deems trusted for that
+// DID (see the Server.trustAnchor field doc for the default allow-all
+// posture). Rotation-tolerant: tries every trusted key ResolveAndVerifyAll
+// returns, succeeding if any one verifies (mirrors compose.VerifyByDID).
+func (s *Server) toolVerifyPassportByDID(args json.RawMessage) (string, error) {
+	var in struct {
+		CredentialJson string `json:"credentialJson"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	var cred compliance.Credential
+	if err := json.Unmarshal([]byte(in.CredentialJson), &cred); err != nil {
+		return "", err
+	}
+	if cred.Issuer == "" {
+		return "", errors.New("mcp: credential has no issuer")
+	}
+	s.mu.RLock()
+	resolver, anchor := s.didResolver, s.trustAnchor
+	s.mu.RUnlock()
+	keys, err := didresolver.ResolveAndVerifyAll(context.Background(), resolver, anchor, cred.Issuer)
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	var verr error
+	for _, pub := range keys {
+		if verr = compliance.Verify(&cred, pub); verr == nil {
+			return `{"valid":true}`, nil
+		}
+	}
+	return verifyResult(false, verr.Error()), nil
+}
+
+// toolVerifySDJWTByDID is verify_sdjwt's DID-resolving counterpart: same
+// nonce/audience binding options, but the issuer public key comes from
+// resolving+trust-checking issuerDID instead of being supplied directly.
+func (s *Server) toolVerifySDJWTByDID(args json.RawMessage) (string, error) {
+	var in struct {
+		SDJWT            string `json:"sdjwt"`
+		IssuerDID        string `json:"issuerDid"`
+		ExpectedNonce    string `json:"expectedNonce"`
+		ExpectedAudience string `json:"expectedAudience"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.IssuerDID == "" {
+		return "", errors.New("mcp: issuerDid is required")
+	}
+	s.mu.RLock()
+	resolver, anchor := s.didResolver, s.trustAnchor
+	s.mu.RUnlock()
+	keys, err := didresolver.ResolveAndVerifyAll(context.Background(), resolver, anchor, in.IssuerDID)
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	opts := compliance.VerifyOptions{
+		ExpectedNonce:    in.ExpectedNonce,
+		ExpectedAudience: in.ExpectedAudience,
+	}
+	var vc *compliance.VerifiedClaims
+	var verr error
+	for _, pub := range keys {
+		if vc, verr = compliance.VerifySDJWTWithBinding(in.SDJWT, pub, opts); verr == nil {
+			b, _ := json.Marshal(map[string]any{
+				"valid":    true,
+				"issuer":   vc.Issuer,
+				"subject":  vc.Subject,
+				"claims":   vc.Claims,
+				"keyBound": vc.KeyBound,
+				"issuedAt": vc.IssuedAt,
+				"expires":  vc.Expires,
+			})
+			return string(b), nil
+		}
+	}
+	return verifyResult(false, verr.Error()), nil
 }
 
 // verifyResult builds a structured {"valid":..,"reason":..} result with the
