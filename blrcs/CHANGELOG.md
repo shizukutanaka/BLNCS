@@ -7,6 +7,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mcp`, `cmd/blrcs-mcpd`: `verify_passport_by_did` / `verify_sdjwt_by_did`
+  (Axis 110).** `compose.Composer.VerifyByDID`/`VerifySDJWTByDID`
+  (DID-resolved + trust-anchor-gated verification with key-rotation
+  support) had zero MCP wiring, and `compose` itself has zero callers
+  anywhere. Rather than wire the whole `Composer` (which also bundles CAS
+  publishing and webhook notification — deferred as a separate design
+  decision), called `didresolver.ResolveAndVerifyAll` directly, reusing
+  the `didResolver` already wired for `resolve_did`/`discover_did_services`
+  (Axis 108–109). Closes a real gap: `verify_passport`/`verify_sdjwt`
+  require the caller to already have the issuer's raw public key; an agent
+  previously had to chain `resolve_did` → `verify_passport` manually with
+  no trust-anchor concept at all. `Server` gains a `trustAnchor` field
+  defaulting to allow-all (same posture as that manual chain) and
+  `RegisterTrustAnchor` for operators wanting a real PKI-style
+  restriction; new `BLRCS_TRUSTED_DIDS` env var in `cmd/blrcs-mcpd` opts
+  into it. 7 new tests, including a dedicated test proving an empty trust
+  anchor actually rejects an otherwise-valid signature. `TestToolsList`
+  updated (22 → 24).
+
+### Added
 - **`mcp`: `discover_did_services` — completes the DID Document read surface
   (Axis 109).** Complements `resolve_did` (Axis 108): a DID Document has two
   halves relevant to this server's callers — verification keys
