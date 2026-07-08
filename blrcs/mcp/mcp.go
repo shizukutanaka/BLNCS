@@ -25,12 +25,14 @@
 //	verify_mdoc         — mdoc署名検証
 //	build_gs1_link      — GS1 Digital Link URI 構築
 //	parse_gs1_link      — GS1 Digital Link URI 解析
+//	resolve_did         — did:web/did:key/did:jwk を公開鍵に解決 (SSRF対策済み)
 //	create_presentation_request — OpenID4VP authorization request 発行 (要 RegisterVPVerifier)
 //	get_presentation_result     — 提示要求の結果取得 (state で問合せ)
 package mcp
 
 import (
 	"bufio"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -43,6 +45,7 @@ import (
 	"time"
 
 	"blrcs/compliance"
+	"blrcs/didresolver"
 	"blrcs/mdoc"
 	"blrcs/openid4vci"
 	"blrcs/openid4vp"
@@ -166,6 +169,13 @@ type Server struct {
 	vpVerifier  *openid4vp.Verifier
 	presResults map[string]*presentationResult
 
+	// didResolver backs resolve_did. Always initialized (unlike vciIssuer/
+	// vpVerifier) since it adds no new HTTP surface of its own — it only
+	// makes outbound fetches when a tool call asks it to, same risk shape as
+	// any other MCP tool, and didresolver's default fetcher is SSRF-hardened
+	// (see didresolver.defaultClient) so this is safe by default.
+	didResolver *didresolver.Resolver
+
 	// Revocation: a single server-wide W3C Bitstring Status List that
 	// issue_passport embeds into every issued credential's credentialStatus,
 	// and revoke_passport mutates. Persisted via storage.BlobStorage when the
@@ -221,10 +231,11 @@ func buildServer(tsID, serverDID string, ledger *scitt.Ledger, store storage.Sto
 		return nil, err
 	}
 	s := &Server{
-		issuers:    make(map[string]*compliance.Issuer),
-		attesters:  make(map[string]*compliance.SensorAttester),
-		ledger:     ledger,
-		selfIssuer: selfIss,
+		issuers:     make(map[string]*compliance.Issuer),
+		attesters:   make(map[string]*compliance.SensorAttester),
+		ledger:      ledger,
+		selfIssuer:  selfIss,
+		didResolver: didresolver.New(),
 	}
 	if err := s.initRevocation(store); err != nil {
 		return nil, err
@@ -565,6 +576,11 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{"uri":{"type":"string"}},"required":["uri"]}`),
 		},
 		{
+			Name:        "resolve_did",
+			Description: "Resolve a did:web/did:key/did:jwk identifier to its Ed25519 public key(s) — useful before verify_passport/verify_sdjwt/verify_mdoc when you only have an issuer's DID, not its raw public key. Does not itself decide trust; the caller evaluates the returned key(s).",
+			InputSchema: rawJSON(`{"type":"object","properties":{"did":{"type":"string"}},"required":["did"]}`),
+		},
+		{
 			Name:        "create_presentation_request",
 			Description: "Mint an OpenID4VP authorization request a real wallet can respond to (returns openid4vp:// request URL + state). Requires the server to have a registered OpenID4VP verifier; errors otherwise. Poll get_presentation_result with the returned state to see the wallet's response.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"presentationDefinition":{"type":"object","description":"DIF Presentation Exchange 2.0 PresentationDefinition (id, purpose, requiredClaims, format)"},"acceptableIssuerKeys":{"type":"object","description":"issuer DID -> base64 Ed25519 public key, the trust anchor ProcessResponse verifies the presented credential's signature against"}},"required":["presentationDefinition"]}`),
@@ -693,6 +709,8 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolBuildGS1Link(args)
 	case "parse_gs1_link":
 		return s.toolParseGS1Link(args)
+	case "resolve_did":
+		return s.toolResolveDID(args)
 	case "create_presentation_request":
 		return s.toolCreatePresentationRequest(args)
 	case "get_presentation_result":
@@ -1046,6 +1064,35 @@ func (s *Server) toolParseGS1Link(args json.RawMessage) (string, error) {
 		"serial": key.Serial,
 		"batch":  key.Batch,
 	})
+	return string(b), nil
+}
+
+// toolResolveDID resolves a did:web/did:key/did:jwk identifier to its Ed25519
+// public key(s) — previously only reachable via the didresolver package
+// directly. Deliberately does NOT gate on a trust anchor: the caller decides
+// whether to trust the result, same as verify_passport/verify_mdoc require
+// the caller to already have a public key rather than deciding trust
+// server-side. Safe to expose unconditionally because didresolver's default
+// fetcher is SSRF-hardened (validates the resolved IP before connecting).
+func (s *Server) toolResolveDID(args json.RawMessage) (string, error) {
+	var in struct {
+		DID string `json:"did"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.DID == "" {
+		return "", errors.New("mcp: did is required")
+	}
+	keys, err := s.didResolver.ResolveAll(context.Background(), in.DID)
+	if err != nil {
+		return "", err
+	}
+	b64Keys := make([]string, len(keys))
+	for i, k := range keys {
+		b64Keys[i] = base64.StdEncoding.EncodeToString(k)
+	}
+	b, _ := json.Marshal(map[string]any{"publicKeysB64": b64Keys})
 	return string(b), nil
 }
 
