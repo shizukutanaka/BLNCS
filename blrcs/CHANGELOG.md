@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mcp`: `discover_did_services` — completes the DID Document read surface
+  (Axis 109).** Complements `resolve_did` (Axis 108): a DID Document has two
+  halves relevant to this server's callers — verification keys
+  (`resolve_did`) and declared service endpoints
+  (`didresolver.Resolver.ResolveServices`, e.g. a wallet's credential-offer
+  or presentation endpoint) — and only the first half had MCP wiring. Same
+  SSRF-hardened fetcher as `resolve_did`; no `TrustAnchor` gating, for the
+  same reason `resolve_did` has none. 3 new tests using a mock
+  `HTTPFetcher`. `TestToolsList` updated (21 → 22).
+
+### Added
 - **`mcp`: `resolve_did` — DID resolution previously reachable from zero
   tools (Axis 108).** `didresolver.Resolver.ResolveAll` (did:web/did:key/
   did:jwk → Ed25519 public key) had zero MCP wiring, leaving no way for an
