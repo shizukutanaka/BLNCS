@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`mcp`: `create_did_webvh` / `update_did_webvh` / `verify_did_webvh_log`
+  (Axis 111).** `didwebvh` (README: "did:webvh (verifiable history +
+  pre-rotation) ✅") had zero callers anywhere despite being a complete,
+  tested DID method implementation — same shape as the `mdoc`/GS1 gaps,
+  larger in scope (a full create/rotate/verify lifecycle). The signing key
+  is always a pre-registered issuer's private key (`issuerId`/
+  `signKeyIssuerId`), never a raw key over the wire, matching
+  `issue_passport`/`issue_sdjwt`/`issue_mdoc`. This server does not
+  persist did:webvh logs — the caller receives and passes back the growing
+  log array between calls, the same statelessness contract
+  `verify_passport` has for `credentialJson`. Verified a subtle but
+  important asymmetry with a dedicated test: `update_did_webvh` does not
+  itself reject an unauthorized signing key (append-only log design means
+  that check only happens at verify time against the log's own recorded
+  update-key history) — an unauthorized update succeeds at write time but
+  correctly fails `verify_did_webvh_log`. Verified end-to-end against the
+  built `blrcs-mcp` binary: produces a real `did:webvh:<SCID>:<path>`
+  identifier with a signed genesis entry. 7 new tests, including a full
+  create→update→verify lifecycle round-trip. `TestToolsList` updated
+  (24 → 27).
+
 ### Fixed
 - **`cmd/blrcs-mcp`, `cmd/blrcs-mcpd`: stop defaulting server identity to a
   nonexistent `.example` domain.** Both real server binaries silently
