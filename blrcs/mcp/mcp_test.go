@@ -64,14 +64,14 @@ func TestToolsList(t *testing.T) {
 	resp := callRaw(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 	result := resp["result"].(map[string]any)
 	tools := result["tools"].([]any)
-	if len(tools) != 24 {
-		t.Fatalf("expected 24 tools, got %d", len(tools))
+	if len(tools) != 27 {
+		t.Fatalf("expected 27 tools, got %d", len(tools))
 	}
 	names := make(map[string]bool)
 	for _, tl := range tools {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
-	for _, want := range []string{"issue_passport", "issue_battery_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "issue_sdjwt", "verify_sdjwt", "check_revocation", "revoke_passport", "get_revocation_list", "create_credential_offer", "issue_mdoc", "verify_mdoc", "build_gs1_link", "parse_gs1_link", "create_presentation_request", "get_presentation_result", "resolve_did", "discover_did_services", "verify_passport_by_did", "verify_sdjwt_by_did"} {
+	for _, want := range []string{"issue_passport", "issue_battery_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "issue_sdjwt", "verify_sdjwt", "check_revocation", "revoke_passport", "get_revocation_list", "create_credential_offer", "issue_mdoc", "verify_mdoc", "build_gs1_link", "parse_gs1_link", "create_presentation_request", "get_presentation_result", "resolve_did", "discover_did_services", "verify_passport_by_did", "verify_sdjwt_by_did", "create_did_webvh", "update_did_webvh", "verify_did_webvh_log"} {
 		if !names[want] {
 			t.Errorf("tool %s missing", want)
 		}

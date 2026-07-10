@@ -29,6 +29,9 @@
 //	discover_did_services — did:web の DID Document から service endpoint 群を取得
 //	verify_passport_by_did — DPP検証 (issuer DID から鍵解決)
 //	verify_sdjwt_by_did — SD-JWT検証 (issuer DID から鍵解決)
+//	create_did_webvh    — did:webvh genesis log entry 作成 (pre-rotation対応)
+//	update_did_webvh    — did:webvh log にエントリ追加 (鍵ローテーション/失効)
+//	verify_did_webvh_log — did:webvh log 全体を検証・解決
 //	create_presentation_request — OpenID4VP authorization request 発行 (要 RegisterVPVerifier)
 //	get_presentation_result     — 提示要求の結果取得 (state で問合せ)
 package mcp
@@ -49,6 +52,7 @@ import (
 
 	"blrcs/compliance"
 	"blrcs/didresolver"
+	"blrcs/didwebvh"
 	"blrcs/mdoc"
 	"blrcs/openid4vci"
 	"blrcs/openid4vp"
@@ -571,6 +575,21 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{"sdjwt":{"type":"string"},"issuerDid":{"type":"string"},"expectedNonce":{"type":"string"},"expectedAudience":{"type":"string"}},"required":["sdjwt","issuerDid"]}`),
 		},
 		{
+			Name:        "create_did_webvh",
+			Description: "Create a new did:webvh genesis log entry (verifiable history + optional pre-rotation commitment). issuerId must be a registered issuer whose key becomes the genesis update key. Returns the new DID and a one-entry log — keep it and pass it to update_did_webvh/verify_did_webvh_log; this server does not persist did:webvh logs.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"didPath":{"type":"string","description":"Method-specific id without the SCID, e.g. example.com:dids:org-1"},"nextKeyHashes":{"type":"array","items":{"type":"string"},"description":"Optional pre-rotation commitment hashes"},"stateExtra":{"type":"object","description":"Extra fields for the genesis DID document"}},"required":["issuerId","didPath"]}`),
+		},
+		{
+			Name:        "update_did_webvh",
+			Description: "Append a new signed entry to an existing did:webvh log (key rotation, document update, or deactivation). signKeyIssuerId must be a registered issuer whose key currently holds update authority over the log. Returns the extended log.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"signKeyIssuerId":{"type":"string"},"log":{"type":"array","description":"The existing verified log (array of LogEntry)"},"newState":{"type":"object","description":"The new DID document"},"updateKeys":{"type":"array","items":{"type":"string"},"description":"Multikey-encoded keys that take update authority from this entry on"},"nextKeyHashes":{"type":"array","items":{"type":"string"}},"deactivate":{"type":"boolean"}},"required":["signKeyIssuerId","log"]}`),
+		},
+		{
+			Name:        "verify_did_webvh_log",
+			Description: "Validate a complete did:webvh log (SCID self-certification, entry hash-chaining, sequential versions, update-key authorization, pre-rotation commitments) and return the resolved DID document. Returns {valid, did, scid, document, versionId, versionTime, deactivated} or {valid:false, reason}.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"log":{"type":"array","description":"Array of LogEntry as returned by create_did_webvh/update_did_webvh"}},"required":["log"]}`),
+		},
+		{
 			Name:        "check_revocation",
 			Description: "Check whether a credential is revoked using a W3C Bitstring Status List token. Returns {revoked:bool}.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"statusListTokenJWT":{"type":"string","description":"Status list token (application/statuslist+jwt)"},"statusListIssuerKeyB64":{"type":"string","description":"Base64-encoded Ed25519 public key of status list issuer"},"statusIndex":{"type":"integer","minimum":0,"description":"Bit index of the credential in the status list"}},"required":["statusListTokenJWT","statusListIssuerKeyB64","statusIndex"]}`),
@@ -690,6 +709,8 @@ var auditableTool = map[string]bool{
 	"create_credential_offer":     true,
 	"issue_mdoc":                  true,
 	"create_presentation_request": true,
+	"create_did_webvh":            true,
+	"update_did_webvh":            true,
 }
 
 func (s *Server) auditToolCall(name string, args json.RawMessage) {
@@ -737,6 +758,12 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolVerifyPassportByDID(args)
 	case "verify_sdjwt_by_did":
 		return s.toolVerifySDJWTByDID(args)
+	case "create_did_webvh":
+		return s.toolCreateDIDWebVH(args)
+	case "update_did_webvh":
+		return s.toolUpdateDIDWebVH(args)
+	case "verify_did_webvh_log":
+		return s.toolVerifyDIDWebVHLog(args)
 	case "check_revocation":
 		return s.toolCheckRevocation(args)
 	case "revoke_passport":
@@ -1255,6 +1282,122 @@ func (s *Server) toolVerifySDJWTByDID(args json.RawMessage) (string, error) {
 		}
 	}
 	return verifyResult(false, verr.Error()), nil
+}
+
+// toolCreateDIDWebVH creates a new did:webvh genesis log entry — previously
+// only reachable via the didwebvh package directly, despite README listing
+// "did:webvh (verifiable history + pre-rotation) ✅". The signing key is a
+// pre-registered issuer's private key (never a raw key over the JSON-RPC
+// wire), matching how issue_passport/issue_sdjwt/issue_mdoc already work.
+// Returns the new DID and a one-entry log the caller must keep and pass to
+// subsequent update_did_webvh/verify_did_webvh_log calls — this server does
+// not persist did:webvh logs itself (same statelessness contract as
+// credentialJson round-tripping through verify_passport).
+func (s *Server) toolCreateDIDWebVH(args json.RawMessage) (string, error) {
+	var in struct {
+		IssuerID      string         `json:"issuerId"`
+		DIDPath       string         `json:"didPath"`
+		NextKeyHashes []string       `json:"nextKeyHashes"`
+		StateExtra    map[string]any `json:"stateExtra"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.DIDPath == "" {
+		return "", errors.New("mcp: didPath is required")
+	}
+	s.mu.RLock()
+	iss, ok := s.issuers[in.IssuerID]
+	s.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("unknown issuer: %s", in.IssuerID)
+	}
+	entry, did, err := didwebvh.Create(didwebvh.CreateParams{
+		DIDPath:       in.DIDPath,
+		UpdateKey:     iss.PrivateKey(),
+		NextKeyHashes: in.NextKeyHashes,
+		StateExtra:    in.StateExtra,
+	})
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]any{
+		"did": did,
+		"log": []didwebvh.LogEntry{*entry},
+	})
+	return string(b), nil
+}
+
+// toolUpdateDIDWebVH appends a new signed entry to an existing did:webvh log
+// (key rotation, document update, or deactivation). signKeyIssuerId must be
+// a registered issuer whose key currently holds update authority over log
+// (didwebvh.Update itself rejects otherwise) — this may be a different
+// issuer than the one that created the log, if authority already rotated.
+func (s *Server) toolUpdateDIDWebVH(args json.RawMessage) (string, error) {
+	var in struct {
+		SignKeyIssuerID string              `json:"signKeyIssuerId"`
+		Log             []didwebvh.LogEntry `json:"log"`
+		NewState        map[string]any      `json:"newState"`
+		UpdateKeys      []string            `json:"updateKeys"`
+		NextKeyHashes   []string            `json:"nextKeyHashes"`
+		Deactivate      bool                `json:"deactivate"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if len(in.Log) == 0 {
+		return "", errors.New("mcp: log is required")
+	}
+	s.mu.RLock()
+	iss, ok := s.issuers[in.SignKeyIssuerID]
+	s.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("unknown issuer: %s", in.SignKeyIssuerID)
+	}
+	entry, err := didwebvh.Update(didwebvh.UpdateParams{
+		Log:           in.Log,
+		SignKey:       iss.PrivateKey(),
+		NewState:      in.NewState,
+		UpdateKeys:    in.UpdateKeys,
+		NextKeyHashes: in.NextKeyHashes,
+		Deactivate:    in.Deactivate,
+	})
+	if err != nil {
+		return "", err
+	}
+	newLog := make([]didwebvh.LogEntry, 0, len(in.Log)+1)
+	newLog = append(newLog, in.Log...)
+	newLog = append(newLog, *entry)
+	b, _ := json.Marshal(map[string]any{"log": newLog})
+	return string(b), nil
+}
+
+// toolVerifyDIDWebVHLog validates a complete did:webvh log (SCID
+// self-certification, entry hash-chaining, sequential versions, monotonic
+// versionTime, update-key authorization, pre-rotation commitments) and
+// returns the resolved DID document. Structural/signature failures return a
+// structured {"valid":false,...} result, matching verify_passport's contract.
+func (s *Server) toolVerifyDIDWebVHLog(args json.RawMessage) (string, error) {
+	var in struct {
+		Log []didwebvh.LogEntry `json:"log"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	res, err := didwebvh.Verify(in.Log)
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	b, _ := json.Marshal(map[string]any{
+		"valid":       true,
+		"did":         res.DID,
+		"scid":        res.SCID,
+		"document":    res.Document,
+		"versionId":   res.VersionID,
+		"versionTime": res.VersionTime,
+		"deactivated": res.Deactivated,
+	})
+	return string(b), nil
 }
 
 // verifyResult builds a structured {"valid":..,"reason":..} result with the
