@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`cmd/blrcs-mcp`, `cmd/blrcs-mcpd`: stop defaulting server identity to a
+  nonexistent `.example` domain.** Both real server binaries silently
+  defaulted `BLRCS_TS_ID`/`BLRCS_SERVER_DID` to
+  `did:web:blrcs.example/...` when unset, and hardcoded the bootstrap demo
+  issuer's DID to `did:web:blrcs.example/demo-issuer`. `blrcs.example` is
+  an RFC 2606 reserved domain that will never resolve — fine for
+  documentation examples (left alone in doc comments and
+  `cmd/blrcs-demo`), wrong as a live runtime default: any wallet/verifier
+  resolving this server's own DID, or the bootstrap issuer's DID it hands
+  out by default, gets nothing back. This also could back the real
+  OpenID4VCI issuer signer (Axis 103) if an operator never set
+  `BLRCS_TS_ID`/`BLRCS_SERVER_DID`. Changed the fallback to
+  `did:web:localhost/...` (a real, resolvable-to-loopback address that
+  honestly signals a local/non-production identity), and derived the demo
+  issuer's DID from `serverDID` instead of a separate hardcoded literal so
+  it always tracks whatever domain the operator actually configures.
+
 ### Added
 - **`mcp`, `cmd/blrcs-mcpd`: `verify_passport_by_did` / `verify_sdjwt_by_did`
   (Axis 110).** `compose.Composer.VerifyByDID`/`VerifySDJWTByDID`
