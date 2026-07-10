@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`mcp`: `resolve_vct_metadata` / `validate_claims_against_vct` (Axis
+  112).** Closes the gap that motivated the `vctmeta` SSRF fix above:
+  `resolve_vct_metadata` wraps `vctmeta.Resolve` (README: "SD-JWT-VC Type
+  Metadata + schema validation ✅"), and `validate_claims_against_vct` is
+  the natural complement to `verify_sdjwt` — after checking a credential's
+  signature, check its disclosed claims actually conform to the JSON
+  Schema its declared `vct` points to. `Server` gains a `vctFetcher` field
+  (defaults to the now SSRF-hardened `vctmeta.HTTPFetcher(nil)`) so tests
+  can inject a mock and exercise the full happy path without a real
+  network round-trip. Both tools are read-only, not in `auditableTool`.
+  Verified end-to-end against the built `blrcs-mcp` binary:
+  `resolve_vct_metadata` against a cloud-metadata URL is correctly refused
+  by the SSRF guard through the real MCP tool surface. 7 new tests,
+  including IETF SD-JWT-VC §5 vct-mismatch (type-confusion) rejection.
+  `TestToolsList` updated (27 → 29).
+
 ### Security
 - **`vctmeta`: SSRF via direct type-metadata resolution to private/loopback/
   metadata addresses (Axis 112).** Same vulnerability class as Axis 107's
