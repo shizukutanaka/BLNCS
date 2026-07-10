@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **`vctmeta`: SSRF via direct type-metadata resolution to private/loopback/
+  metadata addresses (Axis 112).** Same vulnerability class as Axis 107's
+  `didresolver` fix, found while investigating whether to wire `vctmeta`
+  into MCP tools. `HTTPFetcher(nil)`'s default client was explicitly
+  commented and tested as "SSRF-hardened," but only blocked *redirects* —
+  the existing `TestHTTPFetcherRejectsRedirect` test called it directly
+  against a real loopback server and passed, proving no protection against
+  resolving *directly* to a private/loopback/metadata address. `vctmeta`
+  has zero callers today, so this wasn't yet live, but wiring an MCP tool
+  around it without this fix would have introduced a fresh SSRF in the
+  same threat position as the `didresolver` one (a credential's `vct` is
+  attacker-influenced input). Fixed identically: `isBlockedIP`/
+  `safeDialContext` wired as `Transport.DialContext`; a caller-supplied
+  `*http.Client` is unaffected (documented escape hatch, matching
+  `didresolver.Resolver.HTTPFetcher`). 3 new/updated tests, including a
+  dedicated regression test proving the real default client now refuses a
+  loopback target it would previously have reached.
+
 ### Added
 - **`mcp`: `create_did_webvh` / `update_did_webvh` / `verify_did_webvh_log`
   (Axis 111).** `didwebvh` (README: "did:webvh (verifiable history +
