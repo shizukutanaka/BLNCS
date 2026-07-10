@@ -32,6 +32,8 @@
 //	create_did_webvh    — did:webvh genesis log entry 作成 (pre-rotation対応)
 //	update_did_webvh    — did:webvh log にエントリ追加 (鍵ローテーション/失効)
 //	verify_did_webvh_log — did:webvh log 全体を検証・解決
+//	resolve_vct_metadata — SD-JWT-VC Type Metadata 解決
+//	validate_claims_against_vct — vct のJSON Schemaでクレームを検証
 //	create_presentation_request — OpenID4VP authorization request 発行 (要 RegisterVPVerifier)
 //	get_presentation_result     — 提示要求の結果取得 (state で問合せ)
 package mcp
@@ -59,6 +61,7 @@ import (
 	"blrcs/revocation"
 	"blrcs/scitt"
 	"blrcs/storage"
+	"blrcs/vctmeta"
 )
 
 const (
@@ -183,6 +186,14 @@ type Server struct {
 	// (see didresolver.defaultClient) so this is safe by default.
 	didResolver *didresolver.Resolver
 
+	// vctFetcher backs resolve_vct_metadata/validate_claims_against_vct.
+	// Defaults to vctmeta.HTTPFetcher(nil) — SSRF-hardened (Axis 112) — but
+	// is a settable field (rather than calling HTTPFetcher(nil) inline in
+	// each tool) so tests can inject a mock and exercise the happy path
+	// without a real network round-trip, same rationale as
+	// Resolver.HTTPFetcher above.
+	vctFetcher vctmeta.FetchFunc
+
 	// trustAnchor gates verify_passport_by_did/verify_sdjwt_by_did: which
 	// issuer DIDs' resolved keys this server accepts as trust roots. Defaults
 	// to AllowAll() (any resolved key is trusted) — the exact same security
@@ -255,6 +266,7 @@ func buildServer(tsID, serverDID string, ledger *scitt.Ledger, store storage.Sto
 		selfIssuer:  selfIss,
 		didResolver: didresolver.New(),
 		trustAnchor: defaultTrust,
+		vctFetcher:  vctmeta.HTTPFetcher(nil),
 	}
 	if err := s.initRevocation(store); err != nil {
 		return nil, err
@@ -590,6 +602,16 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{"log":{"type":"array","description":"Array of LogEntry as returned by create_did_webvh/update_did_webvh"}},"required":["log"]}`),
 		},
 		{
+			Name:        "resolve_vct_metadata",
+			Description: "Resolve an SD-JWT-VC vct claim to its Type Metadata document (name, description, extends, schema). expectedIntegrity is an optional W3C SRI-style hash (sha256-<base64>) pinning the vct#integrity claim.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"vct":{"type":"string","description":"https URL identifying the credential type"},"expectedIntegrity":{"type":"string"}},"required":["vct"]}`),
+		},
+		{
+			Name:        "validate_claims_against_vct",
+			Description: "Resolve a vct's Type Metadata and validate claims against its JSON Schema — the natural complement to verify_sdjwt: after checking the signature, check the disclosed claims conform to the credential's declared type.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"vct":{"type":"string"},"expectedIntegrity":{"type":"string"},"claims":{"type":"object"}},"required":["vct","claims"]}`),
+		},
+		{
 			Name:        "check_revocation",
 			Description: "Check whether a credential is revoked using a W3C Bitstring Status List token. Returns {revoked:bool}.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"statusListTokenJWT":{"type":"string","description":"Status list token (application/statuslist+jwt)"},"statusListIssuerKeyB64":{"type":"string","description":"Base64-encoded Ed25519 public key of status list issuer"},"statusIndex":{"type":"integer","minimum":0,"description":"Bit index of the credential in the status list"}},"required":["statusListTokenJWT","statusListIssuerKeyB64","statusIndex"]}`),
@@ -764,6 +786,10 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolUpdateDIDWebVH(args)
 	case "verify_did_webvh_log":
 		return s.toolVerifyDIDWebVHLog(args)
+	case "resolve_vct_metadata":
+		return s.toolResolveVCTMetadata(args)
+	case "validate_claims_against_vct":
+		return s.toolValidateClaimsAgainstVCT(args)
 	case "check_revocation":
 		return s.toolCheckRevocation(args)
 	case "revoke_passport":
@@ -1398,6 +1424,74 @@ func (s *Server) toolVerifyDIDWebVHLog(args json.RawMessage) (string, error) {
 		"deactivated": res.Deactivated,
 	})
 	return string(b), nil
+}
+
+// toolResolveVCTMetadata resolves an SD-JWT-VC `vct` claim to its Type
+// Metadata document (draft-ietf-oauth-sd-jwt-vc §Type Metadata) —
+// previously only reachable via the vctmeta package directly, despite
+// README listing "SD-JWT-VC Type Metadata + schema validation ✅". Only
+// safe to expose now that Axis 112 hardened vctmeta's default fetcher
+// against SSRF (direct resolution to private/loopback/metadata addresses),
+// mirroring resolve_did's relationship to Axis 107.
+func (s *Server) toolResolveVCTMetadata(args json.RawMessage) (string, error) {
+	var in struct {
+		VCT               string `json:"vct"`
+		ExpectedIntegrity string `json:"expectedIntegrity"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.VCT == "" {
+		return "", errors.New("mcp: vct is required")
+	}
+	s.mu.RLock()
+	fetch := s.vctFetcher
+	s.mu.RUnlock()
+	tm, err := vctmeta.Resolve(context.Background(), in.VCT, in.ExpectedIntegrity, fetch)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]any{
+		"vct":         tm.VCT,
+		"name":        tm.Name,
+		"description": tm.Description,
+		"extends":     tm.Extends,
+		"hasSchema":   tm.HasSchema(),
+		"schema":      tm.Schema,
+		"schemaUri":   tm.SchemaURI,
+	})
+	return string(b), nil
+}
+
+// toolValidateClaimsAgainstVCT resolves a vct's Type Metadata (and, if the
+// schema is only referenced via schema_uri, fetches that too) and validates
+// claims against its JSON Schema — the natural complement to verify_sdjwt:
+// after checking the signature, check the disclosed claims actually conform
+// to the credential's declared type. Structural/validation failures return a
+// structured {"valid":false,...} result, matching verify_passport's contract.
+func (s *Server) toolValidateClaimsAgainstVCT(args json.RawMessage) (string, error) {
+	var in struct {
+		VCT               string         `json:"vct"`
+		ExpectedIntegrity string         `json:"expectedIntegrity"`
+		Claims            map[string]any `json:"claims"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.VCT == "" {
+		return "", errors.New("mcp: vct is required")
+	}
+	s.mu.RLock()
+	fetch := s.vctFetcher
+	s.mu.RUnlock()
+	tm, err := vctmeta.Resolve(context.Background(), in.VCT, in.ExpectedIntegrity, fetch)
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	if err := tm.ResolveAndValidate(context.Background(), in.Claims, fetch); err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	return `{"valid":true}`, nil
 }
 
 // verifyResult builds a structured {"valid":..,"reason":..} result with the
