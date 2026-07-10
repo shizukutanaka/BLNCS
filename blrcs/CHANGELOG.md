@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`compliance`: issue SD-JWT-VCs with the current `dc+sd-jwt` typ, not the
+  retired `vc+sd-jwt` (Axis 113).** Found via a standards-currency review
+  (latest draft-ietf-oauth-sd-jwt-vc, OpenID4VP 1.0, Token Status List,
+  did:webvh v1.0, ISO 18013-7:2025). The SD-JWT-VC media type was renamed
+  `vc+sd-jwt` → `dc+sd-jwt` in Nov 2024 to avoid colliding with the W3C VC
+  Data Model's `vc` media type; current drafts use `dc+sd-jwt`. The
+  verifier already accepted both (`isSDJWTVCType`), but the single
+  production issuance site still emitted the retired value. Added
+  `Issuer.SDJWTVCType` (mirrors the `Issuer.DecoyDigests` pattern): empty →
+  `dc+sd-jwt` default; set to `"vc+sd-jwt"` for legacy verifiers.
+  Backward-compatible with any conformant current verifier (dual-accept on
+  both sides). Verified end-to-end: `issue_sdjwt` now produces a JWS header
+  of `{"alg":"EdDSA","typ":"dc+sd-jwt"}`. 3 new tests.
+
 ### Added
 - **`mcp`: `resolve_vct_metadata` / `validate_claims_against_vct` (Axis
   112).** Closes the gap that motivated the `vctmeta` SSRF fix above:
