@@ -1372,3 +1372,85 @@ func TestIssueBatteryPassportWithStatusStillEnforcesDueDiligence(t *testing.T) {
 		t.Errorf("want ErrDueDiligenceRequired, got %v", err)
 	}
 }
+
+// ============================================================================
+// SD-JWT-VC typ header — dc+sd-jwt default, vc+sd-jwt legacy override
+// ============================================================================
+
+// sdjwtTyp decodes the JWS protected header of an issued SD-JWT and returns
+// its `typ` value.
+func sdjwtTyp(t *testing.T, sdjwt string) string {
+	t.Helper()
+	jwt := strings.SplitN(sdjwt, "~", 2)[0]
+	parts := strings.Split(jwt, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a JWT: %q", jwt)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hdr struct {
+		Typ string `json:"typ"`
+	}
+	if err := json.Unmarshal(raw, &hdr); err != nil {
+		t.Fatal(err)
+	}
+	return hdr.Typ
+}
+
+// TestIssueSDJWTDefaultTypIsDCSDJWT pins the spec-alignment fix: a default
+// Issuer now emits the current draft-ietf-oauth-sd-jwt-vc `typ` value
+// `dc+sd-jwt` (renamed from `vc+sd-jwt` in Nov 2024), and the result still
+// verifies (verification accepts both values).
+func TestIssueSDJWTDefaultTypIsDCSDJWT(t *testing.T) {
+	iss, _ := NewIssuer("did:web:test")
+	sdjwt, _, err := iss.IssueSDJWT("subj", map[string]any{"a": 1}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sdjwtTyp(t, sdjwt); got != "dc+sd-jwt" {
+		t.Errorf("default typ: want dc+sd-jwt, got %q", got)
+	}
+	if _, err := VerifySDJWT(sdjwt, iss.PublicKey()); err != nil {
+		t.Fatalf("dc+sd-jwt credential must still verify: %v", err)
+	}
+}
+
+// TestIssueSDJWTLegacyTypOverride verifies an operator can still emit the old
+// vc+sd-jwt value for legacy verifiers, and that it verifies too.
+func TestIssueSDJWTLegacyTypOverride(t *testing.T) {
+	iss, _ := NewIssuer("did:web:test")
+	iss.SDJWTVCType = "vc+sd-jwt"
+	sdjwt, _, err := iss.IssueSDJWT("subj", map[string]any{"a": 1}, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sdjwtTyp(t, sdjwt); got != "vc+sd-jwt" {
+		t.Errorf("override typ: want vc+sd-jwt, got %q", got)
+	}
+	if _, err := VerifySDJWT(sdjwt, iss.PublicKey()); err != nil {
+		t.Fatalf("vc+sd-jwt credential must still verify: %v", err)
+	}
+}
+
+// TestIssueSDJWTVCTypRoundTripsBothValues verifies both typ values survive a
+// full issue -> verify round-trip, i.e. the verifier's dual-accept and the
+// issuer's configurable emission are consistent.
+func TestIssueSDJWTVCTypRoundTripsBothValues(t *testing.T) {
+	for _, typ := range []string{"dc+sd-jwt", "vc+sd-jwt"} {
+		iss, _ := NewIssuer("did:web:test")
+		iss.SDJWTVCType = typ
+		sdjwt, _, err := iss.IssueSDJWT("subj", map[string]any{"category": "textile"}, nil, time.Hour)
+		if err != nil {
+			t.Fatalf("%s: issue: %v", typ, err)
+		}
+		vc, err := VerifySDJWT(sdjwt, iss.PublicKey())
+		if err != nil {
+			t.Fatalf("%s: verify: %v", typ, err)
+		}
+		if vc.Claims["category"] != "textile" {
+			t.Errorf("%s: claim mismatch: %v", typ, vc.Claims["category"])
+		}
+	}
+}

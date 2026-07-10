@@ -104,6 +104,26 @@ type Issuer struct {
 	// decoy を混ぜると真の claim 数が隠れ、unlinkability/プライバシが向上する。
 	// 既定 0 (後方互換: 挙動変化なし)。プライバシ重視の発行者は数個設定する。
 	DecoyDigests int
+
+	// SDJWTVCType — 発行する SD-JWT-VC の JWS `typ` ヘッダ値。空なら現行の
+	// draft-ietf-oauth-sd-jwt-vc 推奨値 `dc+sd-jwt` を使う。
+	//
+	// この typ は 2024年11月 (draft-14 前後) に、W3C VC Data Model が登録した
+	// `vc` メディアタイプとの衝突回避のため `vc+sd-jwt` → `dc+sd-jwt` へ変更された。
+	// 検証側は移行期間中は両方受理すべきとされており (本実装の isSDJWTVCType も
+	// 両方受理する)、既定を現行値 `dc+sd-jwt` にしても現行の verifier とは相互運用
+	// できる。旧 `vc+sd-jwt` しか受け付けないレガシー verifier 相手に発行する必要が
+	// ある運用者のみ、明示的に "vc+sd-jwt" を設定する。
+	SDJWTVCType string
+}
+
+// sdjwtVCType — 発行時に使う SD-JWT-VC の typ ヘッダ値を返す。未設定なら
+// 現行 draft 推奨値 `dc+sd-jwt`。
+func (i *Issuer) sdjwtVCType() string {
+	if i.SDJWTVCType != "" {
+		return i.SDJWTVCType
+	}
+	return "dc+sd-jwt"
 }
 
 // NewIssuer — ed25519 鍵ペアを生成し Issuer を構築。id は DID 形式。

@@ -233,8 +233,12 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 		return "", nil, err
 	}
 	payload["_sd"] = sdDigests
-	// Sign JWT
-	headerB64 := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"vc+sd-jwt"}`))
+	// Sign JWT. typ defaults to the current draft-ietf-oauth-sd-jwt-vc value
+	// `dc+sd-jwt` (renamed from `vc+sd-jwt` in Nov 2024 to avoid colliding with
+	// the W3C VC media type); overridable via Issuer.SDJWTVCType for legacy
+	// verifiers that only accept the old value.
+	header := `{"alg":"EdDSA","typ":"` + i.sdjwtVCType() + `"}`
+	headerB64 := base64.RawURLEncoding.EncodeToString([]byte(header))
 	payloadBytes, _ := json.Marshal(payload)
 	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadBytes)
 	sigInput := headerB64 + "." + payloadB64
