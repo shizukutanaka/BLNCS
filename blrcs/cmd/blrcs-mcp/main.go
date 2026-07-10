@@ -12,8 +12,8 @@
 //
 // 環境変数:
 //
-//	BLRCS_TS_ID          — Transparency Service DID (default: did:web:blrcs.example/ts)
-//	BLRCS_SERVER_DID     — Server self DID        (default: did:web:blrcs.example/mcp)
+//	BLRCS_TS_ID          — Transparency Service DID (default: did:web:localhost/ts)
+//	BLRCS_SERVER_DID     — Server self DID        (default: did:web:localhost/mcp)
 //	BLRCS_DATA_DIR       — 永続化ディレクトリ。未設定なら揮発
 //	BLRCS_ENCRYPTION_KEY — 64桁hex (32 bytes)。設定時、statement log を AES-256-GCM で暗号化
 package main
@@ -30,8 +30,8 @@ import (
 )
 
 func main() {
-	tsID := envOr("BLRCS_TS_ID", "did:web:blrcs.example/ts")
-	serverDID := envOr("BLRCS_SERVER_DID", "did:web:blrcs.example/mcp")
+	tsID := envOr("BLRCS_TS_ID", "did:web:localhost/ts")
+	serverDID := envOr("BLRCS_SERVER_DID", "did:web:localhost/mcp")
 	dataDir := os.Getenv("BLRCS_DATA_DIR")
 
 	var srv *mcp.Server
@@ -73,7 +73,11 @@ func main() {
 	}
 
 	// MVP: デモ用発行者/センサ自動登録。本番では外部設定/KMS連携
-	demoIssuer, _ := compliance.NewIssuer("did:web:blrcs.example/demo-issuer")
+	// DID はハードコードされた存在しないドメイン (.example) ではなく、
+	// operator が実際に指定した (または localhost にフォールバックする)
+	// serverDID から派生させる — 常に一貫した、operator の意図した
+	// ドメインを指す。
+	demoIssuer, _ := compliance.NewIssuer(serverDID + "-issuer")
 	demoSensor, _ := compliance.NewSensorAttester("did:device:blrcs-demo-sensor")
 	srv.RegisterIssuer(demoIssuer)
 	srv.RegisterAttester(demoSensor)

@@ -62,8 +62,8 @@ import (
 
 func main() {
 	listen := envOr("BLRCS_LISTEN", ":8080")
-	tsID := envOr("BLRCS_TS_ID", "did:web:blrcs.example/ts")
-	serverDID := envOr("BLRCS_SERVER_DID", "did:web:blrcs.example/mcp")
+	tsID := envOr("BLRCS_TS_ID", "did:web:localhost/ts")
+	serverDID := envOr("BLRCS_SERVER_DID", "did:web:localhost/mcp")
 	dataDir := os.Getenv("BLRCS_DATA_DIR")
 	tlsCert := os.Getenv("BLRCS_TLS_CERT")
 	tlsKey := os.Getenv("BLRCS_TLS_KEY")
@@ -111,7 +111,11 @@ func main() {
 	}
 
 	// Demo issuers
-	demoIssuer, _ := compliance.NewIssuer("did:web:blrcs.example/demo-issuer")
+	// DID はハードコードされた存在しないドメイン (.example) ではなく、
+	// operator が実際に指定した (または localhost にフォールバックする)
+	// serverDID から派生させる — 常に一貫した、operator の意図した
+	// ドメインを指す。
+	demoIssuer, _ := compliance.NewIssuer(serverDID + "-issuer")
 	demoSensor, _ := compliance.NewSensorAttester("did:device:blrcs-demo-sensor")
 	srv.RegisterIssuer(demoIssuer)
 	srv.RegisterAttester(demoSensor)
