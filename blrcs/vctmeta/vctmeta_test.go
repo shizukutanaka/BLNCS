@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -580,23 +581,77 @@ func TestResolveChainFetchErrorOnExtends(t *testing.T) {
 	}
 }
 
-// TestHTTPFetcherRejectsRedirect verifies the default HTTPFetcher refuses 3xx
-// responses. A malicious Type Metadata host that 302s could otherwise (a)
-// silently violate the vct#integrity URL → bytes binding (the SRI hash would
-// guard a different URL than was issued) and (b) pivot the verifier into a
-// private/loopback/metadata-IP target — an SSRF primitive.
+// TestHTTPFetcherRejectsRedirect verifies the default HTTPFetcher's
+// CheckRedirect policy refuses 3xx responses. A malicious Type Metadata host
+// that 302s could otherwise (a) silently violate the vct#integrity URL ->
+// bytes binding (the SRI hash would guard a different URL than was issued)
+// and (b) pivot the verifier into a private/loopback/metadata-IP target — an
+// SSRF primitive. Uses a client with the same CheckRedirect policy as the
+// real default but without its SSRF dial guard (see
+// TestHTTPFetcherBlocksLoopback for that), so this test can still reach an
+// httptest.Server (always loopback) to exercise the redirect-rejection path
+// specifically.
 func TestHTTPFetcherRejectsRedirect(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/elsewhere", http.StatusFound)
 	}))
 	defer ts.Close()
-	fetcher := HTTPFetcher(nil) // default SSRF-hardened client
+	fetcher := HTTPFetcher(&http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return ErrRedirectNotAllowed
+		},
+	})
 	_, err := fetcher(context.Background(), ts.URL+"/metadata.json")
 	if err == nil {
 		t.Fatal("redirect should be refused")
 	}
 	if !errors.Is(err, ErrRedirectNotAllowed) {
 		t.Errorf("want ErrRedirectNotAllowed, got %v", err)
+	}
+}
+
+// TestHTTPFetcherBlocksLoopback is the core regression test for the SSRF gap
+// this axis fixes: a vct/schema_uri/extends URL resolving *directly* (no
+// redirect involved) to a loopback address must be refused by the real
+// default HTTPFetcher(nil) client, not just by the CheckRedirect guard that
+// only covers the redirect vector. Before the fix, this reached the local
+// httptest.Server successfully — exactly the SSRF this closes.
+func TestHTTPFetcherBlocksLoopback(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"vct":"should-not-be-reached"}`))
+	}))
+	defer ts.Close()
+	fetcher := HTTPFetcher(nil) // real default SSRF-hardened client
+	_, err := fetcher(context.Background(), ts.URL+"/metadata.json")
+	if !errors.Is(err, ErrBlockedTarget) {
+		t.Fatalf("want ErrBlockedTarget, got %v", err)
+	}
+}
+
+func TestIsBlockedIP(t *testing.T) {
+	cases := []struct {
+		ip      string
+		blocked bool
+	}{
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"10.0.0.5", true},
+		{"172.16.0.1", true},
+		{"192.168.1.1", true},
+		{"169.254.169.254", true}, // cloud metadata service
+		{"100.64.0.1", true},      // RFC 6598 carrier-grade NAT
+		{"0.0.0.0", true},
+		{"8.8.8.8", false},
+		{"1.1.1.1", false},
+	}
+	for _, c := range cases {
+		ip := net.ParseIP(c.ip)
+		if ip == nil {
+			t.Fatalf("bad test IP %q", c.ip)
+		}
+		if got := isBlockedIP(ip); got != c.blocked {
+			t.Errorf("isBlockedIP(%s): got %v want %v", c.ip, got, c.blocked)
+		}
 	}
 }
 

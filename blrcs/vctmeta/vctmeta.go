@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -59,6 +60,16 @@ var (
 	// metadata resolution into an SSRF primitive. A caller that genuinely needs
 	// to follow redirects can pass their own *http.Client to HTTPFetcher.
 	ErrRedirectNotAllowed = errors.New("vctmeta: type metadata fetch redirects are not permitted")
+	// ErrBlockedTarget is returned when a vct/schema_uri/extends URL resolves
+	// (directly, not just via redirect) to a private/loopback/link-local/
+	// metadata address. vct is attacker-influenced input in exactly the
+	// place this matters: a verifier resolving an untrusted credential's
+	// type metadata does so before the credential has been fully evaluated,
+	// so "fetch redirects are blocked" alone (see ErrRedirectNotAllowed)
+	// does not stop a vct like "https://169.254.169.254/x" from making this
+	// process issue a direct request to cloud metadata or an internal
+	// service — no redirect is involved in that case.
+	ErrBlockedTarget = errors.New("vctmeta: type metadata URL resolves to a non-public address")
 )
 
 const (
@@ -96,6 +107,12 @@ func HTTPFetcher(client *http.Client) FetchFunc {
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 				return ErrRedirectNotAllowed
 			},
+			// Transport's DialContext resolves the host once and validates the
+			// IP before connecting (see safeDialContext), so a vct/schema_uri/
+			// extends URL that points directly at a private/loopback/metadata
+			// address is blocked on the initial request — CheckRedirect above
+			// only stops a *redirect* from pivoting there, a different vector.
+			Transport: &http.Transport{DialContext: safeDialContext},
 		}
 	}
 	return func(ctx context.Context, url string) ([]byte, error) {
@@ -114,6 +131,55 @@ func HTTPFetcher(client *http.Client) FetchFunc {
 		}
 		return io.ReadAll(io.LimitReader(resp.Body, maxMetadataBytes+1))
 	}
+}
+
+// isBlockedIP reports whether ip is a non-public address type metadata
+// resolution must never be allowed to reach (mirrors didresolver.isBlockedIP
+// and webhook.isBlockedIP's threat model — all three defend against SSRF via
+// attacker-influenced outbound-URL resolution).
+func isBlockedIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 100 && ip4[1]&0xc0 == 64 {
+		return true // 100.64.0.0/10 (RFC 6598) — carrier-grade NAT range some
+		// cloud providers route internal/metadata traffic through.
+	}
+	return false
+}
+
+// safeDialContext resolves the host once and connects only to a validated
+// public IP, so the address the policy checked is the address actually
+// dialed (defeats DNS rebinding). Used as the default HTTPFetcher client's
+// Transport.DialContext; a caller-supplied *http.Client bypasses this
+// entirely (documented: "the caller is in charge" of that client's policy).
+func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBlockedTarget, err)
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return nil, fmt.Errorf("%w: resolve %s: %v", ErrBlockedTarget, host, err)
+	}
+	d := &net.Dialer{Timeout: 10 * time.Second}
+	var lastErr error
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			lastErr = fmt.Errorf("%w: %s resolves to non-public %s", ErrBlockedTarget, host, ip)
+			continue
+		}
+		conn, derr := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if derr == nil {
+			return conn, nil
+		}
+		lastErr = derr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("%w: %s has no allowed address", ErrBlockedTarget, host)
+	}
+	return nil, lastErr
 }
 
 // VerifyIntegrity — data が integrity (W3C SRI: "sha256-<base64std>") に一致するか検証。
