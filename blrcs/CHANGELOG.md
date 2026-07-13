@@ -7,6 +7,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`didwebvh`, `mcp`: did:webvh witness support, v1.0 spec (Axis 119).**
+  Closes a gap the package's own doc comment flagged: "Witness cosigning …
+  not implemented here." Verified the exact wire format against the
+  canonical spec source before implementing — witness proofs live in a
+  separate `did-witness.json` file (not appended to the entry's own
+  `proof` field), keyed by `versionId`:
+  `parameters.witness = {"threshold": n, "witnesses": [{"id": "did:key:..."}]}`.
+  New `SignWitnessProof` (reuses the existing `eddsa-jcs-2022` signing
+  primitives — same hash construction as the controller's own proof, just
+  a different key source/storage location) and `VerifyWithWitnesses`
+  (counts distinct valid witness proofs against the declared list,
+  rejecting duplicate/undeclared/tampered proofs, enforcing the declared
+  threshold). `VerifyWithWitnesses(log, nil)` is exactly equivalent to
+  `Verify(log)` when no entry declares a witness requirement — plain
+  `Verify` continues to ignore any declared requirement entirely
+  (opt-in enforcement). `create_did_webvh`/`update_did_webvh` gained an
+  optional `witness` arg; `verify_did_webvh_log` gained an optional
+  `witnessLog` arg; new `sign_witness_proof` MCP tool reuses the existing
+  pre-registered-issuer-key mechanism (a witness identity is just an
+  Issuer registered under a `did:key:` ID instead of `did:web:`).
+  Verified end-to-end against the built `blrcs-mcp` binary. 15 new tests.
+  `TestToolsList` updated (30 → 31).
 - **`cmd/blrcs-mcpd`: `.well-known` capabilities and privacy discovery
   endpoints (Axis 118).** Continuing the zero-caller triage: `openapi`'s
   `BLRCSDefault()` spec (also unwired) documents
