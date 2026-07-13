@@ -21,6 +21,8 @@
 //	GET /healthz       — liveness probe
 //	GET /readyz        — readiness probe
 //	GET /metrics       — Prometheus metrics
+//	GET /.well-known/blrcs-capabilities.json — 有効な機能の宣言 (get_server_capabilities と同一データ)
+//	GET /.well-known/privacy.json            — GDPR Art.30 相当のデータ処理宣言
 //
 // BLRCS_DIAG=1 設定時のみ (運用診断):
 //
@@ -44,6 +46,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -64,6 +67,7 @@ import (
 	"blrcs/metrics"
 	"blrcs/openid4vci"
 	"blrcs/openid4vp"
+	"blrcs/privacy"
 	"blrcs/storage"
 	"blrcs/telemetry"
 )
@@ -267,6 +271,33 @@ func main() {
 		mux.Handle("/openid4vp/callback", httpmw.Default(vpVerifier.CallbackHandler(srv.RecordPresentationResult)))
 		fmt.Fprintf(os.Stderr, "openid4vp: verifier enabled at %s\n", vpClientID)
 	}
+	// Always-on RFC 8615 .well-known discovery documents — unlike BLRCS_DIAG
+	// (runtime internals: goroutine/memory stats, recent error messages) these
+	// are meant for public discovery and carry no sensitive data. Both packages
+	// were implemented and tested with a ready-made default builder
+	// (capability.New()/Snapshot, privacy.BLRCSDefaultManifest) but nothing was
+	// serving them. The capabilities document reuses srv.CapabilitiesSnapshot()
+	// — the exact same data get_server_capabilities returns over MCP — so both
+	// transports agree; the privacy manifest is a static GDPR Art.30-style
+	// declaration of what data categories this service processes, not a live
+	// technical claim, so (unlike an OpenAPI spec) it doesn't risk describing
+	// endpoints that may or may not be enabled for this instance.
+	mux.Handle("/.well-known/blrcs-capabilities.json", httpmw.Default(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(srv.CapabilitiesSnapshot())
+	})))
+	mux.Handle("/.well-known/privacy.json", httpmw.Default(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(privacy.BLRCSDefaultManifest(serverDID, "1.0.0"))
+	})))
 	// Optional sysdiagnose-style diagnostic snapshot: the diag package is fully
 	// implemented and tested with a ready-to-mount Handler(), but nothing was
 	// mounting it. Off by default (BLRCS_DIAG=1) since the snapshot exposes

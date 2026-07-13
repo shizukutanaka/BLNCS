@@ -6,6 +6,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`cmd/blrcs-mcpd`: `.well-known` capabilities and privacy discovery
+  endpoints (Axis 118).** Continuing the zero-caller triage: `openapi`'s
+  `BLRCSDefault()` spec (also unwired) documents
+  `/.well-known/blrcs-capabilities.json` and `/.well-known/privacy.json`
+  as expected endpoints, but neither was ever mounted — and the spec is
+  itself stale/inaccurate in other ways (omits `/mcp`, `/diag`; always
+  claims OpenID4VCI/VP paths regardless of whether those features are
+  actually enabled for a given instance), so `/openapi.json` itself was
+  deliberately **not** wired this round — publishing a misleading spec
+  under a URL that implies authoritative completeness would be worse than
+  not publishing it. The two `.well-known` documents it references *were*
+  independently fixable: `GET /.well-known/blrcs-capabilities.json` serves
+  `mcp.Server.CapabilitiesSnapshot()` (new exported method,
+  refactored out of Axis 116's `get_server_capabilities` tool so both
+  transports return the same data by construction, not by convention);
+  `GET /.well-known/privacy.json` serves `privacy.BLRCSDefaultManifest()`
+  (a static GDPR Art.30-style declaration of data categories processed —
+  legitimate to always serve, unlike a live technical/API claim, since it
+  doesn't describe runtime-configurable endpoints). Both always-on (not
+  gated behind an opt-in env var like `BLRCS_DIAG`), served through the
+  full `httpmw.Default` chain. Verified end-to-end against the built
+  binary. 1 new test proving the MCP tool and the HTTP endpoint return the
+  same capability data from a single source.
+
 ### Fixed
 - **`httpmw`: `statusWriter`/`loggingResponseWriter` didn't forward
   `http.Flusher`/`Unwrap` (Axis 117).** Found while auditing why

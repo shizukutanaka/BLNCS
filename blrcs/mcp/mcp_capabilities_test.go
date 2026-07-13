@@ -78,3 +78,37 @@ func TestServerCapabilitiesNotAudited(t *testing.T) {
 		t.Errorf("get_server_capabilities should not be audited: before=%d after=%d", before, after)
 	}
 }
+
+// TestCapabilitiesSnapshotMatchesTool verifies the exported
+// CapabilitiesSnapshot (used by cmd/blrcs-mcpd's
+// /.well-known/blrcs-capabilities.json) returns the same capability data as the
+// get_server_capabilities MCP tool — the whole point of a shared
+// discovery document is that both transports agree.
+func TestCapabilitiesSnapshotMatchesTool(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	srv.RegisterVPVerifier(openid4vp.NewVerifier("https://verify.example", "https://verify.example/cb", nil))
+
+	toolResult := toolCall(t, srv, 1, "get_server_capabilities", map[string]any{})
+	toolJSON, err := json.Marshal(json.RawMessage(toolCallText(t, toolResult)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directJSON, err := json.Marshal(srv.CapabilitiesSnapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compare via unmarshaled maps rather than raw bytes: detectedAt timestamps
+	// are independently computed on each call, so byte-for-byte JSON would
+	// differ even though the semantic content (available/sealed/runtime) agrees.
+	var toolSnap, directSnap map[string]any
+	_ = json.Unmarshal(toolJSON, &toolSnap)
+	_ = json.Unmarshal(directJSON, &directSnap)
+	if toolSnap["available"] == nil || directSnap["available"] == nil {
+		t.Fatal("available field missing from one of the snapshots")
+	}
+	toolAvail, _ := json.Marshal(toolSnap["available"])
+	directAvail, _ := json.Marshal(directSnap["available"])
+	if string(toolAvail) != string(directAvail) {
+		t.Errorf("available capabilities differ: tool=%s direct=%s", toolAvail, directAvail)
+	}
+}

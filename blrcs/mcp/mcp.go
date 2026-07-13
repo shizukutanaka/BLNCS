@@ -1955,6 +1955,16 @@ func (s *Server) toolGetPresentationResult(args json.RawMessage) (string, error)
 // handle is non-nil either way) — only the constructing binary knows, via its
 // data-dir config. Reporting a guessed value would be worse than omitting it.
 func (s *Server) toolServerCapabilities(_ json.RawMessage) (string, error) {
+	b, _ := json.Marshal(s.CapabilitiesSnapshot())
+	return string(b), nil
+}
+
+// CapabilitiesSnapshot builds the same capability report toolServerCapabilities
+// returns, exported so a caller with its own HTTP surface (e.g.
+// cmd/blrcs-mcpd's /.well-known/blrcs-capabilities.json) can serve identical,
+// single-sourced data rather than re-deriving it — the whole point of
+// discovery endpoints is that different transports agree.
+func (s *Server) CapabilitiesSnapshot() capability.Snapshot {
 	s.mu.RLock()
 	hasVCI := s.vciIssuer != nil
 	hasVP := s.vpVerifier != nil
@@ -1971,6 +1981,5 @@ func (s *Server) toolServerCapabilities(_ json.RawMessage) (string, error) {
 	caps.Set(capability.CapOpenID4VP, hasVP)
 	caps.Seal()
 
-	b, _ := json.Marshal(caps.Snapshot())
-	return string(b), nil
+	return caps.Snapshot()
 }
