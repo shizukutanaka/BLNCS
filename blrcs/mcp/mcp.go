@@ -20,6 +20,7 @@
 //	check_revocation    — W3C Bitstring Status List 失効確認
 //	revoke_passport     — 発行済み DPP/SD-JWT VC を失効
 //	get_revocation_list — 現在の署名済み Status List トークンを取得
+//	get_server_capabilities — 有効な機能 (VCI/VP/永続化等) を報告 (機能検出)
 //	create_credential_offer — OpenID4VCI pre-authorized offer 発行 (要 RegisterVCIIssuer)
 //	issue_mdoc          — ISO 18013-5 mdoc/mDL発行 (IssuerSigned + MSO)
 //	verify_mdoc         — mdoc署名検証
@@ -53,6 +54,7 @@ import (
 	"sync"
 	"time"
 
+	"blrcs/capability"
 	"blrcs/compliance"
 	"blrcs/didresolver"
 	"blrcs/didwebvh"
@@ -628,6 +630,11 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{}}`),
 		},
 		{
+			Name:        "get_server_capabilities",
+			Description: "Report which optional server features are actually operational (OpenID4VCI issuance, OpenID4VP verification) plus always-present ones (DPP, Battery Passport, SCITT). Call this first to discover whether config-dependent tools like create_credential_offer / create_presentation_request will work before invoking them.",
+			InputSchema: rawJSON(`{"type":"object","properties":{}}`),
+		},
+		{
 			Name:        "create_credential_offer",
 			Description: "Mint an OpenID4VCI pre-authorized credential offer a real wallet can redeem (returns openid-credential-offer:// URI + pre-authorized code). Requires the server to have a registered OpenID4VCI issuer; errors otherwise.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"configId":{"type":"string","description":"Registered CredentialConfiguration ID"},"subject":{"type":"string"},"sdClaims":{"type":"object","description":"Selectively disclosable claims"},"clearClaims":{"type":"object","description":"Always-visible claims"}},"required":["configId","subject"]}`),
@@ -797,6 +804,8 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolRevokePassport(args)
 	case "get_revocation_list":
 		return s.toolGetRevocationList(args)
+	case "get_server_capabilities":
+		return s.toolServerCapabilities(args)
 	case "create_credential_offer":
 		return s.toolCreateCredentialOffer(args)
 	case "issue_mdoc":
@@ -1929,5 +1938,39 @@ func (s *Server) toolGetPresentationResult(args json.RawMessage) (string, error)
 		"issuer":  entry.vp.Issuer,
 		"claims":  entry.vp.Claims,
 	})
+	return string(b), nil
+}
+
+// toolServerCapabilities reports which of this server's optional features are
+// actually operational given how it was configured — capability discovery so
+// an agent can tell, before calling them, whether create_credential_offer
+// (needs a registered OpenID4VCI issuer) or create_presentation_request (needs
+// a registered OpenID4VP verifier) will work. Built from real server state via
+// the capability package (previously implemented and tested but reachable from
+// no binary).
+//
+// Persistence is deliberately NOT reported here: whether the backing store is
+// disk-backed vs in-memory is not self-detectable from inside the Server (the
+// in-memory MemoryStorage also implements BlobStorage, so the revocation-store
+// handle is non-nil either way) — only the constructing binary knows, via its
+// data-dir config. Reporting a guessed value would be worse than omitting it.
+func (s *Server) toolServerCapabilities(_ json.RawMessage) (string, error) {
+	s.mu.RLock()
+	hasVCI := s.vciIssuer != nil
+	hasVP := s.vpVerifier != nil
+	s.mu.RUnlock()
+
+	caps := capability.New()
+	// Always-present functional capabilities (compiled into every build).
+	caps.Set(capability.CapEd25519, true)
+	caps.Set(capability.CapDPP, true)         // issue_passport / EU ESPR DPP
+	caps.Set(capability.CapBatteryPass, true) // issue_battery_passport / Reg 2023/1542
+	caps.Set(capability.CapSCITT, true)       // register_scitt / transparency ledger
+	// Config-dependent capabilities (honestly tracked on the Server).
+	caps.Set(capability.CapOpenID4VCI, hasVCI)
+	caps.Set(capability.CapOpenID4VP, hasVP)
+	caps.Seal()
+
+	b, _ := json.Marshal(caps.Snapshot())
 	return string(b), nil
 }

@@ -7,6 +7,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mcp`, `capability`: `get_server_capabilities` tool for agent capability
+  discovery (Axis 116).** The `capability` feature-detection package was
+  implemented and tested but reachable from no binary (zero-caller triage,
+  same shape as Axis 115's `diag`). Added a read-only MCP tool that reports
+  which optional features are actually operational — `protocol.openid4vci`
+  (issuance), `protocol.openid4vp` (verification), both reflecting real
+  registration state — plus always-present `crypto.ed25519`,
+  `compliance.dpp`, `compliance.battery`, `audit.scitt`, and runtime info.
+  Lets an agent discover, before calling them, whether config-dependent
+  tools like `create_credential_offer` / `create_presentation_request` will
+  work. Added `CapOpenID4VCI`/`CapOpenID4VP` capability constants.
+  Persistence is deliberately not reported — it isn't self-detectable from
+  inside the Server (in-memory `MemoryStorage` also implements
+  `BlobStorage`), and a guessed value would be worse than omitting it.
+  Verified end-to-end against the built `blrcs-mcp` binary. 3 new tests
+  incl. one proving the report flips when a verifier is registered.
+  `TestToolsList` updated (29 → 30).
 - **`cmd/blrcs-mcpd`: mount the `diag` sysdiagnose-style snapshot endpoint
   (Axis 115).** The `diag` package (runtime/goroutine/memory stats,
   telemetry counters & histograms, a recent-error ring, custom resources)

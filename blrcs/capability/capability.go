@@ -44,6 +44,10 @@ const (
 	CapWebSocket Capability = "net.websocket"
 	CapSSE       Capability = "net.sse" // Server-Sent Events
 
+	// === プロトコル ===
+	CapOpenID4VCI Capability = "protocol.openid4vci" // OpenID4VCI 発行者エンドポイント有効
+	CapOpenID4VP  Capability = "protocol.openid4vp"  // OpenID4VP 検証者エンドポイント有効
+
 	// === ウォレット ===
 	CapWalletNative Capability = "wallet.native"    // OS-level wallet (Apple/Google)
 	CapWalletWebDC  Capability = "wallet.webdc_api" // navigator.credentials.get()
