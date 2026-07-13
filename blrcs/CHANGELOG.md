@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`cmd/blrcs-mcpd`: mount the `diag` sysdiagnose-style snapshot endpoint
+  (Axis 115).** The `diag` package (runtime/goroutine/memory stats,
+  telemetry counters & histograms, a recent-error ring, custom resources)
+  is fully implemented and tested with a ready-to-mount `Handler()`, but
+  nothing was mounting it — the same "part exists but isn't connected"
+  shape as the openid4vci/openid4vp `Handler()` gaps (Axis 103/105).
+  Wired into the daemon opt-in via `BLRCS_DIAG=1` (off by default, since
+  the snapshot exposes runtime internals an operator may not want on an
+  unauthenticated port — matching the `BLRCS_VCI_URL`/`BLRCS_VP_CLIENT_ID`
+  posture), reusing the same `telemetry.Telemetry` the `/metrics` exporter
+  reads so the two stay consistent. Registers `ledger.size` and `persist`
+  as diagnostic resources. Serves `/diag/snapshot.json` and
+  `/diag/snapshot.txt`. Verified end-to-end against the built binary:
+  enabled returns the snapshot with live runtime + resource data; 404 by
+  default.
 - **`compliance`, `openid4vp`, `mcp`: OpenID4VP 1.0 `transaction_data`
   binding (Axis 114).** Implements the OpenID4VP 1.0 (final, Jul 2025)
   Transaction Data mechanism — the basis for qualified e-signatures /

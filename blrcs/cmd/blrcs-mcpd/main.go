@@ -11,6 +11,7 @@
 //	BLRCS_VCI_URL=https://issue.example blrcs-mcpd               # enable OpenID4VCI issuer
 //	BLRCS_VP_CLIENT_ID=https://verify.example blrcs-mcpd         # enable OpenID4VP verifier
 //	BLRCS_TRUSTED_DIDS=did:web:a.example,did:web:b.example       # restrict verify_*_by_did trust
+//	BLRCS_DIAG=1 blrcs-mcpd                                      # enable /diag/snapshot.{json,txt}
 //
 // エンドポイント:
 //
@@ -19,6 +20,12 @@
 //	DELETE /mcp        — session close
 //	GET /healthz       — liveness probe
 //	GET /readyz        — readiness probe
+//	GET /metrics       — Prometheus metrics
+//
+// BLRCS_DIAG=1 設定時のみ (運用診断):
+//
+//	GET /diag/snapshot.json — ランタイム/テレメトリ/直近エラーのスナップショット
+//	GET /diag/snapshot.txt  — 同上 (人間可読)
 //
 // BLRCS_VCI_URL 設定時のみ (OpenID4VCI, wallet向け):
 //
@@ -49,6 +56,7 @@ import (
 	"blrcs/atrest"
 	"blrcs/compliance"
 	"blrcs/config"
+	"blrcs/diag"
 	"blrcs/didresolver"
 	"blrcs/healthprobe"
 	"blrcs/httpmw"
@@ -247,6 +255,36 @@ func main() {
 		mux.Handle("/openid4vp/authorize", httpmw.Recovery(vpVerifier.AuthorizeHandler()))
 		mux.Handle("/openid4vp/callback", httpmw.Recovery(vpVerifier.CallbackHandler(srv.RecordPresentationResult)))
 		fmt.Fprintf(os.Stderr, "openid4vp: verifier enabled at %s\n", vpClientID)
+	}
+	// Optional sysdiagnose-style diagnostic snapshot: the diag package is fully
+	// implemented and tested with a ready-to-mount Handler(), but nothing was
+	// mounting it. Off by default (BLRCS_DIAG=1) since the snapshot exposes
+	// runtime internals (goroutine/memory stats, telemetry counters, recent
+	// error messages) an operator may not want on an unauthenticated port —
+	// same opt-in posture as BLRCS_VCI_URL / BLRCS_VP_CLIENT_ID. Reuses the
+	// same telemetry the /metrics exporter reads, so the two stay consistent.
+	if os.Getenv("BLRCS_DIAG") == "1" {
+		diagGen := diag.NewGenerator(tel, diag.ProductInfo{
+			Name:    "BLRCS",
+			Service: "blrcs-mcpd",
+		})
+		diagGen.AddResource("ledger.size", func(context.Context) string {
+			return strconv.FormatInt(int64(srv.Ledger().Size()), 10)
+		})
+		diagGen.AddResource("persist", func(context.Context) string {
+			return strconv.FormatBool(dataDir != "")
+		})
+		// Handler() owns /diag/snapshot.json and /diag/snapshot.txt (no collision
+		// with the routes above); mount at "/" only if openid4vci didn't already
+		// claim the catch-all, otherwise mount its two exact paths individually.
+		diagHandler := httpmw.Recovery(diagGen.Handler())
+		if vciIssuer == nil {
+			mux.Handle("/diag/", diagHandler)
+		} else {
+			mux.Handle("/diag/snapshot.json", diagHandler)
+			mux.Handle("/diag/snapshot.txt", diagHandler)
+		}
+		fmt.Fprintln(os.Stderr, "diag: snapshot enabled at /diag/snapshot.{json,txt}")
 	}
 
 	httpSrv := &http.Server{
