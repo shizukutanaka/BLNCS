@@ -30,9 +30,10 @@
 //	discover_did_services — did:web の DID Document から service endpoint 群を取得
 //	verify_passport_by_did — DPP検証 (issuer DID から鍵解決)
 //	verify_sdjwt_by_did — SD-JWT検証 (issuer DID から鍵解決)
-//	create_did_webvh    — did:webvh genesis log entry 作成 (pre-rotation対応)
-//	update_did_webvh    — did:webvh log にエントリ追加 (鍵ローテーション/失効)
-//	verify_did_webvh_log — did:webvh log 全体を検証・解決
+//	create_did_webvh    — did:webvh genesis log entry 作成 (pre-rotation/witness対応)
+//	update_did_webvh    — did:webvh log にエントリ追加 (鍵ローテーション/失効/witness)
+//	verify_did_webvh_log — did:webvh log 全体を検証・解決 (witness閾値含む)
+//	sign_witness_proof  — did:webvh witness の Data Integrity proof 発行
 //	resolve_vct_metadata — SD-JWT-VC Type Metadata 解決
 //	validate_claims_against_vct — vct のJSON Schemaでクレームを検証
 //	create_presentation_request — OpenID4VP authorization request 発行 (要 RegisterVPVerifier)
@@ -591,18 +592,23 @@ func toolDefs() []tool {
 		},
 		{
 			Name:        "create_did_webvh",
-			Description: "Create a new did:webvh genesis log entry (verifiable history + optional pre-rotation commitment). issuerId must be a registered issuer whose key becomes the genesis update key. Returns the new DID and a one-entry log — keep it and pass it to update_did_webvh/verify_did_webvh_log; this server does not persist did:webvh logs.",
-			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"didPath":{"type":"string","description":"Method-specific id without the SCID, e.g. example.com:dids:org-1"},"nextKeyHashes":{"type":"array","items":{"type":"string"},"description":"Optional pre-rotation commitment hashes"},"stateExtra":{"type":"object","description":"Extra fields for the genesis DID document"}},"required":["issuerId","didPath"]}`),
+			Description: "Create a new did:webvh genesis log entry (verifiable history + optional pre-rotation commitment + optional witness requirement). issuerId must be a registered issuer whose key becomes the genesis update key. Returns the new DID and a one-entry log — keep it and pass it to update_did_webvh/verify_did_webvh_log; this server does not persist did:webvh logs.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"didPath":{"type":"string","description":"Method-specific id without the SCID, e.g. example.com:dids:org-1"},"nextKeyHashes":{"type":"array","items":{"type":"string"},"description":"Optional pre-rotation commitment hashes"},"stateExtra":{"type":"object","description":"Extra fields for the genesis DID document"},"witness":{"type":"object","description":"Optional witness requirement: {threshold, witnesses:[{id: did:key DID}]}. Collect proofs from each witness via sign_witness_proof and pass them as witnessLog to verify_did_webvh_log."}},"required":["issuerId","didPath"]}`),
 		},
 		{
 			Name:        "update_did_webvh",
-			Description: "Append a new signed entry to an existing did:webvh log (key rotation, document update, or deactivation). signKeyIssuerId must be a registered issuer whose key currently holds update authority over the log. Returns the extended log.",
-			InputSchema: rawJSON(`{"type":"object","properties":{"signKeyIssuerId":{"type":"string"},"log":{"type":"array","description":"The existing verified log (array of LogEntry)"},"newState":{"type":"object","description":"The new DID document"},"updateKeys":{"type":"array","items":{"type":"string"},"description":"Multikey-encoded keys that take update authority from this entry on"},"nextKeyHashes":{"type":"array","items":{"type":"string"}},"deactivate":{"type":"boolean"}},"required":["signKeyIssuerId","log"]}`),
+			Description: "Append a new signed entry to an existing did:webvh log (key rotation, document update, deactivation, or (re)declaring a witness requirement). signKeyIssuerId must be a registered issuer whose key currently holds update authority over the log. Returns the extended log.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"signKeyIssuerId":{"type":"string"},"log":{"type":"array","description":"The existing verified log (array of LogEntry)"},"newState":{"type":"object","description":"The new DID document"},"updateKeys":{"type":"array","items":{"type":"string"},"description":"Multikey-encoded keys that take update authority from this entry on"},"nextKeyHashes":{"type":"array","items":{"type":"string"}},"deactivate":{"type":"boolean"},"witness":{"type":"object","description":"Optional witness requirement to declare from this entry on: {threshold, witnesses:[{id: did:key DID}]}"}},"required":["signKeyIssuerId","log"]}`),
 		},
 		{
 			Name:        "verify_did_webvh_log",
-			Description: "Validate a complete did:webvh log (SCID self-certification, entry hash-chaining, sequential versions, update-key authorization, pre-rotation commitments) and return the resolved DID document. Returns {valid, did, scid, document, versionId, versionTime, deactivated} or {valid:false, reason}.",
-			InputSchema: rawJSON(`{"type":"object","properties":{"log":{"type":"array","description":"Array of LogEntry as returned by create_did_webvh/update_did_webvh"}},"required":["log"]}`),
+			Description: "Validate a complete did:webvh log (SCID self-certification, entry hash-chaining, sequential versions, update-key authorization, pre-rotation commitments, and — when witnessLog is supplied or any entry declares Parameters.Witness — witness threshold enforcement) and return the resolved DID document. Returns {valid, did, scid, document, versionId, versionTime, deactivated} or {valid:false, reason}.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"log":{"type":"array","description":"Array of LogEntry as returned by create_did_webvh/update_did_webvh"},"witnessLog":{"type":"array","description":"Optional did-witness.json content: [{versionId, proof:[...]}], collected via sign_witness_proof"}},"required":["log"]}`),
+		},
+		{
+			Name:        "sign_witness_proof",
+			Description: "Produce one witness's Data Integrity proof for a did:webvh log entry (did:webvh v1.0 §Witnesses). witnessIssuerId must be a registered issuer whose ID is that witness's did:key DID. Collect one proof per required witness and assemble them into a did-witness.json-shaped array to pass as verify_did_webvh_log's witnessLog.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"witnessIssuerId":{"type":"string"},"entry":{"type":"object","description":"The LogEntry being witnessed"},"predecessorVersionId":{"type":"string","description":"The prior entry's versionId; empty for the genesis entry"}},"required":["witnessIssuerId","entry"]}`),
 		},
 		{
 			Name:        "resolve_vct_metadata",
@@ -741,6 +747,7 @@ var auditableTool = map[string]bool{
 	"create_presentation_request": true,
 	"create_did_webvh":            true,
 	"update_did_webvh":            true,
+	"sign_witness_proof":          true,
 }
 
 func (s *Server) auditToolCall(name string, args json.RawMessage) {
@@ -794,6 +801,8 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolUpdateDIDWebVH(args)
 	case "verify_did_webvh_log":
 		return s.toolVerifyDIDWebVHLog(args)
+	case "sign_witness_proof":
+		return s.toolSignWitnessProof(args)
 	case "resolve_vct_metadata":
 		return s.toolResolveVCTMetadata(args)
 	case "validate_claims_against_vct":
@@ -1331,10 +1340,11 @@ func (s *Server) toolVerifySDJWTByDID(args json.RawMessage) (string, error) {
 // credentialJson round-tripping through verify_passport).
 func (s *Server) toolCreateDIDWebVH(args json.RawMessage) (string, error) {
 	var in struct {
-		IssuerID      string         `json:"issuerId"`
-		DIDPath       string         `json:"didPath"`
-		NextKeyHashes []string       `json:"nextKeyHashes"`
-		StateExtra    map[string]any `json:"stateExtra"`
+		IssuerID      string            `json:"issuerId"`
+		DIDPath       string            `json:"didPath"`
+		NextKeyHashes []string          `json:"nextKeyHashes"`
+		StateExtra    map[string]any    `json:"stateExtra"`
+		Witness       *didwebvh.Witness `json:"witness"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
@@ -1353,6 +1363,7 @@ func (s *Server) toolCreateDIDWebVH(args json.RawMessage) (string, error) {
 		UpdateKey:     iss.PrivateKey(),
 		NextKeyHashes: in.NextKeyHashes,
 		StateExtra:    in.StateExtra,
+		Witness:       in.Witness,
 	})
 	if err != nil {
 		return "", err
@@ -1377,6 +1388,7 @@ func (s *Server) toolUpdateDIDWebVH(args json.RawMessage) (string, error) {
 		UpdateKeys      []string            `json:"updateKeys"`
 		NextKeyHashes   []string            `json:"nextKeyHashes"`
 		Deactivate      bool                `json:"deactivate"`
+		Witness         *didwebvh.Witness   `json:"witness"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
@@ -1397,6 +1409,7 @@ func (s *Server) toolUpdateDIDWebVH(args json.RawMessage) (string, error) {
 		UpdateKeys:    in.UpdateKeys,
 		NextKeyHashes: in.NextKeyHashes,
 		Deactivate:    in.Deactivate,
+		Witness:       in.Witness,
 	})
 	if err != nil {
 		return "", err
@@ -1415,12 +1428,16 @@ func (s *Server) toolUpdateDIDWebVH(args json.RawMessage) (string, error) {
 // structured {"valid":false,...} result, matching verify_passport's contract.
 func (s *Server) toolVerifyDIDWebVHLog(args json.RawMessage) (string, error) {
 	var in struct {
-		Log []didwebvh.LogEntry `json:"log"`
+		Log        []didwebvh.LogEntry `json:"log"`
+		WitnessLog didwebvh.WitnessLog `json:"witnessLog"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
 	}
-	res, err := didwebvh.Verify(in.Log)
+	// VerifyWithWitnesses with a nil/empty WitnessLog behaves exactly like
+	// Verify for any log where no entry declares Parameters.Witness, so this
+	// one call correctly serves both the witnessed and unwitnessed cases.
+	res, err := didwebvh.VerifyWithWitnesses(in.Log, in.WitnessLog)
 	if err != nil {
 		return verifyResult(false, err.Error()), nil //nolint:nilerr
 	}
@@ -1433,6 +1450,46 @@ func (s *Server) toolVerifyDIDWebVHLog(args json.RawMessage) (string, error) {
 		"versionTime": res.VersionTime,
 		"deactivated": res.Deactivated,
 	})
+	return string(b), nil
+}
+
+// toolSignWitnessProof produces one witness's Data Integrity proof for a
+// did:webvh log entry, per did:webvh v1.0 §Witnesses — previously
+// unreachable, since the didwebvh package didn't implement witness support
+// at all until this axis. witnessIssuerId reuses the same pre-registered-key
+// mechanism as issue_passport/create_did_webvh: an operator registers a
+// witness's identity as an Issuer via RegisterIssuer, with its ID set to that
+// witness's did:key DID (the spec's own identifier scheme for witnesses —
+// registering it as an "Issuer" here is just this server's existing key
+// storage/lookup mechanism, not a claim that witnesses issue credentials).
+// The caller is responsible for collecting proofs from each required witness
+// and assembling them into a WitnessLog (did-witness.json) to pass to
+// verify_did_webvh_log's witnessLog argument — this server does not persist
+// did-witness.json itself, the same statelessness contract create_did_webvh/
+// update_did_webvh already have for the log itself.
+func (s *Server) toolSignWitnessProof(args json.RawMessage) (string, error) {
+	var in struct {
+		WitnessIssuerID      string             `json:"witnessIssuerId"`
+		Entry                *didwebvh.LogEntry `json:"entry"`
+		PredecessorVersionID string             `json:"predecessorVersionId"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.Entry == nil {
+		return "", errors.New("mcp: entry is required")
+	}
+	s.mu.RLock()
+	iss, ok := s.issuers[in.WitnessIssuerID]
+	s.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("unknown issuer: %s", in.WitnessIssuerID)
+	}
+	proof, err := didwebvh.SignWitnessProof(in.Entry, in.PredecessorVersionID, iss.PrivateKey(), iss.ID)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]any{"proof": proof})
 	return string(b), nil
 }
 

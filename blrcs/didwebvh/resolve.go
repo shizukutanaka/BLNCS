@@ -17,6 +17,12 @@ type CreateParams struct {
 	UpdateKey ed25519.PrivateKey
 	// NextKeyHashes optionally pre-commits the next rotation keys.
 	NextKeyHashes []string
+	// Witness optionally declares the did:key witnesses required to co-sign
+	// this and subsequent entries, and how many are required. Must be set
+	// here (not mutated on the returned *LogEntry afterward) — Witness is part
+	// of Parameters, which is included in the entry's own self-referential
+	// hash/SCID/proof; changing it post-hoc invalidates the entry.
+	Witness *Witness
 	// VersionTime is the genesis time (defaults to now UTC).
 	VersionTime time.Time
 	// StateExtra lets the caller add fields to the genesis DID document.
@@ -52,6 +58,7 @@ func Create(p CreateParams) (*LogEntry, string, error) {
 			SCID:          SCIDPlaceholder,
 			UpdateKeys:    []string{updateMultikey},
 			NextKeyHashes: p.NextKeyHashes,
+			Witness:       p.Witness,
 		},
 		State: state,
 	}
@@ -95,8 +102,14 @@ type UpdateParams struct {
 	NewState      map[string]any     // the new DID document
 	UpdateKeys    []string           // updateKeys to take effect from this entry (Multikey)
 	NextKeyHashes []string           // pre-rotation commitments for the next entry
-	VersionTime   time.Time
-	Deactivate    bool
+	// Witness optionally (re)declares the witness requirement in effect from
+	// this entry on. nil leaves whatever the predecessor entry declared
+	// unresolved — VerifyWithWitnesses only enforces a threshold for entries
+	// that explicitly set Parameters.Witness, so a nil here means "no witness
+	// requirement declared BY THIS entry", not "inherit the prior one".
+	Witness     *Witness
+	VersionTime time.Time
+	Deactivate  bool
 }
 
 // Update appends a signed entry to the log and returns the new entry.
@@ -135,6 +148,7 @@ func Update(p UpdateParams) (*LogEntry, error) {
 			UpdateKeys:    updateKeys,
 			NextKeyHashes: p.NextKeyHashes,
 			Deactivated:   p.Deactivate,
+			Witness:       p.Witness,
 		},
 		State: p.NewState,
 	}

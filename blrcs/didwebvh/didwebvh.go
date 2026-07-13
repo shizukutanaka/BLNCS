@@ -58,6 +58,15 @@ var (
 	ErrDeactivated       = errors.New("didwebvh: DID is deactivated")
 	ErrMalformedEntry    = errors.New("didwebvh: malformed log entry")
 	ErrNoUpdateKeys      = errors.New("didwebvh: no update keys in effect")
+	// ErrWitnessThreshold is returned by VerifyWithWitnesses when an entry
+	// declares a witness requirement (Parameters.Witness) but the supplied
+	// WitnessLog does not contain enough valid, distinct witness proofs to
+	// meet the declared threshold. Per spec: "If a DID Controller has opted
+	// to use witnesses for the DID, the required proofs from the DID's
+	// witnesses must be collected and published in the did-witness.json file
+	// before the DID with the new version is published" — so an insufficiently
+	// witnessed entry must be rejected, not silently accepted.
+	ErrWitnessThreshold = errors.New("didwebvh: insufficient valid witness proofs for declared threshold")
 )
 
 // Parameters are the did:webvh log-entry parameters (spec §parameters).
@@ -69,6 +78,10 @@ type Parameters struct {
 	Portable      bool     `json:"portable,omitempty"`
 	Deactivated   bool     `json:"deactivated,omitempty"`
 	TTL           int      `json:"ttl,omitempty"`
+	// Witness declares the did:key witnesses required to co-sign updates from
+	// this entry on, and how many of them (threshold) — see witness.go. nil
+	// means no witness requirement is in effect for this entry.
+	Witness *Witness `json:"witness,omitempty"`
 }
 
 // Proof is a W3C Data Integrity proof (eddsa-jcs-2022) on a log entry.
