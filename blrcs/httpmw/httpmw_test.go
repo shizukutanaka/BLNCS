@@ -1,11 +1,14 @@
 package httpmw
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"strings"
 	"testing"
 	"time"
@@ -601,5 +604,171 @@ func TestRequestIDSanitizesIncomingHeader(t *testing.T) {
 	if capturedRID == "" {
 		// At least the alphabetic parts ("injecttrue") survive.
 		t.Errorf("RID should not be empty after sanitization")
+	}
+}
+
+// ============================================================================
+// Flusher/Unwrap forwarding — statusWriter (Recovery) and loggingResponseWriter
+// (AccessLog) must not silently break SSE handlers when wrapped around them.
+// mcp/http.go's SSE endpoint does a direct `w.(http.Flusher)` type assertion,
+// so the wrapper types must implement Flush() directly (Unwrap alone would
+// only satisfy http.NewResponseController-based callers, not a raw assertion).
+// ============================================================================
+
+// nonFlushingWriter implements only the 3 required http.ResponseWriter
+// methods — no Flush() — to test the "underlying writer doesn't support
+// Flusher" fallback path doesn't panic.
+type nonFlushingWriter struct {
+	header http.Header
+}
+
+func (w *nonFlushingWriter) Header() http.Header         { return w.header }
+func (w *nonFlushingWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (w *nonFlushingWriter) WriteHeader(int)             {}
+
+func newNonFlushingWriter() *nonFlushingWriter {
+	return &nonFlushingWriter{header: make(http.Header)}
+}
+
+func TestStatusWriterForwardsFlush(t *testing.T) {
+	rec := httptest.NewRecorder() // httptest.ResponseRecorder implements http.Flusher
+	sw := &statusWriter{ResponseWriter: rec}
+	f, ok := any(sw).(http.Flusher)
+	if !ok {
+		t.Fatal("statusWriter must implement http.Flusher")
+	}
+	f.Flush()
+	if !rec.Flushed {
+		t.Error("Flush() did not forward to the underlying ResponseRecorder")
+	}
+}
+
+func TestStatusWriterFlushNoOpWhenUnsupported(t *testing.T) {
+	sw := &statusWriter{ResponseWriter: newNonFlushingWriter()}
+	// Must not panic even though the underlying writer has no Flush method.
+	sw.Flush()
+}
+
+func TestStatusWriterUnwrap(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rec}
+	u, ok := any(sw).(interface{ Unwrap() http.ResponseWriter })
+	if !ok {
+		t.Fatal("statusWriter must implement Unwrap() http.ResponseWriter")
+	}
+	if u.Unwrap() != http.ResponseWriter(rec) {
+		t.Error("Unwrap() should return the exact wrapped ResponseWriter")
+	}
+}
+
+func TestLoggingResponseWriterForwardsFlush(t *testing.T) {
+	rec := httptest.NewRecorder()
+	lrw := &loggingResponseWriter{ResponseWriter: rec}
+	f, ok := any(lrw).(http.Flusher)
+	if !ok {
+		t.Fatal("loggingResponseWriter must implement http.Flusher")
+	}
+	f.Flush()
+	if !rec.Flushed {
+		t.Error("Flush() did not forward to the underlying ResponseRecorder")
+	}
+}
+
+func TestLoggingResponseWriterFlushNoOpWhenUnsupported(t *testing.T) {
+	lrw := &loggingResponseWriter{ResponseWriter: newNonFlushingWriter()}
+	lrw.Flush()
+}
+
+func TestLoggingResponseWriterUnwrap(t *testing.T) {
+	rec := httptest.NewRecorder()
+	lrw := &loggingResponseWriter{ResponseWriter: rec}
+	u, ok := any(lrw).(interface{ Unwrap() http.ResponseWriter })
+	if !ok {
+		t.Fatal("loggingResponseWriter must implement Unwrap() http.ResponseWriter")
+	}
+	if u.Unwrap() != http.ResponseWriter(rec) {
+		t.Error("Unwrap() should return the exact wrapped ResponseWriter")
+	}
+}
+
+// TestResponseControllerDrillsThroughRecoveryAndAccessLog is the regression
+// test for the actual bug: http.NewResponseController(w) must find a working
+// Flush/SetWriteDeadline even when w has been wrapped by BOTH Recovery and
+// AccessLog (the composition mcp/http.go's SSE endpoint would see once the
+// full default chain wraps it) — proving http.ResponseController's Unwrap
+// walk works through two stacked wrapper layers, not just one.
+func TestResponseControllerDrillsThroughRecoveryAndAccessLog(t *testing.T) {
+	var sawFlusher bool
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		sawFlusher = rc.Flush() == nil
+	})
+	wrapped := Recovery(AccessLog(inner))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	wrapped.ServeHTTP(rec, req)
+	if !sawFlusher {
+		t.Error("http.NewResponseController(w).Flush() should succeed through Recovery(AccessLog(...))")
+	}
+}
+
+// TestDefaultChainPreservesRealStreamingOverTCP is the rigorous version of
+// the ResponseController test above: it proves bytes written before a Flush
+// call actually reach a REAL TCP client promptly when the handler is wrapped
+// by the full Default chain — not just that the Flush call itself doesn't
+// error (httptest.ResponseRecorder.Flush() is a no-op flag-set, so it can't
+// catch server-side buffering). Uses a real net/http.Server via
+// httptest.NewServer so actual socket writes are exercised.
+func TestDefaultChainPreservesRealStreamingOverTCP(t *testing.T) {
+	const firstChunk = "first-chunk\n"
+	release := make(chan struct{})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, firstChunk)
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("flush through Default chain failed: %v", err)
+		}
+		<-release // hold the connection open until the test has read the first chunk
+	})
+
+	srv := httptest.NewServer(Default(handler))
+	defer srv.Close()
+	defer close(release)
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A short deadline: if Flush is silently swallowed by the wrapper chain,
+	// the first chunk sits server-side until the handler returns (it never
+	// will, until `release` closes) and this read times out.
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	reader := bufio.NewReader(conn)
+	// Skip the HTTP status line + headers.
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("reading response (flush likely did not reach the socket in time): %v", err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	// The response has no Content-Length (streaming), so net/http.Server sends
+	// it chunked-transfer-encoded (RFC 9112 §7.1): a hex chunk-size line, then
+	// exactly that many content bytes, then a trailing CRLF. httputil's
+	// chunked reader decodes that framing rather than hand-parsing it.
+	body := make([]byte, len(firstChunk))
+	if _, err := io.ReadFull(httputil.NewChunkedReader(reader), body); err != nil {
+		t.Fatalf("reading flushed (chunked) body chunk: %v", err)
+	}
+	if string(body) != firstChunk {
+		t.Errorf("body: got %q want %q", body, firstChunk)
 	}
 }

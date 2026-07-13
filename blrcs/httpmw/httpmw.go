@@ -83,6 +83,28 @@ func (s *statusWriter) Write(b []byte) (int, error) {
 	return s.ResponseWriter.Write(b)
 }
 
+// Unwrap exposes the wrapped ResponseWriter so http.NewResponseController can
+// drill through this wrapper to reach Flush/Hijack/SetReadDeadline/
+// SetWriteDeadline on the underlying writer (Go 1.20+ convention: "If the
+// [ResponseWriter] type implements Unwrap() http.ResponseWriter, the
+// ResponseController will use that to unwrap"). Without this, wrapping an
+// SSE handler (which needs Flush) with Recovery would silently stop
+// streaming — the write would still succeed but never reach the client
+// until the connection closes, since the flush call finds no Flusher.
+func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
+// Flush forwards to the underlying ResponseWriter's Flush when it supports
+// http.Flusher (SSE handlers need this), and is a no-op otherwise. This
+// exists in addition to Unwrap because some callers do a direct
+// `w.(http.Flusher)` type assertion instead of going through
+// http.NewResponseController — Unwrap alone would not satisfy that, since a
+// plain type assertion has no knowledge of the Unwrap convention.
+func (s *statusWriter) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // headerWritten — ResponseWriter が既に status を書いたか判定
 func headerWritten(w http.ResponseWriter) bool {
 	if sw, ok := w.(*statusWriter); ok {
@@ -168,6 +190,19 @@ func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
 	n, err := lrw.ResponseWriter.Write(b)
 	lrw.bytes += n
 	return n, err
+}
+
+// Unwrap and Flush mirror statusWriter's — see its doc comment. Without
+// these, wrapping an SSE handler with AccessLog would silently stop
+// streaming instead of failing loudly, since the underlying handler's own
+// http.Flusher / http.ResponseController-based flush calls would find
+// nothing to flush through this wrapper.
+func (lrw *loggingResponseWriter) Unwrap() http.ResponseWriter { return lrw.ResponseWriter }
+
+func (lrw *loggingResponseWriter) Flush() {
+	if f, ok := lrw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // AccessLog — 構造化 HTTP アクセスログ + telemetry counter/histogram

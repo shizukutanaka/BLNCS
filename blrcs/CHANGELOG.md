@@ -6,7 +6,42 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`httpmw`: `statusWriter`/`loggingResponseWriter` didn't forward
+  `http.Flusher`/`Unwrap` (Axis 117).** Found while auditing why
+  `cmd/blrcs-mcpd` only ever applied bare `Recovery` instead of the
+  documented recommended `httpmw.Default` chain (Recovery → RequestID →
+  SecurityHeaders → AccessLog) to any route. The reason: applying it to
+  `/mcp` (which serves SSE) would have hard-broken streaming —
+  `mcp/http.go`'s SSE handler does a direct `w.(http.Flusher)` type
+  assertion, and neither wrapper type implemented `Flush()` or the Go
+  1.20+ `Unwrap() http.ResponseWriter` convention `http.NewResponseController`
+  needs to drill through wrapper chains. Added both to each wrapper. A
+  rigorous regression test opens a real TCP connection to a real
+  `net/http.Server` wrapped in the full `Default` chain and proves a
+  flushed chunk arrives well within a 2s deadline (not just that the
+  `Flush()` call itself doesn't error, which a `httptest.ResponseRecorder`
+  can't catch). 8 new tests.
+
 ### Added
+- **`cmd/blrcs-mcpd`: apply the full recommended middleware chain to every
+  route (Axis 117).** Every route was using bare `httpmw.Recovery`
+  (`/mcp`, the OpenID4VCI/VP endpoints, `/diag`) while `/metrics`,
+  `/healthz`, `/readyz` had **no middleware at all** — zero panic
+  protection, no security response headers
+  (`X-Content-Type-Options`/`X-Frame-Options`/HSTS/`Referrer-Policy`/
+  `Permissions-Policy`), no request-ID correlation, no structured access
+  log — despite `httpmw.Default` bundling exactly this as BLRCS's own
+  documented recommended chain. Upgraded `/mcp`, the OpenID4VCI catch-all,
+  both OpenID4VP endpoints, and `/diag` to `httpmw.Default` (safe now that
+  Flush/Unwrap forward correctly through it); `/metrics`/`/healthz`/`/readyz`
+  gained `httpmw.Recovery` (kept lighter — full access-logging of frequent
+  health-check polling is noise, not signal). Also confirmed
+  `httpmw.MaxBodyBytes` (also previously unused anywhere) is *not* a gap:
+  every handler that reads a request body already caps it individually via
+  `http.MaxBytesReader`. Verified end-to-end against the built binary:
+  security headers and `X-Request-Id` present on `/mcp` responses, SSE
+  streaming still works, `/diag`/`/healthz`/`/metrics` all still reachable.
 - **`mcp`, `capability`: `get_server_capabilities` tool for agent capability
   discovery (Axis 116).** The `capability` feature-detection package was
   implemented and tested but reachable from no binary (zero-caller triage,

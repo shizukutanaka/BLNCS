@@ -235,25 +235,36 @@ func main() {
 
 	// Routes
 	mux := http.NewServeMux()
-	// Wrap MCP handler with panic recovery so a tool panic cannot crash the daemon.
+	// httpmw.Default = Recovery -> RequestID -> SecurityHeaders -> AccessLog,
+	// BLRCS's documented recommended chain — was only bare Recovery on every
+	// route (no request-ID correlation, no security response headers, no
+	// structured access log). Safe to apply to the SSE-serving /mcp route:
+	// statusWriter/loggingResponseWriter now forward Flush/Unwrap so
+	// http.NewResponseController (and mcp/http.go's direct http.Flusher
+	// assertion) still reach the real ResponseWriter through the wrapper
+	// stack — see httpmw's TestResponseControllerDrillsThroughRecoveryAndAccessLog.
 	mcpHandler := mcp.NewHTTPHandler(srv, auth, limiter)
 	// Stop the handler's background session-GC goroutine on shutdown.
 	defer func() { _ = mcpHandler.Close() }()
-	mux.Handle("/mcp", httpmw.Recovery(mcpHandler))
-	mux.Handle("/metrics", exp)
-	mux.Handle("/healthz", probe.Liveness())
-	mux.Handle("/readyz", probe.Readiness())
+	mux.Handle("/mcp", httpmw.Default(mcpHandler))
+	// Health/metrics endpoints keep Recovery only (no RequestID/AccessLog): they
+	// are typically polled every few seconds by Kubernetes/monitoring, and full
+	// access logging of that traffic is noise, not signal. They previously had
+	// NO middleware at all — zero panic protection — which Recovery now closes.
+	mux.Handle("/metrics", httpmw.Recovery(exp))
+	mux.Handle("/healthz", httpmw.Recovery(probe.Liveness()))
+	mux.Handle("/readyz", httpmw.Recovery(probe.Readiness()))
 	if vciIssuer != nil {
 		// Mounted at "/" (catch-all): openid4vci.Issuer.Handler() owns its own
 		// absolute paths (/.well-known/..., /token, /nonce, /credential) per
 		// spec — none collide with /mcp, /metrics, /healthz, /readyz above,
 		// which win on ServeMux's longest-match regardless of registration order.
-		mux.Handle("/", httpmw.Recovery(vciIssuer.Handler()))
+		mux.Handle("/", httpmw.Default(vciIssuer.Handler()))
 		fmt.Fprintf(os.Stderr, "openid4vci: issuer enabled at %s\n", vciURL)
 	}
 	if vpVerifier != nil {
-		mux.Handle("/openid4vp/authorize", httpmw.Recovery(vpVerifier.AuthorizeHandler()))
-		mux.Handle("/openid4vp/callback", httpmw.Recovery(vpVerifier.CallbackHandler(srv.RecordPresentationResult)))
+		mux.Handle("/openid4vp/authorize", httpmw.Default(vpVerifier.AuthorizeHandler()))
+		mux.Handle("/openid4vp/callback", httpmw.Default(vpVerifier.CallbackHandler(srv.RecordPresentationResult)))
 		fmt.Fprintf(os.Stderr, "openid4vp: verifier enabled at %s\n", vpClientID)
 	}
 	// Optional sysdiagnose-style diagnostic snapshot: the diag package is fully
@@ -277,7 +288,7 @@ func main() {
 		// Handler() owns /diag/snapshot.json and /diag/snapshot.txt (no collision
 		// with the routes above); mount at "/" only if openid4vci didn't already
 		// claim the catch-all, otherwise mount its two exact paths individually.
-		diagHandler := httpmw.Recovery(diagGen.Handler())
+		diagHandler := httpmw.Default(diagGen.Handler())
 		if vciIssuer == nil {
 			mux.Handle("/diag/", diagHandler)
 		} else {
