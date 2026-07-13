@@ -40,6 +40,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -663,8 +664,8 @@ func toolDefs() []tool {
 		},
 		{
 			Name:        "create_presentation_request",
-			Description: "Mint an OpenID4VP authorization request a real wallet can respond to (returns openid4vp:// request URL + state). Requires the server to have a registered OpenID4VP verifier; errors otherwise. Poll get_presentation_result with the returned state to see the wallet's response.",
-			InputSchema: rawJSON(`{"type":"object","properties":{"presentationDefinition":{"type":"object","description":"DIF Presentation Exchange 2.0 PresentationDefinition (id, purpose, requiredClaims, format)"},"acceptableIssuerKeys":{"type":"object","description":"issuer DID -> base64 Ed25519 public key, the trust anchor ProcessResponse verifies the presented credential's signature against"}},"required":["presentationDefinition"]}`),
+			Description: "Mint an OpenID4VP authorization request a real wallet can respond to (returns openid4vp:// request URL + state). Requires the server to have a registered OpenID4VP verifier; errors otherwise. Optionally bind the presentation to transaction_data (payment/consent) per OpenID4VP 1.0. Poll get_presentation_result with the returned state to see the wallet's response.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"presentationDefinition":{"type":"object","description":"DIF Presentation Exchange 2.0 PresentationDefinition (id, purpose, requiredClaims, format)"},"acceptableIssuerKeys":{"type":"object","description":"issuer DID -> base64 Ed25519 public key, the trust anchor ProcessResponse verifies the presented credential's signature against"},"transactionData":{"type":"array","items":{"type":"object"},"description":"OpenID4VP 1.0 transaction_data: JSON objects (payment/consent details) the holder must approve; the presentation is cryptographically bound to them"}},"required":["presentationDefinition"]}`),
 		},
 		{
 			Name:        "get_presentation_result",
@@ -1850,6 +1851,11 @@ func (s *Server) toolCreatePresentationRequest(args json.RawMessage) (string, er
 		// rather than deserialized) — this is the JSON-facing equivalent so a
 		// tool caller can still supply it.
 		AcceptableIssuerKeys map[string]string `json:"acceptableIssuerKeys"`
+		// TransactionData — OpenID4VP 1.0 §Transaction Data. Each entry is a
+		// plain JSON object (payment/consent details) the wallet must show and
+		// the holder must approve; the tool base64url-encodes each per spec so
+		// the presentation is cryptographically bound to them.
+		TransactionData []json.RawMessage `json:"transactionData"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
@@ -1877,7 +1883,17 @@ func (s *Server) toolCreatePresentationRequest(args json.RawMessage) (string, er
 			def.AcceptableIssuers[did] = key
 		}
 	}
-	reqURL, state, err := vp.CreateRequest(def)
+	var transactionData []string
+	for _, td := range in.TransactionData {
+		// Compact each entry (strip caller whitespace) then base64url-encode, so
+		// the hash the wallet computes and the verifier expects agree byte-for-byte.
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, td); err != nil {
+			return "", fmt.Errorf("mcp: bad transactionData entry: %w", err)
+		}
+		transactionData = append(transactionData, base64.RawURLEncoding.EncodeToString(compact.Bytes()))
+	}
+	reqURL, state, err := vp.CreateRequestTx(def, transactionData)
 	if err != nil {
 		return "", err
 	}

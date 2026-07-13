@@ -1454,3 +1454,124 @@ func TestIssueSDJWTVCTypRoundTripsBothValues(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// OpenID4VP 1.0 transaction_data binding (Axis 114)
+// ============================================================================
+
+// b64uTxData encodes a transaction_data JSON object exactly as it travels in
+// the request array (base64url of the JSON bytes).
+func b64uTxData(t *testing.T, obj map[string]any) string {
+	t.Helper()
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// TestTransactionDataBindingHappyPath verifies a KB-JWT that hashes the exact
+// transaction_data entries the verifier bound to passes verification.
+func TestTransactionDataBindingHappyPath(t *testing.T) {
+	iss, _ := NewIssuer("did:web:tx.test")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub", map[string]any{"amount": 50}, nil, holderPub, time.Hour)
+
+	td := []string{
+		b64uTxData(t, map[string]any{"type": "payment", "amount": "50.00", "currency": "EUR"}),
+	}
+	presented, err := PresentWithKeyBindingTx(sdjwt, []string{"amount"}, holderPriv, "nonce-1", "verifier-1", td, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = VerifySDJWTWithBinding(presented, iss.PublicKey(), VerifyOptions{
+		ExpectedNonce:           "nonce-1",
+		ExpectedAudience:        "verifier-1",
+		ExpectedTransactionData: td,
+	})
+	if err != nil {
+		t.Fatalf("correctly-bound transaction_data must verify: %v", err)
+	}
+}
+
+// TestTransactionDataBindingTamperedRejected verifies that if the verifier
+// expects a transaction_data entry the holder did NOT hash (e.g. the amount
+// was altered after the holder consented), verification fails.
+func TestTransactionDataBindingTamperedRejected(t *testing.T) {
+	iss, _ := NewIssuer("did:web:tx.test")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub", map[string]any{"amount": 50}, nil, holderPub, time.Hour)
+
+	holderSaw := []string{b64uTxData(t, map[string]any{"amount": "50.00"})}
+	verifierWants := []string{b64uTxData(t, map[string]any{"amount": "5000.00"})} // altered
+
+	presented, _ := PresentWithKeyBindingTx(sdjwt, []string{"amount"}, holderPriv, "n", "v", holderSaw, time.Now())
+	_, err := VerifySDJWTWithBinding(presented, iss.PublicKey(), VerifyOptions{
+		ExpectedNonce:           "n",
+		ExpectedAudience:        "v",
+		ExpectedTransactionData: verifierWants,
+	})
+	if !errors.Is(err, ErrKeyBindingTransactionData) {
+		t.Errorf("tampered transaction_data: want ErrKeyBindingTransactionData, got %v", err)
+	}
+}
+
+// TestTransactionDataExpectedButAbsentRejected verifies that when a verifier
+// binds transaction_data but the holder's KB-JWT carries no
+// transaction_data_hashes at all, verification fails (a holder cannot silently
+// drop the binding).
+func TestTransactionDataExpectedButAbsentRejected(t *testing.T) {
+	iss, _ := NewIssuer("did:web:tx.test")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub", map[string]any{"amount": 50}, nil, holderPub, time.Hour)
+
+	// Holder presents WITHOUT transaction_data (plain PresentWithKeyBinding).
+	presented, _ := PresentWithKeyBinding(sdjwt, []string{"amount"}, holderPriv, "n", "v", time.Now())
+	_, err := VerifySDJWTWithBinding(presented, iss.PublicKey(), VerifyOptions{
+		ExpectedNonce:           "n",
+		ExpectedAudience:        "v",
+		ExpectedTransactionData: []string{b64uTxData(t, map[string]any{"amount": "50.00"})},
+	})
+	if !errors.Is(err, ErrKeyBindingTransactionData) {
+		t.Errorf("missing transaction_data_hashes: want ErrKeyBindingTransactionData, got %v", err)
+	}
+}
+
+// TestTransactionDataNotExpectedIsBackwardCompatible verifies that a verifier
+// with no ExpectedTransactionData ignores whatever the holder did, preserving
+// the existing (pre-Axis-114) behavior.
+func TestTransactionDataNotExpectedIsBackwardCompatible(t *testing.T) {
+	iss, _ := NewIssuer("did:web:tx.test")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub", map[string]any{"amount": 50}, nil, holderPub, time.Hour)
+
+	// Holder includes transaction_data, but verifier doesn't ask for it.
+	td := []string{b64uTxData(t, map[string]any{"amount": "50.00"})}
+	presented, _ := PresentWithKeyBindingTx(sdjwt, []string{"amount"}, holderPriv, "n", "v", td, time.Now())
+	if _, err := VerifySDJWTWithBinding(presented, iss.PublicKey(), VerifyOptions{
+		ExpectedNonce: "n", ExpectedAudience: "v",
+	}); err != nil {
+		t.Errorf("verifier not requesting transaction_data must still verify: %v", err)
+	}
+}
+
+// TestTransactionDataMultipleEntriesAllRequired verifies that when the verifier
+// binds multiple transaction_data entries, the holder must hash all of them.
+func TestTransactionDataMultipleEntriesAllRequired(t *testing.T) {
+	iss, _ := NewIssuer("did:web:tx.test")
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sdjwt, _, _ := iss.IssueSDJWTBound("sub", map[string]any{"amount": 50}, nil, holderPub, time.Hour)
+
+	entryA := b64uTxData(t, map[string]any{"step": "A"})
+	entryB := b64uTxData(t, map[string]any{"step": "B"})
+
+	// Holder only hashes A; verifier requires both A and B.
+	presented, _ := PresentWithKeyBindingTx(sdjwt, []string{"amount"}, holderPriv, "n", "v", []string{entryA}, time.Now())
+	_, err := VerifySDJWTWithBinding(presented, iss.PublicKey(), VerifyOptions{
+		ExpectedNonce: "n", ExpectedAudience: "v",
+		ExpectedTransactionData: []string{entryA, entryB},
+	})
+	if !errors.Is(err, ErrKeyBindingTransactionData) {
+		t.Errorf("partial transaction_data coverage: want ErrKeyBindingTransactionData, got %v", err)
+	}
+}

@@ -63,6 +63,12 @@ func signRequestObject(req *AuthorizationRequest, key ed25519.PrivateKey, ttl ti
 	} else {
 		payload["presentation_definition"] = req.PresentationDefinition
 	}
+	if len(req.TransactionData) > 0 {
+		// OpenID4VP 1.0 §Transaction Data must be inside the signed request
+		// object so a JAR-aware wallet binds the exact entries the verifier
+		// signed — an unsigned query-param copy would be tamperable.
+		payload["transaction_data"] = req.TransactionData
+	}
 	headerB64 := base64.RawURLEncoding.EncodeToString(
 		[]byte(`{"alg":"EdDSA","typ":"` + requestObjectTyp + `"}`))
 	payloadBytes, err := json.Marshal(payload)
@@ -140,6 +146,7 @@ func VerifyRequestObject(requestURL string, verifierPub ed25519.PublicKey) (*Aut
 		Exp                    int64            `json:"exp"`
 		DCQLQuery              *DCQLQuery       `json:"dcql_query,omitempty"`
 		PresentationDefinition *json.RawMessage `json:"presentation_definition,omitempty"`
+		TransactionData        []string         `json:"transaction_data,omitempty"`
 	}
 	if err := json.Unmarshal(plRaw, &pl); err != nil {
 		return nil, fmt.Errorf("%w: payload json", ErrRequestObjectInvalid)
@@ -155,13 +162,14 @@ func VerifyRequestObject(requestURL string, verifierPub ed25519.PublicKey) (*Aut
 		return nil, fmt.Errorf("%w: client_id mismatch", ErrRequestObjectInvalid)
 	}
 	req := &AuthorizationRequest{
-		ClientID:     pl.ClientID,
-		ResponseType: pl.ResponseType,
-		ResponseMode: pl.ResponseMode,
-		ResponseURI:  pl.ResponseURI,
-		Nonce:        pl.Nonce,
-		State:        pl.State,
-		DCQLQuery:    pl.DCQLQuery,
+		ClientID:        pl.ClientID,
+		ResponseType:    pl.ResponseType,
+		ResponseMode:    pl.ResponseMode,
+		ResponseURI:     pl.ResponseURI,
+		Nonce:           pl.Nonce,
+		State:           pl.State,
+		DCQLQuery:       pl.DCQLQuery,
+		TransactionData: pl.TransactionData,
 	}
 	if pl.PresentationDefinition != nil {
 		if err := json.Unmarshal(*pl.PresentationDefinition, &req.PresentationDefinition); err != nil {

@@ -68,6 +68,13 @@ var (
 	ErrKeyBindingInvalid = errors.New("compliance: key binding JWT malformed or signature failed")
 	ErrKeyBindingNonce   = errors.New("compliance: key binding nonce/audience mismatch")
 	ErrKeyBindingSDHash  = errors.New("compliance: key binding sd_hash mismatch")
+	// ErrKeyBindingTransactionData — the KB-JWT's transaction_data_hashes do not
+	// cover every transaction_data entry the verifier bound the request to
+	// (OpenID4VP 1.0 §Transaction Data). This binding is what proves the holder
+	// saw and approved this exact transaction (payment/consent); a mismatch
+	// means the presentation attests to a different transaction — or none — and
+	// must be rejected.
+	ErrKeyBindingTransactionData = errors.New("compliance: key binding transaction_data_hashes mismatch")
 
 	// Credential status (revocation)
 	ErrStatusListRequired = errors.New("compliance: status list required to check revocation")

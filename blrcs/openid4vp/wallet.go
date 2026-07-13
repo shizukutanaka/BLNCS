@@ -125,6 +125,7 @@ func (w *MockWallet) Present(reqURL string) (*AuthorizationResponse, error) {
 	var (
 		state, nonce, clientID string
 		def                    PresentationDefinition
+		transactionData        []string
 	)
 	if w.VerifierKey != nil {
 		// Secure path (RFC 9101 JAR): trust ONLY the signed request object.
@@ -136,6 +137,7 @@ func (w *MockWallet) Present(reqURL string) (*AuthorizationResponse, error) {
 		}
 		state, nonce, clientID = authReq.State, authReq.Nonce, authReq.ClientID
 		def = authReq.PresentationDefinition
+		transactionData = authReq.TransactionData
 		if state == "" {
 			return nil, errors.New("wallet: state missing in signed request")
 		}
@@ -162,6 +164,11 @@ func (w *MockWallet) Present(reqURL string) (*AuthorizationResponse, error) {
 		if err := json.Unmarshal([]byte(pdRaw), &def); err != nil {
 			return nil, fmt.Errorf("wallet: pd parse: %w", err)
 		}
+		if tdRaw := q.Get("transaction_data"); tdRaw != "" {
+			if err := json.Unmarshal([]byte(tdRaw), &transactionData); err != nil {
+				return nil, fmt.Errorf("wallet: transaction_data parse: %w", err)
+			}
+		}
 	}
 	// 適合 credential 検索 — AcceptableDIDs (wire) を使う
 	acceptSet := make(map[string]bool, len(def.AcceptableDIDs))
@@ -182,9 +189,9 @@ func (w *MockWallet) Present(reqURL string) (*AuthorizationResponse, error) {
 	var presented string
 	var err error
 	if w.HolderKey != nil {
-		presented, err = compliance.PresentWithKeyBinding(
+		presented, err = compliance.PresentWithKeyBindingTx(
 			matched.SDJWT, def.RequiredClaims, w.HolderKey,
-			nonce, clientID, time.Time{})
+			nonce, clientID, transactionData, time.Time{})
 	} else {
 		presented, err = compliance.Present(matched.SDJWT, def.RequiredClaims)
 	}

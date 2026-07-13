@@ -6,6 +6,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`compliance`, `openid4vp`, `mcp`: OpenID4VP 1.0 `transaction_data`
+  binding (Axis 114).** Implements the OpenID4VP 1.0 (final, Jul 2025)
+  Transaction Data mechanism — the basis for qualified e-signatures /
+  payment-consent in the EUDI ecosystem, previously absent. A verifier can
+  bind an Authorization Request to specific transaction_data entries
+  (base64url JSON objects); the holder hashes each into the KB-JWT
+  (`transaction_data_hashes` + `_alg`), and the verifier requires the hashes
+  to cover every entry — cryptographically proving the holder saw and
+  approved *this exact* transaction. `compliance.VerifyOptions` gains
+  `ExpectedTransactionData` and a new `ErrKeyBindingTransactionData`;
+  `PresentWithKeyBindingTx` is the holder-side variant.
+  `openid4vp.CreateRequestTx` carries transaction_data through both the
+  unsigned query-param path and the signed RFC 9101 JAR request object; the
+  MockWallet binds it on both. The `create_presentation_request` MCP tool
+  gains an optional `transactionData` arg (plain JSON objects, base64url-
+  encoded per spec by the tool). Verified end-to-end against the built
+  `blrcs-mcpd` binary and via a replay test proving a presentation bound to
+  a €42 payment does not verify against a request binding €4200. 8 new
+  tests. Fully backward-compatible: a verifier that sets no
+  `ExpectedTransactionData` behaves exactly as before.
+
 ### Fixed
 - **`compliance`: issue SD-JWT-VCs with the current `dc+sd-jwt` typ, not the
   retired `vc+sd-jwt` (Axis 113).** Found via a standards-currency review

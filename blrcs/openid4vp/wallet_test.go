@@ -3,6 +3,8 @@ package openid4vp
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"net/url"
 	"strings"
 	"testing"
@@ -337,5 +339,130 @@ func TestJARE2E_RequiresSignedRequest(t *testing.T) {
 	}
 	if _, err := wallet.Present(reqURL); err == nil {
 		t.Fatal("JAR-aware wallet must refuse an unsigned request")
+	}
+}
+
+// ============================================================================
+// OpenID4VP 1.0 transaction_data — full verifier↔wallet round-trip (Axis 114)
+// ============================================================================
+
+func encodeTxData(t *testing.T, obj map[string]any) string {
+	t.Helper()
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// txDataE2ESetup mirrors the E2E setup but returns the pieces needed to drive
+// transaction_data through both the unsigned and JAR-signed paths.
+func txDataE2ESetup(t *testing.T, jarSigned bool) (*Verifier, *MockWallet, PresentationDefinition) {
+	t.Helper()
+	issuer, _ := compliance.NewIssuer("did:web:factory.example")
+	holderPub, holderPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := NewVerifier("https://verify.blrcs.example", "https://verify.blrcs.example/cb", nil)
+	wallet := NewMockWallet("did:web:alice.holder")
+	wallet.HolderKey = holderPriv
+	if jarSigned {
+		signPub, signPriv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verifier.RequestSigningKey = signPriv
+		wallet.VerifierKey = signPub
+	}
+	sdjwt, _, err := issuer.IssueSDJWTBound("payment-authz",
+		map[string]any{"accountHolder": "Alice"}, nil, holderPub, 365*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet.Store(StoredCredential{
+		ID: "c1", IssuerDID: issuer.ID, IssuerPub: issuer.PublicKey(), SDJWT: sdjwt,
+		ClaimNames: []string{"accountHolder"},
+	})
+	def := PresentationDefinition{
+		ID: "pay", RequiredClaims: []string{"accountHolder"},
+		AcceptableIssuers: map[string][]byte{issuer.ID: issuer.PublicKey()},
+	}
+	return verifier, wallet, def
+}
+
+// TestTransactionDataE2EUnsigned drives transaction_data through the unsigned
+// (query-param) request path: verifier binds a payment, wallet hashes it into
+// the KB-JWT, verifier confirms the binding on ProcessResponse.
+func TestTransactionDataE2EUnsigned(t *testing.T) {
+	verifier, wallet, def := txDataE2ESetup(t, false)
+	td := []string{encodeTxData(t, map[string]any{"type": "payment", "amount": "42.00", "currency": "EUR", "payee": "ACME"})}
+
+	reqURL, _, err := verifier.CreateRequestTx(def, td)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := wallet.Present(reqURL)
+	if err != nil {
+		t.Fatalf("wallet present: %v", err)
+	}
+	vp, err := verifier.ProcessResponse(resp)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if vp.Claims["accountHolder"] != "Alice" {
+		t.Errorf("claim: %v", vp.Claims["accountHolder"])
+	}
+}
+
+// TestTransactionDataE2ESigned drives the same flow through the JAR-signed
+// request path, proving transaction_data survives the signed request object.
+func TestTransactionDataE2ESigned(t *testing.T) {
+	verifier, wallet, def := txDataE2ESetup(t, true)
+	td := []string{encodeTxData(t, map[string]any{"type": "payment", "amount": "42.00"})}
+
+	reqURL, _, err := verifier.CreateRequestTx(def, td)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := wallet.Present(reqURL)
+	if err != nil {
+		t.Fatalf("wallet present: %v", err)
+	}
+	if _, err := verifier.ProcessResponse(resp); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+}
+
+// TestTransactionDataE2EReplayAgainstDifferentTxRejected is the security
+// property end-to-end: a presentation bound to transaction A must not verify
+// against a request that binds transaction B. This is exactly the "the holder
+// approved a €42 payment, an attacker replays it for €4200" defense.
+func TestTransactionDataE2EReplayAgainstDifferentTxRejected(t *testing.T) {
+	verifier, wallet, def := txDataE2ESetup(t, false)
+
+	// The holder responds to a request binding a €42 payment.
+	tdReal := []string{encodeTxData(t, map[string]any{"amount": "42.00"})}
+	reqURL, _, err := verifier.CreateRequestTx(def, tdReal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := wallet.Present(reqURL)
+	if err != nil {
+		t.Fatalf("wallet present: %v", err)
+	}
+
+	// An attacker replays the SAME vp_token against a session that binds a
+	// €4200 payment. Build that session directly on the verifier's store.
+	tdAttack := []string{encodeTxData(t, map[string]any{"amount": "4200.00"})}
+	attackReqURL, attackState, err := verifier.CreateRequestTx(def, tdAttack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = attackReqURL
+	resp.State = attackState // point the stolen token at the attacker's session
+
+	if _, err := verifier.ProcessResponse(resp); err == nil {
+		t.Fatal("presentation bound to a different transaction must not verify")
 	}
 }

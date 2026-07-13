@@ -262,6 +262,13 @@ type VerifyOptions struct {
 	Leeway           time.Duration // 時刻ズレ許容 (ゼロなら 60s)
 	ExpectedNonce    string        // 設定時、KB-JWT の nonce と一致必須
 	ExpectedAudience string        // 設定時、KB-JWT の aud と一致必須
+	// ExpectedTransactionData — 設定時 (OpenID4VP 1.0 §Transaction Data)、KB-JWT
+	// の transaction_data_hashes が、ここに渡された各 transaction_data エントリ
+	// (base64url エンコード済み JSON 文字列) の sha-256 ハッシュを全て含むこと必須。
+	// verifier が Authorization Request に transaction_data を載せた場合、提示を
+	// その取引 (決済/同意) に暗号的に束縛し、holder が「その取引を見て承認した」
+	// ことを保証する。一致しなければ ErrKeyBindingTransactionData。
+	ExpectedTransactionData []string
 	// ExpectedIssuer — 設定時、JWT の iss クレームと一致必須 (key-confusion 防止)。
 	// 検証者は公開鍵をそのまま受け入れず、鍵がどの発行者を表すかも確認すべき。
 	ExpectedIssuer    string
@@ -679,6 +686,15 @@ func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, opts Veri
 	if opts.ExpectedAudience != "" && !audienceMatches(pl["aud"], opts.ExpectedAudience) {
 		return ErrKeyBindingNonce
 	}
+	// transaction_data binding (OpenID4VP 1.0 §Transaction Data): when the
+	// verifier bound the request to specific transaction_data, require the
+	// KB-JWT's transaction_data_hashes to cover the sha-256 of every entry.
+	// This is what proves the holder saw and approved this exact transaction.
+	if len(opts.ExpectedTransactionData) > 0 {
+		if err := verifyTransactionDataHashes(pl, opts.ExpectedTransactionData); err != nil {
+			return err
+		}
+	}
 	// sd_hash: KB-JWT 直前の '~' までを含む提示文字列の SHA-256。
 	idx := strings.LastIndex(presentation, "~")
 	h := sha256.Sum256([]byte(presentation[:idx+1]))
@@ -697,6 +713,42 @@ func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, opts Veri
 	}
 	if opts.MaxKBAge > 0 && iat < now.Add(-opts.MaxKBAge).Add(-leeway).Unix() {
 		return ErrKeyBindingInvalid
+	}
+	return nil
+}
+
+// transactionDataHash returns the OpenID4VP 1.0 transaction_data hash of one
+// entry: base64url(sha-256(entry)), where entry is the base64url-encoded JSON
+// string exactly as it appears in the request's transaction_data array (the
+// hash is over the encoded string, not the decoded JSON — §Transaction Data).
+func transactionDataHash(entry string) string {
+	h := sha256.Sum256([]byte(entry))
+	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// verifyTransactionDataHashes checks that the KB-JWT's transaction_data_hashes
+// claim covers every expected transaction_data entry. Per OpenID4VP 1.0, the
+// only hash algorithm a Wallet may use when the Verifier does not specify one
+// is sha-256; if transaction_data_hashes_alg is present it must be sha-256
+// (the sole registered value), else the binding is unverifiable here.
+func verifyTransactionDataHashes(pl map[string]any, expected []string) error {
+	if alg, ok := pl["transaction_data_hashes_alg"].(string); ok && alg != "" && alg != "sha-256" {
+		return ErrKeyBindingTransactionData
+	}
+	rawHashes, ok := pl["transaction_data_hashes"].([]any)
+	if !ok {
+		return ErrKeyBindingTransactionData
+	}
+	present := make(map[string]bool, len(rawHashes))
+	for _, h := range rawHashes {
+		if s, ok := h.(string); ok {
+			present[s] = true
+		}
+	}
+	for _, entry := range expected {
+		if !present[transactionDataHash(entry)] {
+			return ErrKeyBindingTransactionData
+		}
 	}
 	return nil
 }
@@ -751,6 +803,16 @@ func Present(sdjwt string, reveal []string) (string, error) {
 // holder は cnf にバインドされた秘密鍵で nonce/aud/sd_hash に署名する。
 // 出力形式: <jwt>~<disc>...~<kb-jwt>。VerifySDJWTWithBinding が検証する。
 func PresentWithKeyBinding(sdjwt string, reveal []string, holderPriv ed25519.PrivateKey, nonce, aud string, now time.Time) (string, error) {
+	return PresentWithKeyBindingTx(sdjwt, reveal, holderPriv, nonce, aud, nil, now)
+}
+
+// PresentWithKeyBindingTx is PresentWithKeyBinding with OpenID4VP 1.0
+// transaction_data support: when transactionData is non-empty, the holder
+// binds the presentation to those exact entries by adding
+// transaction_data_hashes (sha-256 of each base64url entry) and
+// transaction_data_hashes_alg to the KB-JWT. A verifier with
+// VerifyOptions.ExpectedTransactionData set then requires this binding.
+func PresentWithKeyBindingTx(sdjwt string, reveal []string, holderPriv ed25519.PrivateKey, nonce, aud string, transactionData []string, now time.Time) (string, error) {
 	if len(holderPriv) != ed25519.PrivateKeySize {
 		return "", ErrHolderKeyRequired
 	}
@@ -764,12 +826,21 @@ func PresentWithKeyBinding(sdjwt string, reveal []string, holderPriv ed25519.Pri
 	// sd_hash: 末尾 '~' までを含む提示文字列の SHA-256。
 	h := sha256.Sum256([]byte(presented))
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"kb+jwt"}`))
-	plBytes, _ := json.Marshal(map[string]any{
+	payloadClaims := map[string]any{
 		"iat":     now.Unix(),
 		"aud":     aud,
 		"nonce":   nonce,
 		"sd_hash": base64.RawURLEncoding.EncodeToString(h[:]),
-	})
+	}
+	if len(transactionData) > 0 {
+		hashes := make([]string, len(transactionData))
+		for i, entry := range transactionData {
+			hashes[i] = transactionDataHash(entry)
+		}
+		payloadClaims["transaction_data_hashes"] = hashes
+		payloadClaims["transaction_data_hashes_alg"] = "sha-256"
+	}
+	plBytes, _ := json.Marshal(payloadClaims)
 	payload := base64.RawURLEncoding.EncodeToString(plBytes)
 	sig := ed25519.Sign(holderPriv, []byte(header+"."+payload))
 	kbjwt := header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(sig)

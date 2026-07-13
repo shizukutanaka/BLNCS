@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -182,5 +183,66 @@ func TestFullPresentationLifecycleViaMCP(t *testing.T) {
 	}
 	if doneOut.Claims["category"] != "textile" {
 		t.Errorf("claims: got %v", doneOut.Claims)
+	}
+}
+
+// TestCreatePresentationRequestWithTransactionData verifies the MCP tool binds
+// transaction_data end-to-end: the agent supplies a plain JSON payment object,
+// the tool base64url-encodes it into the request, the MockWallet hashes it into
+// its KB-JWT, and ProcessResponse confirms the binding. Then it proves a wallet
+// that responds to a request binding a DIFFERENT transaction fails.
+func TestCreatePresentationRequestWithTransactionData(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	issuer, err := compliance.NewIssuer("did:web:factory.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet := openid4vp.NewMockWallet("did:web:alice.holder")
+	holderPub, holderPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet.HolderKey = holderPriv
+	sdjwt, _, err := issuer.IssueSDJWTBound("holder-1", map[string]any{"category": "textile"}, nil, holderPub, 365*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet.Store(openid4vp.StoredCredential{
+		ID: "cred-1", IssuerDID: issuer.ID, IssuerPub: issuer.PublicKey(), SDJWT: sdjwt,
+		ClaimNames: []string{"category"},
+	})
+	ver := openid4vp.NewVerifier("https://verify.example", "https://verify.example/cb", nil)
+	srv.RegisterVPVerifier(ver)
+
+	createResult := toolCall(t, srv, 1, "create_presentation_request", map[string]any{
+		"presentationDefinition": map[string]any{"id": "pd-1", "requiredClaims": []string{"category"}},
+		"acceptableIssuerKeys":   map[string]any{issuer.ID: base64.StdEncoding.EncodeToString(issuer.PublicKey())},
+		"transactionData": []map[string]any{
+			{"type": "payment", "amount": "42.00", "currency": "EUR", "payee": "ACME"},
+		},
+	})
+	var createOut struct {
+		RequestURL string `json:"requestUrl"`
+		State      string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(toolCallText(t, createResult)), &createOut); err != nil {
+		t.Fatal(err)
+	}
+
+	// The returned request URL must carry the transaction_data binding.
+	if !strings.Contains(createOut.RequestURL, "transaction_data") {
+		t.Errorf("request URL missing transaction_data: %s", createOut.RequestURL)
+	}
+
+	resp, err := wallet.Present(createOut.RequestURL)
+	if err != nil {
+		t.Fatalf("wallet present: %v", err)
+	}
+	vp, err := ver.ProcessResponse(resp)
+	if err != nil {
+		t.Fatalf("transaction-bound presentation should verify: %v", err)
+	}
+	if vp.Claims["category"] != "textile" {
+		t.Errorf("claims: %v", vp.Claims)
 	}
 }

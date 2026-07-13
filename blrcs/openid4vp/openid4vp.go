@@ -90,7 +90,12 @@ type AuthorizationRequest struct {
 	State                  string                 `json:"state"`
 	PresentationDefinition PresentationDefinition `json:"presentation_definition,omitempty"`
 	DCQLQuery              *DCQLQuery             `json:"dcql_query,omitempty"` // OpenID4VP v1.0 §5 (PE 後継)
-	CreatedAt              time.Time              `json:"-"`                    // サーバ内部
+	// TransactionData — OpenID4VP 1.0 §Transaction Data。各要素は base64url
+	// エンコードされた JSON オブジェクト。設定時、ProcessResponse は holder の
+	// KB-JWT が transaction_data_hashes でこれらを束縛していることを要求する
+	// (決済/同意を提示に暗号的に結び付ける)。
+	TransactionData []string  `json:"transaction_data,omitempty"`
+	CreatedAt       time.Time `json:"-"` // サーバ内部
 }
 
 // AuthorizationResponse — Walletから受け取るレスポンス
@@ -327,6 +332,15 @@ func (v *Verifier) Close() error {
 // 戻り値: QRやディープリンクに埋込む URL (openid4vp://...) と state
 // Walletはこの URL を解釈し、ユーザに同意を求めた後、vp_token を ResponseURI に POST する
 func (v *Verifier) CreateRequest(def PresentationDefinition) (requestURL string, state string, err error) {
+	return v.CreateRequestTx(def, nil)
+}
+
+// CreateRequestTx is CreateRequest with OpenID4VP 1.0 transaction_data: each
+// entry is a base64url-encoded JSON object describing a transaction the Wallet
+// must display and the holder must approve. The resulting presentation is
+// cryptographically bound to these entries (ProcessResponse enforces the
+// holder's transaction_data_hashes cover them).
+func (v *Verifier) CreateRequestTx(def PresentationDefinition, transactionData []string) (requestURL string, state string, err error) {
 	if err := ValidateClientID(v.ClientID); err != nil {
 		return "", "", err
 	}
@@ -359,6 +373,7 @@ func (v *Verifier) CreateRequest(def PresentationDefinition) (requestURL string,
 		Nonce:                  nonce,
 		State:                  state,
 		PresentationDefinition: def,
+		TransactionData:        transactionData,
 		CreatedAt:              time.Now().UTC(),
 	}
 	if err := v.store.Save(state, req, v.DefaultTTL); err != nil {
@@ -436,6 +451,14 @@ func buildRequestURL(req *AuthorizationRequest, signKey ed25519.PrivateKey, ttl 
 		}
 		q.Set("presentation_definition", string(b))
 	}
+	if len(req.TransactionData) > 0 {
+		// OpenID4VP 1.0 §Transaction Data: array of base64url-encoded JSON objects.
+		b, err := json.Marshal(req.TransactionData)
+		if err != nil {
+			return "", fmt.Errorf("openid4vp: marshal transaction_data: %w", err)
+		}
+		q.Set("transaction_data", string(b))
+	}
 	// RFC 9101 JAR (by value): 署名鍵があれば request 全体の署名付き JWT を同梱。
 	if len(signKey) == ed25519.PrivateKeySize {
 		jwt, err := signRequestObject(req, signKey, ttl)
@@ -498,11 +521,12 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 	// (nonce バインドが replay を防ぐが、iat フレッシュネスがセッション TTL を超えた
 	//  古い提示を追加で防ぐ — SD-JWT draft §KB-JWT freshness requirement)
 	opts := compliance.VerifyOptions{
-		ExpectedNonce:     req.Nonce,
-		ExpectedAudience:  v.ClientID,
-		RequireKeyBinding: v.RequireKeyBinding,
-		MaxKBAge:          v.DefaultTTL,
-		AllowedAlgs:       v.AllowedAlgs,
+		ExpectedNonce:           req.Nonce,
+		ExpectedAudience:        v.ClientID,
+		RequireKeyBinding:       v.RequireKeyBinding,
+		MaxKBAge:                v.DefaultTTL,
+		AllowedAlgs:             v.AllowedAlgs,
+		ExpectedTransactionData: req.TransactionData,
 	}
 	var verified *compliance.VerifiedClaims
 	var usedIssuer string
