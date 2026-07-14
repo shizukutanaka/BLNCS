@@ -54,6 +54,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   same capability data from a single source.
 
 ### Fixed
+- **`openid4vci`: legacy `vc+sd-jwt` format-id default and un-threaded `vct`
+  (Axis 120-121).** A background research workflow re-verified blrcs
+  against the current state of 10 standards and surfaced these as the
+  top-ranked, highest-confidence gaps. `RegisterConfiguration` defaulted an
+  unset `Format` to the retired `vc+sd-jwt` discriminator (and
+  `cmd/blrcs-mcpd/main.go`'s demo config used the same string), even though
+  `compliance.Issuer` has issued `dc+sd-jwt`-typed credentials by default
+  since Axis 113 — a wallet reading `credential_configurations_supported`
+  saw the retired format id while receiving a `dc+sd-jwt` JWT. Separately,
+  `IssueCredentialWithProof` always signed with the vct-parameterized
+  variants hardcoded to `VCTDigitalProductPassport`, ignoring the matched
+  configuration's own `CredentialType` — two differently-configured
+  `credential_configurations` on the same issuer (e.g. `BatteryPassport` vs
+  `DigitalProductPassport`) silently collapsed to the same `vct` despite
+  advertising distinct types in issuer metadata. Now threads
+  `cfg.CredentialType` into the (previously unused)
+  `IssueSDJWTVC*`/`IssueSDJWTVCBound*`/`IssueSDJWTVCStatus*` variants,
+  falling back to the DPP default only when `CredentialType` is unset. Also
+  refreshed stale "OpenID4VCI Draft 15" doc comments to "1.0 Final" (spec
+  reached Final status 2025-09-16), and removed a hardcoded
+  `Format: "vc+sd-jwt"` from `WalletClient.FetchCredentialCtx` that would
+  otherwise re-drift on every future format-string change. 2 new tests
+  proving distinct configs issue distinct `vct` claims and that an unset
+  `CredentialType` still falls back correctly. Verified against a built
+  `blrcs-mcpd`: `/.well-known/openid-credential-issuer` now advertises
+  `"format":"dc+sd-jwt"` matching what is actually signed.
 - **`httpmw`: `statusWriter`/`loggingResponseWriter` didn't forward
   `http.Flusher`/`Unwrap` (Axis 117).** Found while auditing why
   `cmd/blrcs-mcpd` only ever applied bare `Recovery` instead of the
