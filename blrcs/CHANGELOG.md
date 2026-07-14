@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`openid4vci`: Notification Endpoint (OpenID4VCI 1.0 §10, Axis 127).**
+  No `notification_id` in `CredentialResponse`, no `POST /notification`
+  handler, not advertised in `Metadata()` — the audit trail for whether a
+  wallet actually stored an issued credential was missing entirely.
+  `IssueCredentialWithProof` now generates a `notification_id` alongside
+  every issuance, bound to the access_token used (spec requires the same
+  token to submit the notification). New `HandleNotification` validates the
+  event (`credential_accepted`/`credential_failure`/`credential_deleted`),
+  single-use, and collapses all failure modes into one
+  `ErrUnknownNotification` (mirrors the existing pre-authorized_code/tx_code
+  oracle defense). New `OnNotification` audit hook mirrors `OnTxCodeLockout`.
+  HTTP: `POST /notification`, Bearer auth, 204 on success. 13 new tests.
+  Verified end-to-end against the built `blrcs-mcpd` binary.
 - **`didresolver`: live HTTP resolution for did:webvh identifiers (Axis
   126).** `Resolve`/`ResolveAll` switched on `case "key"/"jwk"/"web"` but had
   no `case "webvh"` — did:webvh could only be verified from a caller-supplied
