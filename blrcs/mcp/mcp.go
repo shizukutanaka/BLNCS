@@ -592,13 +592,13 @@ func toolDefs() []tool {
 		},
 		{
 			Name:        "create_did_webvh",
-			Description: "Create a new did:webvh genesis log entry (verifiable history + optional pre-rotation commitment + optional witness requirement). issuerId must be a registered issuer whose key becomes the genesis update key. Returns the new DID and a one-entry log — keep it and pass it to update_did_webvh/verify_did_webvh_log; this server does not persist did:webvh logs.",
-			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"didPath":{"type":"string","description":"Method-specific id without the SCID, e.g. example.com:dids:org-1"},"nextKeyHashes":{"type":"array","items":{"type":"string"},"description":"Optional pre-rotation commitment hashes"},"stateExtra":{"type":"object","description":"Extra fields for the genesis DID document"},"witness":{"type":"object","description":"Optional witness requirement: {threshold, witnesses:[{id: did:key DID}]}. Collect proofs from each witness via sign_witness_proof and pass them as witnessLog to verify_did_webvh_log."}},"required":["issuerId","didPath"]}`),
+			Description: "Create a new did:webvh genesis log entry (verifiable history + optional pre-rotation commitment + optional witness requirement + optional portability). issuerId must be a registered issuer whose key becomes the genesis update key. Returns the new DID and a one-entry log — keep it and pass it to update_did_webvh/verify_did_webvh_log; this server does not persist did:webvh logs.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"didPath":{"type":"string","description":"Method-specific id without the SCID, e.g. example.com:dids:org-1"},"nextKeyHashes":{"type":"array","items":{"type":"string"},"description":"Optional pre-rotation commitment hashes"},"stateExtra":{"type":"object","description":"Extra fields for the genesis DID document"},"witness":{"type":"object","description":"Optional witness requirement: {threshold, witnesses:[{id: did:key DID}]}. Collect proofs from each witness via sign_witness_proof and pass them as witnessLog to verify_did_webvh_log."},"portable":{"type":"boolean","description":"Optional: set true to allow this DID to later be moved to a different domain/path via update_did_webvh while retaining its SCID. Only settable at genesis; defaults to false (not portable)."}},"required":["issuerId","didPath"]}`),
 		},
 		{
 			Name:        "update_did_webvh",
-			Description: "Append a new signed entry to an existing did:webvh log (key rotation, document update, deactivation, or (re)declaring a witness requirement). signKeyIssuerId must be a registered issuer whose key currently holds update authority over the log. Returns the extended log.",
-			InputSchema: rawJSON(`{"type":"object","properties":{"signKeyIssuerId":{"type":"string"},"log":{"type":"array","description":"The existing verified log (array of LogEntry)"},"newState":{"type":"object","description":"The new DID document"},"updateKeys":{"type":"array","items":{"type":"string"},"description":"Multikey-encoded keys that take update authority from this entry on"},"nextKeyHashes":{"type":"array","items":{"type":"string"}},"deactivate":{"type":"boolean"},"witness":{"type":"object","description":"Optional witness requirement to declare from this entry on: {threshold, witnesses:[{id: did:key DID}]}"}},"required":["signKeyIssuerId","log"]}`),
+			Description: "Append a new signed entry to an existing did:webvh log (key rotation, document update, deactivation, (re)declaring a witness requirement, or moving domain/path if the log was created with portable=true). signKeyIssuerId must be a registered issuer whose key currently holds update authority over the log. Returns the extended log.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"signKeyIssuerId":{"type":"string"},"log":{"type":"array","description":"The existing verified log (array of LogEntry)"},"newState":{"type":"object","description":"The new DID document"},"updateKeys":{"type":"array","items":{"type":"string"},"description":"Multikey-encoded keys that take update authority from this entry on"},"nextKeyHashes":{"type":"array","items":{"type":"string"}},"deactivate":{"type":"boolean"},"witness":{"type":"object","description":"Optional witness requirement to declare from this entry on: {threshold, witnesses:[{id: did:key DID}]}"},"portable":{"type":"boolean","description":"Optional: set false to permanently disable further domain/path moves. Omit to retain whatever was previously in effect. Cannot be set true here — portability may only be enabled at genesis."}},"required":["signKeyIssuerId","log"]}`),
 		},
 		{
 			Name:        "verify_did_webvh_log",
@@ -1345,6 +1345,11 @@ func (s *Server) toolCreateDIDWebVH(args json.RawMessage) (string, error) {
 		NextKeyHashes []string          `json:"nextKeyHashes"`
 		StateExtra    map[string]any    `json:"stateExtra"`
 		Witness       *didwebvh.Witness `json:"witness"`
+		// Portable declares whether this DID may later be moved to a different
+		// domain/path while retaining its SCID (spec §DID Portability). Omitted
+		// or false leaves portability disabled (the spec default) — only the
+		// genesis entry may ever set this true.
+		Portable *bool `json:"portable"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
@@ -1364,6 +1369,7 @@ func (s *Server) toolCreateDIDWebVH(args json.RawMessage) (string, error) {
 		NextKeyHashes: in.NextKeyHashes,
 		StateExtra:    in.StateExtra,
 		Witness:       in.Witness,
+		Portable:      in.Portable,
 	})
 	if err != nil {
 		return "", err
@@ -1389,6 +1395,12 @@ func (s *Server) toolUpdateDIDWebVH(args json.RawMessage) (string, error) {
 		NextKeyHashes   []string            `json:"nextKeyHashes"`
 		Deactivate      bool                `json:"deactivate"`
 		Witness         *didwebvh.Witness   `json:"witness"`
+		// Portable (re)declares the portability parameter from this entry on.
+		// Omitted retains whatever value was previously in effect; false
+		// permanently disables further moves. true is rejected here by
+		// didwebvh.Update's underlying Verify contract — only the genesis entry
+		// may ever set it.
+		Portable *bool `json:"portable"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
@@ -1410,6 +1422,7 @@ func (s *Server) toolUpdateDIDWebVH(args json.RawMessage) (string, error) {
 		NextKeyHashes: in.NextKeyHashes,
 		Deactivate:    in.Deactivate,
 		Witness:       in.Witness,
+		Portable:      in.Portable,
 	})
 	if err != nil {
 		return "", err

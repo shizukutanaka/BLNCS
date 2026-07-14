@@ -15,13 +15,18 @@
 //
 // Security model implemented and tested here: SCID self-certification, entry
 // hash-chaining (tamper / reorder / truncation detection), update-key
-// authorization, and pre-rotation commitment enforcement. The wire format
-// (JCS, multihash, base58btc, Multikey) is built on the KAT-validated
-// blrcs/multiformats primitives.
+// authorization, pre-rotation commitment enforcement, witness threshold
+// co-signing (see witness.go), and DID Portability enforcement (a DID's SCID
+// segment can never change across entries; its domain/path segment can only
+// change when portable was declared at genesis, opted out of by a later
+// entry explicitly setting portable=false). The wire format (JCS, multihash,
+// base58btc, Multikey) is built on the KAT-validated blrcs/multiformats
+// primitives.
 //
 // Note: full byte-for-byte interop should be validated against the official
-// did:webvh test vectors. Witness cosigning and did:web fallback resolution are
-// not implemented here.
+// did:webvh test vectors. did:web fallback resolution and live HTTP
+// resolution of a did:webvh identifier are not implemented here — Verify
+// operates on a caller-supplied in-memory log only.
 package didwebvh
 
 import (
@@ -67,6 +72,14 @@ var (
 	// before the DID with the new version is published" — so an insufficiently
 	// witnessed entry must be rejected, not silently accepted.
 	ErrWitnessThreshold = errors.New("didwebvh: insufficient valid witness proofs for declared threshold")
+	// ErrPortableViolation is returned by Verify when a log entry violates the
+	// DID Portability rules (spec §DID Portability): a non-genesis entry set
+	// portable=true (only the first entry may), or state.id's domain/path
+	// segment changed while portability was not in effect, or state.id's SCID
+	// segment does not match the DID's SCID. Without this check a malicious or
+	// buggy log could silently rewrite a DID's SCID or domain across entries
+	// and Verify would still accept it.
+	ErrPortableViolation = errors.New("didwebvh: DID portability rules violated")
 )
 
 // Parameters are the did:webvh log-entry parameters (spec §parameters).
@@ -75,9 +88,17 @@ type Parameters struct {
 	SCID          string   `json:"scid,omitempty"`
 	UpdateKeys    []string `json:"updateKeys,omitempty"`    // Multikey (z6Mk…)
 	NextKeyHashes []string `json:"nextKeyHashes,omitempty"` // base58btc(multihash) commitments
-	Portable      bool     `json:"portable,omitempty"`
-	Deactivated   bool     `json:"deactivated,omitempty"`
-	TTL           int      `json:"ttl,omitempty"`
+	// Portable — spec §Parameters: "indicating if the DID is portable, allowing
+	// a DID Controller to control if a DID can be moved, while retaining its
+	// SCID and verifiable history." A nil value means the parameter is omitted
+	// from this entry: the FIRST entry then defaults to false; a LATER entry
+	// retains whatever value was previously in effect. Only the first entry
+	// may set this to true — a later entry may only omit it (retain) or set it
+	// to false (permanently disable further moves); Verify rejects any later
+	// entry that sets it to true.
+	Portable    *bool `json:"portable,omitempty"`
+	Deactivated bool  `json:"deactivated,omitempty"`
+	TTL         int   `json:"ttl,omitempty"`
 	// Witness declares the did:key witnesses required to co-sign updates from
 	// this entry on, and how many of them (threshold) — see witness.go. nil
 	// means no witness requirement is in effect for this entry.
@@ -235,6 +256,22 @@ func substituteSCID(v any, from, to string) any {
 	default:
 		return v
 	}
+}
+
+// splitWebVHMethodSpecificID splits a did:webvh identifier
+// ("did:webvh:<scid>:<host/path>") into its SCID segment and the remaining
+// host/path segment, per spec §Method-Specific Identifier.
+func splitWebVHMethodSpecificID(did string) (scid, rest string, err error) {
+	prefix := "did:" + Method + ":"
+	if !strings.HasPrefix(did, prefix) {
+		return "", "", fmt.Errorf("%w: %q is not a did:%s identifier", ErrMalformedEntry, did, Method)
+	}
+	body := did[len(prefix):]
+	idx := strings.IndexByte(body, ':')
+	if idx <= 0 || idx == len(body)-1 {
+		return "", "", fmt.Errorf("%w: malformed did:%s method-specific-id %q", ErrMalformedEntry, Method, did)
+	}
+	return body[:idx], body[idx+1:], nil
 }
 
 // parseVersionID splits "<n>-<entryHash>" into its parts.

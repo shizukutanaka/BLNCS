@@ -23,6 +23,11 @@ type CreateParams struct {
 	// of Parameters, which is included in the entry's own self-referential
 	// hash/SCID/proof; changing it post-hoc invalidates the entry.
 	Witness *Witness
+	// Portable declares whether this DID may later be moved to a different
+	// domain/path while retaining its SCID (spec §DID Portability). nil or a
+	// pointer to false leaves portability disabled (the spec default); only
+	// the genesis entry may set this true.
+	Portable *bool
 	// VersionTime is the genesis time (defaults to now UTC).
 	VersionTime time.Time
 	// StateExtra lets the caller add fields to the genesis DID document.
@@ -59,6 +64,7 @@ func Create(p CreateParams) (*LogEntry, string, error) {
 			UpdateKeys:    []string{updateMultikey},
 			NextKeyHashes: p.NextKeyHashes,
 			Witness:       p.Witness,
+			Portable:      p.Portable,
 		},
 		State: state,
 	}
@@ -107,7 +113,13 @@ type UpdateParams struct {
 	// unresolved — VerifyWithWitnesses only enforces a threshold for entries
 	// that explicitly set Parameters.Witness, so a nil here means "no witness
 	// requirement declared BY THIS entry", not "inherit the prior one".
-	Witness     *Witness
+	Witness *Witness
+	// Portable (re)declares the portability parameter from this entry on. nil
+	// omits it (retains whatever value was previously in effect); a pointer to
+	// false permanently disables further moves. A pointer to true is only
+	// valid on the FIRST entry of a log — Verify rejects it here since Update
+	// only ever appends a non-genesis entry.
+	Portable    *bool
 	VersionTime time.Time
 	Deactivate  bool
 }
@@ -149,6 +161,7 @@ func Update(p UpdateParams) (*LogEntry, error) {
 			NextKeyHashes: p.NextKeyHashes,
 			Deactivated:   p.Deactivate,
 			Witness:       p.Witness,
+			Portable:      p.Portable,
 		},
 		State: p.NewState,
 	}
@@ -206,6 +219,15 @@ func Verify(log []LogEntry) (*Resolution, error) {
 		return nil, fmt.Errorf("%w: derived %s want %s", ErrSCIDMismatch, derived, scid)
 	}
 
+	// The genesis state.id's host/path segment is the DID's fixed identity
+	// unless/until portability is declared and exercised; every later entry's
+	// state.id is checked against it below.
+	genesisID := didFromState(genesis.State)
+	_, genesisRest, err := splitWebVHMethodSpecificID(genesisID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: genesis state.id %q", ErrMalformedEntry, genesisID)
+	}
+
 	var (
 		predecessorVersionID = scid
 		prevNum              = 0
@@ -213,6 +235,7 @@ func Verify(log []LogEntry) (*Resolution, error) {
 		currentUpdateKeys    []string
 		pendingNextHashes    []string // nextKeyHashes committed by the previous entry
 		deactivated          bool
+		portableInEffect     = false // spec default; entry 0 applies its own declaration below
 	)
 
 	for i := range log {
@@ -253,6 +276,35 @@ func Verify(log []LogEntry) (*Resolution, error) {
 		}
 		if i > 0 && t.Before(prevTime) {
 			return nil, fmt.Errorf("%w: versionTime went backwards at entry %d", ErrMalformedEntry, num)
+		}
+
+		// 5b. DID Portability (spec §DID Portability): the SCID segment of
+		//     state.id MUST match the DID's SCID in every entry, and the
+		//     host/path segment MUST match the genesis entry's UNLESS
+		//     portability was already in effect entering this entry. Checked
+		//     against portableInEffect as carried over from the PREDECESSOR —
+		//     the same entry that authorizes this move — before this entry's
+		//     own portable declaration (applied below) takes effect.
+		entryID := didFromState(entry.State)
+		entrySCID, entryRest, err := splitWebVHMethodSpecificID(entryID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: entry %d state.id %q", ErrMalformedEntry, num, entryID)
+		}
+		if entrySCID != scid {
+			return nil, fmt.Errorf("%w: entry %d state.id scid segment %q, want %q", ErrPortableViolation, num, entrySCID, scid)
+		}
+		if entryRest != genesisRest && !portableInEffect {
+			return nil, fmt.Errorf("%w: entry %d changed domain/path without portability in effect", ErrPortableViolation, num)
+		}
+		if entry.Parameters.Portable != nil {
+			if *entry.Parameters.Portable {
+				if i != 0 {
+					return nil, fmt.Errorf("%w: entry %d set portable=true (only the first entry may)", ErrPortableViolation, num)
+				}
+				portableInEffect = true
+			} else {
+				portableInEffect = false
+			}
 		}
 
 		// 6. Determine the update keys authorized to sign THIS entry.
@@ -301,9 +353,13 @@ func Verify(log []LogEntry) (*Resolution, error) {
 		prevTime = t
 	}
 
+	// DID resolves to the LATEST entry's state.id, not the genesis one: for a
+	// non-portable DID these are always identical (enforced above), but a
+	// legitimately portable DID that has moved must resolve to its current
+	// domain/path, not the address it started at.
 	last := &log[len(log)-1]
 	return &Resolution{
-		DID:         didFromState(genesis.State),
+		DID:         didFromState(last.State),
 		SCID:        scid,
 		Document:    last.State,
 		VersionID:   last.VersionID,
