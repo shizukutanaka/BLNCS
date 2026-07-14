@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`cbor`, `mdoc`, `scitt`: per-call COSE algorithm allowlist (Axis 124).**
+  `cbor.RegisterVerifier` lets a second COSE algorithm be registered
+  globally, but `Verify1` had no allowlist parameter — once any second alg
+  is registered, every mdoc/SCITT verification call anywhere in the process
+  silently accepted either algorithm, with no way to pin one verification
+  to PQC-only. Mirrors the downgrade defense
+  `compliance.VerifyOptions.AllowedAlgs` already provides on the SD-JWT
+  side. New `cbor.Verify1WithAlgs` (`Verify1` now a thin wrapper) plus
+  `ErrCOSEAlgNotAllowed`, wired through to its real callers —
+  `mdoc.VerifyWithAlgs`, `mdoc.VerifyDeviceAuthWithAlgs`,
+  `scitt.VerifyCOSEReceiptWithAlgs` — rather than left cbor-internal only.
+  Also switched the COSE-error wrapping at those three call sites from
+  `%w: %v` to `%w: %w` so `errors.Is` can see through to the underlying
+  cbor sentinel, not just each package's own top-level one. 5 new tests.
 - **`didwebvh`, `mcp`: enforce the did:webvh Portable parameter in `Verify`
   (Axis 123).** `Parameters.Portable` was round-tripped on the wire but never
   actually checked: `Verify` never confirmed that a log entry's `state.id`
