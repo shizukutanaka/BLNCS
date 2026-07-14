@@ -54,6 +54,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   same capability data from a single source.
 
 ### Fixed
+- **`openid4vp`: DC-API client_id prefix used the wrong wire string (Axis
+  122).** OpenID4VP 1.0 Final §5.10 defines the DC-API Client Identifier
+  Prefix as the literal `origin` (`origin:<calling origin>`); `clientid.go`
+  instead implemented it as `web-origin`, which no spec-conformant
+  wallet/browser recognizes. Renamed the known-prefix entry and its
+  scheme-validation branch. New test locks in both directions: `origin:`
+  validates as the DC-API prefix, and the retired `web-origin:` string no
+  longer gets scheme-validated as one. Continues the standards-research
+  audit backlog started at Axis 120.
 - **`openid4vci`: legacy `vc+sd-jwt` format-id default and un-threaded `vct`
   (Axis 120-121).** A background research workflow re-verified blrcs
   against the current state of 10 standards and surfaced these as the
