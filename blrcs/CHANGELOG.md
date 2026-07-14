@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`didresolver`: live HTTP resolution for did:webvh identifiers (Axis
+  126).** `Resolve`/`ResolveAll` switched on `case "key"/"jwk"/"web"` but had
+  no `case "webvh"` — did:webvh could only be verified from a caller-supplied
+  in-memory log, never resolved as a live trust anchor the way did:web
+  already is. Verified the exact DID-to-HTTPS transformation against the
+  canonical spec source before implementing: strip the SCID segment, decode
+  `%3A`-encoded ports, join remaining segments into a path, fetch
+  `.../did.jsonl` (or `.well-known/did.jsonl`). New
+  `didresolver/didwebvh.go` fetches, parses the `text/jsonl` log, calls
+  `didwebvh.Verify`, and — critically — confirms the verified log's resolved
+  SCID matches the SCID segment parsed from the identifier itself, since
+  `Verify` alone only checks a log's internal self-consistency and has no way
+  to know which DID was actually requested (a malicious server could
+  otherwise serve a valid log for a *different* SCID at the same URL).
+  `resolve_did`/`discover_did_services` (existing generic MCP tools)
+  transparently gained did:webvh support with no MCP-layer code change.
+  Reuses the same SSRF-hardened fetcher as did:web — no new attack surface.
+  12 new tests. Verified end-to-end against the built `blrcs-mcp` binary +
+  a real local HTTP server.
 - **`mcp`: wire GS1 Digital Link Linkset to `build_gs1_linkset`/
   `parse_gs1_linkset` (Axis 125).** `compliance/linkset.go` fully implements
   the RFC 9264 Linkset — the standard EU DPP discovery mechanism (a QR
