@@ -21,7 +21,12 @@ var knownClientIDPrefixes = map[string]bool{
 	"verifier_attestation":     true,
 	"x509_san_dns":             true,
 	"x509_hash":                true,
-	"web-origin":               true,
+	// "origin" — OpenID4VP v1.0 §5.10: identifies a Digital Credentials API
+	// unsigned request's client_id as the browser-supplied calling origin
+	// rather than a registered Verifier identifier. The literal wire prefix
+	// is "origin", not "web-origin" (which no spec-conformant wallet/browser
+	// recognizes).
+	"origin": true,
 }
 
 // ValidateClientID — client_id の形式を検証する。
@@ -41,7 +46,7 @@ func ValidateClientID(clientID string) error {
 		return nil // bare / pre-registered identifier (incl. plain https URL)
 	}
 	switch prefix {
-	case "redirect_uri", "web-origin", "openid_federation":
+	case "redirect_uri", "origin", "openid_federation":
 		return validateAbsHTTPSURL(value)
 	case "decentralized_identifier":
 		// value は DID 全体 (例 "did:web:verifier.example")。
