@@ -679,12 +679,12 @@ func toolDefs() []tool {
 		},
 		{
 			Name:        "resolve_did",
-			Description: "Resolve a did:web/did:key/did:jwk identifier to its Ed25519 public key(s) — useful before verify_passport/verify_sdjwt/verify_mdoc when you only have an issuer's DID, not its raw public key. Does not itself decide trust; the caller evaluates the returned key(s).",
+			Description: "Resolve a did:web/did:webvh/did:key/did:jwk identifier to its Ed25519 public key(s) — useful before verify_passport/verify_sdjwt/verify_mdoc when you only have an issuer's DID, not its raw public key. did:webvh resolution fetches and verifies the full did.jsonl log (SCID self-certification, hash-chaining, witness/portability rules). Does not itself decide trust; the caller evaluates the returned key(s).",
 			InputSchema: rawJSON(`{"type":"object","properties":{"did":{"type":"string"}},"required":["did"]}`),
 		},
 		{
 			Name:        "discover_did_services",
-			Description: "Resolve a did:web identifier's DID Document and return its declared service endpoints (e.g. a wallet's credential-offer or presentation endpoint).",
+			Description: "Resolve a did:web/did:webvh identifier's DID Document and return its declared service endpoints (e.g. a wallet's credential-offer or presentation endpoint).",
 			InputSchema: rawJSON(`{"type":"object","properties":{"did":{"type":"string"}},"required":["did"]}`),
 		},
 		{
@@ -1258,11 +1258,11 @@ func (s *Server) toolParseGS1Linkset(args json.RawMessage) (string, error) {
 	return string(b), nil
 }
 
-// toolResolveDID resolves a did:web/did:key/did:jwk identifier to its Ed25519
-// public key(s) — previously only reachable via the didresolver package
-// directly. Deliberately does NOT gate on a trust anchor: the caller decides
-// whether to trust the result, same as verify_passport/verify_mdoc require
-// the caller to already have a public key rather than deciding trust
+// toolResolveDID resolves a did:web/did:webvh/did:key/did:jwk identifier to
+// its Ed25519 public key(s) — previously only reachable via the didresolver
+// package directly. Deliberately does NOT gate on a trust anchor: the caller
+// decides whether to trust the result, same as verify_passport/verify_mdoc
+// require the caller to already have a public key rather than deciding trust
 // server-side. Safe to expose unconditionally because didresolver's default
 // fetcher is SSRF-hardened (validates the resolved IP before connecting).
 func (s *Server) toolResolveDID(args json.RawMessage) (string, error) {

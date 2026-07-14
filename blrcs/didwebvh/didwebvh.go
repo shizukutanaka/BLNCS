@@ -24,9 +24,10 @@
 // primitives.
 //
 // Note: full byte-for-byte interop should be validated against the official
-// did:webvh test vectors. did:web fallback resolution and live HTTP
-// resolution of a did:webvh identifier are not implemented here — Verify
-// operates on a caller-supplied in-memory log only.
+// did:webvh test vectors. Verify itself operates on a caller-supplied
+// in-memory log only — live HTTP resolution (did:webvh identifier ->
+// did.jsonl fetch -> Verify) is implemented one layer up, in
+// blrcs/didresolver, which also has no did:web fallback resolution path.
 package didwebvh
 
 import (

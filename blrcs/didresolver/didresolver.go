@@ -106,7 +106,8 @@ func New() *Resolver {
 
 // Resolve — DID 文字列 → ed25519.PublicKey
 //
-// サポート: did:web (HTTP fetch), did:key (公開鍵埋込), did:jwk (JWK 埋込)
+// サポート: did:web (HTTP fetch), did:webvh (HTTP fetch + verifiable-history
+// verification), did:key (公開鍵埋込), did:jwk (JWK 埋込)
 func (r *Resolver) Resolve(ctx context.Context, did string) (ed25519.PublicKey, error) {
 	keys, err := r.ResolveAll(ctx, did)
 	if err != nil {
@@ -156,6 +157,8 @@ func (r *Resolver) ResolveAll(ctx context.Context, did string) ([]ed25519.Public
 		}
 	case "web":
 		keys, err = r.resolveDIDWebAll(ctx, identifier)
+	case "webvh":
+		keys, err = r.resolveDIDWebVHAll(ctx, identifier)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedMethod, method)
 	}
@@ -214,7 +217,7 @@ type Service struct {
 	ServiceEndpoint string
 }
 
-// ResolveServices — did:web の DID document から service endpoint 群を取得。
+// ResolveServices — did:web/did:webvh の DID document から service endpoint 群を取得。
 //
 // DPP データ所在の公示に使う (arXiv:2410.15758 §2.3)。did:key / did:jwk は
 // service を持たないため空スライスを返す。
@@ -226,7 +229,12 @@ func (r *Resolver) ResolveServices(ctx context.Context, did string) ([]Service, 
 	if len(parts) != 3 || parts[0] != "did" {
 		return nil, fmt.Errorf("%w: %q", ErrMalformedDID, did)
 	}
-	if parts[1] != "web" {
+	switch parts[1] {
+	case "webvh":
+		return r.resolveDIDWebVHServices(ctx, parts[2])
+	case "web":
+		// fall through below
+	default:
 		// did:key / did:jwk carry no service endpoints
 		return nil, nil
 	}
