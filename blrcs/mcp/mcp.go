@@ -26,6 +26,8 @@
 //	verify_mdoc         — mdoc署名検証
 //	build_gs1_link      — GS1 Digital Link URI 構築
 //	parse_gs1_link      — GS1 Digital Link URI 解析
+//	build_gs1_linkset   — GS1 Digital Link Linkset 構築 (RFC 9264, DPP発見用)
+//	parse_gs1_linkset   — GS1 Digital Link Linkset 解析
 //	resolve_did         — did:web/did:key/did:jwk を公開鍵に解決 (SSRF対策済み)
 //	discover_did_services — did:web の DID Document から service endpoint 群を取得
 //	verify_passport_by_did — DPP検証 (issuer DID から鍵解決)
@@ -666,6 +668,16 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{"uri":{"type":"string"}},"required":["uri"]}`),
 		},
 		{
+			Name:        "build_gs1_linkset",
+			Description: "Build a GS1 Digital Link Linkset (RFC 9264 application/linkset+json) from an anchor product URI and a set of linkType -> links. This is the standard DPP discovery mechanism: a QR code resolves to the anchor URI, and the linkset routes from there to the passport, declaration of conformity, due-diligence statement, instructions, etc. Use the LinkTypeXxx constants (compliance package) as linkType keys, e.g. \"https://gs1.org/voc/epil\" for the DPP itself.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"anchor":{"type":"string","description":"Product identifier URI, e.g. the output of build_gs1_link"},"links":{"type":"object","description":"linkType URI -> array of {href, type, title, hreflang}","additionalProperties":{"type":"array","items":{"type":"object","properties":{"href":{"type":"string"},"type":{"type":"string"},"title":{"type":"string"},"hreflang":{"type":"string"}},"required":["href"]}}}},"required":["anchor","links"]}`),
+		},
+		{
+			Name:        "parse_gs1_linkset",
+			Description: "Parse a GS1 Digital Link Linkset (RFC 9264 application/linkset+json) back into its anchor URI and linkType -> links map.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"linksetJson":{"type":"string","description":"Raw application/linkset+json document"}},"required":["linksetJson"]}`),
+		},
+		{
 			Name:        "resolve_did",
 			Description: "Resolve a did:web/did:key/did:jwk identifier to its Ed25519 public key(s) — useful before verify_passport/verify_sdjwt/verify_mdoc when you only have an issuer's DID, not its raw public key. Does not itself decide trust; the caller evaluates the returned key(s).",
 			InputSchema: rawJSON(`{"type":"object","properties":{"did":{"type":"string"}},"required":["did"]}`),
@@ -825,6 +837,10 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolBuildGS1Link(args)
 	case "parse_gs1_link":
 		return s.toolParseGS1Link(args)
+	case "build_gs1_linkset":
+		return s.toolBuildGS1Linkset(args)
+	case "parse_gs1_linkset":
+		return s.toolParseGS1Linkset(args)
 	case "resolve_did":
 		return s.toolResolveDID(args)
 	case "discover_did_services":
@@ -1182,6 +1198,63 @@ func (s *Server) toolParseGS1Link(args json.RawMessage) (string, error) {
 		"serial": key.Serial,
 		"batch":  key.Batch,
 	})
+	return string(b), nil
+}
+
+// toolBuildGS1Linkset builds a GS1 Digital Link Linkset (RFC 9264
+// application/linkset+json) — previously only reachable via the compliance
+// package directly, despite compliance/linkset.go being a complete, tested
+// implementation with no MCP tool or HTTP handler ever wiring it up. This is
+// the standard DPP discovery mechanism: anchor URI -> linkType -> resources
+// (passport, declaration of conformity, due-diligence statement, ...).
+func (s *Server) toolBuildGS1Linkset(args json.RawMessage) (string, error) {
+	var in struct {
+		Anchor string                       `json:"anchor"`
+		Links  map[string][]compliance.Link `json:"links"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.Anchor == "" {
+		return "", errors.New("mcp: anchor is required")
+	}
+	ls := compliance.NewLinkset(in.Anchor)
+	for linkType, links := range in.Links {
+		for _, l := range links {
+			ls.Add(linkType, l)
+		}
+	}
+	b, err := json.Marshal(ls)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// toolParseGS1Linkset parses a GS1 Digital Link Linkset (RFC 9264
+// application/linkset+json) back into its anchor URI and linkType -> links map.
+func (s *Server) toolParseGS1Linkset(args json.RawMessage) (string, error) {
+	var in struct {
+		LinksetJSON string `json:"linksetJson"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	ls, err := compliance.ParseLinkset([]byte(in.LinksetJSON))
+	if err != nil {
+		return "", err
+	}
+	links := make(map[string][]compliance.Link, len(ls.LinkTypes()))
+	for _, lt := range ls.LinkTypes() {
+		links[lt] = ls.Get(lt)
+	}
+	b, err := json.Marshal(map[string]any{
+		"anchor": ls.Anchor,
+		"links":  links,
+	})
+	if err != nil {
+		return "", err
+	}
 	return string(b), nil
 }
 
