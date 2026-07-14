@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`openid4vp`: DCQL `claim_sets` support (OpenID4VP 1.0 §6.3.1, Axis
+  128).** `CredentialQuery` had a flat `Claims` list but no `ClaimSets`,
+  and no logic requiring at least one claim-set option to be fully
+  disclosed — distinct from the already-implemented query-level
+  `credential_sets` (§6.2). `ClaimQuery` gains an optional `id`, required
+  when `claim_sets` is present on that credential query; a credential
+  satisfies the query if it can fully disclose every claim referenced by
+  *at least one* `claim_sets` option (OR-of-ANDs — e.g. "passport number OR
+  license number"), not a mechanism for making individual claims optional.
+  `Validate()` enforces unique ids and valid references, mirroring the
+  existing `credential_sets` validation exactly. 8 new tests.
 - **`openid4vci`: Notification Endpoint (OpenID4VCI 1.0 §10, Axis 127).**
   No `notification_id` in `CredentialResponse`, no `POST /notification`
   handler, not advertised in `Metadata()` — the audit trail for whether a
