@@ -696,7 +696,7 @@ func TestHTTPMetadataDiscovery(t *testing.T) {
 }
 
 // ============================================================================
-// Proof-of-Possession (OpenID4VCI Draft 15 §5.1.2)
+// Proof-of-Possession (OpenID4VCI 1.0 Final §8.2.1.1)
 // ============================================================================
 
 // buildProofJWT は Ed25519 holderKey で署名した openid4vci-proof+jwt を返す。
@@ -1014,11 +1014,120 @@ func TestRegisterConfigurationDefaults(t *testing.T) {
 	if !ok {
 		t.Fatal("config not registered")
 	}
-	if cfg.Format != "vc+sd-jwt" {
+	if cfg.Format != "dc+sd-jwt" {
 		t.Errorf("default format: %s", cfg.Format)
 	}
 	if cfg.ValidForDays != 365 {
 		t.Errorf("default validForDays: %d", cfg.ValidForDays)
+	}
+}
+
+// sdjwtVCT decodes an unsigned-payload-visible SD-JWT's JWT part and returns its vct claim.
+func sdjwtVCT(t *testing.T, sdjwt string) string {
+	t.Helper()
+	jwtPart := strings.SplitN(sdjwt, "~", 2)[0]
+	parts := strings.SplitN(jwtPart, ".", 3)
+	if len(parts) != 3 {
+		t.Fatalf("malformed SD-JWT: %s", sdjwt)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	var claims struct {
+		VCT string `json:"vct"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	return claims.VCT
+}
+
+// TestIssueCredentialWithProofUsesConfiguredVCT proves that a credential_configuration's
+// declared CredentialType (vct) is actually threaded into the issued SD-JWT rather than
+// always collapsing to the DPP default. Two differently-typed configs on the same issuer
+// must produce distinct vct claims — otherwise a wallet reading
+// credential_configurations_supported sees one advertised type but receives another.
+func TestIssueCredentialWithProofUsesConfiguredVCT(t *testing.T) {
+	signer, err := compliance.NewIssuer("did:web:multi.vci.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss := NewIssuer("https://issue.blrcs.example", signer)
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:                "battery-passport-v1",
+		CredentialType:    "BatteryPassport",
+		DisclosableClaims: []string{"carbonKgCO2ePerKWh"},
+		ClearClaims:       []string{"capacityKWh"},
+	})
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:                "dpp-v1",
+		CredentialType:    "DigitalProductPassport",
+		DisclosableClaims: []string{"carbonKgCO2e"},
+		ClearClaims:       []string{"productId"},
+	})
+
+	issueAndVCT := func(configID string) string {
+		_, code, err := iss.CreateOffer(configID, "sub-"+configID,
+			map[string]any{"carbonKgCO2ePerKWh": 1.0, "carbonKgCO2e": 1.0},
+			map[string]any{"capacityKWh": 1.0, "productId": "p"})
+		if err != nil {
+			t.Fatalf("CreateOffer(%s): %v", configID, err)
+		}
+		tr, err := iss.ExchangeCode(code)
+		if err != nil {
+			t.Fatalf("ExchangeCode(%s): %v", configID, err)
+		}
+		cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{})
+		if err != nil {
+			t.Fatalf("IssueCredentialWithProof(%s): %v", configID, err)
+		}
+		return sdjwtVCT(t, cr.Credential)
+	}
+
+	batteryVCT := issueAndVCT("battery-passport-v1")
+	dppVCT := issueAndVCT("dpp-v1")
+
+	if batteryVCT != "BatteryPassport" {
+		t.Errorf("battery-passport-v1 config: want vct=BatteryPassport, got %q", batteryVCT)
+	}
+	if dppVCT != "DigitalProductPassport" {
+		t.Errorf("dpp-v1 config: want vct=DigitalProductPassport, got %q", dppVCT)
+	}
+	if batteryVCT == dppVCT {
+		t.Fatal("two differently-configured credential_configurations must not collapse to the same vct")
+	}
+}
+
+// TestIssueCredentialWithProofDefaultsVCTWhenUnset proves that a config that never sets
+// CredentialType still falls back to the DPP default vct, preserving existing behavior
+// for configs that don't declare one.
+func TestIssueCredentialWithProofDefaultsVCTWhenUnset(t *testing.T) {
+	signer, err := compliance.NewIssuer("did:web:default.vci.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss := NewIssuer("https://issue.blrcs.example", signer)
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:                "no-type-v1",
+		DisclosableClaims: []string{"carbonKgCO2e"},
+		ClearClaims:       []string{"productId"},
+	})
+	_, code, err := iss.CreateOffer("no-type-v1", "sub-no-type",
+		map[string]any{"carbonKgCO2e": 1.0}, map[string]any{"productId": "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sdjwtVCT(t, cr.Credential); got != compliance.VCTDigitalProductPassport {
+		t.Errorf("want default vct %q, got %q", compliance.VCTDigitalProductPassport, got)
 	}
 }
 

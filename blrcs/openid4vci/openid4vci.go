@@ -1,6 +1,6 @@
 // Package openid4vci — Verifiable Credential Issuance
 //
-// OpenID4VCI Draft 15 準拠。Apple/Google/EUDI wallet 互換。
+// OpenID4VCI 1.0 Final 準拠。Apple/Google/EUDI wallet 互換。
 // Pre-Authorized Code Flow (consumer側操作最小、Apple推奨)。
 //
 // 対称設計 — verifier (openid4vp) の反対側:
@@ -62,7 +62,7 @@ var (
 // Apple式宣言的スキーマ: どんなクレームを発行するかの契約
 type CredentialConfiguration struct {
 	ID                string   // 例: "eu-battery-passport-v1"
-	Format            string   // "sd-jwt" / "vc+sd-jwt"
+	Format            string   // "dc+sd-jwt" (current) / "vc+sd-jwt" (legacy, still verifier-accepted)
 	CredentialType    string   // "BatteryPassport" / "DigitalProductPassport"
 	Scope             string   // OAuth2 scope
 	DisclosableClaims []string // SD開示可 (プライバシーガード対象)
@@ -103,13 +103,13 @@ type preAuthEntry struct {
 //	Credential:  POST {IssuerURL}/credential
 type Issuer struct {
 	URL          string
-	RequireProof bool               // OpenID4VCI Draft 15 §5.1.2: Proof-of-Possession を必須化
+	RequireProof bool               // OpenID4VCI 1.0 Final §8.2.1.1: Proof-of-Possession を必須化
 	signer       *compliance.Issuer // 既存の compliance.Issuer を再利用 (DRY)
 	configs      map[string]CredentialConfiguration
 	preAuthTTL   time.Duration
 	tokenTTL     time.Duration
 	// MaxTxCodeAttempts — tx_code の許容失敗回数。超過で pre-authorized code を無効化し
-	// 短い PIN へのブルートフォースを防ぐ (Draft 15 §6.1 推奨)。0 は既定 (5) を使う。
+	// 短い PIN へのブルートフォースを防ぐ (1.0 Final §6.1 推奨)。0 は既定 (5) を使う。
 	MaxTxCodeAttempts int
 
 	// OnTxCodeLockout — 任意。tx_code (PIN) の失敗が上限に達し pre-authorized code を
@@ -178,7 +178,11 @@ func NewIssuer(url string, signer *compliance.Issuer) *Issuer {
 // RegisterConfiguration — 発行可能な credential config を登録
 func (iss *Issuer) RegisterConfiguration(c CredentialConfiguration) {
 	if c.Format == "" {
-		c.Format = "vc+sd-jwt"
+		// dc+sd-jwt is the current SD-JWT-VC typ (renamed from vc+sd-jwt, Nov 2024
+		// draft; compliance.Issuer has issued dc+sd-jwt by default since Axis 113).
+		// Defaulting here to the retired string would advertise a format id that no
+		// longer matches what IssueCredentialWithProof actually signs.
+		c.Format = "dc+sd-jwt"
 	}
 	if c.ValidForDays == 0 {
 		c.ValidForDays = 365
@@ -202,7 +206,7 @@ func (iss *Issuer) Signer() *compliance.Issuer { return iss.signer }
 // 内部で pre-authorized code を発行し、TTL付きで保管。
 // Wallet がこのコードを使って /token エンドポイントで access_token を取得する。
 // TxCodeSpec describes the transaction code (PIN) the wallet must collect from the
-// user before redeeming a pre-authorized code (OpenID4VCI Draft 15 §4.1.1). The
+// user before redeeming a pre-authorized code (OpenID4VCI 1.0 Final §6.1). The
 // metadata is advertised in the offer; the code *value* is communicated to the user
 // out-of-band (never in the offer). All fields are optional.
 type TxCodeSpec struct {
@@ -358,7 +362,7 @@ func (iss *Issuer) ExchangeCodeWithTxCode(code, txCode string) (*TokenResponse, 
 	// tx_code (PIN) binding: when the offer set one, redemption must present the exact
 	// value. Constant-time compare avoids leaking the code via response timing. Failed
 	// attempts are counted; once the limit is exceeded the code is invalidated so a
-	// short PIN cannot be brute-forced (Draft 15 §6.1).
+	// short PIN cannot be brute-forced (1.0 Final §6.1).
 	if entry.txCode != "" {
 		if subtle.ConstantTimeCompare([]byte(entry.txCode), []byte(txCode)) != 1 {
 			entry.txCodeFails++
@@ -422,7 +426,7 @@ func (iss *Issuer) IssueCredential(accessToken string) (*CredentialResponse, err
 
 // IssueCredentialWithProof — access_token + Proof-of-Possession を検証し SD-JWT を生成。
 //
-// OpenID4VCI Draft 15 §5.1.2:
+// OpenID4VCI 1.0 Final §8.2.1.1:
 //   - req.Proof が存在する場合は proof JWT を検証 (typ, alg, nonce, aud, iat, 署名)
 //   - iss.RequireProof=true かつ proof 欠如 → ErrInvalidProof
 //   - proof なし かつ iss.RequireProof=false → 従来動作 (後方互換)
@@ -461,7 +465,7 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	validForDays := cfg.ValidForDays
 	iss.mu.Unlock()
 
-	// Proof-of-Possession validation (OpenID4VCI Draft 15 §5.1.2)
+	// Proof-of-Possession validation (OpenID4VCI 1.0 Final §8.2.1.1)
 	var holderKey ed25519.PublicKey
 	if len(req.Proof) > 0 {
 		var proofEnv struct {
@@ -504,6 +508,16 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	}
 
 	validFor := time.Duration(validForDays) * 24 * time.Hour
+	// vct: the credential type declared on the matched configuration. Falling back to
+	// the DPP default preserves existing behavior for configs that never set
+	// CredentialType, but a non-empty value MUST be honored — otherwise two
+	// differently-configured credential_configurations (e.g. BatteryPassport vs
+	// DigitalProductPassport) registered on the same issuer would silently collapse
+	// to the same vct despite advertising distinct types in issuer metadata.
+	vct := cfg.CredentialType
+	if vct == "" {
+		vct = compliance.VCTDigitalProductPassport
+	}
 	// Issue with whichever combination the offer + proof selected: holder-bound (cnf)
 	// when proof-of-possession was provided, and/or revocable (status_list) when the
 	// offer set a status reference.
@@ -511,13 +525,13 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	var err error
 	switch {
 	case holderKey != nil && status != nil:
-		sdjwt, _, err = iss.signer.IssueSDJWTBoundStatus(subject, sdClaims, clearClaims, holderKey, status, validFor)
+		sdjwt, _, err = iss.signer.IssueSDJWTVCBoundStatus(vct, subject, sdClaims, clearClaims, holderKey, status, validFor)
 	case holderKey != nil:
-		sdjwt, _, err = iss.signer.IssueSDJWTBound(subject, sdClaims, clearClaims, holderKey, validFor)
+		sdjwt, _, err = iss.signer.IssueSDJWTVCBound(vct, subject, sdClaims, clearClaims, holderKey, validFor)
 	case status != nil:
-		sdjwt, _, err = iss.signer.IssueSDJWTStatus(subject, sdClaims, clearClaims, status, validFor)
+		sdjwt, _, err = iss.signer.IssueSDJWTVCStatus(vct, subject, sdClaims, clearClaims, status, validFor)
 	default:
-		sdjwt, _, err = iss.signer.IssueSDJWT(subject, sdClaims, clearClaims, validFor)
+		sdjwt, _, err = iss.signer.IssueSDJWTVC(vct, subject, sdClaims, clearClaims, validFor)
 	}
 	if err != nil {
 		iss.mu.Lock()
@@ -544,7 +558,7 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	}, nil
 }
 
-// verifyProofJWT — OpenID4VCI Draft 15 §5.1.2 の proof JWT を検証する。
+// verifyProofJWT — OpenID4VCI 1.0 Final §8.2.1.1 の proof JWT を検証する。
 //
 // 対応アルゴリズム: EdDSA (Ed25519) のみ (ゼロ依存制約)。
 // header に jwk (OKP/Ed25519) が必須。expectedNonce に proof の nonce を束縛する
@@ -965,8 +979,14 @@ func (c *WalletClient) FetchCredentialCtx(ctx context.Context, preAuthCode strin
 	if err := json.NewDecoder(io.LimitReader(resp.Body, walletMaxResponseBytes)).Decode(&tr); err != nil {
 		return "", fmt.Errorf("wallet: token decode: %w", err)
 	}
-	// credential endpoint
-	body, _ := json.Marshal(CredentialRequest{Format: "vc+sd-jwt"})
+	// credential endpoint. Format is intentionally omitted: this generic wallet
+	// client has no way to know which format string a given issuer configuration
+	// advertises (dc+sd-jwt today, previously vc+sd-jwt, potentially mso_mdoc for a
+	// future config) — IssueCredentialWithProof only enforces a format match when
+	// the wallet supplies one, so omitting it lets the issuer's own registered
+	// config decide, matching how a real wallet would read credential_configuration_id
+	// from the offer rather than guessing a format string.
+	body, _ := json.Marshal(CredentialRequest{})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/credential", strings.NewReader(string(body)))
 	if err != nil {
 		return "", fmt.Errorf("wallet: credential request: %w", err)

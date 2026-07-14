@@ -145,7 +145,7 @@ func main() {
 		vciIssuer.RegisterConfiguration(openid4vci.CredentialConfiguration{
 			ID:                "eu-dpp-v1",
 			CredentialType:    "DigitalProductPassport",
-			Format:            "vc+sd-jwt",
+			Format:            "dc+sd-jwt",
 			DisclosableClaims: []string{"carbonKgCO2e"},
 			ClearClaims:       []string{"productId", "category"},
 			ValidForDays:      365,
