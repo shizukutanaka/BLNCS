@@ -7,6 +7,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`didwebvh`, `mcp`: enforce the did:webvh Portable parameter in `Verify`
+  (Axis 123).** `Parameters.Portable` was round-tripped on the wire but never
+  actually checked: `Verify` never confirmed that a log entry's `state.id`
+  SCID segment matched the DID's SCID, nor that a domain/path change was
+  gated by `portable=true` declared at genesis — a malicious or buggy log
+  could silently rewrite a DID's SCID or move it to an attacker-controlled
+  domain and `Verify` would still accept it. Verified the exact rules
+  (defaults to false; only the first entry may ever set it true; a later
+  entry may omit it to retain the prior value or set it false to permanently
+  disable further moves; the SCID segment must never change, only host/path,
+  and only while portability is in effect) against the canonical spec source
+  before implementing. `Parameters.Portable` changed from `bool` to `*bool`
+  so "omitted" and "explicit false" are distinguishable on the wire (the
+  field had no working writer anywhere in the codebase before this, so this
+  is not a breaking change to any real caller). Also fixed a bug this
+  surfaced: `Resolution.DID` was hardcoded to the genesis entry's id, so a
+  legitimately-moved portable DID resolved to its stale original address
+  instead of its current one. `create_did_webvh`/`update_did_webvh` gained an
+  optional `portable` arg. Refreshed the package doc comment, which still
+  claimed witness cosigning was unimplemented despite Axis 119. 7 new tests.
+  Verified end-to-end against the built `blrcs-mcp` binary over real stdio
+  JSON-RPC: an unauthorized domain move is rejected, a `portable=true` move
+  verifies and resolves to its new address.
 - **`didwebvh`, `mcp`: did:webvh witness support, v1.0 spec (Axis 119).**
   Closes a gap the package's own doc comment flagged: "Witness cosigning …
   not implemented here." Verified the exact wire format against the
