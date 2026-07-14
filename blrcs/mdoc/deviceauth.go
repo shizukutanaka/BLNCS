@@ -96,6 +96,13 @@ func SignDeviceAuth(docType string, sessionTranscript []byte, devicePriv ed25519
 // the COSE_Sign1 signature and that its payload equals the expected
 // DeviceAuthenticationBytes for docType + sessionTranscript.
 func VerifyDeviceAuth(deviceSignature []byte, docType string, sessionTranscript []byte, deviceKey ed25519.PublicKey) error {
+	return VerifyDeviceAuthWithAlgs(deviceSignature, docType, sessionTranscript, deviceKey, nil)
+}
+
+// VerifyDeviceAuthWithAlgs is VerifyDeviceAuth with an optional per-call COSE
+// algorithm allowlist (see cbor.Verify1WithAlgs). A nil/empty allowedAlgs
+// accepts any registered algorithm, identical to VerifyDeviceAuth.
+func VerifyDeviceAuthWithAlgs(deviceSignature []byte, docType string, sessionTranscript []byte, deviceKey ed25519.PublicKey, allowedAlgs []int) error {
 	if len(deviceKey) != ed25519.PublicKeySize {
 		return ErrNoDeviceKey
 	}
@@ -103,9 +110,9 @@ func VerifyDeviceAuth(deviceSignature []byte, docType string, sessionTranscript 
 	if err != nil {
 		return err
 	}
-	res, err := cbor.Verify1(deviceSignature, deviceKey, nil)
+	res, err := cbor.Verify1WithAlgs(deviceSignature, deviceKey, nil, allowedAlgs)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrDeviceAuth, err)
+		return fmt.Errorf("%w: %w", ErrDeviceAuth, err)
 	}
 	if subtle.ConstantTimeCompare(res.Payload, want) != 1 {
 		return fmt.Errorf("%w: session-transcript/docType binding mismatch", ErrDeviceAuth)

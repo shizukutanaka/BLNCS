@@ -30,6 +30,15 @@ type VerifiedDoc struct {
 // Selectively-disclosed credentials (a subset of items) verify fine: only the
 // present items are digest-checked; the MSO still attests to the full set.
 func Verify(issuerSigned []byte, issuerPub ed25519.PublicKey, now time.Time) (*VerifiedDoc, error) {
+	return VerifyWithAlgs(issuerSigned, issuerPub, now, nil)
+}
+
+// VerifyWithAlgs is Verify with an optional per-call COSE algorithm allowlist
+// (see cbor.Verify1WithAlgs) — lets a caller pin issuerAuth verification to a
+// specific algorithm (e.g. post-quantum-only) even if other algorithms are
+// registered globally via cbor.RegisterVerifier. A nil/empty allowedAlgs
+// accepts any registered algorithm, identical to Verify.
+func VerifyWithAlgs(issuerSigned []byte, issuerPub ed25519.PublicKey, now time.Time, allowedAlgs []int) (*VerifiedDoc, error) {
 	top, err := cbor.Unmarshal(issuerSigned)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
@@ -48,9 +57,9 @@ func Verify(issuerSigned []byte, issuerPub ed25519.PublicKey, now time.Time) (*V
 	if err != nil {
 		return nil, fmt.Errorf("%w: re-encode issuerAuth: %v", ErrMalformed, err)
 	}
-	coseRes, err := cbor.Verify1(issuerAuthBytes, issuerPub, nil)
+	coseRes, err := cbor.Verify1WithAlgs(issuerAuthBytes, issuerPub, nil, allowedAlgs)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrIssuerAuth, err)
+		return nil, fmt.Errorf("%w: %w", ErrIssuerAuth, err)
 	}
 
 	// --- MSO: payload = #6.24(bstr .cbor MSO) ---

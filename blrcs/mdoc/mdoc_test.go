@@ -76,6 +76,35 @@ func TestIssueVerifyRoundtrip(t *testing.T) {
 	}
 }
 
+// TestVerifyWithAlgsPinsAllowedAlg proves mdoc.VerifyWithAlgs actually threads
+// its allowlist through to cbor.Verify1WithAlgs: a caller pinning verification
+// to an algorithm other than the credential's actual signing alg (AlgEdDSA)
+// must reject it as a policy violation (ErrCOSEAlgNotAllowed), even though the
+// signature itself is valid and Verify (no allowlist) accepts it.
+func TestVerifyWithAlgsPinsAllowedAlg(t *testing.T) {
+	issuerPriv, issuerPub := testKeys(t)
+	_, devicePub := testKeys(t)
+	cred, err := Issue(sampleParams(issuerPriv, devicePub))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := VerifyWithAlgs(cred, issuerPub, time.Now(), nil); err != nil {
+		t.Fatalf("nil allowlist should accept the actual signing alg: %v", err)
+	}
+	if _, err := VerifyWithAlgs(cred, issuerPub, time.Now(), []int{cbor.AlgEdDSA}); err != nil {
+		t.Fatalf("allowlist containing the actual signing alg should accept: %v", err)
+	}
+	const notTheSigningAlg = -999
+	_, err = VerifyWithAlgs(cred, issuerPub, time.Now(), []int{notTheSigningAlg})
+	if !errors.Is(err, ErrIssuerAuth) {
+		t.Fatalf("allowlist excluding the actual signing alg: want ErrIssuerAuth, got %v", err)
+	}
+	if !errors.Is(err, cbor.ErrCOSEAlgNotAllowed) {
+		t.Fatalf("underlying cause should be ErrCOSEAlgNotAllowed, got %v", err)
+	}
+}
+
 func TestVerifyWrongIssuerKey(t *testing.T) {
 	issuerPriv, _ := testKeys(t)
 	_, wrongPub := testKeys(t)

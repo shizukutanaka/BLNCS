@@ -52,6 +52,33 @@ func TestDeviceAuthRoundtrip(t *testing.T) {
 	}
 }
 
+// TestVerifyDeviceAuthWithAlgsPinsAllowedAlg proves the allowlist actually
+// reaches cbor.Verify1WithAlgs through VerifyDeviceAuth's device-signature
+// check, mirroring TestVerifyWithAlgsPinsAllowedAlg for issuerAuth.
+func TestVerifyDeviceAuthWithAlgsPinsAllowedAlg(t *testing.T) {
+	devicePriv, devicePub := testKeys(t)
+	transcript := []byte("session-transcript")
+	sig, err := SignDeviceAuth("org.iso.18013.5.1.mDL", transcript, devicePriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := VerifyDeviceAuthWithAlgs(sig, "org.iso.18013.5.1.mDL", transcript, devicePub, nil); err != nil {
+		t.Fatalf("nil allowlist should accept the actual signing alg: %v", err)
+	}
+	if err := VerifyDeviceAuthWithAlgs(sig, "org.iso.18013.5.1.mDL", transcript, devicePub, []int{cbor.AlgEdDSA}); err != nil {
+		t.Fatalf("allowlist containing the actual signing alg should accept: %v", err)
+	}
+	const notTheSigningAlg = -999
+	err = VerifyDeviceAuthWithAlgs(sig, "org.iso.18013.5.1.mDL", transcript, devicePub, []int{notTheSigningAlg})
+	if !errors.Is(err, ErrDeviceAuth) {
+		t.Fatalf("want ErrDeviceAuth, got %v", err)
+	}
+	if !errors.Is(err, cbor.ErrCOSEAlgNotAllowed) {
+		t.Fatalf("underlying cause should be ErrCOSEAlgNotAllowed, got %v", err)
+	}
+}
+
 // TestDeviceAuthWrongTranscript rejects a presentation replayed against a different
 // session transcript (the core anti-replay property).
 func TestDeviceAuthWrongTranscript(t *testing.T) {

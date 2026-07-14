@@ -282,6 +282,60 @@ func TestCOSERegisterVerifier(t *testing.T) {
 	}
 }
 
+// TestVerify1WithAlgsRejectsRegisteredButDisallowedAlg proves the crypto-agility
+// downgrade defense this axis adds: once a second algorithm is registered
+// globally via RegisterVerifier, Verify1 (no allowlist) still accepts it, but
+// Verify1WithAlgs lets an individual caller pin verification to a narrower set
+// — e.g. a post-quantum-only deployment rejecting a legacy EdDSA signature even
+// though EdDSA remains globally registered.
+func TestVerify1WithAlgsRejectsRegisteredButDisallowedAlg(t *testing.T) {
+	const customAlg = -998
+	RegisterVerifier(customAlg, func(pub, sigInput, sig []byte) bool {
+		return bytes.Equal(sig, []byte("custom-sig"))
+	})
+	defer RegisterVerifier(customAlg, nil)
+
+	protected := Header{HeaderAlg: customAlg}
+	protectedBytes, _ := encodedHeader(protected)
+	data, _ := Marshal(Tag{
+		Number:  TagCOSESign1,
+		Content: []any{protectedBytes, map[int]any{}, []byte("payload"), []byte("custom-sig")},
+	})
+
+	// No allowlist: registered alg is accepted (existing Verify1 behavior).
+	if _, err := Verify1(data, ed25519.PublicKey(make([]byte, 32)), nil); err != nil {
+		t.Fatalf("Verify1 (no allowlist) should accept any registered alg: %v", err)
+	}
+
+	// Allowlist excludes customAlg: must be rejected as policy, not capability.
+	_, err := Verify1WithAlgs(data, ed25519.PublicKey(make([]byte, 32)), nil, []int{AlgEdDSA})
+	if !errors.Is(err, ErrCOSEAlgNotAllowed) {
+		t.Fatalf("want ErrCOSEAlgNotAllowed, got %v", err)
+	}
+
+	// Allowlist includes customAlg: accepted.
+	if _, err := Verify1WithAlgs(data, ed25519.PublicKey(make([]byte, 32)), nil, []int{customAlg}); err != nil {
+		t.Errorf("allowlisted alg should verify: %v", err)
+	}
+}
+
+// TestVerify1WithAlgsEmptyAllowlistAcceptsAny proves a nil/empty allowedAlgs
+// behaves identically to Verify1 (backward compatible default).
+func TestVerify1WithAlgsEmptyAllowlistAcceptsAny(t *testing.T) {
+	priv := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+	pub := priv.Public().(ed25519.PublicKey)
+	data, err := Sign1(Header{HeaderAlg: AlgEdDSA}, nil, []byte("payload"), nil, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Verify1WithAlgs(data, pub, nil, nil); err != nil {
+		t.Errorf("nil allowlist should accept any registered alg: %v", err)
+	}
+	if _, err := Verify1WithAlgs(data, pub, nil, []int{}); err != nil {
+		t.Errorf("empty allowlist should accept any registered alg: %v", err)
+	}
+}
+
 // ============================================================================
 // Sig_Structure determinism
 // ============================================================================

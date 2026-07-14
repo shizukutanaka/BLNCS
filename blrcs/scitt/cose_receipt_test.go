@@ -3,7 +3,10 @@ package scitt
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"testing"
+
+	"blrcs/cbor"
 )
 
 func TestCOSEReceiptRoundtrip(t *testing.T) {
@@ -43,6 +46,44 @@ func TestCOSEReceiptRoundtrip(t *testing.T) {
 		t.Fatalf("VerifyCOSEReceipt: %v", err)
 	}
 	_ = pub
+}
+
+// TestVerifyCOSEReceiptWithAlgsPinsAllowedAlg proves the allowlist reaches
+// cbor.Verify1WithAlgs through VerifyCOSEReceipt's TS-signature check.
+func TestVerifyCOSEReceiptWithAlgsPinsAllowedAlg(t *testing.T) {
+	ledger, err := NewLedger("did:web:ts.blrcs.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	stmt, err := SignStatement(priv, "did:web:issuer", "product-1", "application/vc+json", []byte("dpp-payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := ledger.Register(stmt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coseData, err := IssueCOSEReceipt(receipt, ledger.tsPriv, ledger.tsID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = pub
+
+	if err := VerifyCOSEReceiptWithAlgs(coseData, stmt, ledger.PublicKey(), nil); err != nil {
+		t.Fatalf("nil allowlist should accept the actual signing alg: %v", err)
+	}
+	if err := VerifyCOSEReceiptWithAlgs(coseData, stmt, ledger.PublicKey(), []int{cbor.AlgEdDSA}); err != nil {
+		t.Fatalf("allowlist containing the actual signing alg should accept: %v", err)
+	}
+	const notTheSigningAlg = -999
+	err = VerifyCOSEReceiptWithAlgs(coseData, stmt, ledger.PublicKey(), []int{notTheSigningAlg})
+	if !errors.Is(err, ErrCOSEReceiptInvalid) {
+		t.Fatalf("want ErrCOSEReceiptInvalid, got %v", err)
+	}
+	if !errors.Is(err, cbor.ErrCOSEAlgNotAllowed) {
+		t.Fatalf("underlying cause should be ErrCOSEAlgNotAllowed, got %v", err)
+	}
 }
 
 func TestCOSEReceiptMultipleEntries(t *testing.T) {

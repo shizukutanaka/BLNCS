@@ -83,9 +83,16 @@ func IssueCOSEReceipt(r *Receipt, tsPriv ed25519.PrivateKey, tsID string) ([]byt
 //  1. COSE_Sign1 signature using tsPub.
 //  2. Merkle inclusion proof for stmt in the recorded tree.
 func VerifyCOSEReceipt(data []byte, stmt Statement, tsPub ed25519.PublicKey) error {
-	res, err := cbor.Verify1(data, tsPub, nil)
+	return VerifyCOSEReceiptWithAlgs(data, stmt, tsPub, nil)
+}
+
+// VerifyCOSEReceiptWithAlgs is VerifyCOSEReceipt with an optional per-call COSE
+// algorithm allowlist (see cbor.Verify1WithAlgs). A nil/empty allowedAlgs
+// accepts any registered algorithm, identical to VerifyCOSEReceipt.
+func VerifyCOSEReceiptWithAlgs(data []byte, stmt Statement, tsPub ed25519.PublicKey, allowedAlgs []int) error {
+	res, err := cbor.Verify1WithAlgs(data, tsPub, nil, allowedAlgs)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrCOSEReceiptInvalid, err)
+		return fmt.Errorf("%w: %w", ErrCOSEReceiptInvalid, err)
 	}
 	fields, err := decodeReceiptPayload(res.Payload)
 	if err != nil {

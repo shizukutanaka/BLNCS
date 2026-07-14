@@ -44,6 +44,13 @@ var ErrCOSESigFailed = errors.New("cbor/cose: signature verification failed")
 // ErrCOSEUnsupportedAlg is returned for unknown or disallowed algorithms.
 var ErrCOSEUnsupportedAlg = errors.New("cbor/cose: unsupported algorithm")
 
+// ErrCOSEAlgNotAllowed is returned by Verify1WithAlgs when the COSE_Sign1's
+// algorithm is registered (so it COULD be verified) but is not a member of
+// the caller-supplied allowedAlgs allowlist. Distinct from
+// ErrCOSEUnsupportedAlg (no verifier registered at all): this is a policy
+// rejection, not a capability gap.
+var ErrCOSEAlgNotAllowed = errors.New("cbor/cose: algorithm not in caller's allowlist")
+
 // ErrCOSECritUnsupported is returned when the protected header carries a `crit`
 // (label 2) field that lists a critical label this implementation does not
 // understand. RFC 9052 §3.1 requires processing to fail in that case. BLRCS
@@ -168,7 +175,27 @@ type Verify1Result struct {
 // signature is verified over an empty payload (matching Sign1 with a nil
 // payload). Callers needing true detached COSE (payload transmitted separately)
 // must embed the payload instead — every BLRCS user (mdoc, SCITT receipts) does.
+//
+// Verify1 accepts any algorithm registered in the global coseVerifiers map. Once
+// a second algorithm is registered via RegisterVerifier (e.g. a future
+// post-quantum COSE alg id), this makes EVERY call process-wide silently accept
+// either algorithm, with no way for an individual caller to pin verification to
+// one alg only (mirrors the downgrade risk compliance.VerifyOptions.AllowedAlgs
+// closes on the SD-JWT side). Callers that need to pin should use
+// Verify1WithAlgs instead.
 func Verify1(data []byte, pub ed25519.PublicKey, externalAAD []byte) (*Verify1Result, error) {
+	return Verify1WithAlgs(data, pub, externalAAD, nil)
+}
+
+// Verify1WithAlgs is Verify1 with an optional per-call algorithm allowlist.
+// A non-empty allowedAlgs restricts acceptance to those COSE algorithm
+// identifiers even if other algorithms are registered globally via
+// RegisterVerifier — letting a post-quantum-only deployment pin verification
+// to (say) only a registered ML-DSA id, or a legacy caller pin to only
+// AlgEdDSA, regardless of what else has been registered process-wide. An
+// empty/nil allowedAlgs accepts any registered algorithm (Verify1's
+// behavior, preserved for backward compatibility).
+func Verify1WithAlgs(data []byte, pub ed25519.PublicKey, externalAAD []byte, allowedAlgs []int) (*Verify1Result, error) {
 	v, err := Unmarshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("cbor/cose: decode: %w", err)
@@ -220,6 +247,13 @@ func Verify1(data []byte, pub ed25519.PublicKey, externalAAD []byte) (*Verify1Re
 	alg, err := headerAlg(protected)
 	if err != nil {
 		return nil, err
+	}
+
+	// Per-verification algorithm allowlist (crypto-agility downgrade defense).
+	// Checked BEFORE the registry lookup so an excluded-but-registered alg is
+	// rejected as policy (ErrCOSEAlgNotAllowed), not capability.
+	if len(allowedAlgs) > 0 && !containsInt(allowedAlgs, alg) {
+		return nil, fmt.Errorf("%w: %d", ErrCOSEAlgNotAllowed, alg)
 	}
 
 	coseVerifiersMu.RLock()
@@ -323,6 +357,15 @@ func headerAlg(h Header) (int, error) {
 		return 0, fmt.Errorf("%w: alg must be integer", ErrCOSEUnsupportedAlg)
 	}
 	return int(alg), nil
+}
+
+func containsInt(list []int, v int) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 func copyHeader(h Header) Header {
