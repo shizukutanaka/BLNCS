@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mcp`: wire GS1 Digital Link Linkset to `build_gs1_linkset`/
+  `parse_gs1_linkset` (Axis 125).** `compliance/linkset.go` fully implements
+  the RFC 9264 Linkset — the standard EU DPP discovery mechanism (a QR
+  resolves to a GTIN URI, and the linkset routes from there to the passport,
+  declaration of conformity, due-diligence statement, instructions, etc.) —
+  but nothing wired it to the MCP tool surface or an HTTP handler, unlike
+  its sibling `build_gs1_link`/`parse_gs1_link` (Axis 106). A complete,
+  tested feature was sitting completely unused. New tools follow the exact
+  same pure/read-only, not-audited pattern as the existing GS1 link tools.
+  `TestToolsList` count updated 31 → 33. 12 new tests. Verified end-to-end
+  against the built `blrcs-mcp` binary: build → parse round-trips the
+  anchor and every linkType's links losslessly.
 - **`cbor`, `mdoc`, `scitt`: per-call COSE algorithm allowlist (Axis 124).**
   `cbor.RegisterVerifier` lets a second COSE algorithm be registered
   globally, but `Verify1` had no allowlist parameter — once any second alg
