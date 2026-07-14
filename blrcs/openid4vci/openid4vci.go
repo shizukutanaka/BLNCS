@@ -51,6 +51,23 @@ var (
 	// the issuer silently issues its own format anyway — confusing both parties about
 	// what was actually bound).
 	ErrFormatMismatch = errors.New("vci: credential format or configuration_id mismatch")
+	// ErrUnknownNotification is returned by HandleNotification when the
+	// notification_id is unknown, expired, already consumed, or was not issued to
+	// the presented access_token. Deliberately collapses all four cases into one
+	// error (mirrors the pre-authorized_code/tx_code oracle defense elsewhere in
+	// this file): distinguishing "wrong token" from "unknown id" would let a
+	// caller probe for valid notification_ids issued to other wallets.
+	ErrUnknownNotification = errors.New("vci: unknown, expired, or already-consumed notification_id")
+	// ErrInvalidNotificationEvent is returned when the event field is not one of
+	// the three values OpenID4VCI 1.0 §10.1 defines.
+	ErrInvalidNotificationEvent = errors.New("vci: notification event must be credential_accepted, credential_failure, or credential_deleted")
+)
+
+// Notification event values (OpenID4VCI 1.0 §10.1).
+const (
+	NotificationEventAccepted = "credential_accepted"
+	NotificationEventFailure  = "credential_failure"
+	NotificationEventDeleted  = "credential_deleted"
 )
 
 // ============================================================================
@@ -119,12 +136,39 @@ type Issuer struct {
 	// ため、フック内から Issuer を再呼び出ししても安全。nil なら何もしない (既定)。
 	OnTxCodeLockout func(subject, configID string)
 
-	mu       sync.Mutex
-	preAuths map[string]*preAuthEntry // code → entry
-	tokens   map[string]*preAuthEntry // access_token → same entry
-	nonces   map[string]time.Time     // Nonce Endpoint c_nonce → expiry (single-use)
-	lastGC   time.Time                // 最後に期限切れ掃除を実行した時刻
+	// OnNotification — 任意。wallet が Notification Endpoint (OpenID4VCI 1.0 §10) 経由で
+	// 発行済みクレデンシャルの受理/失敗/削除を通知してきたときに呼ばれる監査フック。
+	// eIDAS/DPP の「発行したクレデンシャルを wallet が実際に受理したか」の監査証跡要件
+	// 向け。引数は subject/configID/event/eventDescription のみで、notification_id や
+	// access_token などの秘密は渡さない。nil なら何もしない (既定)。
+	OnNotification func(subject, configID, event, eventDescription string)
+
+	// NotificationTTL — notification_id の有効期限。0 は既定 (24h) を使う。issuance と
+	// 実際の wallet 側受理確認の間には (offer/token の TTL よりずっと長い) 現実的な遅延が
+	// あり得るため、pre-auth/token より長い既定値にしている。
+	NotificationTTL time.Duration
+
+	mu            sync.Mutex
+	preAuths      map[string]*preAuthEntry      // code → entry
+	tokens        map[string]*preAuthEntry      // access_token → same entry
+	nonces        map[string]time.Time          // Nonce Endpoint c_nonce → expiry (single-use)
+	notifications map[string]*notificationEntry // notification_id → entry (single-use)
+	lastGC        time.Time                     // 最後に期限切れ掃除を実行した時刻
 }
+
+// notificationEntry — Notification Endpoint 用の内部エントリ。issuance 成功時に
+// 発行され、wallet が対応する access_token 付きで notification_id を提示したときのみ
+// 消費される (単一使用)。
+type notificationEntry struct {
+	accessToken string // 発行時に使われた access_token — 同じトークンの提示を要求 (spec)
+	subject     string
+	configID    string
+	expiresAt   time.Time
+	consumed    bool
+}
+
+// defaultNotificationTTL — notification_id の既定有効期限。
+const defaultNotificationTTL = 24 * time.Hour
 
 // gcInterval — 期限切れエントリ掃除の最小間隔。CreateOffer ごとに O(n) 走査すると
 // コストが嵩むため、掃除はこの間隔に1回までに制限する (償却 O(1))。
@@ -153,10 +197,24 @@ func (iss *Issuer) gcExpiredLocked(now time.Time) {
 			delete(iss.tokens, tok)
 		}
 	}
+	for id, e := range iss.notifications {
+		if now.After(e.expiresAt) {
+			delete(iss.notifications, id)
+		}
+	}
 }
 
 // defaultMaxTxCodeAttempts — tx_code 失敗の既定上限。
 const defaultMaxTxCodeAttempts = 5
+
+// notificationTTL returns iss.NotificationTTL, falling back to the default
+// when unset.
+func (iss *Issuer) notificationTTL() time.Duration {
+	if iss.NotificationTTL > 0 {
+		return iss.NotificationTTL
+	}
+	return defaultNotificationTTL
+}
 
 // NewIssuer — Apple式の1行構築
 //
@@ -164,14 +222,15 @@ const defaultMaxTxCodeAttempts = 5
 // 同一鍵で DPP credential も SD-JWT も署名可能 (DRY)
 func NewIssuer(url string, signer *compliance.Issuer) *Issuer {
 	return &Issuer{
-		URL:        strings.TrimRight(url, "/"),
-		signer:     signer,
-		configs:    make(map[string]CredentialConfiguration),
-		preAuths:   make(map[string]*preAuthEntry),
-		tokens:     make(map[string]*preAuthEntry),
-		nonces:     make(map[string]time.Time),
-		preAuthTTL: 10 * time.Minute,
-		tokenTTL:   5 * time.Minute,
+		URL:           strings.TrimRight(url, "/"),
+		signer:        signer,
+		configs:       make(map[string]CredentialConfiguration),
+		preAuths:      make(map[string]*preAuthEntry),
+		tokens:        make(map[string]*preAuthEntry),
+		nonces:        make(map[string]time.Time),
+		notifications: make(map[string]*notificationEntry),
+		preAuthTTL:    10 * time.Minute,
+		tokenTTL:      5 * time.Minute,
 	}
 }
 
@@ -417,6 +476,9 @@ type CredentialResponse struct {
 	Credential      string `json:"credential"`
 	CNonce          string `json:"c_nonce,omitempty"`
 	CNonceExpiresIn int    `json:"c_nonce_expires_in,omitempty"`
+	// NotificationID — Notification Endpoint (OpenID4VCI 1.0 §10) 経由で、この
+	// クレデンシャルの受理/失敗/削除を issuer に通知する際に提示する識別子。
+	NotificationID string `json:"notification_id,omitempty"`
 }
 
 // IssueCredential — access_token を検証し SD-JWT を生成 (proof なし / 後方互換)
@@ -548,14 +610,78 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	if err != nil {
 		return nil, err
 	}
+	// notification_id (OpenID4VCI 1.0 §10): lets the wallet later tell this issuer
+	// whether it actually accepted/stored the credential, failed to, or deleted it —
+	// an audit signal issuance alone cannot provide. Bound to the access_token used
+	// for this issuance (spec requires the same token to submit the notification)
+	// so a caller cannot notify about a credential it never received.
+	notificationID, err := randomB64(16)
+	if err != nil {
+		return nil, err
+	}
 	iss.mu.Lock()
 	entry.cNonce = newCNonce
+	iss.gcExpiredLocked(time.Now())
+	iss.notifications[notificationID] = &notificationEntry{
+		accessToken: accessToken,
+		subject:     subject,
+		configID:    entry.configID,
+		expiresAt:   time.Now().Add(iss.notificationTTL()),
+	}
 	iss.mu.Unlock()
 	return &CredentialResponse{
 		Credential:      sdjwt,
 		CNonce:          newCNonce,
 		CNonceExpiresIn: int(iss.tokenTTL.Seconds()), // must not exceed access token lifetime
+		NotificationID:  notificationID,
 	}, nil
+}
+
+// ============================================================================
+// Phase 3b — Notification Endpoint (OpenID4VCI 1.0 §10)
+// ============================================================================
+
+// NotificationRequest is the wallet's request body to the Notification
+// Endpoint (OpenID4VCI 1.0 §10).
+type NotificationRequest struct {
+	NotificationID   string `json:"notification_id"`
+	Event            string `json:"event"`
+	EventDescription string `json:"event_description,omitempty"`
+}
+
+// HandleNotification processes a wallet's notification about the outcome of
+// issuing a specific credential (OpenID4VCI 1.0 Notification Endpoint,
+// §10). accessToken must be the SAME token used for the credential request
+// that returned this notification_id (spec requirement) — this is what lets
+// an issuer trust that the notifier actually received that credential rather
+// than guessing another wallet's notification_id.
+//
+// notification_id is single-use: a second submission (retry, replay) returns
+// ErrUnknownNotification rather than silently re-invoking OnNotification,
+// matching the burn-after-use pattern already used for pre-authorized codes
+// and Nonce Endpoint nonces elsewhere in this file.
+func (iss *Issuer) HandleNotification(accessToken string, req NotificationRequest) error {
+	switch req.Event {
+	case NotificationEventAccepted, NotificationEventFailure, NotificationEventDeleted:
+	default:
+		return ErrInvalidNotificationEvent
+	}
+	iss.mu.Lock()
+	entry, ok := iss.notifications[req.NotificationID]
+	if !ok || entry.consumed || time.Now().After(entry.expiresAt) ||
+		subtle.ConstantTimeCompare([]byte(entry.accessToken), []byte(accessToken)) != 1 {
+		iss.mu.Unlock()
+		return ErrUnknownNotification
+	}
+	entry.consumed = true
+	subject, configID := entry.subject, entry.configID
+	hook := iss.OnNotification
+	iss.mu.Unlock()
+
+	if hook != nil {
+		hook(subject, configID, req.Event, req.EventDescription)
+	}
+	return nil
 }
 
 // verifyProofJWT — OpenID4VCI 1.0 Final §8.2.1.1 の proof JWT を検証する。
@@ -749,6 +875,7 @@ func (iss *Issuer) Metadata() map[string]any {
 		"credential_endpoint":                 iss.URL + "/credential",
 		"token_endpoint":                      iss.URL + "/token",
 		"nonce_endpoint":                      iss.URL + "/nonce",
+		"notification_endpoint":               iss.URL + "/notification",
 		"credential_configurations_supported": configs,
 		"grant_types_supported":               []string{"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
 		"response_types_supported":            []string{"vp_token"},
@@ -787,6 +914,7 @@ func (iss *Issuer) Handler() http.Handler {
 	mux.HandleFunc("/token", iss.handleToken)
 	mux.HandleFunc("/nonce", iss.handleNonce)
 	mux.HandleFunc("/credential", iss.handleCredential)
+	mux.HandleFunc("/notification", iss.handleNotification)
 	return mux
 }
 
@@ -884,6 +1012,43 @@ func (iss *Issuer) handleCredential(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleNotification serves POST {issuer}/notification (OpenID4VCI 1.0 §10):
+// the wallet reports whether it accepted, failed to store, or deleted a
+// previously-issued credential, identified by the notification_id returned
+// in that credential's CredentialResponse. Requires the same Bearer token
+// used for the original credential request.
+func (iss *Issuer) handleNotification(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	authz := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authz, "Bearer ") {
+		writeVCIError(w, http.StatusUnauthorized, "invalid_token", "Bearer token required")
+		return
+	}
+	accessToken := strings.TrimPrefix(authz, "Bearer ")
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096)) // 4 KiB: ample for notification_id/event/event_description
+	if err != nil {
+		writeVCIError(w, http.StatusBadRequest, "invalid_notification_request", "request body too large or unreadable")
+		return
+	}
+	var req NotificationRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeVCIError(w, http.StatusBadRequest, "invalid_notification_request", "malformed request body")
+		return
+	}
+	if err := iss.HandleNotification(accessToken, req); err != nil {
+		if errors.Is(err, ErrInvalidNotificationEvent) {
+			writeVCIError(w, http.StatusBadRequest, "invalid_notification_request", err.Error())
+		} else {
+			writeVCIError(w, http.StatusBadRequest, "invalid_notification_id", "unknown, expired, or already-consumed notification_id")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeVCIError(w http.ResponseWriter, code int, errName, desc string) {
