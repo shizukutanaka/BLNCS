@@ -92,6 +92,158 @@ func TestDCQLValidateCredentialSetEmptyOptions(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Axis 128: claim_sets (§6.3.1)
+// ============================================================================
+
+func TestDCQLValidateClaimSetsHappy(t *testing.T) {
+	q := DCQLQuery{
+		Credentials: []CredentialQuery{{
+			ID:     "id-doc",
+			Format: "dc+sd-jwt",
+			Claims: []ClaimQuery{
+				{ID: "passport_number", Path: []string{"passportNumber"}},
+				{ID: "license_number", Path: []string{"licenseNumber"}},
+			},
+			ClaimSets: [][]string{{"passport_number"}, {"license_number"}},
+		}},
+	}
+	if err := q.Validate(); err != nil {
+		t.Fatalf("valid claim_sets should pass: %v", err)
+	}
+}
+
+func TestDCQLValidateClaimSetsRequiresIDs(t *testing.T) {
+	q := DCQLQuery{
+		Credentials: []CredentialQuery{{
+			ID:     "id-doc",
+			Format: "dc+sd-jwt",
+			Claims: []ClaimQuery{
+				{ID: "passport_number", Path: []string{"passportNumber"}},
+				{Path: []string{"licenseNumber"}}, // no id
+			},
+			ClaimSets: [][]string{{"passport_number"}},
+		}},
+	}
+	if err := q.Validate(); err == nil {
+		t.Error("claim_sets with an unlabeled claim should fail")
+	}
+}
+
+func TestDCQLValidateClaimSetsUnknownID(t *testing.T) {
+	q := DCQLQuery{
+		Credentials: []CredentialQuery{{
+			ID:        "id-doc",
+			Format:    "dc+sd-jwt",
+			Claims:    []ClaimQuery{{ID: "a", Path: []string{"a"}}},
+			ClaimSets: [][]string{{"nonexistent"}},
+		}},
+	}
+	if err := q.Validate(); err == nil {
+		t.Error("claim_sets referencing unknown claim id should fail")
+	}
+}
+
+func TestDCQLValidateClaimSetsEmptyOption(t *testing.T) {
+	q := DCQLQuery{
+		Credentials: []CredentialQuery{{
+			ID:        "id-doc",
+			Format:    "dc+sd-jwt",
+			Claims:    []ClaimQuery{{ID: "a", Path: []string{"a"}}},
+			ClaimSets: [][]string{{}},
+		}},
+	}
+	if err := q.Validate(); err == nil {
+		t.Error("empty claim_sets option should fail")
+	}
+}
+
+func TestDCQLValidateClaimSetsDuplicateClaimID(t *testing.T) {
+	q := DCQLQuery{
+		Credentials: []CredentialQuery{{
+			ID:     "id-doc",
+			Format: "dc+sd-jwt",
+			Claims: []ClaimQuery{
+				{ID: "dup", Path: []string{"a"}},
+				{ID: "dup", Path: []string{"b"}},
+			},
+		}},
+	}
+	if err := q.Validate(); err == nil {
+		t.Error("duplicate claim id within a credential query should fail")
+	}
+}
+
+// TestMatchClaimsClaimSetsAlternative proves the OR-of-ANDs semantics: a
+// credential disclosing EITHER a passport number OR a license number (not
+// both) satisfies the query, but one disclosing neither does not.
+func TestMatchClaimsClaimSetsAlternative(t *testing.T) {
+	cq := CredentialQuery{
+		ID:     "id-doc",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{
+			{ID: "passport_number", Path: []string{"passportNumber"}},
+			{ID: "license_number", Path: []string{"licenseNumber"}},
+		},
+		ClaimSets: [][]string{{"passport_number"}, {"license_number"}},
+	}
+	if !cq.MatchClaims(map[string]any{"passportNumber": "P123"}) {
+		t.Error("passport-only disclosure should satisfy the first option")
+	}
+	if !cq.MatchClaims(map[string]any{"licenseNumber": "L456"}) {
+		t.Error("license-only disclosure should satisfy the second option")
+	}
+	if !cq.MatchClaims(map[string]any{"passportNumber": "P123", "licenseNumber": "L456"}) {
+		t.Error("disclosing both should still satisfy (first option fully covered)")
+	}
+	if cq.MatchClaims(map[string]any{"unrelated": "x"}) {
+		t.Error("neither option satisfied should not match")
+	}
+}
+
+// TestMatchClaimsClaimSetsMultiClaimOption proves an option requiring
+// multiple claim ids needs ALL of them present (AND within an option).
+func TestMatchClaimsClaimSetsMultiClaimOption(t *testing.T) {
+	cq := CredentialQuery{
+		ID:     "addr",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{
+			{ID: "street", Path: []string{"street"}},
+			{ID: "city", Path: []string{"city"}},
+			{ID: "poBox", Path: []string{"poBox"}},
+		},
+		ClaimSets: [][]string{{"street", "city"}, {"poBox"}},
+	}
+	if !cq.MatchClaims(map[string]any{"street": "Main St", "city": "Berlin"}) {
+		t.Error("street+city option fully disclosed should match")
+	}
+	if cq.MatchClaims(map[string]any{"street": "Main St"}) {
+		t.Error("partial option (missing city) should not match")
+	}
+	if !cq.MatchClaims(map[string]any{"poBox": "123"}) {
+		t.Error("poBox-only option should match")
+	}
+}
+
+// TestMatchClaimsClaimSetsValueConstraint proves value constraints on a
+// claim referenced by claim_sets are still enforced.
+func TestMatchClaimsClaimSetsValueConstraint(t *testing.T) {
+	cq := CredentialQuery{
+		ID:     "cat",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{
+			{ID: "category", Path: []string{"category"}, Values: []any{"EV"}},
+		},
+		ClaimSets: [][]string{{"category"}},
+	}
+	if !cq.MatchClaims(map[string]any{"category": "EV"}) {
+		t.Error("matching value should satisfy")
+	}
+	if cq.MatchClaims(map[string]any{"category": "ICE"}) {
+		t.Error("non-matching value should not satisfy despite id being present")
+	}
+}
+
 func TestDCQLFromPresentationDefinition(t *testing.T) {
 	def := PresentationDefinition{
 		ID:             "battery-check",

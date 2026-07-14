@@ -44,6 +44,12 @@ type CredentialQuery struct {
 	Meta *CredentialQueryMeta `json:"meta,omitempty"`
 	// Claims — 要求するクレーム群 (§6.3)。空なら全クレーム。
 	Claims []ClaimQuery `json:"claims,omitempty"`
+	// ClaimSets — claims の代替な組合せ制約 (§6.3.1)。任意。指定時は各 ClaimQuery が
+	// id を持つ必要があり、ClaimSets の各 option (id の集合) のいずれか1つを全て
+	// 満たせば良い (credential_sets の claims 版、個々のクレームを "任意" にする機構
+	// ではなく "この組合せか、あの組合せか" を表す — 例: パスポート番号 か
+	// 運転免許証番号のどちらかを開示)。
+	ClaimSets [][]string `json:"claim_sets,omitempty"`
 }
 
 // CredentialQueryMeta — フォーマット固有メタデータ。
@@ -56,6 +62,10 @@ type CredentialQueryMeta struct {
 
 // ClaimQuery — 要求する個別クレーム (§6.3)。
 type ClaimQuery struct {
+	// ID — このクレーム照会の識別子。ClaimSets から参照するために使う。ClaimSets
+	// が指定される CredentialQuery では必須 (§6.3.1)、それ以外では任意。同一
+	// CredentialQuery.Claims 内で重複不可。
+	ID string `json:"id,omitempty"`
 	// Path — クレームへの JSON path (配列要素 = ネストのキー)。
 	Path []string `json:"path"`
 	// Values — 許容値 (指定時はこの値のみ受理)。
@@ -110,6 +120,7 @@ func (q *DCQLQuery) Validate() error {
 			return fmt.Errorf("%w: credential %q has %d claims, limit is %d",
 				ErrDCQLQueryTooComplex, c.ID, len(c.Claims), dcqlMaxClaims)
 		}
+		claimIDs := make(map[string]bool, len(c.Claims))
 		for j, claim := range c.Claims {
 			if len(claim.Path) > dcqlMaxPathDepth {
 				return fmt.Errorf("%w: credential %q claim[%d] path depth %d exceeds limit of %d",
@@ -118,6 +129,30 @@ func (q *DCQLQuery) Validate() error {
 			if len(claim.Values) > dcqlMaxValuesPerClaim {
 				return fmt.Errorf("%w: credential %q claim[%d] has %d values, limit is %d",
 					ErrDCQLQueryTooComplex, c.ID, j, len(claim.Values), dcqlMaxValuesPerClaim)
+			}
+			if claim.ID != "" {
+				if claimIDs[claim.ID] {
+					return fmt.Errorf("openid4vp: credential %q has duplicate claim id: %s", c.ID, claim.ID)
+				}
+				claimIDs[claim.ID] = true
+			}
+		}
+		// §6.3.1: claim_sets requires every claim in this CredentialQuery to carry
+		// an id (otherwise there is nothing for an option to reference), and every
+		// id an option references must exist in this same CredentialQuery's claims.
+		if len(c.ClaimSets) > 0 {
+			if len(claimIDs) != len(c.Claims) {
+				return fmt.Errorf("openid4vp: credential %q: claim_sets requires every claim to have an id", c.ID)
+			}
+			for _, opt := range c.ClaimSets {
+				if len(opt) == 0 {
+					return fmt.Errorf("openid4vp: credential %q: claim_sets option must be non-empty", c.ID)
+				}
+				for _, claimID := range opt {
+					if !claimIDs[claimID] {
+						return fmt.Errorf("openid4vp: credential %q: claim_sets references unknown claim id: %s", c.ID, claimID)
+					}
+				}
 			}
 		}
 	}
@@ -171,35 +206,67 @@ func DCQLFromPresentationDefinition(def PresentationDefinition) DCQLQuery {
 // claim.Path の全セグメントを辿ってネストオブジェクトに対応する (DCQL §6.3)。
 // 例: Path=["address","country"] は {"address":{"country":"DE"}} にマッチする。
 // Values が指定されている場合は最終値がそのいずれかに一致しなければならない。
+//
+// ClaimSets が指定されている場合 (§6.3.1) は全 Claims の同時充足を要求する
+// 代わりに、いずれか1つの option (claim id の集合) が指すクレーム群を全て
+// 満たせば良い — "この組合せか、あの組合せか" という代替表現であり、個々の
+// クレームを任意にする機構ではない。
 func (cq *CredentialQuery) MatchClaims(presented map[string]any) bool {
-	for _, claim := range cq.Claims {
-		if len(claim.Path) == 0 {
-			continue
+	if len(cq.ClaimSets) > 0 {
+		byID := make(map[string]*ClaimQuery, len(cq.Claims))
+		for i := range cq.Claims {
+			if cq.Claims[i].ID != "" {
+				byID[cq.Claims[i].ID] = &cq.Claims[i]
+			}
 		}
-		val, found := walkPath(presented, claim.Path)
-		if !found {
-			return false
-		}
-		if len(claim.Values) > 0 {
-			matched := false
-			for _, want := range claim.Values {
-				// reflect.DeepEqual, not ==: a disclosed claim value can be a JSON
-				// array/object (map[string]any / []any). The == operator panics when
-				// both operands share an uncomparable dynamic type — reachable when a
-				// verifier lists a composite value in DCQL `values` and a (possibly
-				// malicious) wallet discloses a same-typed composite claim. DeepEqual
-				// never panics and also matches composites structurally.
-				if reflect.DeepEqual(val, want) {
-					matched = true
+		for _, opt := range cq.ClaimSets {
+			allMatch := true
+			for _, claimID := range opt {
+				claim, ok := byID[claimID]
+				if !ok || !matchOneClaim(claim, presented) {
+					allMatch = false
 					break
 				}
 			}
-			if !matched {
-				return false
+			if allMatch {
+				return true
 			}
+		}
+		return false
+	}
+	for i := range cq.Claims {
+		if !matchOneClaim(&cq.Claims[i], presented) {
+			return false
 		}
 	}
 	return true
+}
+
+// matchOneClaim reports whether a single ClaimQuery is satisfied by the
+// presented claims (path resolution + optional value-set membership).
+func matchOneClaim(claim *ClaimQuery, presented map[string]any) bool {
+	if len(claim.Path) == 0 {
+		return true
+	}
+	val, found := walkPath(presented, claim.Path)
+	if !found {
+		return false
+	}
+	if len(claim.Values) == 0 {
+		return true
+	}
+	for _, want := range claim.Values {
+		// reflect.DeepEqual, not ==: a disclosed claim value can be a JSON
+		// array/object (map[string]any / []any). The == operator panics when
+		// both operands share an uncomparable dynamic type — reachable when a
+		// verifier lists a composite value in DCQL `values` and a (possibly
+		// malicious) wallet discloses a same-typed composite claim. DeepEqual
+		// never panics and also matches composites structurally.
+		if reflect.DeepEqual(val, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // enforceDCQLConstraints checks the single presented credential against a DCQL
