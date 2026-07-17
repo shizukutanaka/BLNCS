@@ -570,6 +570,63 @@ func TestMetadata(t *testing.T) {
 	}
 }
 
+// TestMetadataSDJWTVCShape verifies the Axis 129 fix: an SD-JWT-VC (vc+sd-jwt /
+// dc+sd-jwt) credential configuration is advertised with a top-level `vct` and
+// a `proof_types_supported` block, and does NOT use the jwt_vc_json-style
+// `credential_definition.type` shape (which belongs to the W3C VC formats).
+func TestMetadataSDJWTVCShape(t *testing.T) {
+	iss, _ := setupIssuer(t) // registers eu-battery-passport-v1, format vc+sd-jwt, vct BatteryPassport
+	m := iss.Metadata()
+	configs := m["credential_configurations_supported"].(map[string]any)
+	cfg := configs["eu-battery-passport-v1"].(map[string]any)
+
+	if cfg["vct"] != "BatteryPassport" {
+		t.Errorf("vct: got %v want BatteryPassport", cfg["vct"])
+	}
+	if _, present := cfg["credential_definition"]; present {
+		t.Error("SD-JWT-VC config must not carry credential_definition.type")
+	}
+	pts, ok := cfg["proof_types_supported"].(map[string]any)
+	if !ok {
+		t.Fatalf("proof_types_supported missing or wrong type: %v", cfg["proof_types_supported"])
+	}
+	jwt, ok := pts["jwt"].(map[string]any)
+	if !ok {
+		t.Fatalf("proof_types_supported.jwt missing: %v", pts)
+	}
+	algs, ok := jwt["proof_signing_alg_values_supported"].([]string)
+	if !ok || len(algs) == 0 || algs[0] != "EdDSA" {
+		t.Errorf("proof_signing_alg_values_supported: got %v want [EdDSA]", jwt["proof_signing_alg_values_supported"])
+	}
+}
+
+// TestMetadataNonSDJWTKeepsCredentialDefinition verifies a non-SD-JWT format
+// configuration still emits the credential_definition.type shape (and no vct).
+func TestMetadataNonSDJWTKeepsCredentialDefinition(t *testing.T) {
+	signer, err := compliance.NewIssuer("did:web:w3c.vci.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss := NewIssuer("https://issue.blrcs.example", signer)
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:             "jwt-vc-json-v1",
+		Format:         "jwt_vc_json",
+		CredentialType: "UniversityDegree",
+	})
+	cfg := iss.Metadata()["credential_configurations_supported"].(map[string]any)["jwt-vc-json-v1"].(map[string]any)
+	if _, present := cfg["vct"]; present {
+		t.Error("non-SD-JWT format must not carry vct")
+	}
+	cd, ok := cfg["credential_definition"].(map[string]any)
+	if !ok {
+		t.Fatalf("credential_definition missing for jwt_vc_json: %v", cfg["credential_definition"])
+	}
+	types := cd["type"].([]string)
+	if len(types) != 2 || types[1] != "UniversityDegree" {
+		t.Errorf("credential_definition.type: got %v", types)
+	}
+}
+
 func TestJWKS(t *testing.T) {
 	iss, signer := setupIssuer(t)
 	jwks := iss.JWKS()

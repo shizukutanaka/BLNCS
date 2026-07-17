@@ -251,6 +251,14 @@ func (iss *Issuer) RegisterConfiguration(c CredentialConfiguration) {
 	iss.mu.Unlock()
 }
 
+// isSDJWTVCFormat reports whether a credential_configuration Format string names
+// the SD-JWT-VC profile — the current "dc+sd-jwt" or the retired-but-still-
+// verifier-accepted "vc+sd-jwt". These use a top-level `vct` in issuer metadata
+// rather than the W3C-VC-style credential_definition.type.
+func isSDJWTVCFormat(format string) bool {
+	return format == "dc+sd-jwt" || format == "vc+sd-jwt"
+}
+
 // Signer — 内部コンポーネント統合用 (MCP層から鍵にアクセスするため)
 func (iss *Issuer) Signer() *compliance.Issuer { return iss.signer }
 
@@ -862,13 +870,33 @@ func (iss *Issuer) Metadata() map[string]any {
 	defer iss.mu.Unlock()
 	configs := make(map[string]any, len(iss.configs))
 	for id, cfg := range iss.configs {
-		configs[id] = map[string]any{
-			"format":                cfg.Format,
-			"credential_definition": map[string]any{"type": []string{"VerifiableCredential", cfg.CredentialType}},
-			"scope":                 cfg.Scope,
+		entry := map[string]any{
+			"format": cfg.Format,
+			"scope":  cfg.Scope,
 			"cryptographic_binding_methods_supported": []string{"did:web"},
 			"credential_signing_alg_values_supported": []string{"EdDSA"},
+			// proof_types_supported (OpenID4VCI 1.0 §11.2.3): the wallet must know
+			// which proof types/algorithms the issuer accepts before attempting
+			// issuance. This mirrors exactly what parseProofJWT enforces — a
+			// jwt-typed proof (typ=openid4vci-proof+jwt) signed with EdDSA.
+			"proof_types_supported": map[string]any{
+				"jwt": map[string]any{
+					"proof_signing_alg_values_supported": []string{"EdDSA"},
+				},
+			},
 		}
+		// The SD-JWT-VC format profile (dc+sd-jwt / legacy vc+sd-jwt) identifies
+		// the credential type with a top-level `vct`, NOT the jwt_vc_json-style
+		// `credential_definition.type` (which belongs to the W3C VC formats). A
+		// wallet reading credential_configurations_supported for an SD-JWT-VC
+		// config expects `vct`; the old shape broke display-metadata-driven
+		// wallets. Non-SD-JWT formats keep the credential_definition.type shape.
+		if isSDJWTVCFormat(cfg.Format) {
+			entry["vct"] = cfg.CredentialType
+		} else {
+			entry["credential_definition"] = map[string]any{"type": []string{"VerifiableCredential", cfg.CredentialType}}
+		}
+		configs[id] = entry
 	}
 	return map[string]any{
 		"credential_issuer":                   iss.URL,
