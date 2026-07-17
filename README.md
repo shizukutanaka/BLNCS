@@ -1,3 +1,15 @@
+# BLNCS
+
+> **📦 BLRCS — EU Digital Product Passport / Verifiable Credentials suite (Go)**
+> A production-grade, zero-dependency Go implementation of EU Digital Product
+> Passport (ESPR) & Battery Passport (Reg 2023/1542) with W3C Verifiable
+> Credentials, SD-JWT-VC, IETF SCITT, OpenID4VP/VCI, ISO 18013-5 mdoc,
+> did:webvh, and the W3C Digital Credentials API — **53 packages, 2000+ tests,
+> 21 fuzz targets, 0 external dependencies.**
+> **→ See [`blrcs/`](./blrcs/) and its [README](./blrcs/README.md).**
+
+---
+
 # BLNCS – Bitcoin Lightning Network Control System
 
 ## ⚡ 最新アップデート / Latest Updates
