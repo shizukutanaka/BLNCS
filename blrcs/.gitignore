@@ -1,0 +1,33 @@
+# Binaries (anchored to the module root so they don't match cmd/ source dirs)
+/blrcs
+/blrcs-mcp
+/blrcs-mcpd
+/blrcs-demo
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+coverage.out
+coverage.html
+# Ad-hoc coverage profiles (go test -coverprofile=...)
+*.out
+testdata/fuzz/*/corpus/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+/dist/
+/bin/

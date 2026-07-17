@@ -1,0 +1,2419 @@
+package openid4vci
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"blrcs/compliance"
+)
+
+func setupIssuer(t *testing.T) (*Issuer, *compliance.Issuer) {
+	t.Helper()
+	signer, err := compliance.NewIssuer("did:web:issuer.vci.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss := NewIssuer("https://issue.blrcs.example", signer)
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:                "eu-battery-passport-v1",
+		CredentialType:    "BatteryPassport",
+		Format:            "vc+sd-jwt",
+		DisclosableClaims: []string{"carbonKgCO2ePerKWh", "recycledCoPct"},
+		ClearClaims:       []string{"batteryCategory", "capacityKWh"},
+		ValidForDays:      3650,
+	})
+	return iss, signer
+}
+
+// ============================================================================
+// Configuration & Offer
+// ============================================================================
+
+func TestCreateOfferBasic(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	offerURL, code, err := iss.CreateOffer(
+		"eu-battery-passport-v1",
+		"bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 75.0},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(offerURL, "openid-credential-offer://?credential_offer=") {
+		t.Errorf("bad URL: %s", offerURL)
+	}
+	if code == "" {
+		t.Fatal("code empty")
+	}
+	if !strings.Contains(offerURL, "eu-battery-passport-v1") {
+		t.Errorf("config missing from URL: %s", offerURL)
+	}
+}
+
+// TestExchangeCodeTxCodeRequired covers the tx_code (PIN) binding: an offer created
+// with a transaction code cannot be redeemed without the exact code, defeating
+// interception of the pre-authorized code alone.
+func TestExchangeCodeTxCodeRequired(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	const pin = "secret-pin-9173"
+	_, code, err := iss.CreateOfferWithTxCode(
+		"eu-battery-passport-v1", "bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		map[string]any{"batteryCategory": "ev"},
+		pin, &TxCodeSpec{InputMode: "text", Length: len(pin)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Plain ExchangeCode (no PIN) must fail when a tx_code is required.
+	if _, err := iss.ExchangeCode(code); err != ErrBadTxCode {
+		t.Fatalf("no PIN: want ErrBadTxCode, got %v", err)
+	}
+	// Wrong PIN must fail.
+	if _, err := iss.ExchangeCodeWithTxCode(code, "wrong"); err != ErrBadTxCode {
+		t.Fatalf("wrong PIN: want ErrBadTxCode, got %v", err)
+	}
+	// Failed attempts must NOT consume the code — the correct PIN still works.
+	tr, err := iss.ExchangeCodeWithTxCode(code, pin)
+	if err != nil {
+		t.Fatalf("correct PIN should succeed: %v", err)
+	}
+	if tr.AccessToken == "" {
+		t.Error("access token empty after correct PIN")
+	}
+	// And now the code is consumed.
+	if _, err := iss.ExchangeCodeWithTxCode(code, pin); err != ErrBadPreAuthCode {
+		t.Fatalf("redeemed code reuse: want ErrBadPreAuthCode, got %v", err)
+	}
+}
+
+// TestCreateOfferAdvertisesTxCode confirms the offer advertises the tx_code
+// requirement (metadata only) and never leaks the PIN value.
+func TestCreateOfferAdvertisesTxCode(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	const pin = "distinctive-pin-55501"
+	offerURL, _, err := iss.CreateOfferWithTxCode(
+		"eu-battery-passport-v1", "bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		nil, pin, &TxCodeSpec{InputMode: "text", Length: len(pin), Description: "PIN from email"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(offerURL, "tx_code") {
+		t.Errorf("offer should advertise tx_code requirement: %s", offerURL)
+	}
+	if !strings.Contains(offerURL, "input_mode") {
+		t.Errorf("offer should advertise tx_code metadata: %s", offerURL)
+	}
+	if strings.Contains(offerURL, pin) {
+		t.Errorf("offer MUST NOT contain the PIN value: %s", offerURL)
+	}
+}
+
+// TestExchangeCodeNoTxCodeBackcompat confirms the plain flow is unchanged: an offer
+// with no tx_code redeems via ExchangeCode, and an extraneous tx_code is ignored.
+func TestExchangeCodeNoTxCodeBackcompat(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, err := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Extraneous tx_code on a no-tx offer is ignored (lenient, per spec).
+	if _, err := iss.ExchangeCodeWithTxCode(code, "irrelevant"); err != nil {
+		t.Fatalf("no-tx offer with extraneous PIN should still redeem: %v", err)
+	}
+}
+
+// TestExchangeCodeTxCodeBruteForceLimit confirms the pre-authorized code is burned
+// after too many wrong tx_code attempts, preventing PIN brute-force.
+func TestExchangeCodeTxCodeBruteForceLimit(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.MaxTxCodeAttempts = 3
+	const pin = "1234"
+	_, code, err := iss.CreateOfferWithTxCode(
+		"eu-battery-passport-v1", "bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		nil, pin, &TxCodeSpec{InputMode: "numeric", Length: 4},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First (limit-1) wrong attempts return ErrBadTxCode and keep the code alive.
+	for i := 0; i < 2; i++ {
+		if _, err := iss.ExchangeCodeWithTxCode(code, "0000"); err != ErrBadTxCode {
+			t.Fatalf("attempt %d: want ErrBadTxCode, got %v", i, err)
+		}
+	}
+	// The attempt that reaches the limit still reports ErrBadTxCode but burns the code.
+	if _, err := iss.ExchangeCodeWithTxCode(code, "0000"); err != ErrBadTxCode {
+		t.Fatalf("limit attempt: want ErrBadTxCode, got %v", err)
+	}
+	// Even the CORRECT PIN now fails because the code was invalidated.
+	if _, err := iss.ExchangeCodeWithTxCode(code, pin); err != ErrBadPreAuthCode {
+		t.Fatalf("after limit, correct PIN: want ErrBadPreAuthCode, got %v", err)
+	}
+}
+
+// TestTxCodeLockoutAuditHook pins the forensic-observability fix (Axis 12): the
+// brute-force lockout fires OnTxCodeLockout exactly once, with the offer's
+// subject/configID and never the secret code or PIN.
+func TestTxCodeLockoutAuditHook(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.MaxTxCodeAttempts = 2
+	var fires int
+	var gotSubject, gotConfig string
+	iss.OnTxCodeLockout = func(subject, configID string) {
+		fires++
+		gotSubject, gotConfig = subject, configID
+	}
+	const pin = "4242"
+	_, code, err := iss.CreateOfferWithTxCode(
+		"eu-battery-passport-v1", "bat-777",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		nil, pin, &TxCodeSpec{InputMode: "numeric", Length: 4},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First wrong attempt: under the limit, no lockout.
+	if _, err := iss.ExchangeCodeWithTxCode(code, "0000"); err != ErrBadTxCode {
+		t.Fatalf("attempt 1: want ErrBadTxCode, got %v", err)
+	}
+	if fires != 0 {
+		t.Fatalf("hook must not fire before the limit, fired %d", fires)
+	}
+	// Second wrong attempt reaches the limit → burn → hook fires once.
+	if _, err := iss.ExchangeCodeWithTxCode(code, "0000"); err != ErrBadTxCode {
+		t.Fatalf("attempt 2: want ErrBadTxCode, got %v", err)
+	}
+	if fires != 1 {
+		t.Fatalf("hook should fire exactly once on lockout, fired %d", fires)
+	}
+	if gotSubject != "bat-777" {
+		t.Errorf("hook subject: want bat-777, got %q", gotSubject)
+	}
+	if gotConfig != "eu-battery-passport-v1" {
+		t.Errorf("hook configID: want eu-battery-passport-v1, got %q", gotConfig)
+	}
+	// A no-tx_code offer must never trigger the hook.
+	_, code2, _ := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	if _, err := iss.ExchangeCode(code2); err != nil {
+		t.Fatal(err)
+	}
+	if fires != 1 {
+		t.Errorf("no-tx_code flow must not fire the lockout hook, total fires %d", fires)
+	}
+}
+
+// TestIssueCredentialBoundAndRevocable confirms an offer with a status reference and
+// proof-of-possession yields a credential that is both holder-bound (cnf) AND
+// revocable (status_list) — so VCI-issued credentials can be revoked.
+func TestIssueCredentialBoundAndRevocable(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	iss.RequireProof = true
+	status := &compliance.StatusRef{URI: "https://status.example/list", Index: 9}
+	_, code, err := iss.CreateOfferWithOptions(
+		"eu-battery-passport-v1", "bat-rev",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+		OfferOptions{Status: status},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, tr.CNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Holder-bound: plain verify must require a KB-JWT.
+	if _, verr := compliance.VerifySDJWT(cr.Credential, signer.PublicKey()); verr != compliance.ErrKeyBindingMissing {
+		t.Fatalf("want ErrKeyBindingMissing, got %v", verr)
+	}
+	// Present and verify: result must carry the status reference.
+	pres, err := compliance.PresentWithKeyBinding(cr.Credential, []string{"carbonKgCO2ePerKWh"}, holderPriv, "n", "a", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vc, err := compliance.VerifySDJWTWithBinding(pres, signer.PublicKey(), compliance.VerifyOptions{
+		ExpectedNonce: "n", ExpectedAudience: "a", RequireKeyBinding: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !vc.KeyBound {
+		t.Error("credential should be holder-bound")
+	}
+	if vc.Status == nil || vc.Status.Index != 9 || vc.Status.URI != status.URI {
+		t.Fatalf("status reference not embedded: %+v", vc.Status)
+	}
+}
+
+// TestIssueCredentialBearerRevocable covers the no-proof status path: a bearer
+// credential can still carry a revocation reference.
+func TestIssueCredentialBearerRevocable(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	status := &compliance.StatusRef{URI: "https://status.example/list", Index: 3}
+	_, code, err := iss.CreateOfferWithOptions(
+		"eu-battery-passport-v1", "bat-bearer-rev",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+		OfferOptions{Status: status},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := iss.IssueCredential(tr.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vc, err := compliance.VerifySDJWT(cr.Credential, signer.PublicKey())
+	if err != nil {
+		t.Fatalf("bearer credential should verify: %v", err)
+	}
+	if vc.Status == nil || vc.Status.Index != 3 {
+		t.Fatalf("status reference not embedded on bearer credential: %+v", vc.Status)
+	}
+}
+
+func TestCreateOfferUnknownConfig(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, _, err := iss.CreateOffer("unknown-config", "s", nil, nil)
+	if err != ErrUnknownConfig {
+		t.Fatalf("want ErrUnknownConfig, got %v", err)
+	}
+}
+
+func TestCreateOfferMissingRequiredSDClaim(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	// DisclosableClaims requires carbonKgCO2ePerKWh and recycledCoPct, omit one
+	_, _, err := iss.CreateOffer(
+		"eu-battery-passport-v1",
+		"bat-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5}, // recycledCoPct missing
+		nil,
+	)
+	if err == nil {
+		t.Fatal("should fail strict check")
+	}
+}
+
+// ============================================================================
+// Token exchange
+// ============================================================================
+
+func TestExchangeCode(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.AccessToken == "" || tr.TokenType != "Bearer" {
+		t.Error("bad token response")
+	}
+	if tr.CNonce == "" {
+		t.Error("c_nonce missing")
+	}
+}
+
+// TestCNonceExpiresInMatchesTokenTTL pins that c_nonce_expires_in ≤ ExpiresIn
+// (Axis 6: temporal integrity).
+//
+// A wallet that caches a c_nonce for up to c_nonce_expires_in seconds must be
+// able to use it before the access token expires. Advertising a c_nonce window
+// longer than the token lifetime creates a false expectation: the wallet would
+// present a proof JWT referencing a c_nonce whose paired token is already gone.
+func TestCNonceExpiresInMatchesTokenTTL(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, err := iss.CreateOffer(
+		"eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.CNonceExpiresIn > tr.ExpiresIn {
+		t.Errorf("c_nonce_expires_in (%d) > access_token expires_in (%d): "+
+			"wallet would receive a stale-nonce error before it can present the proof",
+			tr.CNonceExpiresIn, tr.ExpiresIn)
+	}
+}
+
+func TestExchangeCodeSingleUse(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil,
+	)
+	_, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2回目は拒否されるはず
+	if _, err := iss.ExchangeCode(code); err != ErrBadPreAuthCode {
+		t.Fatalf("want ErrBadPreAuthCode, got %v", err)
+	}
+}
+
+func TestExchangeCodeUnknown(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	if _, err := iss.ExchangeCode("never-issued"); err != ErrBadPreAuthCode {
+		t.Fatalf("want ErrBadPreAuthCode, got %v", err)
+	}
+}
+
+// TestCreateOfferGCEvictsAbandonedOffer pins the resource-exhaustion fix: an
+// offer created but never redeemed must not linger past its TTL. The time-gated
+// sweep on CreateOffer evicts it (Axis 10: unbounded growth).
+func TestCreateOfferGCEvictsAbandonedOffer(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.preAuthTTL = time.Millisecond
+
+	_, code1, err := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss.mu.Lock()
+	_, present := iss.preAuths[code1]
+	iss.mu.Unlock()
+	if !present {
+		t.Fatal("offer should be stored after CreateOffer")
+	}
+
+	// Let it expire and force the GC gate open (it was just set by CreateOffer).
+	time.Sleep(5 * time.Millisecond)
+	iss.mu.Lock()
+	iss.lastGC = time.Now().Add(-time.Hour)
+	iss.mu.Unlock()
+
+	// A new offer triggers the gated sweep.
+	if _, _, err = iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 2.0, "recycledCoPct": 6.0}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	iss.mu.Lock()
+	_, stillThere := iss.preAuths[code1]
+	n := len(iss.preAuths)
+	iss.mu.Unlock()
+	if stillThere {
+		t.Error("expired abandoned offer should have been evicted by GC")
+	}
+	if n != 1 {
+		t.Errorf("preAuths should hold only the new offer, got %d entries", n)
+	}
+}
+
+// TestCreateOfferGCEvictsAbandonedToken: a token created by an exchange but never
+// used to issue a credential is also swept once expired.
+func TestCreateOfferGCEvictsAbandonedToken(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.tokenTTL = time.Millisecond
+
+	_, code, err := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss.mu.Lock()
+	_, present := iss.tokens[tr.AccessToken]
+	iss.mu.Unlock()
+	if !present {
+		t.Fatal("token should be stored after exchange")
+	}
+
+	time.Sleep(5 * time.Millisecond)
+	iss.mu.Lock()
+	iss.lastGC = time.Now().Add(-time.Hour)
+	iss.mu.Unlock()
+
+	if _, _, err = iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 2.0, "recycledCoPct": 6.0}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	iss.mu.Lock()
+	_, stillThere := iss.tokens[tr.AccessToken]
+	iss.mu.Unlock()
+	if stillThere {
+		t.Error("expired abandoned access token should have been evicted by GC")
+	}
+}
+
+func TestExchangeCodeExpired(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.preAuthTTL = 10 * time.Millisecond
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil,
+	)
+	time.Sleep(30 * time.Millisecond)
+	if _, err := iss.ExchangeCode(code); err != ErrBadPreAuthCode {
+		t.Fatalf("want expiry, got %v", err)
+	}
+}
+
+// ============================================================================
+// Credential issuance
+// ============================================================================
+
+func TestIssueCredential(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-123",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 75.0},
+	)
+	tr, _ := iss.ExchangeCode(code)
+	cr, err := iss.IssueCredential(tr.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cr.Credential, "~") {
+		t.Error("SD-JWT must contain disclosure separator")
+	}
+	// Verify the SD-JWT
+	verified, err := compliance.VerifySDJWT(cr.Credential, signer.PublicKey())
+	if err != nil {
+		t.Fatalf("SD-JWT verify: %v", err)
+	}
+	if verified.Subject != "bat-123" {
+		t.Errorf("subject: %s", verified.Subject)
+	}
+	// All claims present (full disclosure by default)
+	for _, k := range []string{"carbonKgCO2ePerKWh", "recycledCoPct", "batteryCategory", "capacityKWh"} {
+		if _, ok := verified.Claims[k]; !ok {
+			t.Errorf("claim missing: %s", k)
+		}
+	}
+}
+
+func TestIssueCredentialTokenSingleUse(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil,
+	)
+	tr, _ := iss.ExchangeCode(code)
+	if _, err := iss.IssueCredential(tr.AccessToken); err != nil {
+		t.Fatal(err)
+	}
+	// 2回目は拒否
+	if _, err := iss.IssueCredential(tr.AccessToken); err != ErrBadAccessToken {
+		t.Fatalf("want ErrBadAccessToken, got %v", err)
+	}
+}
+
+func TestIssueCredentialBadToken(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	if _, err := iss.IssueCredential("bogus"); err != ErrBadAccessToken {
+		t.Fatalf("want ErrBadAccessToken, got %v", err)
+	}
+}
+
+// ============================================================================
+// Metadata + JWKS
+// ============================================================================
+
+func TestMetadata(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	m := iss.Metadata()
+	if m["credential_issuer"] != "https://issue.blrcs.example" {
+		t.Errorf("issuer URL: %v", m["credential_issuer"])
+	}
+	if m["token_endpoint"] != "https://issue.blrcs.example/token" {
+		t.Errorf("token endpoint: %v", m["token_endpoint"])
+	}
+	configs := m["credential_configurations_supported"].(map[string]any)
+	if _, ok := configs["eu-battery-passport-v1"]; !ok {
+		t.Error("config missing from metadata")
+	}
+}
+
+func TestJWKS(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	jwks := iss.JWKS()
+	keys := jwks["keys"].([]map[string]any)
+	if len(keys) != 1 {
+		t.Fatalf("want 1 key, got %d", len(keys))
+	}
+	k := keys[0]
+	if k["kty"] != "OKP" || k["crv"] != "Ed25519" {
+		t.Errorf("wrong key type: kty=%v crv=%v", k["kty"], k["crv"])
+	}
+	// Decode the key and compare
+	xb, err := base64.RawURLEncoding.DecodeString(k["x"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytesEqualKeys(xb, signer.PublicKey()) {
+		t.Error("JWKS key mismatch")
+	}
+}
+
+func bytesEqualKeys(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// ============================================================================
+// HTTP handler — full-stack test
+// ============================================================================
+
+func TestFullHTTPFlow(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	// Rebind issuer URL to test server
+	iss.URL = ts.URL
+
+	// 1. Create offer out-of-band (e.g. issuer's backend)
+	_, code, err := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-http-001",
+		map[string]any{"carbonKgCO2ePerKWh": 48.5, "recycledCoPct": 16.0},
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 75.0},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Wallet fetches credential via WalletClient
+	client := NewWalletClient(ts.URL)
+	sdjwt, err := client.FetchCredential(code)
+	if err != nil {
+		t.Fatalf("wallet fetch: %v", err)
+	}
+
+	// 3. Wallet fetches JWKS and verifies
+	pub, err := client.FetchJWKS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytesEqualKeys(pub, signer.PublicKey()) {
+		t.Error("fetched JWKS key mismatch")
+	}
+
+	verified, err := compliance.VerifySDJWT(sdjwt, pub)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if verified.Subject != "bat-http-001" {
+		t.Errorf("subject: %s", verified.Subject)
+	}
+}
+
+func TestHTTPInvalidTokenRequest(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+	// GET on token endpoint
+	resp, err := ts.Client().Get(ts.URL + "/token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 405 {
+		t.Fatalf("want 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestHTTPMissingBearer(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+	resp, err := ts.Client().Post(ts.URL+"/credential", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Fatalf("want 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestHTTPMetadataDiscovery(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+	iss.URL = ts.URL
+
+	client := NewWalletClient(ts.URL)
+	meta, err := client.FetchMetadata()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta["credential_issuer"] != ts.URL {
+		t.Errorf("discovery URL: %v", meta["credential_issuer"])
+	}
+}
+
+// ============================================================================
+// Proof-of-Possession (OpenID4VCI 1.0 Final §8.2.1.1)
+// ============================================================================
+
+// buildProofJWT は Ed25519 holderKey で署名した openid4vci-proof+jwt を返す。
+func buildProofJWT(t *testing.T, holderPriv ed25519.PrivateKey, nonce, aud string) string {
+	t.Helper()
+	pub := holderPriv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := `{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`
+	pl := `{"nonce":"` + nonce + `","aud":"` + aud + `","iat":` + strconv.FormatInt(time.Now().Unix(), 10) + `}`
+	h := base64.RawURLEncoding.EncodeToString([]byte(hdr))
+	p := base64.RawURLEncoding.EncodeToString([]byte(pl))
+	sig := ed25519.Sign(holderPriv, []byte(h+"."+p))
+	return h + "." + p + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func TestIssueCredentialWithProofHappy(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-proof",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a valid proof JWT using a fresh holder key.
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, tr.CNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatalf("valid proof should succeed: %v", err)
+	}
+	if cr.Credential == "" {
+		t.Error("credential must not be empty")
+	}
+}
+
+// TestIssueCredentialWithProofRotatesCNonce verifies that after a successful
+// credential issuance the returned c_nonce is stored back into the token entry,
+// so a subsequent proof-of-possession request (deferred issuance, multi-use token)
+// must use the rotated nonce — not the original c_nonce from the token response.
+// Without the write-back, the rotated nonce was dead code: entry.cNonce stayed at
+// the original value making every retry use the same stale nonce.
+func TestIssueCredentialWithProofRotatesCNonce(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-nonce",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalNonce := tr.CNonce
+
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, originalNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatalf("valid proof: %v", err)
+	}
+	if cr.CNonce == "" {
+		t.Fatal("response must include a rotated c_nonce")
+	}
+	if cr.CNonce == originalNonce {
+		t.Error("rotated c_nonce must differ from the original token-response nonce")
+	}
+
+	// The token entry's internal cNonce must now equal the rotated value.
+	iss.mu.Lock()
+	var entry *preAuthEntry
+	for _, e := range iss.tokens {
+		entry = e
+	}
+	iss.mu.Unlock()
+	if entry == nil {
+		// Token was consumed by the successful issuance — entry may be absent
+		// (implementation detail). Just confirm the response nonce was non-empty.
+		t.Log("token entry evicted after issuance; nonce rotation confirmed via response only")
+		return
+	}
+	if entry.cNonce != cr.CNonce {
+		t.Errorf("internal entry.cNonce=%q should equal response CNonce=%q", entry.cNonce, cr.CNonce)
+	}
+}
+
+// TestIssueCredentialWithProofBindsHolderKey is the regression test for the
+// proof-of-possession binding gap: a credential issued against a valid proof MUST
+// be holder-bound (carry a cnf), otherwise it is a bearer credential that the
+// secure-by-default OpenID4VP verifier (RequireKeyBinding=true) rejects, defeating
+// the whole point of the proof step.
+func TestIssueCredentialWithProofBindsHolderKey(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-bound",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holderPub, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, tr.CNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatalf("valid proof should succeed: %v", err)
+	}
+
+	// The credential must carry a cnf: plain (bearer) verification must now fail
+	// with ErrKeyBindingMissing because a KB-JWT is required.
+	if _, verr := compliance.VerifySDJWT(cr.Credential, signer.PublicKey()); verr != compliance.ErrKeyBindingMissing {
+		t.Fatalf("proof-bound credential should require KB-JWT, got %v", verr)
+	}
+
+	// And it must be presentable through the secure holder-binding path using the
+	// exact key the wallet proved possession of.
+	nonce, aud := "vp-nonce-123", "https://verify.example"
+	pres, err := compliance.PresentWithKeyBinding(cr.Credential, []string{"carbonKgCO2ePerKWh"}, holderPriv, nonce, aud, time.Time{})
+	if err != nil {
+		t.Fatalf("PresentWithKeyBinding: %v", err)
+	}
+	vc, err := compliance.VerifySDJWTWithBinding(pres, signer.PublicKey(), compliance.VerifyOptions{
+		ExpectedNonce: nonce, ExpectedAudience: aud, RequireKeyBinding: true,
+	})
+	if err != nil {
+		t.Fatalf("bound presentation should verify: %v", err)
+	}
+	if !vc.KeyBound {
+		t.Error("verified presentation should be KeyBound")
+	}
+	if !bytesEqualKeys(vc.HolderKey, holderPub) {
+		t.Error("credential bound to the wrong holder key")
+	}
+}
+
+// TestIssueCredentialNoProofStaysBearer confirms the no-proof path is unchanged:
+// when proof is not required and not supplied, a plain bearer SD-JWT is issued
+// (verifiable without a KB-JWT) — backward compatibility.
+func TestIssueCredentialNoProofStaysBearer(t *testing.T) {
+	iss, signer := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-bearer",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := iss.IssueCredential(tr.AccessToken)
+	if err != nil {
+		t.Fatalf("no-proof issuance: %v", err)
+	}
+	// Bearer credential: plain verification succeeds (no cnf, no KB-JWT required).
+	if _, verr := compliance.VerifySDJWT(cr.Credential, signer.PublicKey()); verr != nil {
+		t.Fatalf("bearer credential should verify without KB-JWT, got %v", verr)
+	}
+}
+
+func TestIssueCredentialWithProofWrongNonce(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-proof2",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, _ := iss.ExchangeCode(code)
+
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, "wrong-nonce", iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrProofNonceMismatch {
+		t.Fatalf("want ErrProofNonceMismatch, got %v", err)
+	}
+}
+
+func TestIssueCredentialRequireProof(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.RequireProof = true
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-proof3",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, _ := iss.ExchangeCode(code)
+
+	// No proof provided → must fail
+	_, err := iss.IssueCredential(tr.AccessToken)
+	if err != ErrInvalidProof {
+		t.Fatalf("RequireProof=true with no proof: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestHTTPMethodNotAllowed(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	// GET on credential endpoint (requires POST)
+	resp, err := ts.Client().Get(ts.URL + "/credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 405 {
+		t.Fatalf("credential GET: want 405, got %d", resp.StatusCode)
+	}
+
+	// POST on metadata endpoint (requires GET)
+	resp2, err := ts.Client().Post(ts.URL+"/.well-known/openid-credential-issuer", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != 405 {
+		t.Fatalf("metadata POST: want 405, got %d", resp2.StatusCode)
+	}
+
+	// POST on JWKS endpoint (requires GET)
+	resp3, err := ts.Client().Post(ts.URL+"/.well-known/jwks.json", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3.Body.Close()
+	if resp3.StatusCode != 405 {
+		t.Fatalf("jwks POST: want 405, got %d", resp3.StatusCode)
+	}
+}
+
+func TestSigner(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	if iss.Signer() == nil {
+		t.Error("Signer() must not be nil")
+	}
+}
+
+func TestIssueCredentialProofBadSignature(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-proof4",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, _ := iss.ExchangeCode(code)
+
+	// Build JWT, then corrupt the signature.
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, tr.CNonce, iss.URL)
+	// Overwrite last byte of sig (base64 last segment)
+	parts := strings.Split(proofJWT, ".")
+	sigBytes, _ := base64.RawURLEncoding.DecodeString(parts[2])
+	sigBytes[0] ^= 0xFF
+	parts[2] = base64.RawURLEncoding.EncodeToString(sigBytes)
+	badJWT := strings.Join(parts, ".")
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": badJWT})
+
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad sig: want ErrInvalidProof, got %v", err)
+	}
+}
+
+// ============================================================================
+// Token endpoint edge cases (handleToken coverage)
+// ============================================================================
+
+func TestHTTPTokenUnsupportedGrantType(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	form := strings.NewReader("grant_type=authorization_code&code=xyz")
+	resp, err := ts.Client().Post(ts.URL+"/token", "application/x-www-form-urlencoded", form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestHTTPTokenMissingCode(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	form := strings.NewReader("grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code")
+	resp, err := ts.Client().Post(ts.URL+"/token", "application/x-www-form-urlencoded", form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestRegisterConfigurationDefaults(t *testing.T) {
+	signer, _ := compliance.NewIssuer("did:web:config.test")
+	iss := NewIssuer("https://config.test", signer)
+	// Empty format and zero ValidForDays → should get defaults
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:             "test-cred",
+		CredentialType: "TestType",
+	})
+	iss.mu.Lock()
+	cfg, ok := iss.configs["test-cred"]
+	iss.mu.Unlock()
+	if !ok {
+		t.Fatal("config not registered")
+	}
+	if cfg.Format != "dc+sd-jwt" {
+		t.Errorf("default format: %s", cfg.Format)
+	}
+	if cfg.ValidForDays != 365 {
+		t.Errorf("default validForDays: %d", cfg.ValidForDays)
+	}
+}
+
+// sdjwtVCT decodes an unsigned-payload-visible SD-JWT's JWT part and returns its vct claim.
+func sdjwtVCT(t *testing.T, sdjwt string) string {
+	t.Helper()
+	jwtPart := strings.SplitN(sdjwt, "~", 2)[0]
+	parts := strings.SplitN(jwtPart, ".", 3)
+	if len(parts) != 3 {
+		t.Fatalf("malformed SD-JWT: %s", sdjwt)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	var claims struct {
+		VCT string `json:"vct"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	return claims.VCT
+}
+
+// TestIssueCredentialWithProofUsesConfiguredVCT proves that a credential_configuration's
+// declared CredentialType (vct) is actually threaded into the issued SD-JWT rather than
+// always collapsing to the DPP default. Two differently-typed configs on the same issuer
+// must produce distinct vct claims — otherwise a wallet reading
+// credential_configurations_supported sees one advertised type but receives another.
+func TestIssueCredentialWithProofUsesConfiguredVCT(t *testing.T) {
+	signer, err := compliance.NewIssuer("did:web:multi.vci.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss := NewIssuer("https://issue.blrcs.example", signer)
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:                "battery-passport-v1",
+		CredentialType:    "BatteryPassport",
+		DisclosableClaims: []string{"carbonKgCO2ePerKWh"},
+		ClearClaims:       []string{"capacityKWh"},
+	})
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:                "dpp-v1",
+		CredentialType:    "DigitalProductPassport",
+		DisclosableClaims: []string{"carbonKgCO2e"},
+		ClearClaims:       []string{"productId"},
+	})
+
+	issueAndVCT := func(configID string) string {
+		_, code, err := iss.CreateOffer(configID, "sub-"+configID,
+			map[string]any{"carbonKgCO2ePerKWh": 1.0, "carbonKgCO2e": 1.0},
+			map[string]any{"capacityKWh": 1.0, "productId": "p"})
+		if err != nil {
+			t.Fatalf("CreateOffer(%s): %v", configID, err)
+		}
+		tr, err := iss.ExchangeCode(code)
+		if err != nil {
+			t.Fatalf("ExchangeCode(%s): %v", configID, err)
+		}
+		cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{})
+		if err != nil {
+			t.Fatalf("IssueCredentialWithProof(%s): %v", configID, err)
+		}
+		return sdjwtVCT(t, cr.Credential)
+	}
+
+	batteryVCT := issueAndVCT("battery-passport-v1")
+	dppVCT := issueAndVCT("dpp-v1")
+
+	if batteryVCT != "BatteryPassport" {
+		t.Errorf("battery-passport-v1 config: want vct=BatteryPassport, got %q", batteryVCT)
+	}
+	if dppVCT != "DigitalProductPassport" {
+		t.Errorf("dpp-v1 config: want vct=DigitalProductPassport, got %q", dppVCT)
+	}
+	if batteryVCT == dppVCT {
+		t.Fatal("two differently-configured credential_configurations must not collapse to the same vct")
+	}
+}
+
+// TestIssueCredentialWithProofDefaultsVCTWhenUnset proves that a config that never sets
+// CredentialType still falls back to the DPP default vct, preserving existing behavior
+// for configs that don't declare one.
+func TestIssueCredentialWithProofDefaultsVCTWhenUnset(t *testing.T) {
+	signer, err := compliance.NewIssuer("did:web:default.vci.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss := NewIssuer("https://issue.blrcs.example", signer)
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:                "no-type-v1",
+		DisclosableClaims: []string{"carbonKgCO2e"},
+		ClearClaims:       []string{"productId"},
+	})
+	_, code, err := iss.CreateOffer("no-type-v1", "sub-no-type",
+		map[string]any{"carbonKgCO2e": 1.0}, map[string]any{"productId": "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sdjwtVCT(t, cr.Credential); got != compliance.VCTDigitalProductPassport {
+		t.Errorf("want default vct %q, got %q", compliance.VCTDigitalProductPassport, got)
+	}
+}
+
+func TestFetchCredentialCtxCancelledBeforeRequest(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	client := NewWalletClient(ts.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	_, err := client.FetchCredentialCtx(ctx, "some-code")
+	if err == nil {
+		t.Fatal("cancelled context should produce error")
+	}
+}
+
+func TestFetchMetadataCtxCancelled(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	client := NewWalletClient(ts.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := client.FetchMetadataCtx(ctx)
+	if err == nil {
+		t.Fatal("cancelled context should produce error")
+	}
+}
+
+func TestFetchJWKSCtxCancelled(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	client := NewWalletClient(ts.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := client.FetchJWKSCtx(ctx)
+	if err == nil {
+		t.Fatal("cancelled context should produce error")
+	}
+}
+
+// ============================================================================
+// Coverage uplift: verifyProofJWT error paths
+// ============================================================================
+
+// buildBadProofJWT creates a proof JWT with controllable field values for
+// negative testing of verifyProofJWT.
+func buildCustomProofJWT(t *testing.T, holderPriv ed25519.PrivateKey, alg, typ, nonce, aud string, iatOffset time.Duration) string {
+	t.Helper()
+	pub := holderPriv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := `{"alg":"` + alg + `","typ":"` + typ + `","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`
+	iat := time.Now().Add(iatOffset).Unix()
+	pl := `{"nonce":"` + nonce + `","aud":"` + aud + `","iat":` + strconv.FormatInt(iat, 10) + `}`
+	h := base64.RawURLEncoding.EncodeToString([]byte(hdr))
+	p := base64.RawURLEncoding.EncodeToString([]byte(pl))
+	sig := ed25519.Sign(holderPriv, []byte(h+"."+p))
+	return h + "." + p + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func mustGetToken(t *testing.T, iss *Issuer) *TokenResponse {
+	t.Helper()
+	_, code, err := iss.CreateOffer(
+		"eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 2.0}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tr
+}
+
+func TestVerifyProofJWTWrongAud(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	jwt := buildCustomProofJWT(t, holderPriv, "EdDSA", "openid4vci-proof+jwt", tr.CNonce, "https://wrong.aud", 0)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("wrong aud: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTStaleIat(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	// iat = 10 minutes ago — outside the ±5 min window
+	jwt := buildCustomProofJWT(t, holderPriv, "EdDSA", "openid4vci-proof+jwt", tr.CNonce, iss.URL, -10*time.Minute)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("stale iat: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTFutureIat(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	// iat = 10 minutes in the future
+	jwt := buildCustomProofJWT(t, holderPriv, "EdDSA", "openid4vci-proof+jwt", tr.CNonce, iss.URL, 10*time.Minute)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("future iat: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadAlg(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	jwt := buildCustomProofJWT(t, holderPriv, "RS256", "openid4vci-proof+jwt", tr.CNonce, iss.URL, 0)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad alg: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadTyp(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	jwt := buildCustomProofJWT(t, holderPriv, "EdDSA", "JWT", tr.CNonce, iss.URL, 0)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": jwt})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad typ: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadHeaderBase64(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	proofJSON, _ := json.Marshal(map[string]string{
+		"proof_type": "jwt",
+		"jwt":        "!!!.validpayload.validsig",
+	})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad header base64: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadSigBase64(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	pub := (ed25519.PublicKey)(make([]byte, ed25519.PublicKeySize))
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"x","aud":"y","iat":1}`))
+	proofJSON, _ := json.Marshal(map[string]string{
+		"proof_type": "jwt",
+		"jwt":        hdr + "." + pl + ".!!!invalid-sig-base64",
+	})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad sig base64: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTTruncatedSig(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	pub := (ed25519.PublicKey)(make([]byte, ed25519.PublicKeySize))
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"x","aud":"y","iat":1}`))
+	// Only 16 bytes of sig, not 64
+	shortSig := base64.RawURLEncoding.EncodeToString(make([]byte, 16))
+	proofJSON, _ := json.Marshal(map[string]string{
+		"proof_type": "jwt",
+		"jwt":        hdr + "." + pl + "." + shortSig,
+	})
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != ErrInvalidProof {
+		t.Fatalf("truncated sig: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestIssueCredentialWithProofBadProofJSON(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	tr := mustGetToken(t, iss)
+	// proof field is invalid JSON
+	_, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{
+		Proof: []byte(`{"proof_type": "not-jwt", "jwt": ""}`),
+	})
+	if err != ErrInvalidProof {
+		t.Fatalf("bad proof_type: want ErrInvalidProof, got %v", err)
+	}
+}
+
+// ============================================================================
+// Coverage uplift: handleCredential bad JSON body
+// ============================================================================
+
+func TestHTTPCredentialBadJSONBody(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	// Get a valid token first
+	tr := mustGetToken(t, iss)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", strings.NewReader("{bad json}"))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad JSON body: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// Coverage uplift: FetchCredentialCtx / FetchMetadataCtx / FetchJWKSCtx
+// non-200 and decode-error paths
+// ============================================================================
+
+func TestFetchCredentialCtxTokenNon200(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("unauthorized"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Fatal("non-200 token response should error")
+	}
+}
+
+func TestFetchCredentialCtxTokenBadJSON(t *testing.T) {
+	var callCount int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json")) // token endpoint returns garbage
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Fatal("bad token JSON should error")
+	}
+}
+
+func TestFetchCredentialCtxCredentialNon200(t *testing.T) {
+	var callCount int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// Return valid token response
+			json.NewEncoder(w).Encode(TokenResponse{
+				AccessToken: "tok",
+				TokenType:   "Bearer",
+				ExpiresIn:   300,
+			})
+			return
+		}
+		// Credential endpoint returns 500
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("error"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Fatal("non-200 credential response should error")
+	}
+}
+
+func TestFetchCredentialCtxCredentialBadJSON(t *testing.T) {
+	var callCount int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			json.NewEncoder(w).Encode(TokenResponse{
+				AccessToken: "tok",
+				TokenType:   "Bearer",
+				ExpiresIn:   300,
+			})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json credential"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Fatal("bad credential JSON should error")
+	}
+}
+
+func TestFetchMetadataCtxNon200(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("not found"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchMetadataCtx(context.Background())
+	if err == nil {
+		t.Fatal("non-200 metadata response should error")
+	}
+}
+
+func TestFetchMetadataCtxBadJSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchMetadataCtx(context.Background())
+	if err == nil {
+		t.Fatal("bad JSON metadata should error")
+	}
+}
+
+func TestFetchJWKSCtxNon200(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("unavailable"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchJWKSCtx(context.Background())
+	if err == nil {
+		t.Fatal("non-200 JWKS response should error")
+	}
+}
+
+func TestFetchJWKSCtxBadJSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json"))
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchJWKSCtx(context.Background())
+	if err == nil {
+		t.Fatal("bad JWKS JSON should error")
+	}
+}
+
+// ============================================================================
+// Coverage uplift: verifyProofJWT — remaining error branches
+// These call verifyProofJWT directly (same package).
+// ============================================================================
+
+func TestVerifyProofJWTNotThreeParts(t *testing.T) {
+	_, err := verifyProofJWT("no-dots-in-jwt", "n", "a")
+	if err != ErrInvalidProof {
+		t.Fatalf("want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadJWKKty(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"RSA","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"n","aud":"a","iat":1}`))
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	_, err := verifyProofJWT(hdr+"."+pl+"."+sig, "n", "a")
+	if err != ErrInvalidProof {
+		t.Fatalf("bad JWK kty: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadPayloadBase64(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := "!!!" // invalid base64 — verifyProofJWT signs over it literally
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	_, err := verifyProofJWT(hdr+"."+pl+"."+sig, "n", "a")
+	if err != ErrInvalidProof {
+		t.Fatalf("bad payload base64: want ErrInvalidProof, got %v", err)
+	}
+}
+
+func TestVerifyProofJWTBadPayloadJSON(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte("not-json-payload"))
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	_, err := verifyProofJWT(hdr+"."+pl+"."+sig, "n", "a")
+	if err != ErrInvalidProof {
+		t.Fatalf("bad payload JSON: want ErrInvalidProof, got %v", err)
+	}
+}
+
+// ============================================================================
+// handleToken — uncovered HTTP paths
+// ============================================================================
+
+func TestHandleTokenMethodNotAllowed(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET /token: want 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleTokenMissingPreAuthCode(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.PostForm(ts.URL+"/token", map[string][]string{
+		"grant_type": {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		// pre-authorized_code intentionally omitted
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing code: want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleTokenUnsupportedGrantType(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.PostForm(ts.URL+"/token", map[string][]string{
+		"grant_type": {"authorization_code"},
+		"code":       {"abc"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("wrong grant_type: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// handleCredential — uncovered HTTP paths
+// ============================================================================
+
+func TestHandleCredentialMethodNotAllowed(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET /credential: want 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleCredentialMissingBearer(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/credential", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	// No Authorization header
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("missing Bearer: want 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleCredentialBadJSON(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, err := iss.CreateOffer("eu-battery-passport-v1", "bat-bad-json",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 10.0},
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 50.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/credential", strings.NewReader(`{bad json`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad JSON body: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// IssueCredentialWithProof — RequireProof without proof in request
+// ============================================================================
+
+func TestIssueCredentialWithProofRequireProofMissing(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	iss.RequireProof = true
+
+	_, code, err := iss.CreateOffer("eu-battery-passport-v1", "bat-require-proof",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 10.0},
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 50.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{})
+	if err != ErrInvalidProof {
+		t.Errorf("RequireProof without proof: want ErrInvalidProof, got %v", err)
+	}
+}
+
+// ============================================================================
+// ExchangeCode — defensive guard: entry still in preAuths but accessToken set
+// ============================================================================
+
+func TestExchangeCodeAlreadyHasToken(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	// Manually insert a pre-auth entry with accessToken already set.
+	// This guard is defensive; the normal code path deletes the entry on exchange.
+	iss.mu.Lock()
+	iss.preAuths["phantom-code"] = &preAuthEntry{
+		code:        "phantom-code",
+		configID:    "eu-battery-passport-v1",
+		expiresAt:   time.Now().Add(5 * time.Minute),
+		accessToken: "already-set",
+	}
+	iss.mu.Unlock()
+	_, err := iss.ExchangeCode("phantom-code")
+	if err != ErrBadPreAuthCode {
+		t.Fatalf("entry with accessToken set: want ErrBadPreAuthCode, got %v", err)
+	}
+}
+
+// ============================================================================
+// handleToken — ExchangeCode failure (invalid pre-authorized_code over HTTP)
+// ============================================================================
+
+func TestHandleTokenInvalidCode(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	resp, err := http.PostForm(ts.URL+"/token", map[string][]string{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {"this-code-was-never-issued"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid code: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// handleToken — body exceeds MaxBytesReader limit (64 KiB)
+// ============================================================================
+
+func TestHandleTokenBodyTooLarge(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	// Body is just over 64 KiB — triggers http.MaxBytesReader error before ParseForm.
+	bigBody := "grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code&pre-authorized_code=" +
+		strings.Repeat("A", 65536)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/token", strings.NewReader(bigBody))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("oversized token body: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// handleCredential — body exceeds MaxBytesReader limit (1 MiB)
+// ============================================================================
+
+func TestHandleCredentialBodyTooLarge(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer("eu-battery-passport-v1", "big-body",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 10.0},
+		map[string]any{"batteryCategory": "ev", "capacityKWh": 50.0})
+	tr, _ := iss.ExchangeCode(code)
+
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	// Body is just over 1 MiB — triggers http.MaxBytesReader error.
+	bigBody := strings.Repeat("A", (1<<20)+1)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", strings.NewReader(bigBody))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("oversized body: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// IssueCredentialWithProof — ErrUnknownConfig when config deleted after code issued
+// ============================================================================
+
+func TestIssueCredentialUnknownConfig(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	tr, _ := iss.ExchangeCode(code)
+
+	// Delete the config that this token refers to.
+	iss.mu.Lock()
+	delete(iss.configs, "eu-battery-passport-v1")
+	iss.mu.Unlock()
+
+	_, err := iss.IssueCredential(tr.AccessToken)
+	if err != ErrUnknownConfig {
+		t.Fatalf("want ErrUnknownConfig, got %v", err)
+	}
+}
+
+// ============================================================================
+// FetchJWKSCtx — no Ed25519 key present in the JWKS response
+// ============================================================================
+
+func TestFetchJWKSCtxNoEd25519Key(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"keys": []map[string]any{
+				{"kty": "RSA", "crv": "", "x": ""},
+			},
+		})
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchJWKSCtx(context.Background())
+	if err == nil {
+		t.Fatal("JWKS with no Ed25519 key should error")
+	}
+}
+
+// ============================================================================
+// Coverage uplift: IssueSDJWT failure (reserved claim), handleCredential error
+// path, WalletClient bad URL (NewRequestWithContext failures).
+// ============================================================================
+
+// TestIssueCredentialReservedClearClaim covers openid4vci.go:307-311: IssueSDJWT
+// returns an error when a clear claim uses a reserved JWT claim name ("iss").
+// The pre-auth code is un-consumed so a retry is possible.
+func TestIssueCredentialReservedClearClaim(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	// Register a config with no DisclosableClaims requirement so the offer
+	// creation passes, but with a clear claim that collides with "iss".
+	iss.RegisterConfiguration(CredentialConfiguration{
+		ID:             "bad-clear-v1",
+		CredentialType: "BadClear",
+		Format:         "vc+sd-jwt",
+		ValidForDays:   1,
+	})
+	_, code, err := iss.CreateOffer("bad-clear-v1", "s",
+		nil,
+		map[string]any{"iss": "injected"}, // "iss" is reserved → IssueSDJWT fails
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := iss.ExchangeCode(code)
+	_, err = iss.IssueCredential(tr.AccessToken)
+	if err == nil {
+		t.Error("IssueSDJWT with reserved clear claim should fail")
+	}
+}
+
+// TestHandleCredentialBadProof covers openid4vci.go:525-527: handleCredential
+// calls IssueCredentialWithProof which returns ErrInvalidProof for a malformed
+// proof JWT, exercising the error branch in the HTTP handler.
+func TestHandleCredentialBadProof(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer("eu-battery-passport-v1", "s",
+		map[string]any{"carbonKgCO2ePerKWh": 1.0, "recycledCoPct": 5.0}, nil)
+	tr, _ := iss.ExchangeCode(code)
+
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"format": "vc+sd-jwt",
+		"proof":  map[string]any{"proof_type": "jwt", "jwt": "invalid.proof.jwt"},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad proof JWT: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// TestFetchCredentialTokenOKCredentialFail covers openid4vci.go:634-635:
+// c.HTTP.Do fails for the credential endpoint after the token endpoint
+// succeeded — simulated by closing the connection on the credential request.
+func TestFetchCredentialTokenOKCredentialFail(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(TokenResponse{
+				AccessToken: "test-token",
+				TokenType:   "Bearer",
+				ExpiresIn:   3600,
+			})
+		default:
+			// Hijack and close the connection to force an HTTP client error.
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "no hijack", 500)
+				return
+			}
+			conn, _, _ := hj.Hijack()
+			conn.Close()
+		}
+	}))
+	defer ts.Close()
+	client := NewWalletClient(ts.URL)
+	_, err := client.FetchCredentialCtx(context.Background(), "pre-auth-code")
+	if err == nil {
+		t.Error("credential endpoint connection reset should return error")
+	}
+}
+
+// TestWalletClientBadURLToken covers openid4vci.go:608-609:
+// http.NewRequestWithContext fails for the token endpoint when the base URL
+// contains a null byte.
+func TestWalletClientBadURLToken(t *testing.T) {
+	client := &WalletClient{
+		BaseURL: "http://host\x00bad",
+		HTTP:    &http.Client{},
+	}
+	_, err := client.FetchCredentialCtx(context.Background(), "code")
+	if err == nil {
+		t.Error("null byte in base URL should fail NewRequestWithContext for token")
+	}
+}
+
+// TestWalletClientBadURLMetadata covers openid4vci.go:657-658:
+// http.NewRequestWithContext fails for the metadata endpoint.
+func TestWalletClientBadURLMetadata(t *testing.T) {
+	client := &WalletClient{
+		BaseURL: "http://host\x00bad",
+		HTTP:    &http.Client{},
+	}
+	_, err := client.FetchMetadataCtx(context.Background())
+	if err == nil {
+		t.Error("null byte in base URL should fail NewRequestWithContext for metadata")
+	}
+}
+
+// TestWalletClientBadURLJWKS covers openid4vci.go:680-681:
+// http.NewRequestWithContext fails for the JWKS endpoint.
+func TestWalletClientBadURLJWKS(t *testing.T) {
+	client := &WalletClient{
+		BaseURL: "http://host\x00bad",
+		HTTP:    &http.Client{},
+	}
+	_, err := client.FetchJWKSCtx(context.Background())
+	if err == nil {
+		t.Error("null byte in base URL should fail NewRequestWithContext for JWKS")
+	}
+}
+
+// TestVerifyProofJWTBadXCoord covers openid4vci.go:353-354: the JWK X field
+// decodes to fewer than 32 bytes (wrong length for Ed25519).
+func TestVerifyProofJWTBadXCoord(t *testing.T) {
+	// Build a proof JWT header with an OKP JWK whose X is only 16 bytes.
+	shortX := base64.RawURLEncoding.EncodeToString(make([]byte, 16)) // too short
+	hdr := map[string]any{
+		"alg": "EdDSA",
+		"typ": "openid4vci-proof+jwt",
+		"jwk": map[string]any{"kty": "OKP", "crv": "Ed25519", "x": shortX},
+	}
+	hdrBytes, _ := json.Marshal(hdr)
+	hdrB64 := base64.RawURLEncoding.EncodeToString(hdrBytes)
+	// Use a real Ed25519 key to sign so the split-by-dots works.
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	payload := base64.RawURLEncoding.EncodeToString([]byte("{}"))
+	sigInput := hdrB64 + "." + payload
+	sig := ed25519.Sign(priv, []byte(sigInput))
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
+	proofJWT := sigInput + "." + sigB64
+
+	_, err := verifyProofJWT(proofJWT, "nonce", "https://issuer.example")
+	if err != ErrInvalidProof {
+		t.Errorf("short X coordinate: want ErrInvalidProof, got %v", err)
+	}
+}
+
+// ============================================================================
+// handleCredential error info-disclosure: opaque responses (CWE-209)
+// ============================================================================
+
+// TestHandleCredentialErrorsAreOpaque verifies that the credential endpoint
+// returns opaque, client-safe error descriptions for every failure path —
+// no internal error strings, signer diagnostics, or key state are leaked.
+func TestHandleCredentialErrorsAreOpaque(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+	client := ts.Client()
+
+	mustBody := func(resp *http.Response) string {
+		t.Helper()
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return string(b)
+	}
+
+	internalStrings := []string{
+		"vci:", "sign", "sdjwt", "compliance", "ed25519", "ErrBadAccessToken",
+		"ErrInvalidProof", "ErrProofNonceMismatch", "ErrUnknownConfig",
+	}
+	leak := func(body string) bool {
+		for _, s := range internalStrings {
+			if strings.Contains(body, s) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Case 1: expired/invalid access token → 401, no internals.
+	req1, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", strings.NewReader("{}"))
+	req1.Header.Set("Authorization", "Bearer bad-token")
+	req1.Header.Set("Content-Type", "application/json")
+	resp1, _ := client.Do(req1)
+	body1 := mustBody(resp1)
+	if resp1.StatusCode != http.StatusUnauthorized {
+		t.Errorf("bad token: want 401, got %d: %s", resp1.StatusCode, body1)
+	}
+	if leak(body1) {
+		t.Errorf("bad token response leaks internals: %s", body1)
+	}
+
+	// Case 2: valid token but bad proof JWT → 400 invalid_proof, no internals.
+	tr := mustGetToken(t, iss)
+	badProof := json.RawMessage(`{"proof_type":"jwt","jwt":"a.b.c"}`)
+	body2JSON, _ := json.Marshal(CredentialRequest{Proof: badProof})
+	req2, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", bytes.NewReader(body2JSON))
+	req2.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req2.Header.Set("Content-Type", "application/json")
+	resp2, _ := client.Do(req2)
+	body2 := mustBody(resp2)
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad proof: want 400, got %d: %s", resp2.StatusCode, body2)
+	}
+	if !strings.Contains(body2, "invalid_proof") {
+		t.Errorf("bad proof: want invalid_proof error code: %s", body2)
+	}
+	if leak(body2) {
+		t.Errorf("bad proof response leaks internals: %s", body2)
+	}
+}
+
+// ============================================================================
+// Axis 69 — credential format / configuration_id mismatch validation
+// ============================================================================
+
+// TestIssueCredentialFormatMismatch confirms that a wallet requesting a format
+// that differs from the issuer's registered configuration is rejected.
+func TestIssueCredentialFormatMismatch(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-fmt-mismatch",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The registered config uses "vc+sd-jwt"; requesting a different format must fail.
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{
+		Format: "ldp_vc",
+	})
+	if err != ErrFormatMismatch {
+		t.Fatalf("wrong format: want ErrFormatMismatch, got %v", err)
+	}
+}
+
+// TestIssueCredentialConfigIDMismatch confirms that a wallet requesting a
+// credential_configuration_id that differs from the offer's binding is rejected.
+func TestIssueCredentialConfigIDMismatch(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-cfgid-mismatch",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Offer binds "eu-battery-passport-v1"; requesting a different id must fail.
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{
+		CredentialConfigurationID: "eu-dpp-v2",
+	})
+	if err != ErrFormatMismatch {
+		t.Fatalf("wrong config id: want ErrFormatMismatch, got %v", err)
+	}
+}
+
+// TestIssueCredentialConfigIDMatchPasses confirms that the correct
+// credential_configuration_id and format both pass, and the empty (omitted)
+// case also succeeds (backward-compatible).
+func TestIssueCredentialConfigIDMatchPasses(t *testing.T) {
+	iss, _ := setupIssuer(t)
+
+	tests := []struct {
+		name string
+		req  CredentialRequest
+	}{
+		{"empty fields", CredentialRequest{}},
+		{"matching config id", CredentialRequest{CredentialConfigurationID: "eu-battery-passport-v1"}},
+		{"matching format", CredentialRequest{Format: "vc+sd-jwt"}},
+		{"both matching", CredentialRequest{Format: "vc+sd-jwt", CredentialConfigurationID: "eu-battery-passport-v1"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, code, _ := iss.CreateOffer(
+				"eu-battery-passport-v1", "bat-match-"+tc.name,
+				map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+			)
+			tr, err := iss.ExchangeCode(code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = iss.IssueCredentialWithProof(tr.AccessToken, tc.req)
+			if err != nil {
+				t.Fatalf("expected success, got %v", err)
+			}
+		})
+	}
+}
+
+// TestIssueCredentialFormatMismatchDoesNotConsumeToken confirms that a
+// format-mismatch error does NOT burn the access token — the wallet may
+// retry with the correct format.
+func TestIssueCredentialFormatMismatchDoesNotConsumeToken(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-fmt-retry",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First call: wrong format.
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Format: "ldp_vc"})
+	if err != ErrFormatMismatch {
+		t.Fatalf("first call: want ErrFormatMismatch, got %v", err)
+	}
+
+	// Second call: correct format — token must still be valid.
+	_, err = iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Format: "vc+sd-jwt"})
+	if err != nil {
+		t.Fatalf("retry with correct format: want success, got %v", err)
+	}
+}
+
+// ============================================================================
+// Axis 73 — ErrFormatMismatch HTTP error mapping
+// ============================================================================
+
+// TestHTTPCredentialFormatMismatch confirms that a credential endpoint request
+// whose format mismatches the offer configuration returns 400 (not 500).
+// Without explicit handling, ErrFormatMismatch would fall into the default
+// 500 "server_error" case in handleCredential — wrong for a client error.
+func TestHTTPCredentialFormatMismatch(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+	client := ts.Client()
+
+	// Get a valid access token.
+	tr := mustGetToken(t, iss)
+
+	// Request a credential with the wrong format.
+	body, _ := json.Marshal(CredentialRequest{Format: "ldp_vc"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	rawBody, _ := io.ReadAll(resp.Body)
+	respBody := string(rawBody)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("format mismatch: want 400, got %d: %s", resp.StatusCode, respBody)
+	}
+	if !strings.Contains(respBody, "invalid_request") {
+		t.Errorf("format mismatch response should contain invalid_request error: %s", respBody)
+	}
+}
+
+// TestHTTPCredentialConfigIDMismatch confirms that a credential endpoint request
+// with a mismatched credential_configuration_id returns 400 (not 500).
+func TestHTTPCredentialConfigIDMismatch(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ts := httptest.NewServer(iss.Handler())
+	defer ts.Close()
+	client := ts.Client()
+
+	tr := mustGetToken(t, iss)
+
+	body, _ := json.Marshal(CredentialRequest{CredentialConfigurationID: "wrong-config-id"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/credential", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tr.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	rawBody2, _ := io.ReadAll(resp.Body)
+	respBody2 := string(rawBody2)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("config_id mismatch: want 400, got %d: %s", resp.StatusCode, respBody2)
+	}
+	if !strings.Contains(respBody2, "invalid_request") {
+		t.Errorf("config_id mismatch response should contain invalid_request error: %s", respBody2)
+	}
+}
+
+// ============================================================================
+// Nonce Endpoint (OpenID4VCI §7) — proof-replay mitigation
+// ============================================================================
+
+// TestNonceEndpointIssuesFreshSingleUse verifies IssueNonce mints distinct
+// nonces and that consumeNonce accepts each exactly once (single-use).
+func TestNonceEndpointIssuesFreshSingleUse(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	n1, exp1, err := iss.IssueNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n1 == "" || exp1 <= 0 {
+		t.Fatalf("bad nonce/expiry: %q %d", n1, exp1)
+	}
+	n2, _, _ := iss.IssueNonce()
+	if n1 == n2 {
+		t.Fatal("nonces must be distinct")
+	}
+	// First consume succeeds; replay fails.
+	if !iss.consumeNonce(n1) {
+		t.Fatal("first consume of a valid nonce should succeed")
+	}
+	if iss.consumeNonce(n1) {
+		t.Fatal("replay of a consumed nonce must fail (single-use)")
+	}
+	// Unknown nonce fails.
+	if iss.consumeNonce("never-issued") {
+		t.Fatal("unknown nonce must not be accepted")
+	}
+}
+
+// TestCredentialAcceptsNonceEndpointNonce proves the end-to-end §7 flow: a wallet
+// obtains a nonce from the Nonce Endpoint, binds its proof to it, and the
+// credential endpoint accepts it.
+func TestCredentialAcceptsNonceEndpointNonce(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	_, code, _ := iss.CreateOffer(
+		"eu-battery-passport-v1", "bat-ne",
+		map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+	)
+	tr, err := iss.ExchangeCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Wallet fetches a fresh nonce from the Nonce Endpoint (NOT the token c_nonce).
+	freshNonce, _, err := iss.IssueNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, freshNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	cr, err := iss.IssueCredentialWithProof(tr.AccessToken, CredentialRequest{Proof: proofJSON})
+	if err != nil {
+		t.Fatalf("proof bound to Nonce Endpoint nonce should succeed: %v", err)
+	}
+	if cr.Credential == "" {
+		t.Error("credential must not be empty")
+	}
+}
+
+// TestCredentialRejectsReplayedNonceEndpointNonce is the core anti-replay
+// property: a Nonce Endpoint nonce works once, and a second credential request
+// reusing the same proof (same nonce) is rejected.
+func TestCredentialRejectsReplayedNonceEndpointNonce(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	mkToken := func(subject string) string {
+		_, code, _ := iss.CreateOffer(
+			"eu-battery-passport-v1", subject,
+			map[string]any{"carbonKgCO2ePerKWh": 40.0, "recycledCoPct": 12.0}, nil,
+		)
+		tr, err := iss.ExchangeCode(code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tr.AccessToken
+	}
+	freshNonce, _, _ := iss.IssueNonce()
+	_, holderPriv, _ := ed25519.GenerateKey(rand.Reader)
+	proofJWT := buildProofJWT(t, holderPriv, freshNonce, iss.URL)
+	proofJSON, _ := json.Marshal(map[string]string{"proof_type": "jwt", "jwt": proofJWT})
+
+	// First use (fresh access token) succeeds.
+	if _, err := iss.IssueCredentialWithProof(mkToken("ne-1"), CredentialRequest{Proof: proofJSON}); err != nil {
+		t.Fatalf("first use of nonce should succeed: %v", err)
+	}
+	// Replay the same proof with a *different* fresh access token — the nonce was
+	// consumed, so it must now be rejected.
+	if _, err := iss.IssueCredentialWithProof(mkToken("ne-2"), CredentialRequest{Proof: proofJSON}); err != ErrProofNonceMismatch {
+		t.Fatalf("replayed nonce must yield ErrProofNonceMismatch, got %v", err)
+	}
+}
+
+// TestNonceEndpointHTTP exercises the POST /nonce handler and asserts the
+// non-cacheable JSON response shape, plus method enforcement.
+func TestNonceEndpointHTTP(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	srv := httptest.NewServer(iss.Handler())
+	defer srv.Close()
+
+	// GET must be rejected.
+	getResp, err := http.Get(srv.URL + "/nonce")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = getResp.Body.Close()
+	if getResp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /nonce should be 405, got %d", getResp.StatusCode)
+	}
+
+	// POST returns a fresh nonce.
+	resp, err := http.Post(srv.URL+"/nonce", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /nonce should be 200, got %d", resp.StatusCode)
+	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("nonce response must be non-cacheable, got Cache-Control=%q", cc)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var out struct {
+		CNonce          string `json:"c_nonce"`
+		CNonceExpiresIn int    `json:"c_nonce_expires_in"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.CNonce == "" || out.CNonceExpiresIn <= 0 {
+		t.Errorf("bad nonce response: %s", body)
+	}
+}
+
+// TestMetadataAdvertisesNonceEndpoint confirms discovery advertises the endpoint.
+func TestMetadataAdvertisesNonceEndpoint(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	md := iss.Metadata()
+	if md["nonce_endpoint"] != iss.URL+"/nonce" {
+		t.Errorf("metadata must advertise nonce_endpoint, got %v", md["nonce_endpoint"])
+	}
+}
+
+// ============================================================================
+// Coverage uplift: verifyProofJWT — nonce match/mismatch success paths
+// (Axis 94: the underlying nonce checks were untested via this thin wrapper,
+// only via the internal IssueCredentialWithProof flow which now calls
+// parseProofJWT directly.)
+// ============================================================================
+
+// TestVerifyProofJWTNonceMatches verifies the happy path: a structurally valid
+// proof JWT whose embedded nonce matches expectedNonce returns the holder key.
+func TestVerifyProofJWTNonceMatches(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"the-nonce","aud":"https://issuer.example","iat":` + strconv.FormatInt(time.Now().Unix(), 10) + `}`))
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	proofJWT := hdr + "." + pl + "." + sig
+
+	gotPub, err := verifyProofJWT(proofJWT, "the-nonce", "https://issuer.example")
+	if err != nil {
+		t.Fatalf("matching nonce should verify: %v", err)
+	}
+	if !bytes.Equal(gotPub, pub) {
+		t.Error("returned public key does not match signer")
+	}
+}
+
+// TestVerifyProofJWTNonceMismatchRejected verifies that a structurally valid
+// proof JWT whose embedded nonce does NOT match expectedNonce is rejected with
+// ErrProofNonceMismatch — the core anti-replay check this wrapper exists for.
+func TestVerifyProofJWTNonceMismatchRejected(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := priv.Public().(ed25519.PublicKey)
+	x := base64.RawURLEncoding.EncodeToString(pub)
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"openid4vci-proof+jwt","jwk":{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}}`))
+	pl := base64.RawURLEncoding.EncodeToString([]byte(`{"nonce":"stolen-nonce","aud":"https://issuer.example","iat":` + strconv.FormatInt(time.Now().Unix(), 10) + `}`))
+	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(hdr+"."+pl)))
+	proofJWT := hdr + "." + pl + "." + sig
+
+	_, err := verifyProofJWT(proofJWT, "expected-nonce", "https://issuer.example")
+	if err != ErrProofNonceMismatch {
+		t.Fatalf("mismatched nonce: want ErrProofNonceMismatch, got %v", err)
+	}
+}

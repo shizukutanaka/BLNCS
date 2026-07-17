@@ -1,0 +1,42 @@
+BLRCS
+Copyright (c) 2026 BLRCS Contributors
+
+This product is licensed under the MIT License (see LICENSE).
+
+================================================================================
+Third-party dependencies
+================================================================================
+
+None. BLRCS is implemented using only the Go standard library and the
+crypto/ed25519 package shipped with the Go toolchain. There are no vendored or
+external module dependencies.
+
+================================================================================
+Standards implemented
+================================================================================
+
+This implementation targets the following public specifications. These are
+referenced for interoperability; no specification text is reproduced here.
+
+  - W3C Verifiable Credentials Data Model 2.0
+  - W3C Bitstring Status List v1.0
+  - W3C Decentralized Identifiers (DIDs) 1.0 (did:web, did:key, did:jwk)
+  - W3C Digital Credentials API
+  - IETF SD-JWT VC (draft-ietf-oauth-sd-jwt-vc)
+  - IETF SCITT Architecture; RFC 6962 (Merkle inclusion/consistency proofs)
+  - IETF RFC 9264 (Linkset)
+  - OpenID for Verifiable Presentations 1.0 (DCQL)
+  - OpenID for Verifiable Credential Issuance
+  - GS1 Digital Link
+  - OpenTelemetry Semantic Conventions
+
+================================================================================
+Regulatory scope
+================================================================================
+
+  - EU Ecodesign for Sustainable Products Regulation (Reg. 2024/1781, ESPR)
+  - EU Battery Regulation (Reg. 2023/1542)
+
+This software is a reference implementation and does not by itself constitute
+legal compliance. Operators remain responsible for their own conformity
+assessment.

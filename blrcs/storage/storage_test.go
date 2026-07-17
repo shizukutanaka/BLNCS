@@ -1,0 +1,977 @@
+package storage
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+)
+
+// 共通テスト: 両実装が同じ契約を満たすことを保証
+func testStorageContract(t *testing.T, name string, newStorage func() Storage) {
+	t.Run(name+"/EmptyIterate", func(t *testing.T) {
+		s := newStorage()
+		defer s.Close()
+		count := 0
+		if err := s.IterateStatements(func(idx uint64, b StatementBlob) error {
+			count++
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("empty storage iter count: %d", count)
+		}
+	})
+
+	t.Run(name+"/AppendAndIterate", func(t *testing.T) {
+		s := newStorage()
+		defer s.Close()
+		blobs := []string{`{"a":1}`, `{"b":"hello"}`, `{"c":[1,2,3]}`}
+		for _, b := range blobs {
+			idx, err := s.AppendStatement([]byte(b))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = idx
+		}
+		sz, _ := s.Size()
+		if sz != uint64(len(blobs)) {
+			t.Fatalf("size got %d want %d", sz, len(blobs))
+		}
+		var got []string
+		if err := s.IterateStatements(func(idx uint64, b StatementBlob) error {
+			if idx != uint64(len(got)) {
+				return fmt.Errorf("idx out of order: %d", idx)
+			}
+			got = append(got, string(b))
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for i, b := range blobs {
+			if got[i] != b {
+				t.Errorf("blob %d: got %q want %q", i, got[i], b)
+			}
+		}
+	})
+
+	t.Run(name+"/KeyPairRoundTrip", func(t *testing.T) {
+		s := newStorage()
+		defer s.Close()
+		_, _, err := s.LoadKeyPair()
+		if err != ErrNotFound {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		if err := s.SaveKeyPair(pub, priv); err != nil {
+			t.Fatal(err)
+		}
+		gotPub, gotPriv, err := s.LoadKeyPair()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytesEqual(pub, gotPub) || !bytesEqual(priv, gotPriv) {
+			t.Fatal("keypair mismatch")
+		}
+	})
+
+	t.Run(name+"/Concurrent", func(t *testing.T) {
+		s := newStorage()
+		defer s.Close()
+		const N = 50
+		var wg sync.WaitGroup
+		wg.Add(N)
+		for i := 0; i < N; i++ {
+			go func(i int) {
+				defer wg.Done()
+				blob, _ := json.Marshal(map[string]int{"n": i})
+				if _, err := s.AppendStatement(blob); err != nil {
+					t.Error(err)
+				}
+			}(i)
+		}
+		wg.Wait()
+		sz, _ := s.Size()
+		if sz != N {
+			t.Fatalf("size got %d want %d", sz, N)
+		}
+	})
+}
+
+func TestMemoryStorage(t *testing.T) {
+	testStorageContract(t, "mem", func() Storage { return NewMemoryStorage() })
+}
+
+func TestFileStorage(t *testing.T) {
+	testStorageContract(t, "file", func() Storage {
+		dir, err := os.MkdirTemp("", "blrcs-storage-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := NewFileStorage(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.RemoveAll(dir) })
+		return s
+	})
+}
+
+func TestFileStorage_CrashRecovery(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-crash-*")
+	defer os.RemoveAll(dir)
+
+	// 書込みセッション
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	s.SaveKeyPair(pub, priv)
+	wroteBlobs := make([]string, 100)
+	for i := 0; i < 100; i++ {
+		blob := fmt.Sprintf(`{"n":%d,"msg":"hello-%d"}`, i, i)
+		wroteBlobs[i] = blob
+		if _, err := s.AppendStatement([]byte(blob)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
+
+	// 「クラッシュ」後の再オープン
+	s2, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+
+	sz, _ := s2.Size()
+	if sz != 100 {
+		t.Fatalf("recovered size: got %d want 100", sz)
+	}
+
+	gotPub, gotPriv, err := s2.LoadKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytesEqual(pub, gotPub) || !bytesEqual(priv, gotPriv) {
+		t.Fatal("keypair lost across restart")
+	}
+
+	count := 0
+	if err := s2.IterateStatements(func(idx uint64, b StatementBlob) error {
+		if string(b) != wroteBlobs[idx] {
+			return fmt.Errorf("blob %d mismatch: got %q want %q", idx, string(b), wroteBlobs[idx])
+		}
+		count++
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count != 100 {
+		t.Fatalf("replay count: %d", count)
+	}
+}
+
+func TestFileStorage_AppendAfterReopen(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-reopen-*")
+	defer os.RemoveAll(dir)
+
+	s1, _ := NewFileStorage(dir)
+	s1.AppendStatement([]byte(`{"a":1}`))
+	s1.AppendStatement([]byte(`{"a":2}`))
+	s1.Close()
+
+	s2, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	// index should continue from 2
+	idx, err := s2.AppendStatement([]byte(`{"a":3}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx != 2 {
+		t.Fatalf("post-reopen idx: got %d want 2", idx)
+	}
+	sz, _ := s2.Size()
+	if sz != 3 {
+		t.Fatalf("size: got %d want 3", sz)
+	}
+}
+
+func TestFileStorage_CorruptedLogRejected(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-corrupt-*")
+	defer os.RemoveAll(dir)
+
+	s, _ := NewFileStorage(dir)
+	s.AppendStatement([]byte(`{"ok":true}`))
+	s.Close()
+
+	// 末尾に不完全なフレームを追加 (truncation simulation)
+	p := filepath.Join(dir, ledgerFileName)
+	f, _ := os.OpenFile(p, os.O_WRONLY|os.O_APPEND, 0o600)
+	f.Write([]byte{0x00, 0x00, 0x01}) // 3 bytes, incomplete header
+	f.Close()
+
+	_, err := NewFileStorage(dir)
+	if err == nil {
+		t.Fatal("corrupted log should be rejected")
+	}
+}
+
+func TestFileStorage_AfterCloseErrors(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-closed-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	s.Close()
+	if _, err := s.AppendStatement([]byte(`{"x":1}`)); err != ErrAlreadyClosed {
+		t.Fatalf("want ErrAlreadyClosed, got %v", err)
+	}
+}
+
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// ============================================================================
+// Additional coverage: keypair, bad blob size, second Close, callback error
+// ============================================================================
+
+func TestFileStorage_KeyPairRoundTrip(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kp-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Before any key is stored, LoadKeyPair must return ErrNotFound.
+	if _, _, err := s.LoadKeyPair(); err != ErrNotFound {
+		t.Fatalf("want ErrNotFound before save, got %v", err)
+	}
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	if err := s.SaveKeyPair(pub, priv); err != nil {
+		t.Fatal(err)
+	}
+	// Reload and verify round-trip.
+	gotPub, gotPriv, err := s.LoadKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytesEqual(pub, gotPub) || !bytesEqual(priv, gotPriv) {
+		t.Error("keypair round-trip mismatch")
+	}
+}
+
+func TestFileStorage_SaveKeyPairWrongSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpbad-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	if err := s.SaveKeyPair([]byte("short"), []byte("short")); err == nil {
+		t.Error("wrong-size keypair should fail")
+	}
+}
+
+func TestFileStorage_LoadKeyPairBadSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpbad2-*")
+	defer os.RemoveAll(dir)
+	// Write a keypair file with wrong length.
+	p := filepath.Join(dir, "keypair.bin")
+	if err := os.WriteFile(p, []byte("too short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	if _, _, err := s.LoadKeyPair(); err == nil {
+		t.Error("bad-size keypair file should fail")
+	}
+}
+
+func TestFileStorage_AppendBadBlobSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-badblob-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	// Empty blob → error.
+	if _, err := s.AppendStatement([]byte{}); err == nil {
+		t.Error("empty blob should fail")
+	}
+	// Oversized blob > 16 MiB → error.
+	big := make([]byte, 16*1024*1024+1)
+	if _, err := s.AppendStatement(big); err == nil {
+		t.Error("oversized blob should fail")
+	}
+}
+
+func TestFileStorage_IterateCallbackError(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-iter-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	s.AppendStatement([]byte(`{"a":1}`))
+	s.AppendStatement([]byte(`{"b":2}`))
+	boom := errors.New("callback boom")
+	err := s.IterateStatements(func(idx uint64, _ StatementBlob) error {
+		if idx == 0 {
+			return boom
+		}
+		return nil
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("want callback error propagated, got %v", err)
+	}
+}
+
+func TestFileStorage_CloseIdempotent(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-close2-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Second Close must return nil (idempotent).
+	if err := s.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// ============================================================================
+// Coverage uplift: MemoryStorage closed path, iterate callback error,
+// syncDir error, FileStorage iterate bad-frame paths
+// ============================================================================
+
+func TestMemoryStorage_AfterClose(t *testing.T) {
+	s := NewMemoryStorage()
+	s.Close()
+	if _, err := s.AppendStatement([]byte(`{"x":1}`)); err != ErrAlreadyClosed {
+		t.Fatalf("want ErrAlreadyClosed after Close, got %v", err)
+	}
+}
+
+func TestMemoryStorage_IterateCallbackError(t *testing.T) {
+	s := NewMemoryStorage()
+	s.AppendStatement([]byte(`{"a":1}`))
+	s.AppendStatement([]byte(`{"b":2}`))
+	boom := errors.New("boom")
+	err := s.IterateStatements(func(_ uint64, _ StatementBlob) error { return boom })
+	if !errors.Is(err, boom) {
+		t.Fatalf("callback error not propagated, got %v", err)
+	}
+}
+
+func TestSyncDirNonExistent(t *testing.T) {
+	err := syncDir("/nonexistent-dir-blrcs-test-xyzzy")
+	if err == nil {
+		t.Error("syncDir on non-existent path should fail")
+	}
+}
+
+func TestFileStorage_IterateBadFrameSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-iterfs-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	s.AppendStatement([]byte(`{"ok":true}`))
+	// Write a zero-size frame header directly into the open file.
+	var badHeader [frameHeaderSize]byte // all zeros = size 0
+	if _, err := s.file.Write(badHeader[:]); err != nil {
+		t.Fatalf("write bad header: %v", err)
+	}
+	err := s.IterateStatements(func(_ uint64, _ StatementBlob) error { return nil })
+	if err == nil {
+		t.Fatal("bad frame size (0) should cause IterateStatements to return error")
+	}
+}
+
+// ============================================================================
+// SaveKeyPair / LoadKeyPair — keypair lifecycle tests
+// ============================================================================
+
+func TestFileStorage_SaveAndLoadKeyPair(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kp-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	pub1, priv1, _ := ed25519.GenerateKey(rand.Reader)
+	if err := s.SaveKeyPair(pub1, priv1); err != nil {
+		t.Fatalf("SaveKeyPair: %v", err)
+	}
+	pub2, priv2, err := s.LoadKeyPair()
+	if err != nil {
+		t.Fatalf("LoadKeyPair: %v", err)
+	}
+	if !bytes.Equal(pub1, pub2) {
+		t.Error("public key round-trip mismatch")
+	}
+	if !bytes.Equal(priv1, priv2) {
+		t.Error("private key round-trip mismatch")
+	}
+}
+
+func TestFileStorage_LoadKeyPairNotFound(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpnf-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+
+	_, _, err := s.LoadKeyPair()
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing keypair: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestFileStorage_SaveKeyPairWrongSizeNew(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpwsn-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+
+	// Public key too short
+	err := s.SaveKeyPair([]byte("short"), make(ed25519.PrivateKey, ed25519.PrivateKeySize))
+	if err == nil {
+		t.Error("too-short public key should fail")
+	}
+	// Private key too short
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	err = s.SaveKeyPair(pub, []byte("short"))
+	if err == nil {
+		t.Error("too-short private key should fail")
+	}
+}
+
+func TestFileStorage_SaveKeyPairIdempotent(t *testing.T) {
+	// SaveKeyPair should overwrite previous keypair (atomic write).
+	dir, _ := os.MkdirTemp("", "blrcs-kpi-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+
+	pub1, priv1, _ := ed25519.GenerateKey(rand.Reader)
+	pub2, priv2, _ := ed25519.GenerateKey(rand.Reader)
+	if err := s.SaveKeyPair(pub1, priv1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveKeyPair(pub2, priv2); err != nil {
+		t.Fatal(err)
+	}
+	gotPub, gotPriv, err := s.LoadKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should return the second key pair
+	if !bytes.Equal(gotPub, pub2) {
+		t.Error("second SaveKeyPair should overwrite first")
+	}
+	if !bytes.Equal(gotPriv, priv2) {
+		t.Error("private key not updated")
+	}
+}
+
+func TestFileStorage_LoadKeyPairCorrupted(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-kpcorr-*")
+	defer os.RemoveAll(dir)
+	// Write a keypair file with wrong size
+	p := filepath.Join(dir, "keypair.bin")
+	if err := os.WriteFile(p, []byte("tooshort"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+
+	_, _, err := s.LoadKeyPair()
+	if !errors.Is(err, ErrCorrupted) {
+		t.Errorf("corrupted keypair file: want ErrCorrupted, got %v", err)
+	}
+}
+
+func TestFileStorage_IterateTruncatedPayload(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-itertrunc-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	s.AppendStatement([]byte(`{"ok":true}`))
+	// Write a header claiming 100 bytes but write no payload bytes.
+	var header [frameHeaderSize]byte
+	binary.BigEndian.PutUint32(header[:], 100)
+	if _, err := s.file.Write(header[:]); err != nil {
+		t.Fatalf("write truncated header: %v", err)
+	}
+	err := s.IterateStatements(func(_ uint64, _ StatementBlob) error { return nil })
+	if err == nil {
+		t.Fatal("truncated payload should cause IterateStatements to return error")
+	}
+}
+
+// ============================================================================
+// rescanSize — invalid frame size and truncated payload paths
+// ============================================================================
+
+// TestFileStorage_RescanInvalidFrameSize verifies that rescanSize (called at
+// open time) rejects a frame whose header declares size 0.
+func TestFileStorage_RescanInvalidFrameSize(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-rescanfs-*")
+	defer os.RemoveAll(dir)
+
+	// Write a valid entry, then close.
+	s, _ := NewFileStorage(dir)
+	s.AppendStatement([]byte(`{"ok":true}`))
+	s.Close()
+
+	// Manually append a zero-size frame header — rescanSize rejects n==0.
+	p := filepath.Join(dir, ledgerFileName)
+	f, _ := os.OpenFile(p, os.O_WRONLY|os.O_APPEND, 0o600)
+	var badHeader [frameHeaderSize]byte // all zeros → size 0
+	f.Write(badHeader[:])
+	f.Close()
+
+	// Reopen — rescanSize must fail.
+	_, err := NewFileStorage(dir)
+	if err == nil {
+		t.Fatal("zero frame size in ledger should cause NewFileStorage to fail")
+	}
+}
+
+// TestFileStorage_RescanTruncatedPayload verifies that rescanSize rejects a
+// frame whose header declares a payload larger than the remaining file bytes.
+func TestFileStorage_RescanTruncatedPayload(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-rescantrunc-*")
+	defer os.RemoveAll(dir)
+
+	// Write a valid entry, then close.
+	s, _ := NewFileStorage(dir)
+	s.AppendStatement([]byte(`{"ok":true}`))
+	s.Close()
+
+	// Append a header claiming 100-byte payload but write no payload bytes.
+	p := filepath.Join(dir, ledgerFileName)
+	f, _ := os.OpenFile(p, os.O_WRONLY|os.O_APPEND, 0o600)
+	var hdr [frameHeaderSize]byte
+	binary.BigEndian.PutUint32(hdr[:], 100)
+	f.Write(hdr[:])
+	f.Close()
+
+	// Reopen — rescanSize must fail with a truncated-payload error.
+	_, err := NewFileStorage(dir)
+	if err == nil {
+		t.Fatal("truncated payload frame should cause NewFileStorage to fail")
+	}
+}
+
+// TestNewFileStorageMkdirFails covers storage.go:156-157: os.MkdirAll returns
+// an error when the parent path is a regular file (not a directory).
+func TestNewFileStorageMkdirFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-mkdirfail-*")
+	defer os.RemoveAll(dir)
+	// Create a regular file; using it as a parent dir causes MkdirAll to fail.
+	blocker := filepath.Join(dir, "notadir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewFileStorage(filepath.Join(blocker, "subdir"))
+	if err == nil {
+		t.Error("NewFileStorage with file-as-parent should fail")
+	}
+}
+
+// TestNewFileStorageOpenFails covers storage.go:161-162: os.OpenFile fails
+// when the ledger path is occupied by a directory.
+func TestNewFileStorageOpenFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-openfail-*")
+	defer os.RemoveAll(dir)
+	// Place a directory where the ledger file would be created.
+	if err := os.MkdirAll(filepath.Join(dir, ledgerFileName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewFileStorage(dir)
+	if err == nil {
+		t.Error("NewFileStorage with ledger path occupied by directory should fail")
+	}
+}
+
+// TestAppendStatementWriteFails covers storage.go:244-245: the Write error path
+// in AppendStatement when the underlying file has been closed externally.
+func TestAppendStatementWriteFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-writefail-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Close the underlying *os.File without setting s.closed — bypasses the
+	// ErrAlreadyClosed guard so Write hits the underlying OS error.
+	s.file.Close()
+	_, werr := s.AppendStatement([]byte(`{"x":1}`))
+	if werr == nil {
+		t.Error("AppendStatement on externally-closed file should return error")
+	}
+	if errors.Is(werr, ErrAlreadyClosed) {
+		t.Error("error should be a write error, not ErrAlreadyClosed")
+	}
+}
+
+// TestIterateStatementsOpenFails covers storage.go:260-261: os.Open fails in
+// IterateStatements when the ledger file has been deleted.
+func TestIterateStatementsOpenFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-iterfail-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppendStatement([]byte(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	// Delete the ledger file — IterateStatements.os.Open will fail.
+	if err := os.Remove(filepath.Join(dir, ledgerFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.IterateStatements(func(_ uint64, _ StatementBlob) error { return nil }); err == nil {
+		t.Error("IterateStatements with deleted ledger file should return error")
+	}
+}
+
+// TestLoadKeyPairDirectoryError covers storage.go:305-306: LoadKeyPair returns
+// a non-ErrNotFound error when the keypair path is occupied by a directory.
+func TestLoadKeyPairDirectoryError(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-loadkpdir-*")
+	defer os.RemoveAll(dir)
+	s, _ := NewFileStorage(dir)
+	defer s.Close()
+	// Create a directory at the keypair file path — os.ReadFile returns EISDIR,
+	// which is not os.IsNotExist, so line 305 is reached.
+	if err := os.MkdirAll(filepath.Join(dir, keypairFileName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := s.LoadKeyPair()
+	if err == nil {
+		t.Error("LoadKeyPair with dir at keypair path should return error")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Error("error should not be ErrNotFound")
+	}
+}
+
+// TestSaveKeyPairWriteFileFails covers storage.go:328-330: os.WriteFile fails
+// when the .tmp path is already occupied by a directory.
+func TestSaveKeyPairWriteFileFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-savekpwf-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	pub, priv, genErr := ed25519.GenerateKey(rand.Reader)
+	if genErr != nil {
+		t.Fatal(genErr)
+	}
+	// Create a directory at the .tmp path → os.WriteFile returns EISDIR.
+	tmpPath := filepath.Join(dir, keypairFileName+".tmp")
+	if mkErr := os.MkdirAll(tmpPath, 0o700); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	if savErr := s.SaveKeyPair(pub, priv); savErr == nil {
+		t.Error("SaveKeyPair with blocked .tmp path must return error")
+	}
+}
+
+// TestSaveKeyPairNoStaleTemp verifies the crash-safe write: after a successful
+// SaveKeyPair the .tmp file is not left behind (it was renamed to keypair.bin).
+func TestSaveKeyPairNoStaleTemp(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-savekp-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	if err := s.SaveKeyPair(pub, priv); err != nil {
+		t.Fatalf("SaveKeyPair: %v", err)
+	}
+	tmpPath := filepath.Join(dir, keypairFileName+".tmp")
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Error("stale .tmp file found after successful SaveKeyPair")
+	}
+	// Key must survive reload.
+	pub2, priv2, err := s.LoadKeyPair()
+	if err != nil {
+		t.Fatalf("LoadKeyPair after save: %v", err)
+	}
+	if string(pub2) != string(pub) || string(priv2) != string(priv) {
+		t.Error("keypair mismatch after save + reload")
+	}
+}
+
+// TestSaveKeyPairRenameFails covers storage.go:331-333: os.Rename fails when
+// the final keypair path is occupied by a non-empty directory.
+func TestSaveKeyPairRenameFails(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "blrcs-savekprn-*")
+	defer os.RemoveAll(dir)
+	s, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	pub, priv, genErr := ed25519.GenerateKey(rand.Reader)
+	if genErr != nil {
+		t.Fatal(genErr)
+	}
+	// Create a non-empty directory at the final keypair path so that
+	// os.Rename(tmp, final) fails with ENOTDIR/EISDIR.
+	finalPath := filepath.Join(dir, keypairFileName)
+	if mkErr := os.MkdirAll(finalPath, 0o700); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	// Put a file inside so the directory is non-empty (extra guard on some OSes).
+	if wErr := os.WriteFile(filepath.Join(finalPath, "dummy"), []byte("x"), 0o600); wErr != nil {
+		t.Fatal(wErr)
+	}
+	if savErr := s.SaveKeyPair(pub, priv); savErr == nil {
+		t.Error("SaveKeyPair when final path is a non-empty directory must return error")
+	}
+}
+
+// TestFileStorageLoadKeyPairPubMismatch verifies that FileStorage.LoadKeyPair
+// rejects a keypair file where the stored public key does not match the private
+// key's derived public key. Without this check, a corrupted or tampered keyfile
+// silently yields an inconsistent (pub, priv) pair: receipts embedding the stored
+// pub would fail verification while Sign would still succeed under the derived pub.
+func TestFileStorageLoadKeyPairPubMismatch(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+
+	// Build a keyfile where the pub section is from a different keypair.
+	differentPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	_, realPriv, _ := ed25519.GenerateKey(rand.Reader)
+
+	buf := make([]byte, 0, ed25519.PublicKeySize+ed25519.PrivateKeySize)
+	buf = append(buf, differentPub...)
+	buf = append(buf, realPriv...)
+	kpPath := filepath.Join(dir, "keypair.bin")
+	if err := os.WriteFile(kpPath, buf, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := fs.LoadKeyPair(); !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("mismatched pub/priv should return ErrCorrupted, got %v", err)
+	}
+}
+
+// TestFileStorageAppendGrowsFileByExactFrame verifies that AppendStatement
+// grows the ledger file by exactly frameHeaderSize + len(blob) bytes per call.
+// This indirectly validates that the pre-write Stat() call returns the correct
+// pre-write offset (used by the partial-write truncation path) and that no
+// spurious bytes are added around the frame.
+func TestFileStorageAppendGrowsFileByExactFrame(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+
+	ledgerPath := filepath.Join(dir, ledgerFileName)
+
+	info, err := os.Stat(ledgerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseSize := info.Size()
+
+	blobs := [][]byte{
+		[]byte(`{"msg":"frame-0"}`),
+		[]byte(`{"msg":"frame-1","extra":"value"}`),
+	}
+	for i, blob := range blobs {
+		if _, err := fs.AppendStatement(blob); err != nil {
+			t.Fatalf("AppendStatement %d: %v", i, err)
+		}
+	}
+
+	// Confirm total file size equals base + sum of all frame sizes.
+	info, err = os.Stat(ledgerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var totalFrameBytes int64
+	for _, blob := range blobs {
+		totalFrameBytes += int64(frameHeaderSize) + int64(len(blob))
+	}
+	if info.Size() != baseSize+totalFrameBytes {
+		t.Errorf("ledger file size: got %d, want %d (base=%d + frames=%d)",
+			info.Size(), baseSize+totalFrameBytes, baseSize, totalFrameBytes)
+	}
+}
+
+// TestFileStoragePartialWriteRecovery verifies that injecting a torn frame
+// (truncating the log file to mid-frame after a successful append) is detected
+// on reopen and returns ErrCorrupted. This exercises the rescanSize path that
+// the partial-write Truncate is designed to keep clean.
+func TestFileStoragePartialWriteRecovery(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, ledgerFileName)
+
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := []byte(`{"msg":"good-frame"}`)
+	if _, err := fs.AppendStatement(blob); err != nil {
+		t.Fatal(err)
+	}
+	fs.Close()
+
+	// Inject a partial header (2 bytes — less than the 4-byte uint32 length prefix).
+	f, _ := os.OpenFile(ledgerPath, os.O_RDWR|os.O_APPEND, 0o600)
+	_, _ = f.Write([]byte{0x00, 0x10}) // torn header — only 2 of 4 bytes
+	_ = f.Close()
+
+	// Reopen: rescanSize should detect the truncated header.
+	if _, err := NewFileStorage(dir); !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("torn frame: want ErrCorrupted, got %v", err)
+	}
+}
+
+// ============================================================================
+// BlobStorage — MemoryStorage and FileStorage (Axis 100)
+// ============================================================================
+
+func TestMemoryStorageBlobRoundTrip(t *testing.T) {
+	m := NewMemoryStorage()
+	if err := m.SaveBlob("mykey", []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.LoadBlob("mykey")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("got %q want %q", got, "hello")
+	}
+}
+
+func TestMemoryStorageBlobNotFound(t *testing.T) {
+	m := NewMemoryStorage()
+	if _, err := m.LoadBlob("absent"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestMemoryStorageBlobOverwrite(t *testing.T) {
+	m := NewMemoryStorage()
+	_ = m.SaveBlob("k", []byte("v1"))
+	_ = m.SaveBlob("k", []byte("v2"))
+	got, _ := m.LoadBlob("k")
+	if string(got) != "v2" {
+		t.Errorf("overwrite: got %q want v2", got)
+	}
+}
+
+func TestMemoryStorageBlobInvalidName(t *testing.T) {
+	m := NewMemoryStorage()
+	if err := m.SaveBlob("", []byte("x")); err == nil {
+		t.Error("empty blob name should be rejected")
+	}
+	if err := m.SaveBlob("../etc/passwd", []byte("x")); err == nil {
+		t.Error("path-traversal-shaped blob name should be rejected")
+	}
+}
+
+func TestFileStorageBlobRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+
+	if err := fs.SaveBlob("revocation-list", []byte("bitstring-data")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fs.LoadBlob("revocation-list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "bitstring-data" {
+		t.Errorf("got %q want %q", got, "bitstring-data")
+	}
+}
+
+func TestFileStorageBlobPersistsAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.SaveBlob("state", []byte("persisted")); err != nil {
+		t.Fatal(err)
+	}
+	fs.Close()
+
+	fs2, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs2.Close()
+	got, err := fs2.LoadBlob("state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "persisted" {
+		t.Errorf("got %q want persisted", got)
+	}
+}
+
+func TestFileStorageBlobNotFound(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+	if _, err := fs.LoadBlob("never-saved"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestFileStorageBlobInvalidName(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+	if err := fs.SaveBlob("../../escape", []byte("x")); err == nil {
+		t.Error("path-traversal-shaped blob name should be rejected")
+	}
+	if _, err := fs.LoadBlob("has spaces"); err == nil {
+		t.Error("blob name with spaces should be rejected")
+	}
+}
