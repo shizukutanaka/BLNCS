@@ -146,6 +146,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   same capability data from a single source.
 
 ### Fixed
+- **`openid4vci`: `credential_configurations_supported` metadata shape (Axis
+  129).** `Metadata()` omitted `proof_types_supported` and used the
+  jwt_vc_json-style `credential_definition.type` shape for the SD-JWT-VC
+  format profile, where OpenID4VCI 1.0 Final wants a top-level `vct`. A
+  wallet reading the metadata for an SD-JWT-VC (`dc+sd-jwt`) config expects
+  `vct`, and needs `proof_types_supported` to know which proof algorithms the
+  issuer accepts. Now branches on the format: SD-JWT-VC configs emit `vct`,
+  other formats keep `credential_definition.type`; all configs advertise
+  `proof_types_supported = {"jwt": {"proof_signing_alg_values_supported":
+  ["EdDSA"]}}`, mirroring what `parseProofJWT` enforces. 2 new tests; verified
+  end-to-end against the built `blrcs-mcpd`.
 - **`openid4vp`: DC-API client_id prefix used the wrong wire string (Axis
   122).** OpenID4VP 1.0 Final §5.10 defines the DC-API Client Identifier
   Prefix as the literal `origin` (`origin:<calling origin>`); `clientid.go`
