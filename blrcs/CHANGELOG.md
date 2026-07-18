@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`didwebvh`, `mcp`: did:webvh `watchers` parameter (Axis 131).** The
+  did:webvh v1.0 out-of-band monitoring signal — an array of URLs that have
+  agreed to watch a DID — was absent. Added as `Parameters.Watchers`
+  (`*[]string`, matching the `Portable` rigor so omit/retain vs. explicit
+  set/clear is representable). `Verify` tracks the active list across entries
+  (explicit replaces, omitted retains) and surfaces it as
+  `Resolution.Watchers`, satisfying the spec's "resolvers MUST expose the
+  active watcher list in resolution metadata" (watchers are not a
+  verification gate). `create_did_webvh`/`update_did_webvh` gained a
+  `watchers` arg; `verify_did_webvh_log` now returns `watchers`. 6 new tests.
 - **`openid4vci`: batch issuance (`proofs` → `credentials` array, Axis
   130).** `CredentialRequest` carried only a singular `Proof`; there was no
   plural `proofs`/`credentials` path. Batch issuance is the standard
