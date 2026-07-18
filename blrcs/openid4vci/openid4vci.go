@@ -476,10 +476,25 @@ func (iss *Issuer) ExchangeCodeWithTxCode(code, txCode string) (*TokenResponse, 
 type CredentialRequest struct {
 	Format                    string          `json:"format"`
 	CredentialConfigurationID string          `json:"credential_configuration_id,omitempty"`
-	Proof                     json.RawMessage `json:"proof,omitempty"` // 鍵保有証明 (MVP では未必須)
+	Proof                     json.RawMessage `json:"proof,omitempty"` // 単一鍵保有証明 (MVP では未必須)
+	// Proofs — batch issuance 用の複数鍵保有証明 (OpenID4VCI 1.0 §8.2)。proof と
+	// 相互排他。設定時は proofs.jwt の各鍵ごとに1クレデンシャルを発行し、
+	// BatchCredentialResponse (credentials 配列) を返す。1回の往復で複数の単一使用
+	// unlinkable コピーを得るための、提示リンク可能性緩和の標準機構。
+	Proofs *ProofsObject `json:"proofs,omitempty"`
 }
 
-// CredentialResponse — SD-JWT credential 応答
+// ProofsObject — batch 鍵保有証明群 (OpenID4VCI 1.0 §8.2)。jwt proof type の場合、
+// jwt は各鍵の proof JWT 配列 (それぞれ §8.2.1.1 の形式)。
+type ProofsObject struct {
+	JWT []string `json:"jwt,omitempty"`
+}
+
+// maxBatchProofs — batch 発行の proof 上限。無制限だと単一トークンで大量の署名を
+// 誘発する DoS 面になるため上限を設ける。実運用の unlinkable コピー数として十分。
+const maxBatchProofs = 32
+
+// CredentialResponse — SD-JWT credential 応答 (単一)
 type CredentialResponse struct {
 	Credential      string `json:"credential"`
 	CNonce          string `json:"c_nonce,omitempty"`
@@ -487,6 +502,21 @@ type CredentialResponse struct {
 	// NotificationID — Notification Endpoint (OpenID4VCI 1.0 §10) 経由で、この
 	// クレデンシャルの受理/失敗/削除を issuer に通知する際に提示する識別子。
 	NotificationID string `json:"notification_id,omitempty"`
+}
+
+// CredentialObject — batch 応答の credentials 配列要素 (OpenID4VCI 1.0)。
+type CredentialObject struct {
+	Credential string `json:"credential"`
+}
+
+// BatchCredentialResponse — batch 発行応答 (credentials 配列, OpenID4VCI 1.0 §8.3)。
+// notification_id は「1応答で発行された1つ以上のクレデンシャル」を識別するため、
+// batch 全体で1つ (spec)。
+type BatchCredentialResponse struct {
+	Credentials     []CredentialObject `json:"credentials"`
+	CNonce          string             `json:"c_nonce,omitempty"`
+	CNonceExpiresIn int                `json:"c_nonce_expires_in,omitempty"`
+	NotificationID  string             `json:"notification_id,omitempty"`
 }
 
 // IssueCredential — access_token を検証し SD-JWT を生成 (proof なし / 後方互換)
@@ -535,6 +565,8 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 	validForDays := cfg.ValidForDays
 	iss.mu.Unlock()
 
+	restore := func() { iss.mu.Lock(); entry.consumed = false; iss.mu.Unlock() }
+
 	// Proof-of-Possession validation (OpenID4VCI 1.0 Final §8.2.1.1)
 	var holderKey ed25519.PublicKey
 	if len(req.Proof) > 0 {
@@ -543,71 +575,30 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 			JWT       string `json:"jwt"`
 		}
 		if err := json.Unmarshal(req.Proof, &proofEnv); err != nil || proofEnv.ProofType != "jwt" || proofEnv.JWT == "" {
-			iss.mu.Lock()
-			entry.consumed = false
-			iss.mu.Unlock()
+			restore()
 			return nil, ErrInvalidProof
-		}
-		pub, proofNonce, err := parseProofJWT(proofEnv.JWT, iss.URL)
-		if err != nil {
-			iss.mu.Lock()
-			entry.consumed = false
-			iss.mu.Unlock()
-			return nil, err
-		}
-		// The proof's nonce must be either the token-bound c_nonce or a fresh,
-		// single-use Nonce Endpoint nonce (consumed here so it cannot be replayed).
-		// Checking the token-bound value first avoids consuming a Nonce Endpoint
-		// nonce when the wallet used the legacy flow.
-		if proofNonce != cNonce && !iss.consumeNonce(proofNonce) {
-			iss.mu.Lock()
-			entry.consumed = false
-			iss.mu.Unlock()
-			return nil, ErrProofNonceMismatch
 		}
 		// The wallet proved possession of this key; bind the credential to it so
 		// the holder can later produce a KB-JWT (cnf) in OpenID4VP. Discarding the
 		// key would yield a bearer credential that the secure-by-default VP verifier
 		// (RequireKeyBinding=true) rejects — defeating the proof-of-possession step.
+		pub, err := iss.verifyProofOfPossession(proofEnv.JWT, cNonce)
+		if err != nil {
+			restore()
+			return nil, err
+		}
 		holderKey = pub
 	} else if iss.RequireProof {
-		iss.mu.Lock()
-		entry.consumed = false
-		iss.mu.Unlock()
+		restore()
 		return nil, ErrInvalidProof
 	}
 
 	validFor := time.Duration(validForDays) * 24 * time.Hour
-	// vct: the credential type declared on the matched configuration. Falling back to
-	// the DPP default preserves existing behavior for configs that never set
-	// CredentialType, but a non-empty value MUST be honored — otherwise two
-	// differently-configured credential_configurations (e.g. BatteryPassport vs
-	// DigitalProductPassport) registered on the same issuer would silently collapse
-	// to the same vct despite advertising distinct types in issuer metadata.
-	vct := cfg.CredentialType
-	if vct == "" {
-		vct = compliance.VCTDigitalProductPassport
-	}
-	// Issue with whichever combination the offer + proof selected: holder-bound (cnf)
-	// when proof-of-possession was provided, and/or revocable (status_list) when the
-	// offer set a status reference.
-	var sdjwt string
-	var err error
-	switch {
-	case holderKey != nil && status != nil:
-		sdjwt, _, err = iss.signer.IssueSDJWTVCBoundStatus(vct, subject, sdClaims, clearClaims, holderKey, status, validFor)
-	case holderKey != nil:
-		sdjwt, _, err = iss.signer.IssueSDJWTVCBound(vct, subject, sdClaims, clearClaims, holderKey, validFor)
-	case status != nil:
-		sdjwt, _, err = iss.signer.IssueSDJWTVCStatus(vct, subject, sdClaims, clearClaims, status, validFor)
-	default:
-		sdjwt, _, err = iss.signer.IssueSDJWTVC(vct, subject, sdClaims, clearClaims, validFor)
-	}
+	vct := issuanceVCT(cfg)
+	sdjwt, err := iss.signBoundCredential(vct, subject, sdClaims, clearClaims, holderKey, status, validFor)
 	if err != nil {
-		iss.mu.Lock()
-		entry.consumed = false
-		iss.mu.Unlock()
-		return nil, fmt.Errorf("vci: sdjwt sign: %w", err)
+		restore()
+		return nil, err
 	}
 	// Rotate c_nonce per OpenID4VCI spec: the rotated nonce is stored under the
 	// token entry so that proof-of-possession for a subsequent credential request
@@ -641,6 +632,164 @@ func (iss *Issuer) IssueCredentialWithProof(accessToken string, req CredentialRe
 		Credential:      sdjwt,
 		CNonce:          newCNonce,
 		CNonceExpiresIn: int(iss.tokenTTL.Seconds()), // must not exceed access token lifetime
+		NotificationID:  notificationID,
+	}, nil
+}
+
+// verifyProofOfPossession parses and validates a single key-proof JWT and returns
+// the holder public key it proves possession of. The proof's nonce must be either
+// the token-bound c_nonce or a fresh, single-use Nonce Endpoint nonce (consumed
+// here so it cannot be replayed). Checking the token-bound value first avoids
+// consuming a Nonce Endpoint nonce when the wallet used the legacy flow. Shared by
+// the single- and batch-issuance paths so the replay defense lives in one place.
+func (iss *Issuer) verifyProofOfPossession(proofJWT, cNonce string) (ed25519.PublicKey, error) {
+	pub, proofNonce, err := parseProofJWT(proofJWT, iss.URL)
+	if err != nil {
+		return nil, err
+	}
+	if proofNonce != cNonce && !iss.consumeNonce(proofNonce) {
+		return nil, ErrProofNonceMismatch
+	}
+	return pub, nil
+}
+
+// issuanceVCT returns the vct to stamp on issued credentials for a configuration,
+// falling back to the DPP default when the config declares none (preserving
+// behavior for configs that never set CredentialType) — a non-empty value MUST be
+// honored so differently-configured credential_configurations don't collapse to
+// the same vct despite advertising distinct types in issuer metadata.
+func issuanceVCT(cfg CredentialConfiguration) string {
+	if cfg.CredentialType != "" {
+		return cfg.CredentialType
+	}
+	return compliance.VCTDigitalProductPassport
+}
+
+// signBoundCredential issues one SD-JWT VC with whichever combination the offer +
+// proof selected: holder-bound (cnf) when proof-of-possession was provided, and/or
+// revocable (status_list) when the offer set a status reference. Shared by the
+// single- and batch-issuance paths.
+func (iss *Issuer) signBoundCredential(vct, subject string, sdClaims, clearClaims map[string]any, holderKey ed25519.PublicKey, status *compliance.StatusRef, validFor time.Duration) (string, error) {
+	var sdjwt string
+	var err error
+	switch {
+	case holderKey != nil && status != nil:
+		sdjwt, _, err = iss.signer.IssueSDJWTVCBoundStatus(vct, subject, sdClaims, clearClaims, holderKey, status, validFor)
+	case holderKey != nil:
+		sdjwt, _, err = iss.signer.IssueSDJWTVCBound(vct, subject, sdClaims, clearClaims, holderKey, validFor)
+	case status != nil:
+		sdjwt, _, err = iss.signer.IssueSDJWTVCStatus(vct, subject, sdClaims, clearClaims, status, validFor)
+	default:
+		sdjwt, _, err = iss.signer.IssueSDJWTVC(vct, subject, sdClaims, clearClaims, validFor)
+	}
+	if err != nil {
+		return "", fmt.Errorf("vci: sdjwt sign: %w", err)
+	}
+	return sdjwt, nil
+}
+
+// IssueBatchWithProofs issues one credential per key proof in req.Proofs, binding
+// each to the corresponding holder key (OpenID4VCI 1.0 batch issuance, §8.2/§8.3).
+// This is the standard mechanism for a wallet to obtain multiple single-use,
+// unlinkable credential copies in one round trip — the EUDI-approved-crypto
+// mitigation for presentation linkability.
+//
+// All proofs are validated up-front before any credential is signed (all-or-
+// nothing): a batch where any single proof fails yields no credentials and does
+// not consume the access token, so a wallet can safely retry. One notification_id
+// covers the whole response (spec: a notification_id "identifies one or more
+// Credentials issued in one Credential Response").
+func (iss *Issuer) IssueBatchWithProofs(accessToken string, req CredentialRequest) (*BatchCredentialResponse, error) {
+	if req.Proofs == nil || len(req.Proofs.JWT) == 0 {
+		return nil, ErrInvalidProof
+	}
+	// proof and proofs are mutually exclusive (§8.2): accepting both would leave
+	// it ambiguous which key(s) the issued credential(s) are bound to.
+	if len(req.Proof) > 0 {
+		return nil, ErrInvalidProof
+	}
+	if len(req.Proofs.JWT) > maxBatchProofs {
+		return nil, fmt.Errorf("vci: batch of %d proofs exceeds limit of %d", len(req.Proofs.JWT), maxBatchProofs)
+	}
+
+	iss.mu.Lock()
+	entry, ok := iss.tokens[accessToken]
+	if !ok || time.Now().After(entry.tokenExpiresAt) || entry.consumed {
+		iss.mu.Unlock()
+		return nil, ErrBadAccessToken
+	}
+	cfg, cfgOk := iss.configs[entry.configID]
+	if !cfgOk {
+		iss.mu.Unlock()
+		return nil, ErrUnknownConfig
+	}
+	if req.CredentialConfigurationID != "" && req.CredentialConfigurationID != entry.configID {
+		iss.mu.Unlock()
+		return nil, ErrFormatMismatch
+	}
+	if req.Format != "" && req.Format != cfg.Format {
+		iss.mu.Unlock()
+		return nil, ErrFormatMismatch
+	}
+	entry.consumed = true
+	cNonce := entry.cNonce
+	subject, sdClaims, clearClaims := entry.subject, entry.sdClaims, entry.clearClaims
+	status := entry.status
+	validForDays := cfg.ValidForDays
+	iss.mu.Unlock()
+
+	restore := func() { iss.mu.Lock(); entry.consumed = false; iss.mu.Unlock() }
+
+	// Validate every proof first (all-or-nothing) so a partial batch is never
+	// issued and a wallet whose Nth proof was malformed can retry cleanly.
+	holderKeys := make([]ed25519.PublicKey, 0, len(req.Proofs.JWT))
+	for _, jwt := range req.Proofs.JWT {
+		if jwt == "" {
+			restore()
+			return nil, ErrInvalidProof
+		}
+		pub, err := iss.verifyProofOfPossession(jwt, cNonce)
+		if err != nil {
+			restore()
+			return nil, err
+		}
+		holderKeys = append(holderKeys, pub)
+	}
+
+	validFor := time.Duration(validForDays) * 24 * time.Hour
+	vct := issuanceVCT(cfg)
+	creds := make([]CredentialObject, 0, len(holderKeys))
+	for _, hk := range holderKeys {
+		sdjwt, err := iss.signBoundCredential(vct, subject, sdClaims, clearClaims, hk, status, validFor)
+		if err != nil {
+			restore()
+			return nil, err
+		}
+		creds = append(creds, CredentialObject{Credential: sdjwt})
+	}
+
+	newCNonce, err := randomB64(16)
+	if err != nil {
+		return nil, err
+	}
+	notificationID, err := randomB64(16)
+	if err != nil {
+		return nil, err
+	}
+	iss.mu.Lock()
+	entry.cNonce = newCNonce
+	iss.gcExpiredLocked(time.Now())
+	iss.notifications[notificationID] = &notificationEntry{
+		accessToken: accessToken,
+		subject:     subject,
+		configID:    entry.configID,
+		expiresAt:   time.Now().Add(iss.notificationTTL()),
+	}
+	iss.mu.Unlock()
+	return &BatchCredentialResponse{
+		Credentials:     creds,
+		CNonce:          newCNonce,
+		CNonceExpiresIn: int(iss.tokenTTL.Seconds()),
 		NotificationID:  notificationID,
 	}, nil
 }
@@ -1019,27 +1168,39 @@ func (iss *Issuer) handleCredential(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	resp, err := iss.IssueCredentialWithProof(accessToken, req)
+	// Batch issuance (OpenID4VCI §8.2): a `proofs` object yields a `credentials`
+	// array; the legacy singular `proof` yields a single `credential`.
+	var resp any
+	if req.Proofs != nil && len(req.Proofs.JWT) > 0 {
+		resp, err = iss.IssueBatchWithProofs(accessToken, req)
+	} else {
+		resp, err = iss.IssueCredentialWithProof(accessToken, req)
+	}
 	if err != nil {
-		// Map internal errors to opaque client-safe messages (CWE-209).
-		// Internal details (signer state, key IDs, nonce oracle) must not leak.
-		switch {
-		case errors.Is(err, ErrBadAccessToken):
-			writeVCIError(w, http.StatusUnauthorized, "invalid_token", "access token invalid or expired")
-		case errors.Is(err, ErrProofNonceMismatch), errors.Is(err, ErrInvalidProof):
-			writeVCIError(w, http.StatusBadRequest, "invalid_proof", "proof validation failed")
-		case errors.Is(err, ErrUnknownConfig):
-			writeVCIError(w, http.StatusBadRequest, "invalid_request", "unknown credential configuration")
-		case errors.Is(err, ErrFormatMismatch):
-			writeVCIError(w, http.StatusBadRequest, "invalid_request", "credential format or configuration_id mismatch")
-		default:
-			writeVCIError(w, http.StatusInternalServerError, "server_error", "credential issuance failed")
-		}
+		writeCredentialError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// writeCredentialError maps an issuance error to an opaque client-safe response
+// (CWE-209): internal details (signer state, key IDs, nonce oracle) must not
+// leak. Shared by the single- and batch-issuance HTTP paths.
+func writeCredentialError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrBadAccessToken):
+		writeVCIError(w, http.StatusUnauthorized, "invalid_token", "access token invalid or expired")
+	case errors.Is(err, ErrProofNonceMismatch), errors.Is(err, ErrInvalidProof):
+		writeVCIError(w, http.StatusBadRequest, "invalid_proof", "proof validation failed")
+	case errors.Is(err, ErrUnknownConfig):
+		writeVCIError(w, http.StatusBadRequest, "invalid_request", "unknown credential configuration")
+	case errors.Is(err, ErrFormatMismatch):
+		writeVCIError(w, http.StatusBadRequest, "invalid_request", "credential format or configuration_id mismatch")
+	default:
+		writeVCIError(w, http.StatusInternalServerError, "server_error", "credential issuance failed")
+	}
 }
 
 // handleNotification serves POST {issuer}/notification (OpenID4VCI 1.0 §10):
