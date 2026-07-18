@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`openid4vci`: batch issuance (`proofs` → `credentials` array, Axis
+  130).** `CredentialRequest` carried only a singular `Proof`; there was no
+  plural `proofs`/`credentials` path. Batch issuance is the standard
+  mechanism for a wallet to obtain multiple single-use, unlinkable credential
+  copies in one round trip — the EUDI-approved-crypto mitigation for
+  presentation linkability. New `IssueBatchWithProofs` validates every proof
+  up-front (all-or-nothing: a failed batch issues nothing and leaves the
+  access token reusable), signs one credential per holder key, and returns
+  one `notification_id` for the whole response. Bounded by `maxBatchProofs`
+  (32). The security-sensitive crypto (proof/nonce validation, signer switch)
+  was extracted into shared helpers so single and batch paths use one code
+  path. `/credential` dispatches on request shape. 8 new tests including a
+  full HTTP-layer batch and a proof-key-binding/unlinkability check.
 - **`openid4vp`: DCQL `claim_sets` support (OpenID4VP 1.0 §6.3.1, Axis
   128).** `CredentialQuery` had a flat `Claims` list but no `ClaimSets`,
   and no logic requiring at least one claim-set option to be fully
