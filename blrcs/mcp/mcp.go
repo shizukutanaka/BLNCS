@@ -15,6 +15,7 @@
 //	register_scitt      — 透明性ログ登録
 //	get_scitt_receipt   — 受領証取得
 //	ledger_checkpoint   — 署名済みtree head
+//	search_passports    — SCITT ledger を subject/issuer で検索 (EN 18222)
 //	issue_sdjwt         — SD-JWT VC発行 (選択開示、status_list claim 自動埋込み)
 //	verify_sdjwt        — SD-JWT VC検証 (exp/KB-JWT込み)
 //	check_revocation    — W3C Bitstring Status List 失効確認
@@ -573,6 +574,11 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{}}`),
 		},
 		{
+			Name:        "search_passports",
+			Description: "Search the SCITT ledger for statements by subject (productId/batteryId) and/or issuer (manufacturer DID) using a secondary index — no full-ledger scan (CEN-CENELEC EN 18222 lifecycle searchability). Returns {count, results:[{index, issuer, subject, iat, payloadHash}]}; pass each index to get_scitt_receipt for the full statement + inclusion proof. Both filters together return their intersection; at least one is required.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"subject":{"type":"string","description":"productId / batteryId to search for"},"issuer":{"type":"string","description":"manufacturer/issuer DID to search for"}}}`),
+		},
+		{
 			Name:        "issue_sdjwt",
 			Description: "Issue an SD-JWT VC with selective disclosure. sdClaims become selectively disclosable; clearClaims are always visible. Embeds a status_list claim (revocable via revoke_passport, checkable via check_revocation/get_revocation_list). Returns the full SD-JWT token, a list of disclosures, and the statusListIndex.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"subject":{"type":"string"},"sdClaims":{"type":"object","description":"Claims to make selectively disclosable"},"clearClaims":{"type":"object","description":"Claims always visible in the JWT"},"validForDays":{"type":"integer","default":365}},"required":["issuerId","subject","sdClaims"]}`),
@@ -797,6 +803,8 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolRegisterSCITT(args)
 	case "get_scitt_receipt":
 		return s.toolGetSCITTReceipt(args)
+	case "search_passports":
+		return s.toolSearchPassports(args)
 	case "ledger_checkpoint":
 		return s.toolCheckpoint(args)
 	case "issue_sdjwt":
@@ -1784,6 +1792,45 @@ func (s *Server) toolGetSCITTReceipt(args json.RawMessage) (string, error) {
 func (s *Server) toolCheckpoint(_ json.RawMessage) (string, error) {
 	cp := s.ledger.SignedCheckpoint()
 	b, _ := json.Marshal(cp)
+	return string(b), nil
+}
+
+// toolSearchPassports queries the SCITT ledger's secondary index for statements
+// by subject (productId/batteryId) and/or issuer (manufacturer DID) — the DPP
+// lifecycle-searchability capability (CEN-CENELEC EN 18222). Returns matching
+// {index, issuer, subject, iat, payloadHash} entries; use each index with
+// get_scitt_receipt to fetch the full statement + inclusion proof. When both
+// subject and issuer are given, returns their intersection (statements matching
+// both). At least one filter is required.
+func (s *Server) toolSearchPassports(args json.RawMessage) (string, error) {
+	var in struct {
+		Subject string `json:"subject"`
+		Issuer  string `json:"issuer"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.Subject == "" && in.Issuer == "" {
+		return "", errors.New("mcp: search_passports requires at least one of subject or issuer")
+	}
+	var results []scitt.SearchResult
+	switch {
+	case in.Subject != "" && in.Issuer != "":
+		// Intersection: filter the (usually smaller) subject match set by issuer.
+		for _, r := range s.ledger.FindBySubject(in.Subject) {
+			if r.Issuer == in.Issuer {
+				results = append(results, r)
+			}
+		}
+	case in.Subject != "":
+		results = s.ledger.FindBySubject(in.Subject)
+	default:
+		results = s.ledger.FindByIssuer(in.Issuer)
+	}
+	b, _ := json.Marshal(map[string]any{
+		"count":   len(results),
+		"results": results,
+	})
 	return string(b), nil
 }
 

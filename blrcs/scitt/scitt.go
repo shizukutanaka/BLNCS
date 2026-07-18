@@ -199,6 +199,14 @@ type Ledger struct {
 	// registered key. When empty the ledger is in open mode (any issuer accepted).
 	trustedIssuers map[string]ed25519.PublicKey
 
+	// Secondary indexes for lifecycle search (CEN-CENELEC EN 18222): map a
+	// statement's Subject (productId/batteryId) and Issuer (manufacturer DID) to
+	// the leaf indices carrying them, so FindBySubject/FindByIssuer answer
+	// "all passports for product X / manufacturer Y" without scanning the whole
+	// ledger. Maintained under l.mu on Register and rebuilt during replay.
+	bySubject map[string][]uint64
+	byIssuer  map[string][]uint64
+
 	// subtreeCache memoizes the hashes of completed perfect subtrees, keyed by
 	// (offset, size) with size a power of two. Such subtrees are immutable in an
 	// append-only log, so entries never need invalidation. This turns the per-
@@ -273,7 +281,12 @@ func NewLedgerWithStorage(tsID string, store storage.Storage) (*Ledger, error) {
 	if tsID == "" {
 		return nil, errors.New("transparency service ID required")
 	}
-	l := &Ledger{store: store, tsID: tsID}
+	l := &Ledger{
+		store:     store,
+		tsID:      tsID,
+		bySubject: make(map[string][]uint64),
+		byIssuer:  make(map[string][]uint64),
+	}
 
 	pub, priv, err := store.LoadKeyPair()
 	switch {
@@ -298,6 +311,7 @@ func NewLedgerWithStorage(tsID string, store storage.Storage) (*Ledger, error) {
 		if err := VerifyStatement(&stmt); err != nil {
 			return fmt.Errorf("replay bad sig at idx %d: %w", idx, err)
 		}
+		l.indexStatementLocked(stmt, idx)
 		l.cached = append(l.cached, stmt)
 		l.leafHashes = append(l.leafHashes, hashLeaf(blob))
 		return nil
@@ -305,6 +319,19 @@ func NewLedgerWithStorage(tsID string, store storage.Storage) (*Ledger, error) {
 		return nil, err
 	}
 	return l, nil
+}
+
+// indexStatementLocked records a statement's Subject/Issuer in the secondary
+// indexes. The caller must hold l.mu (Register) or be single-threaded (replay
+// during construction). Empty Subject/Issuer are not indexed (nothing to
+// search on).
+func (l *Ledger) indexStatementLocked(stmt Statement, idx uint64) {
+	if stmt.Subject != "" {
+		l.bySubject[stmt.Subject] = append(l.bySubject[stmt.Subject], idx)
+	}
+	if stmt.Issuer != "" {
+		l.byIssuer[stmt.Issuer] = append(l.byIssuer[stmt.Issuer], idx)
+	}
 }
 
 // Close — 下層storageを閉じる
@@ -432,6 +459,7 @@ func (l *Ledger) Register(stmt Statement) (*Receipt, error) {
 	if idx != uint64(len(l.leafHashes)) {
 		return nil, fmt.Errorf("ledger: storage/memory desync idx=%d mem=%d", idx, len(l.leafHashes))
 	}
+	l.indexStatementLocked(stmt, idx)
 	l.cached = append(l.cached, stmt)
 	l.leafHashes = append(l.leafHashes, leaf)
 
@@ -650,4 +678,52 @@ func (l *Ledger) Get(idx uint64) (Statement, *Receipt, error) {
 	sigPayload := receiptSigPayload(receipt)
 	receipt.TSSignature = base64.StdEncoding.EncodeToString(ed25519.Sign(l.tsPriv, sigPayload))
 	return stmt, receipt, nil
+}
+
+// SearchResult pairs a matched statement with its leaf index, so a caller can
+// fetch the full statement + receipt via Get(idx) for verification.
+type SearchResult struct {
+	Index       uint64    `json:"index"`
+	Issuer      string    `json:"issuer"`
+	Subject     string    `json:"subject"`
+	IssuedAt    time.Time `json:"iat"`
+	PayloadHash string    `json:"payloadHash"`
+}
+
+// FindBySubject returns every statement whose Subject (e.g. productId /
+// batteryId) equals subject, in registration order, using the secondary index
+// (no full-ledger scan) — CEN-CENELEC EN 18222 lifecycle searchability.
+func (l *Ledger) FindBySubject(subject string) []SearchResult {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.resultsForLocked(l.bySubject[subject])
+}
+
+// FindByIssuer returns every statement issued by issuer (e.g. a manufacturer
+// DID), in registration order, using the secondary index.
+func (l *Ledger) FindByIssuer(issuer string) []SearchResult {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.resultsForLocked(l.byIssuer[issuer])
+}
+
+// resultsForLocked materializes SearchResults for the given leaf indices. The
+// caller must hold at least l.mu.RLock. Indices come from the append-only
+// indexes so they are always in range, but the guard keeps it robust.
+func (l *Ledger) resultsForLocked(indices []uint64) []SearchResult {
+	out := make([]SearchResult, 0, len(indices))
+	for _, idx := range indices {
+		if idx >= uint64(len(l.cached)) {
+			continue
+		}
+		s := l.cached[idx]
+		out = append(out, SearchResult{
+			Index:       idx,
+			Issuer:      s.Issuer,
+			Subject:     s.Subject,
+			IssuedAt:    s.IssuedAt,
+			PayloadHash: s.PayloadHash,
+		})
+	}
+	return out
 }
