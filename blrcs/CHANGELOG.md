@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`scitt`, `mcp`: SCITT ledger lifecycle search index + `search_passports`
+  (Axis 132).** The ledger offered only append + linear scan — no way to
+  query "all passports for product X / manufacturer Y" (CEN-CENELEC EN 18222
+  lifecycle searchability). Added `bySubject`/`byIssuer` secondary indexes
+  maintained on `Register` and rebuilt on replay, `FindBySubject`/
+  `FindByIssuer` query methods returning indexed results (no full scan), and
+  a `search_passports` MCP tool (by subject and/or issuer; both = intersection).
+  `TestToolsList` 33 → 34. 4 new tests.
 - **`didwebvh`, `mcp`: did:webvh `watchers` parameter (Axis 131).** The
   did:webvh v1.0 out-of-band monitoring signal — an array of URLs that have
   agreed to watch a DID — was absent. Added as `Parameters.Watchers`
