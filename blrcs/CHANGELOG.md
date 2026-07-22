@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`compliance`: opt-in `eddsa-jcs-2022` Data Integrity suite for W3C VCs
+  (Axis 133).** Issued DPP credentials used the pre-Data-Integrity
+  `Ed25519Signature2020` suite; a correct `eddsa-jcs-2022` implementation
+  already existed in-repo (`didwebvh/proof.go` + `multiformats/jcs.go`),
+  scoped to DID-log entries. New `Issuer.DataIntegrity` flag (default false =
+  byte-unchanged legacy suite) switches issuance to a W3C `DataIntegrityProof`
+  with `cryptosuite=eddsa-jcs-2022`, reusing the same JCS+base58 hashData
+  construction (multibase `z`-prefixed proofValue). Both issue paths route
+  through a shared `attachProof`; `Verify` auto-dispatches on the proof
+  suite. 7 new tests. `eddsa-jcs-2022` is the current W3C REC (EdDSA
+  Cryptosuites v1.0, 2025-05-15).
 - **`docs`: product assessment + Opus/Sonnet work-instruction sheets.**
   `docs/PRODUCT_ASSESSMENT.md` (長所/短所/改善案, every file:line re-verified),
   `docs/INSTRUCTIONS_SONNET.md` (small/well-scoped tasks with in-repo patterns
