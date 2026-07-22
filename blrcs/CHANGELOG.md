@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`docs`: product assessment + Opus/Sonnet work-instruction sheets.**
+  `docs/PRODUCT_ASSESSMENT.md` (長所/短所/改善案, every file:line re-verified),
+  `docs/INSTRUCTIONS_SONNET.md` (small/well-scoped tasks with in-repo patterns
+  to mirror + the mandatory per-axis discipline), and
+  `docs/INSTRUCTIONS_OPUS.md` (large/architectural tracks — ES256/P-256,
+  mdoc↔OpenID4VP dispatch, JWE, array/recursive disclosure, auth-code flow,
+  mdoc PKI, issuance agility — with staged milestones and stop-and-confirm
+  gates). Turns the remaining standards backlog into executable instructions
+  for future sessions.
 - **`scitt`, `mcp`: SCITT ledger lifecycle search index + `search_passports`
   (Axis 132).** The ledger offered only append + linear scan — no way to
   query "all passports for product X / manufacturer Y" (CEN-CENELEC EN 18222
