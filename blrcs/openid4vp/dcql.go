@@ -34,6 +34,17 @@ type DCQLQuery struct {
 	CredentialSets []CredentialSetQuery `json:"credential_sets,omitempty"`
 }
 
+// DCQL credential format identifiers (OpenID4VP 1.0 §6.1).
+const (
+	// FormatSDJWT is the SD-JWT VC format (current typ; the retired "vc+sd-jwt"
+	// is still accepted by the verifier for legacy issuers).
+	FormatSDJWT = "dc+sd-jwt"
+	// FormatSDJWTLegacy is the pre-Nov-2024 SD-JWT VC format identifier.
+	FormatSDJWTLegacy = "vc+sd-jwt"
+	// FormatMsoMdoc is the ISO 18013-5 mdoc format.
+	FormatMsoMdoc = "mso_mdoc"
+)
+
 // CredentialQuery — 個別 credential 要求 (§6.1)。
 type CredentialQuery struct {
 	// ID — このクエリの一意識別子 (response の matching に使う)。

@@ -272,6 +272,14 @@ type Verifier struct {
 	// そのまま渡される。
 	AllowedAlgs []string
 
+	// MdocSessionTranscript — ISO 18013-5 SessionTranscript bytes that an
+	// mso_mdoc presentation's DeviceAuth must be bound to. REQUIRED to verify
+	// an mso_mdoc vp_token: without it the presentation is not bound to this
+	// session and is replayable, so ProcessResponse rejects rather than
+	// verifying unbound (see mdoc.go for why these bytes are supplied and not
+	// constructed here).
+	MdocSessionTranscript []byte
+
 	// TrustedIssuers — DCQL フロー用の DID→公開鍵マップ (JSON 非送信)。
 	// dcql_query は PresentationDefinition.AcceptableIssuers を持たないため、
 	// CreateRequestDCQL で発行した request の応答検証はこの集合を信頼アンカーとして
@@ -528,6 +536,14 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 		AllowedAlgs:             v.AllowedAlgs,
 		ExpectedTransactionData: req.TransactionData,
 	}
+	// Dispatch on the format the query actually asked for. Verifying every
+	// vp_token as an SD-JWT — as this did before Axis 138 — meant an mso_mdoc
+	// presentation failed with a misleading "signature/issuer mismatch" instead
+	// of being verified (or honestly refused).
+	if isMdoc, wantDoctype := mdocQueryFromDCQL(req.DCQLQuery); isMdoc {
+		return v.processMdocResponse(resp, req, acceptable, wantDoctype)
+	}
+
 	var verified *compliance.VerifiedClaims
 	var usedIssuer string
 	// Read the (unverified) iss claim once and verify against exactly that
