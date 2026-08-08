@@ -1,6 +1,7 @@
 package compliance
 
 import (
+	"blrcs/ecdsakey"
 	"crypto/ed25519"
 	"sync"
 )
@@ -18,8 +19,15 @@ import (
 type JWSVerifier func(pub, signingInput, sig []byte) bool
 
 var (
-	jwsMu        sync.RWMutex
-	jwsVerifiers = map[string]JWSVerifier{"EdDSA": verifyEdDSA}
+	jwsMu sync.RWMutex
+	// ES256 ships alongside EdDSA because the EUDI ARF and OpenID4VC HAIP
+	// mandate P-256; without it no real EUDI wallet's credential verifies here.
+	// Its JWS signature is the raw fixed-width R‖S form of RFC 7518 §3.4, not
+	// ASN.1 DER — see the ecdsakey package.
+	jwsVerifiers = map[string]JWSVerifier{
+		"EdDSA": verifyEdDSA,
+		"ES256": ecdsakey.VerifyES256,
+	}
 )
 
 // RegisterJWSVerifier — SD-JWT 検証で追加の JWS `alg` を有効化する。

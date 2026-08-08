@@ -14,6 +14,7 @@
 package cbor
 
 import (
+	"blrcs/ecdsakey"
 	"crypto/ed25519"
 	"errors"
 	"fmt"
@@ -30,6 +31,11 @@ const (
 // Algorithm identifiers (IANA COSE Algorithms registry).
 const (
 	AlgEdDSA = -8 // Ed25519 / Ed448
+	// AlgES256 is ECDSA w/ SHA-256 on P-256 (RFC 9053 §2.1). Mandated by the
+	// EUDI ARF / OpenID4VC HAIP, so mdoc and SCITT receipts from real wallets
+	// and transparency services use it. Its signature is the raw fixed-width
+	// R‖S concatenation, NOT ASN.1 DER — see the ecdsakey package.
+	AlgES256 = -7
 )
 
 // ErrCOSEInvalidTag is returned when the outer CBOR tag is not 18.
@@ -72,6 +78,7 @@ var (
 	coseVerifiersMu sync.RWMutex
 	coseVerifiers   = map[int]COSEVerifier{
 		AlgEdDSA: verifyEdDSA,
+		AlgES256: ecdsakey.VerifyES256,
 	}
 )
 

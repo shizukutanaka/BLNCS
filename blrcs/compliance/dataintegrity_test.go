@@ -1,6 +1,8 @@
 package compliance
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -96,8 +98,14 @@ func TestDefaultStillEd25519Signature2020(t *testing.T) {
 	if cred.Proof.Type != "Ed25519Signature2020" || cred.Proof.Cryptosuite != "" {
 		t.Fatalf("default should be Ed25519Signature2020 with no cryptosuite: %+v", cred.Proof)
 	}
-	if strings.HasPrefix(cred.Proof.ProofValue, "z") {
-		t.Error("default proofValue should be base64-std, not multibase")
+	// Decode rather than sniff the first character: base64-std output legitimately
+	// begins with "z" roughly 1 time in 64, so a prefix check here is flaky.
+	// A base64-std Ed25519 signature decodes to exactly 64 bytes; a multibase
+	// base58btc proofValue does not decode as base64 at all.
+	sig, err := base64.StdEncoding.DecodeString(cred.Proof.ProofValue)
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		t.Errorf("default proofValue should be base64-std over a 64-byte signature, got %q (err=%v)",
+			cred.Proof.ProofValue, err)
 	}
 	if err := Verify(cred, iss.PublicKey()); err != nil {
 		t.Fatalf("default verify failed: %v", err)
