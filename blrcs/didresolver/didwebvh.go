@@ -97,6 +97,19 @@ func parseDIDWebVHLog(body []byte) ([]didwebvh.LogEntry, error) {
 // VerifyWithWitnesses) — a caller needing witness enforcement should fetch
 // did-witness.json separately and call VerifyWithWitnesses directly.
 func (r *Resolver) resolveDIDWebVHAll(ctx context.Context, identifier string) ([]ed25519.PublicKey, error) {
+	docBody, err := r.didWebVHDocument(ctx, identifier)
+	if err != nil {
+		return nil, err
+	}
+	return parseDIDDocumentAll(docBody)
+}
+
+// didWebVHDocument performs the full did:webvh resolution (fetch the log, verify
+// the hash chain, check the SCID matches the DID that was asked for) and returns
+// the resolved DID document as JSON. Split out of resolveDIDWebVHAll so that
+// both the Ed25519-typed and the algorithm-tagged key APIs share one
+// implementation of the security-critical part.
+func (r *Resolver) didWebVHDocument(ctx context.Context, identifier string) ([]byte, error) {
 	scid, url, err := didWebVHLogURL(identifier)
 	if err != nil {
 		return nil, err
@@ -120,7 +133,7 @@ func (r *Resolver) resolveDIDWebVHAll(ctx context.Context, identifier string) ([
 	if err != nil {
 		return nil, fmt.Errorf("didresolver: re-encode did:webvh document: %w", err)
 	}
-	return parseDIDDocumentAll(docBody)
+	return docBody, nil
 }
 
 // resolveDIDWebVHServices fetches and verifies a did:webvh log and returns

@@ -58,3 +58,59 @@ func DecodeMultibaseBase58(s string) ([]byte, error) {
 	}
 	return Base58Decode(s[1:])
 }
+
+// ============================================================================
+// P-256 (secp256r1) Multikey — Axis 136
+// ============================================================================
+
+// Multicodec prefix for P-256 public keys (p256-pub = 0x1200), varint-encoded
+// as the two bytes 0x80 0x24.
+//
+// The varint (LEB128) derivation: 0x1200 = 4608; the low 7 bits are 0 with the
+// continuation bit set (0x80), and 4608>>7 = 36 = 0x24. Multikey then carries
+// the COMPRESSED 33-byte point, giving 35 bytes before base58btc — which is why
+// P-256 did:key identifiers begin "zDn".
+var p256PubPrefix = []byte{0x80, 0x24}
+
+// P256CompressedSize is the SEC1 compressed point length carried by a Multikey.
+const P256CompressedSize = 33
+
+// ErrBadP256Multikey is returned when a Multikey is malformed or not P-256.
+var ErrBadP256Multikey = errors.New("multiformats: malformed or non-P-256 multikey")
+
+// EncodeP256Multikey encodes a COMPRESSED P-256 point (33 bytes, 0x02/0x03-led)
+// as a W3C Multikey: "z" + base58btc(0x80 0x24 || compressed).
+func EncodeP256Multikey(compressed []byte) (string, error) {
+	if len(compressed) != P256CompressedSize || (compressed[0] != 0x02 && compressed[0] != 0x03) {
+		return "", ErrBadP256Multikey
+	}
+	buf := make([]byte, 0, len(p256PubPrefix)+len(compressed))
+	buf = append(buf, p256PubPrefix...)
+	buf = append(buf, compressed...)
+	return "z" + Base58Encode(buf), nil
+}
+
+// DecodeP256Multikey decodes a "zDn…" Multikey to the compressed P-256 point.
+// It deliberately does NOT accept an Ed25519 multikey: the two prefixes are
+// distinct, and silently coercing between curves would be a key-confusion bug.
+func DecodeP256Multikey(mk string) ([]byte, error) {
+	if len(mk) < 1 || mk[0] != 'z' {
+		return nil, ErrBadP256Multikey
+	}
+	raw, err := Base58Decode(mk[1:])
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) != len(p256PubPrefix)+P256CompressedSize {
+		return nil, ErrBadP256Multikey
+	}
+	if raw[0] != p256PubPrefix[0] || raw[1] != p256PubPrefix[1] {
+		return nil, ErrBadP256Multikey
+	}
+	if raw[2] != 0x02 && raw[2] != 0x03 {
+		return nil, ErrBadP256Multikey
+	}
+	out := make([]byte, P256CompressedSize)
+	copy(out, raw[2:])
+	return out, nil
+}
