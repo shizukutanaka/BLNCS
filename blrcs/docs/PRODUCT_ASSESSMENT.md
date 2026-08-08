@@ -73,7 +73,15 @@ history in `CHANGELOG.md`.
    whose hard-coded 32/64-byte size checks still contradict `docs/adr/0001`'s
    crypto-agility claim. Holder binding (KB-JWT) is also Ed25519-only.
 
-2. **mdoc presentation path is a stub.** `openid4vp/openid4vp.go:499`
+2. **mdoc presentation path — verification fixed, DC-API request still a stub.**
+   *(Verification addressed by Axis 138: `ProcessResponse` now dispatches on
+   the DCQL format, verifies the DeviceResponse's issuerAuth and DeviceAuth
+   against a supplied SessionTranscript, and enforces `DoctypeValue`. The
+   SessionTranscript is caller-supplied because the vanilla-OpenID4VP form is
+   still open upstream; an unconfigured one fails closed. **Remaining:** the
+   DC-API request side below.)*
+
+   Original finding: `openid4vp/openid4vp.go:499`
    `ProcessResponse` unconditionally verifies the vp_token as SD-JWT
    (`:544`), never branching on the matched DCQL query's Format;
    `dcapi/dcapi.go:157-173` `buildMdocData` emits an "MVP: minimal envelope"

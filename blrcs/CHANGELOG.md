@@ -6,6 +6,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`openid4vp`: mso_mdoc presentations were mis-routed to the SD-JWT verifier
+  (Axis 138).** `ProcessResponse` verified every vp_token as an SD-JWT
+  whatever format the DCQL query requested, so an mdoc presentation failed
+  with a misleading "signature/issuer mismatch"; and
+  `CredentialQuery.Meta.DoctypeValue` was declared but never read, so any
+  doctype was accepted. Now dispatches on format: the mdoc path decodes the
+  DeviceResponse, verifies issuerAuth and DeviceAuth, and enforces the
+  doctype twice (envelope, then the MSO-attested value, since the envelope is
+  unauthenticated until the signature verifies). **SessionTranscript is
+  supplied, not invented** — it is the replay defence, and while OpenID4VP
+  Annex C defines the DC-API form, the vanilla (direct_post) form is still
+  open upstream (OpenID4VP#402/#519, HAIP#137). An mdoc presentation with no
+  configured `Verifier.MdocSessionTranscript` is **rejected**, not verified
+  unbound. Adds the `FormatSDJWT`/`FormatMsoMdoc` constants. 7 new tests.
+
 ### Added
 - **`compliance`: ES256 SD-JWT issuance (Axis 137).** Completes the P-256
   story — BLRCS can now **issue** credentials a P-256-only EUDI ecosystem
