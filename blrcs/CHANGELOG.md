@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`bundle`, `mcp`: long-term, offline-verifiable DPP bundle (Axis 134).**
+  A first-principles gap the standards backlog never surfaced: a DPP must stay
+  verifiable for the product's 10-25 year life at frequently-offline scan
+  points (recyclers, ports, customs), and after the issuer's server is gone —
+  yet every verification path fetched something at verify time. New `bundle`
+  package packages a credential with its issuer key, did:webvh provenance log,
+  signed status snapshot and archive timestamps into one artifact that
+  verifies with **zero network calls** (enforced by a test that fails on any
+  outbound dial). Design corrected by the long-term-signature literature:
+  ETSI LTV requires a trusted **timestamp** beside the key chain and
+  revocation data — without it a 2045 verifier cannot tell a legitimate 2026
+  signature from a later forgery with a dead key — and RFC 4998 (Evidence
+  Record Syntax) requires renewing that timestamp as a **chain**, each anchor
+  taken over the prior evidence, before the algorithms weaken. The SCITT
+  ledger serves as the timestamping authority. `Verify` reports which checks
+  actually ran (absence is never success) and fails closed on `Require*`.
+  New tools `build_dpp_bundle` / `anchor_dpp_bundle` / `verify_dpp_bundle`
+  (`TestToolsList` 34 → 37). 23 new tests.
 - **`compliance`: opt-in `eddsa-jcs-2022` Data Integrity suite for W3C VCs
   (Axis 133).** Issued DPP credentials used the pre-Data-Integrity
   `Ed25519Signature2020` suite; a correct `eddsa-jcs-2022` implementation

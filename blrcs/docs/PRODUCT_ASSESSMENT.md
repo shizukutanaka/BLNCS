@@ -102,6 +102,26 @@ history in `CHANGELOG.md`.
    only executes workflows at the repo root); the GitHub repo
    description/topics still describe the unrelated legacy Python project.
 
+## 過剰 (Excess) — quantified
+
+A first-principles pass (rather than a spec checklist) also asks what the
+codebase carries that delivers nothing. 13 packages have **zero non-test
+internal callers** (~8,500 LoC):
+
+- **Legitimate public API** — library consumers call these directly and the
+  README documents them: `builder`, `kms`, `i18n`.
+- **Unwired infrastructure** (~5,600 LoC): `apispec`, `apiversion`, `openapi`,
+  `schemaver`, `httpchain`, `replay`, `saga`, `ctx`, `otelbridge`, `compose`.
+  Earlier axes triaged several of these as "deliberate extension points". From
+  first principles that framing is generous: in a **security** product, code
+  that nothing calls is audit surface and maintenance burden delivering zero
+  value, and it inflates the "53 packages" figure the project reports.
+
+**Recommendation**: remove the unwired set, or wire the parts that earn their
+place. This is deliberately *not* done unilaterally — deleting ~5,600 LoC is
+hard to reverse and the owner may value some of it — so it is surfaced here as
+an explicit, separately-confirmable decision.
+
 ## 改善案 (Improvements)
 
 The remaining code-verified backlog, split into two execution tracks by
