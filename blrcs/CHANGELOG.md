@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`ecdsakey`, `compliance`, `cbor`: ES256 / P-256 verification (Axis 135).**
+  The assessment's #1 weakness — Ed25519-only, while the EUDI ARF and
+  OpenID4VC HAIP mandate P-256, so no real EUDI wallet could interoperate.
+  Adds the verify half via the existing algorithm registries (no core changes,
+  stdlib only). Encoding verified against the specs: RFC 7518 §3.4 and
+  RFC 9053 §2.1 both require the raw fixed-width `R‖S` concatenation (32+32
+  octets, leading zeros preserved) and neither permits ASN.1 DER — which is
+  what Go and most libraries emit by default — so a signature that is not
+  exactly 64 bytes is rejected as an encoding-confusion hazard. On-curve
+  validation via `crypto/ecdh` guards invalid-curve attacks; malleability is
+  documented rather than enforced (neither RFC requires low-S). 23 new tests.
+  Issuance-side P-256 and `didresolver` remain a separate, larger axis.
 - **`bundle`, `mcp`: long-term, offline-verifiable DPP bundle (Axis 134).**
   A first-principles gap the standards backlog never surfaced: a DPP must stay
   verifiable for the product's 10-25 year life at frequently-offline scan
