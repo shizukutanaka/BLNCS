@@ -58,11 +58,13 @@ history in `CHANGELOG.md`.
 ## 短所 (Weaknesses)
 
 1. **Ed25519-only on the ISSUANCE side — the top EUDI-interop blocker.**
-   *(Partially addressed by Axis 135: ES256/P-256 **verification** now works
-   for both SD-JWT (JOSE) and mdoc/SCITT (COSE) via the `ecdsakey` package, so
-   a credential from a real EUDI wallet ecosystem verifies. Issuance, `kms`,
-   and `didresolver` remain Ed25519-only — the items below still stand for
-   those paths.)* No ES256/P-256
+   *(Partially addressed. Axis 135: ES256/P-256 **verification** for both
+   SD-JWT (JOSE) and mdoc/SCITT (COSE) via `ecdsakey`. Axis 136: P-256 key
+   **resolution** via `didresolver.ResolveAllKeys` (did:web/webvh JWK,
+   did:key, did:jwk, Multikey), so resolve-then-verify works end to end and a
+   credential from a real EUDI wallet ecosystem can be verified from its DID
+   alone. **Issuance and `kms` remain Ed25519-only** — that is the remaining
+   half of this weakness.)* No ES256/P-256
    signing or verification anywhere: `kms/kms.go:412,440,466,469` hard-checks
    32/64-byte sizes (contradicting `docs/adr/0001`'s crypto-agility claim);
    `cbor/cose.go:32` registers only `AlgEdDSA`;

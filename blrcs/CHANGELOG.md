@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`didresolver`, `multiformats`: P-256 key resolution (Axis 136).** Axis 135
+  could verify an ES256 credential only if the key was already in hand — no
+  resolver path could return a P-256 key. Adds an algorithm-tagged
+  `PublicKey{Alg, Bytes}` + `ResolveAllKeys` covering did:web / did:webvh JWKs,
+  did:key, did:jwk and Multikey, so resolve-then-verify now works end to end.
+  Deliberately a **parallel** API: `ed25519.PublicKey` is a named `[]byte`, so
+  widening it would let a P-256 key masquerade as Ed25519; the legacy
+  Ed25519-typed functions are unchanged and `PublicKey.Ed25519()` returns
+  `ok=false` for P-256. Encodings verified against RFC 7518 §6.2 (32-octet
+  fixed-width `x`/`y`) and multicodec `p256-pub` = 0x1200 → varint `0x80 0x24`
+  + compressed point (hence `zDn…`). Invalid-curve points are rejected at the
+  resolution boundary; Ed25519 and P-256 multikeys cannot cross-decode.
+  10 new tests.
 - **`ecdsakey`, `compliance`, `cbor`: ES256 / P-256 verification (Axis 135).**
   The assessment's #1 weakness — Ed25519-only, while the EUDI ARF and
   OpenID4VC HAIP mandate P-256, so no real EUDI wallet could interoperate.
