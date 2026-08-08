@@ -64,14 +64,14 @@ func TestToolsList(t *testing.T) {
 	resp := callRaw(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 	result := resp["result"].(map[string]any)
 	tools := result["tools"].([]any)
-	if len(tools) != 34 {
-		t.Fatalf("expected 34 tools, got %d", len(tools))
+	if len(tools) != 37 {
+		t.Fatalf("expected 37 tools, got %d", len(tools))
 	}
 	names := make(map[string]bool)
 	for _, tl := range tools {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
-	for _, want := range []string{"issue_passport", "issue_battery_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "search_passports", "issue_sdjwt", "verify_sdjwt", "check_revocation", "revoke_passport", "get_revocation_list", "get_server_capabilities", "create_credential_offer", "issue_mdoc", "verify_mdoc", "build_gs1_link", "parse_gs1_link", "build_gs1_linkset", "parse_gs1_linkset", "create_presentation_request", "get_presentation_result", "resolve_did", "discover_did_services", "verify_passport_by_did", "verify_sdjwt_by_did", "create_did_webvh", "update_did_webvh", "verify_did_webvh_log", "sign_witness_proof", "resolve_vct_metadata", "validate_claims_against_vct"} {
+	for _, want := range []string{"issue_passport", "issue_battery_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "search_passports", "build_dpp_bundle", "anchor_dpp_bundle", "verify_dpp_bundle", "issue_sdjwt", "verify_sdjwt", "check_revocation", "revoke_passport", "get_revocation_list", "get_server_capabilities", "create_credential_offer", "issue_mdoc", "verify_mdoc", "build_gs1_link", "parse_gs1_link", "build_gs1_linkset", "parse_gs1_linkset", "create_presentation_request", "get_presentation_result", "resolve_did", "discover_did_services", "verify_passport_by_did", "verify_sdjwt_by_did", "create_did_webvh", "update_did_webvh", "verify_did_webvh_log", "sign_witness_proof", "resolve_vct_metadata", "validate_claims_against_vct"} {
 		if !names[want] {
 			t.Errorf("tool %s missing", want)
 		}

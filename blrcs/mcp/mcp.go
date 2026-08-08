@@ -16,6 +16,9 @@
 //	get_scitt_receipt   — 受領証取得
 //	ledger_checkpoint   — 署名済みtree head
 //	search_passports    — SCITT ledger を subject/issuer で検索 (EN 18222)
+//	build_dpp_bundle    — 自己完結・オフライン検証可能な DPP バンドル生成
+//	anchor_dpp_bundle   — バンドルに archive timestamp を付与/更新 (LTV/ERS)
+//	verify_dpp_bundle   — バンドルをネットワーク無しで検証
 //	issue_sdjwt         — SD-JWT VC発行 (選択開示、status_list claim 自動埋込み)
 //	verify_sdjwt        — SD-JWT VC検証 (exp/KB-JWT込み)
 //	check_revocation    — W3C Bitstring Status List 失効確認
@@ -58,6 +61,7 @@ import (
 	"sync"
 	"time"
 
+	"blrcs/bundle"
 	"blrcs/capability"
 	"blrcs/compliance"
 	"blrcs/didresolver"
@@ -579,6 +583,21 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{"subject":{"type":"string","description":"productId / batteryId to search for"},"issuer":{"type":"string","description":"manufacturer/issuer DID to search for"}}}`),
 		},
 		{
+			Name:        "build_dpp_bundle",
+			Description: "Package an issued credential into a self-contained, long-term-verifiable DPP bundle: the credential plus the issuer key, and optionally a signed status-list snapshot and a did:webvh provenance log. The artifact verifies with ZERO network calls, so a passport stays checkable for the product's 10-25 year life even when the issuer's server is gone and the scan point (recycler, port, customs) is offline. Call anchor_dpp_bundle next to add the trusted timestamp that long-term validation requires.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"credential":{"type":"string","description":"The SD-JWT VC (from issue_sdjwt)"},"issuerId":{"type":"string","description":"Registered issuer that signed the credential (preferred — the server looks up its key)"},"issuerPublicKeyB64":{"type":"string","description":"Alternative to issuerId: base64-std Ed25519 public key that signed the credential"},"statusToken":{"type":"string","description":"Optional signed Status List Token snapshot"},"statusPublicKeyB64":{"type":"string","description":"base64-std key that signed statusToken"},"issuerDidLog":{"type":"array","description":"Optional did:webvh log proving the issuer key's provenance"}},"required":["credential"]}`),
+		},
+		{
+			Name:        "anchor_dpp_bundle",
+			Description: "Add an archive timestamp to a DPP bundle using this server's SCITT transparency ledger as the timestamping authority. This supplies the component ETSI long-term validation requires but that stapled evidence alone cannot: proof the credential existed at a trusted time, while the issuer key was still valid. Call again later (before the in-use algorithms weaken) to RENEW — each renewal is taken over the whole bundle including prior anchors, per RFC 4998 Evidence Record Syntax, so older evidence is carried forward.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"bundleJson":{"type":"string","description":"The bundle from build_dpp_bundle"},"issuerId":{"type":"string","description":"Registered issuer whose key submits the anchor statement"}},"required":["bundleJson","issuerId"]}`),
+		},
+		{
+			Name:        "verify_dpp_bundle",
+			Description: "Verify a DPP bundle with NO network access. Always checks the credential signature and validity window; additionally checks issuer-key provenance, revocation and the archive-timestamp chain ONLY when the bundle carries that evidence. The result reports exactly which checks ran, so a missing status snapshot is never mistaken for 'not revoked'. Set the require* flags to fail closed when a required check has no evidence.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"bundleJson":{"type":"string"},"requireProvenance":{"type":"boolean"},"requireRevocationCheck":{"type":"boolean"},"requireTimestamp":{"type":"boolean","description":"Demand a verifiable archive timestamp (long-term validation)"},"maxStatusAgeSeconds":{"type":"integer","description":"Reject a status snapshot older than this many seconds"}},"required":["bundleJson"]}`),
+		},
+		{
 			Name:        "issue_sdjwt",
 			Description: "Issue an SD-JWT VC with selective disclosure. sdClaims become selectively disclosable; clearClaims are always visible. Embeds a status_list claim (revocable via revoke_passport, checkable via check_revocation/get_revocation_list). Returns the full SD-JWT token, a list of disclosures, and the statusListIndex.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"subject":{"type":"string"},"sdClaims":{"type":"object","description":"Claims to make selectively disclosable"},"clearClaims":{"type":"object","description":"Claims always visible in the JWT"},"validForDays":{"type":"integer","default":365}},"required":["issuerId","subject","sdClaims"]}`),
@@ -805,6 +824,12 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolGetSCITTReceipt(args)
 	case "search_passports":
 		return s.toolSearchPassports(args)
+	case "build_dpp_bundle":
+		return s.toolBuildDPPBundle(args)
+	case "anchor_dpp_bundle":
+		return s.toolAnchorDPPBundle(args)
+	case "verify_dpp_bundle":
+		return s.toolVerifyDPPBundle(args)
 	case "ledger_checkpoint":
 		return s.toolCheckpoint(args)
 	case "issue_sdjwt":
@@ -1832,6 +1857,145 @@ func (s *Server) toolSearchPassports(args json.RawMessage) (string, error) {
 		"results": results,
 	})
 	return string(b), nil
+}
+
+// ============================================================================
+// Long-term offline DPP bundle tools (Axis 134)
+//
+// See the blrcs/bundle package doc for the design rationale: ETSI long-term
+// validation needs a trusted timestamp alongside the key chain and revocation
+// data, and RFC 4998 requires renewing that timestamp as a chain before the
+// in-use algorithms weaken. This server's SCITT ledger acts as the TSA.
+// ============================================================================
+
+func (s *Server) toolBuildDPPBundle(args json.RawMessage) (string, error) {
+	var in struct {
+		Credential string `json:"credential"`
+		// IssuerID names a registered issuer whose public key the server looks
+		// up. Preferred over IssuerPublicKeyB64: nothing else in the tool
+		// surface hands a caller the raw key, so requiring it would make this
+		// tool effectively uncallable by an agent.
+		IssuerID           string              `json:"issuerId"`
+		IssuerPublicKeyB64 string              `json:"issuerPublicKeyB64"`
+		StatusToken        string              `json:"statusToken"`
+		StatusPublicKeyB64 string              `json:"statusPublicKeyB64"`
+		IssuerDIDLog       []didwebvh.LogEntry `json:"issuerDidLog"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	var issuerKey []byte
+	switch {
+	case in.IssuerID != "":
+		s.mu.RLock()
+		iss, ok := s.issuers[in.IssuerID]
+		s.mu.RUnlock()
+		if !ok {
+			return "", fmt.Errorf("unknown issuer: %s", in.IssuerID)
+		}
+		issuerKey = iss.PublicKey()
+	case in.IssuerPublicKeyB64 != "":
+		k, err := base64.StdEncoding.DecodeString(in.IssuerPublicKeyB64)
+		if err != nil {
+			return "", fmt.Errorf("mcp: issuerPublicKeyB64: %w", err)
+		}
+		issuerKey = k
+	default:
+		return "", errors.New("mcp: either issuerId or issuerPublicKeyB64 is required")
+	}
+	opts := bundle.BuildOptions{StatusToken: in.StatusToken, IssuerDIDLog: in.IssuerDIDLog}
+	if in.StatusPublicKeyB64 != "" {
+		sk, err := base64.StdEncoding.DecodeString(in.StatusPublicKeyB64)
+		if err != nil {
+			return "", fmt.Errorf("mcp: statusPublicKeyB64: %w", err)
+		}
+		opts.StatusKey = sk
+	}
+	b, err := bundle.Build(in.Credential, issuerKey, opts)
+	if err != nil {
+		return "", err
+	}
+	raw, err := b.Marshal()
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// toolAnchorDPPBundle takes (or renews) the archive timestamp using this
+// server's transparency ledger, returning the extended bundle.
+func (s *Server) toolAnchorDPPBundle(args json.RawMessage) (string, error) {
+	var in struct {
+		BundleJSON string `json:"bundleJson"`
+		IssuerID   string `json:"issuerId"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	s.mu.RLock()
+	iss, ok := s.issuers[in.IssuerID]
+	s.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("unknown issuer: %s", in.IssuerID)
+	}
+	b, err := bundle.Parse([]byte(in.BundleJSON))
+	if err != nil {
+		return "", err
+	}
+	if err := b.Anchor(s.ledger, iss.PrivateKey(), iss.ID); err != nil {
+		return "", err
+	}
+	raw, err := b.Marshal()
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func (s *Server) toolVerifyDPPBundle(args json.RawMessage) (string, error) {
+	var in struct {
+		BundleJSON             string `json:"bundleJson"`
+		RequireProvenance      bool   `json:"requireProvenance"`
+		RequireRevocationCheck bool   `json:"requireRevocationCheck"`
+		RequireTimestamp       bool   `json:"requireTimestamp"`
+		MaxStatusAgeSeconds    int    `json:"maxStatusAgeSeconds"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	b, err := bundle.Parse([]byte(in.BundleJSON))
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	res, err := bundle.Verify(b, bundle.Options{
+		RequireProvenance:      in.RequireProvenance,
+		RequireRevocationCheck: in.RequireRevocationCheck,
+		RequireTimestamp:       in.RequireTimestamp,
+		MaxStatusAge:           time.Duration(in.MaxStatusAgeSeconds) * time.Second,
+	})
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	out := map[string]any{
+		"valid":             true,
+		"subject":           res.Claims.Subject,
+		"issuer":            res.Claims.Issuer,
+		"vct":               res.Claims.VCT,
+		"claims":            res.Claims.Claims,
+		"checkedProvenance": res.CheckedProvenance,
+		"checkedRevocation": res.CheckedRevocation,
+		"checkedTimestamp":  res.CheckedTimestamp,
+		"revoked":           res.Revoked,
+		"anchorCount":       res.AnchorCount,
+	}
+	if res.CheckedProvenance {
+		out["issuerDid"] = res.IssuerDID
+	}
+	if res.CheckedTimestamp && len(res.AnchorTimes) > 0 {
+		out["earliestAnchor"] = res.AnchorTimes[0]
+	}
+	bs, _ := json.Marshal(out)
+	return string(bs), nil
 }
 
 // ============================================================================
