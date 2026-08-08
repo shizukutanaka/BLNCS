@@ -57,22 +57,21 @@ history in `CHANGELOG.md`.
 
 ## 短所 (Weaknesses)
 
-1. **Ed25519-only on the ISSUANCE side — the top EUDI-interop blocker.**
-   *(Partially addressed. Axis 135: ES256/P-256 **verification** for both
-   SD-JWT (JOSE) and mdoc/SCITT (COSE) via `ecdsakey`. Axis 136: P-256 key
-   **resolution** via `didresolver.ResolveAllKeys` (did:web/webvh JWK,
-   did:key, did:jwk, Multikey), so resolve-then-verify works end to end and a
-   credential from a real EUDI wallet ecosystem can be verified from its DID
-   alone. **Issuance and `kms` remain Ed25519-only** — that is the remaining
-   half of this weakness.)* No ES256/P-256
-   signing or verification anywhere: `kms/kms.go:412,440,466,469` hard-checks
-   32/64-byte sizes (contradicting `docs/adr/0001`'s crypto-agility claim);
-   `cbor/cose.go:32` registers only `AlgEdDSA`;
-   `didresolver/didresolver.go:366` accepts only OKP/Ed25519 JWKs;
-   `compliance/extensions.go:609` *rejects* P-256 JWKs as a type-confusion
-   defense but never accepts them. EUDI ARF/HAIP mandate P-256, so a real
-   EUDI wallet cannot interoperate today despite the protocol layer being
-   conformant.
+1. **P-256 coverage is now partial, not absent — remaining gaps are W3C VC /
+   mdoc / SCITT signing and `kms`.** *(Largely addressed by Axes 135-137.)*
+
+   **Done:** ES256 verification for JOSE (SD-JWT) and COSE (mdoc/SCITT) via the
+   `ecdsakey` package; P-256 key resolution via `didresolver.ResolveAllKeys`
+   (did:web/webvh JWK, did:key, did:jwk, Multikey); ES256 **SD-JWT issuance**
+   via `compliance.ES256Issuer`. The full loop — issue, publish an EC JWK in a
+   DID document, resolve, verify — is exercised end to end, so a credential
+   from a P-256-only EUDI ecosystem interoperates.
+
+   **Still Ed25519-only:** W3C VC proofs (`compliance.Issuer.Issue`, both the
+   `Ed25519Signature2020` and `eddsa-jcs-2022` suites), mdoc and SCITT
+   *signing* (verification already accepts ES256), and `kms/kms.go:412,440,466,469`,
+   whose hard-coded 32/64-byte size checks still contradict `docs/adr/0001`'s
+   crypto-agility claim. Holder binding (KB-JWT) is also Ed25519-only.
 
 2. **mdoc presentation path is a stub.** `openid4vp/openid4vp.go:499`
    `ProcessResponse` unconditionally verifies the vp_token as SD-JWT
