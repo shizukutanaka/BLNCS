@@ -142,6 +142,15 @@ func (i *Issuer) IssueSDJWTVCBoundStatus(vct, subject string, sdClaims, clearCla
 // issueSDJWT — SD-JWT VC 発行の共通実装。holderPub が non-nil なら cnf.jwk を、
 // status が non-nil なら status_list claim を埋め込む。
 func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[string]any, holderPub ed25519.PublicKey, status *StatusRef, validFor time.Duration) (string, []Disclosure, error) {
+	return buildSDJWT(i, i.ID, vct, subject, sdClaims, clearClaims, holderPub, status, validFor)
+}
+
+// buildSDJWT is the single SD-JWT VC construction shared by every issuer
+// algorithm. Everything algorithm-specific is reached through the jwsSigner
+// seam (alg header, typ, decoy count, signature), so adding an algorithm can
+// never fork the disclosure/decoy/shuffle logic that the privacy properties
+// depend on.
+func buildSDJWT(signer jwsSigner, issuerID, vct, subject string, sdClaims, clearClaims map[string]any, holderPub []byte, status *StatusRef, validFor time.Duration) (string, []Disclosure, error) {
 	if subject == "" {
 		return "", nil, ErrSubjectRequired
 	}
@@ -150,7 +159,7 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 	}
 	now := time.Now().UTC()
 	payload := map[string]any{
-		"iss":     i.ID,
+		"iss":     issuerID,
 		"sub":     subject,
 		"vct":     vct,
 		"iat":     now.Unix(),
@@ -219,7 +228,7 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 	// with no corresponding disclosure. They are indistinguishable from real
 	// digests (same SHA-256 length) and obscure the true number of selectively-
 	// disclosable claims, improving holder unlinkability.
-	for n := 0; n < i.DecoyDigests; n++ {
+	for n := 0; n < signer.decoyCount(); n++ {
 		salt, err := randomB64(32)
 		if err != nil {
 			return "", nil, err
@@ -237,12 +246,15 @@ func (i *Issuer) issueSDJWT(vct, subject string, sdClaims, clearClaims map[strin
 	// `dc+sd-jwt` (renamed from `vc+sd-jwt` in Nov 2024 to avoid colliding with
 	// the W3C VC media type); overridable via Issuer.SDJWTVCType for legacy
 	// verifiers that only accept the old value.
-	header := `{"alg":"EdDSA","typ":"` + i.sdjwtVCType() + `"}`
+	header := `{"alg":"` + signer.jwsAlg() + `","typ":"` + signer.sdjwtTyp() + `"}`
 	headerB64 := base64.RawURLEncoding.EncodeToString([]byte(header))
 	payloadBytes, _ := json.Marshal(payload)
 	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadBytes)
 	sigInput := headerB64 + "." + payloadB64
-	sig := ed25519.Sign(i.privateKey, []byte(sigInput))
+	sig, err := signer.signJWS([]byte(sigInput))
+	if err != nil {
+		return "", nil, err
+	}
 	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
 	jwt := sigInput + "." + sigB64
 	// Append disclosures with ~ separator
