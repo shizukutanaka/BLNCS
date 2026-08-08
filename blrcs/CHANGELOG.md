@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`compliance`: ES256 SD-JWT issuance (Axis 137).** Completes the P-256
+  story — BLRCS can now **issue** credentials a P-256-only EUDI ecosystem
+  accepts, verified end to end (issue → publish EC JWK in a DID document →
+  resolve → verify from the DID alone). New `ES256Issuer` is a distinct type,
+  not a flag: `Issuer.PrivateKey()` feeds Ed25519-only subsystems (SCITT,
+  did:webvh, status lists), so a mode flag would hand them a nil key at
+  runtime — a separate type makes that a compile error. The SD-JWT
+  construction is shared via an unexported `jwsSigner` seam, so decoys and
+  disclosure logic cannot fork per algorithm. Signatures use `FillBytes` for
+  the RFC 7518 §3.4 fixed 64-octet width (a leading-zero coordinate would
+  otherwise emit a short encoding conforming verifiers reject). Nonces rely on
+  Go's *hedged* ECDSA (k from an AES-CTR CSPRNG keyed by
+  `SHA2-512(priv.D‖entropy‖hash)`), which resists RNG failure while keeping
+  the fault-injection tolerance strict RFC 6979 determinism gives up. 9 new
+  tests. Scope: SD-JWT only — W3C VC, mdoc, SCITT and `kms` remain Ed25519.
 - **`didresolver`, `multiformats`: P-256 key resolution (Axis 136).** Axis 135
   could verify an ES256 credential only if the key was already in hand — no
   resolver path could return a P-256 key. Adds an algorithm-tagged
