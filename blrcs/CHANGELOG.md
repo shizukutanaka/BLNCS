@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`compliance`: RFC 9901 array-element and recursive disclosures were
+  rejected as malformed (Axis 139).** The resolver understood only the flat,
+  top-level `[salt, name, value]` shape whose digest sat in the top-level
+  `_sd`, so a credential from any conforming issuer using array-element
+  (`[salt, value]` + `{"...": digest}`) or recursive (nested `_sd`)
+  disclosures was refused — an interop failure that looks like tampering. New
+  `disclosure.go` walks the payload and substitutes disclosures at any depth,
+  enforcing the spec's MUSTs: each digest referenced at most once, every
+  presented disclosure used, distinct `_sd` strings, single-key `...`
+  placeholders, collision checks at every depth, and rejection of shape
+  confusion in both directions. Recursion is depth-bounded. Also stops the
+  issuer emitting the invalid `"_sd": null` for credentials with no
+  disclosable claims (tolerated on the verify side for older credentials).
+  New error sentinels wrap `ErrSDJWTMalformed` so `errors.Is` callers are
+  unaffected. 17 new tests. Verification only — issuance still emits flat
+  disclosures, which no longer blocks interop.
 - **`openid4vp`: mso_mdoc presentations were mis-routed to the SD-JWT verifier
   (Axis 138).** `ProcessResponse` verified every vp_token as an SD-JWT
   whatever format the DCQL query requested, so an mdoc presentation failed

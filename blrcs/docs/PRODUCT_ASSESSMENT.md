@@ -93,9 +93,12 @@ history in `CHANGELOG.md`.
    (HAIP mandates ECDH-ES on P-256; Chrome/Safari already ship it). Depends
    on weakness 1.
 
-4. **Flat selective disclosure only.** No RFC 9901 array-element (2-element
-   `[salt,value]`, `...` placeholder) or recursive `_sd` disclosures;
-   DCQL `walkPath` descends objects only.
+4. **Selective disclosure — verification complete, issuance still flat.**
+   *(Addressed for verification by Axis 139: array-element (`[salt, value]` +
+   `{"...": digest}`) and recursive (nested `_sd`) disclosures now resolve at
+   any depth, so credentials from conforming third-party issuers verify.)*
+   **Remaining:** BLRCS issuance still emits only flat, top-level disclosures,
+   and DCQL `walkPath` descends objects but not into array elements.
 
 5. **Issuance flows limited.** Pre-authorized code flow only
    (`openid4vci/openid4vci.go:1127` rejects other grant types); no
