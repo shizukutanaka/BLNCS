@@ -241,7 +241,12 @@ func buildSDJWT(signer jwsSigner, issuerID, vct, subject string, sdClaims, clear
 	if err := shuffleDigests(sdDigests); err != nil {
 		return "", nil, err
 	}
-	payload["_sd"] = sdDigests
+	// Only emit `_sd` when there is something in it. Serialising an empty list
+	// produced `"_sd": null`, which is not a valid digest array — a strict
+	// verifier is entitled to reject it.
+	if len(sdDigests) > 0 {
+		payload[sdKey] = sdDigests
+	}
 	// Sign JWT. typ defaults to the current draft-ietf-oauth-sd-jwt-vc value
 	// `dc+sd-jwt` (renamed from `vc+sd-jwt` in Nov 2024 to avoid colliding with
 	// the W3C VC media type); overridable via Issuer.SDJWTVCType for legacy
@@ -496,53 +501,19 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 			vc.Claims[k] = v
 		}
 	}
-	// 開示の展開: digest を _sd と照合。重複 digest は拒否 (SD-JWT §verify)。
-	sdDigests := map[string]bool{}
-	if sd, ok := payload["_sd"].([]any); ok {
-		for _, d := range sd {
-			if s, ok := d.(string); ok {
-				if sdDigests[s] {
-					return nil, ErrSDJWTDuplicateDigest
-				}
-				sdDigests[s] = true
-			}
-		}
+	// Disclosure resolution (RFC 9901). Delegated to resolveDisclosures so that
+	// object properties, array elements and RECURSIVELY nested disclosures are
+	// all handled by one walk — see disclosure.go. The previous inline loop
+	// only understood flat, top-level object properties whose digest appeared in
+	// the top-level `_sd`, and rejected everything else as malformed.
+	resolved, err := resolveDisclosures(payload, parts[1:discEnd], reserved)
+	if err != nil {
+		return nil, err
 	}
-	for _, disc := range parts[1:discEnd] {
-		if disc == "" {
-			continue
+	for k, v := range resolved {
+		if !reserved[k] {
+			vc.Claims[k] = v
 		}
-		h := sha256.Sum256([]byte(disc))
-		if !sdDigests[base64.RawURLEncoding.EncodeToString(h[:])] {
-			// SD-JWT §verify: a presented disclosure whose digest is not in _sd
-			// signals tampering or a disclosure from a different credential —
-			// MUST reject, not silently skip.
-			return nil, ErrSDJWTMalformed
-		}
-		raw, err := base64.RawURLEncoding.DecodeString(disc)
-		if err != nil {
-			return nil, ErrSDJWTMalformed
-		}
-		var arr []any
-		if err := json.Unmarshal(raw, &arr); err != nil {
-			return nil, ErrSDJWTMalformed
-		}
-		if len(arr) != 3 {
-			return nil, ErrSDJWTMalformed
-		}
-		name, ok := arr[1].(string)
-		if !ok {
-			return nil, ErrSDJWTMalformed
-		}
-		// A disclosed claim MUST NOT collide with a reserved claim or an
-		// already-present (clear or previously-disclosed) claim.
-		if reserved[name] {
-			return nil, ErrSDJWTMalformed
-		}
-		if _, exists := vc.Claims[name]; exists {
-			return nil, ErrSDJWTMalformed
-		}
-		vc.Claims[name] = arr[2]
 	}
 
 	// Key binding: cnf 有り credential は常に KB-JWT を検証 (nonce/aud バインド)。

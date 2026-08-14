@@ -774,7 +774,7 @@ func TestVerifySDJWTBadHeaderJSON(t *testing.T) {
 	// "aGVsbG8" = base64url("hello"), which is not JSON
 	badJWT := "aGVsbG8.payload.sig"
 	_, err := VerifySDJWTWithBinding(badJWT+"~", iss.PublicKey(), VerifyOptions{})
-	if err != ErrSDJWTMalformed {
+	if !errors.Is(err, ErrSDJWTMalformed) {
 		t.Errorf("bad header JSON: want ErrSDJWTMalformed, got %v", err)
 	}
 }
@@ -830,7 +830,7 @@ func TestVerifySDJWTDisclosureNotInSD(t *testing.T) {
 	extraDisc := base64.RawURLEncoding.EncodeToString([]byte(`["salt","key","val"]`))
 	sdjwt := jwt + "~" + extraDisc + "~"
 	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
-	if err != ErrSDJWTMalformed {
+	if !errors.Is(err, ErrSDJWTMalformed) {
 		t.Errorf("disc not in _sd: want ErrSDJWTMalformed, got %v", err)
 	}
 }
@@ -844,7 +844,7 @@ func TestVerifySDJWTDisclosureBadBase64(t *testing.T) {
 	jwt := craftSignedJWT(iss.privateKey, payload)
 	sdjwt := jwt + "~" + badDisc + "~"
 	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
-	if err != ErrSDJWTMalformed {
+	if !errors.Is(err, ErrSDJWTMalformed) {
 		t.Errorf("bad base64 disc: want ErrSDJWTMalformed, got %v", err)
 	}
 }
@@ -858,7 +858,7 @@ func TestVerifySDJWTDisclosureNotJSONArray(t *testing.T) {
 	jwt := craftSignedJWT(iss.privateKey, payload)
 	sdjwt := jwt + "~" + disc + "~"
 	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
-	if err != ErrSDJWTMalformed {
+	if !errors.Is(err, ErrSDJWTMalformed) {
 		t.Errorf("not-array disc: want ErrSDJWTMalformed, got %v", err)
 	}
 }
@@ -872,7 +872,7 @@ func TestVerifySDJWTDisclosureWrongArrayLength(t *testing.T) {
 	jwt := craftSignedJWT(iss.privateKey, payload)
 	sdjwt := jwt + "~" + disc + "~"
 	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
-	if err != ErrSDJWTMalformed {
+	if !errors.Is(err, ErrSDJWTMalformed) {
 		t.Errorf("wrong arr len: want ErrSDJWTMalformed, got %v", err)
 	}
 }
@@ -886,7 +886,7 @@ func TestVerifySDJWTDisclosureNonStringName(t *testing.T) {
 	jwt := craftSignedJWT(iss.privateKey, payload)
 	sdjwt := jwt + "~" + disc + "~"
 	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
-	if err != ErrSDJWTMalformed {
+	if !errors.Is(err, ErrSDJWTMalformed) {
 		t.Errorf("non-string name: want ErrSDJWTMalformed, got %v", err)
 	}
 }
@@ -900,7 +900,7 @@ func TestVerifySDJWTDisclosureReservedName(t *testing.T) {
 	jwt := craftSignedJWT(iss.privateKey, payload)
 	sdjwt := jwt + "~" + disc + "~"
 	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
-	if err != ErrSDJWTMalformed {
+	if !errors.Is(err, ErrSDJWTMalformed) {
 		t.Errorf("reserved name: want ErrSDJWTMalformed, got %v", err)
 	}
 }
@@ -915,7 +915,7 @@ func TestVerifySDJWTDisclosureDuplicateClaim(t *testing.T) {
 	jwt := craftSignedJWT(iss.privateKey, payload)
 	sdjwt := jwt + "~" + disc + "~"
 	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
-	if err != ErrSDJWTMalformed {
+	if !errors.Is(err, ErrSDJWTMalformed) {
 		t.Errorf("duplicate claim: want ErrSDJWTMalformed, got %v", err)
 	}
 }
@@ -959,7 +959,7 @@ func TestVerifySDJWTRejectsStringExp(t *testing.T) {
 	payload["exp"] = "1700000000" // string, not a number — non-conformant
 	sdjwt := craftSignedJWT(iss.privateKey, payload) + "~"
 	_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
-	if err != ErrSDJWTMalformed {
+	if !errors.Is(err, ErrSDJWTMalformed) {
 		t.Errorf("string exp: want ErrSDJWTMalformed, got %v", err)
 	}
 }
@@ -983,7 +983,7 @@ func TestVerifySDJWTRejectsNonNumericTimeClaims(t *testing.T) {
 			payload[tc.key] = tc.value
 			sdjwt := craftSignedJWT(iss.privateKey, payload) + "~"
 			_, err := VerifySDJWTWithBinding(sdjwt, iss.PublicKey(), VerifyOptions{})
-			if err != ErrSDJWTMalformed {
+			if !errors.Is(err, ErrSDJWTMalformed) {
 				t.Errorf("%s: want ErrSDJWTMalformed, got %v", tc.name, err)
 			}
 		})
