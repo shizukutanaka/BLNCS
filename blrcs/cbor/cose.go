@@ -14,6 +14,11 @@
 package cbor
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+
 	"blrcs/ecdsakey"
 	"crypto/ed25519"
 	"errors"
@@ -46,6 +51,16 @@ var ErrCOSEBadStructure = errors.New("cbor/cose: malformed COSE_Sign1 structure"
 
 // ErrCOSESigFailed is returned when signature verification fails.
 var ErrCOSESigFailed = errors.New("cbor/cose: signature verification failed")
+
+// ErrNotP256Key is returned by Sign1ES256 when the supplied key is nil or not
+// on P-256.
+var ErrNotP256Key = errors.New("cbor/cose: ES256 requires a P-256 private key")
+
+// ErrAlgHeaderMismatch is returned when the protected header declares an
+// algorithm that differs from the one the signing function actually uses.
+// Signing anyway would produce a COSE_Sign1 whose header sends a verifier to the
+// wrong algorithm — an unverifiable credential that looks well-formed.
+var ErrAlgHeaderMismatch = errors.New("cbor/cose: protected header alg does not match the signing algorithm")
 
 // ErrCOSEUnsupportedAlg is returned for unknown or disallowed algorithms.
 var ErrCOSEUnsupportedAlg = errors.New("cbor/cose: unsupported algorithm")
@@ -127,7 +142,13 @@ func encodedHeader(h Header) ([]byte, error) {
 // unprotected may be nil. payload is the content bytes (nil for detached payload).
 // externalAAD should be nil or empty for most use cases.
 func Sign1(protected, unprotected Header, payload, externalAAD []byte, priv ed25519.PrivateKey) ([]byte, error) {
-	if _, ok := protected[HeaderAlg]; !ok {
+	// Symmetric to Sign1ES256: signing under a header that declares a different
+	// algorithm yields a credential the verifier dispatches to the wrong code.
+	if alg, ok := protected[HeaderAlg]; ok {
+		if n, isInt := alg.(int); !isInt || n != AlgEdDSA {
+			return nil, fmt.Errorf("%w: protected header declares alg %v, not EdDSA (%d)", ErrAlgHeaderMismatch, alg, AlgEdDSA)
+		}
+	} else {
 		protected = copyHeader(protected)
 		protected[HeaderAlg] = AlgEdDSA
 	}
@@ -381,4 +402,79 @@ func copyHeader(h Header) Header {
 		out[k] = v
 	}
 	return out
+}
+
+// ============================================================================
+// Axis 141: ES256 COSE_Sign1 signing
+//
+// Verification of AlgES256 landed in Axis 135; this is the signing half, so
+// BLRCS can produce mdoc credentials a P-256-only ecosystem accepts (real mDLs
+// are ES256-signed).
+//
+// The signature is the raw fixed-width R‖S concatenation RFC 9053 §2.1
+// mandates — Signature = I2OSP(R, n) | I2OSP(S, n), n = ceiling(key_length/8),
+// so 32+32 for P-256 — NOT the ASN.1 DER that ecdsa.SignASN1 and most libraries
+// emit by default. FillBytes does the zero-padding; r.Bytes() would emit a short
+// encoding whenever a coordinate has a leading zero byte (~1 in 256), which a
+// conforming verifier rejects.
+//
+// Nonce generation is Go's hedged ECDSA: k comes from an AES-CTR CSPRNG keyed by
+// SHA2-512(priv.D || entropy || hash), so both the key and the message feed it.
+// That resists RNG failure while keeping the fault-injection tolerance strict
+// RFC 6979 determinism gives up. See compliance/es256_issuer.go for the fuller
+// note; the reasoning is identical here.
+// ============================================================================
+
+// Sign1ES256 creates and signs a COSE_Sign1 using ECDSA on P-256 (alg -7).
+//
+// It mirrors Sign1 exactly apart from the algorithm: protected gains
+// HeaderAlg: AlgES256 when unset, unprotected may be nil, and a nil payload
+// produces a detached-payload structure.
+//
+// The key is *ecdsa.PrivateKey rather than a generic signer so that an Ed25519
+// key cannot reach this path (and vice versa) — the compiler enforces the split
+// instead of a runtime type check.
+func Sign1ES256(protected, unprotected Header, payload, externalAAD []byte, priv *ecdsa.PrivateKey) ([]byte, error) {
+	if priv == nil || priv.Curve != elliptic.P256() {
+		return nil, ErrNotP256Key
+	}
+	// A protected header declaring some OTHER algorithm would be signed as-is and
+	// then dispatched to that algorithm's verifier, silently producing a
+	// credential nothing can verify. Reject rather than sign a lie.
+	if alg, ok := protected[HeaderAlg]; ok {
+		if n, isInt := alg.(int); !isInt || n != AlgES256 {
+			return nil, fmt.Errorf("%w: protected header declares alg %v, not ES256 (%d)", ErrAlgHeaderMismatch, alg, AlgES256)
+		}
+	} else {
+		protected = copyHeader(protected)
+		protected[HeaderAlg] = AlgES256
+	}
+	protectedBytes, err := encodedHeader(protected)
+	if err != nil {
+		return nil, fmt.Errorf("cbor/cose: encode protected: %w", err)
+	}
+	sigInput, err := sigStructure(protectedBytes, payload, externalAAD)
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(sigInput)
+	r, s, err := ecdsa.Sign(rand.Reader, priv, digest[:])
+	if err != nil {
+		return nil, fmt.Errorf("cbor/cose: ES256 sign: %w", err)
+	}
+	sig := make([]byte, ecdsakey.ES256SignatureSize)
+	r.FillBytes(sig[:ecdsakey.P256CoordSize])
+	s.FillBytes(sig[ecdsakey.P256CoordSize:])
+
+	if unprotected == nil {
+		unprotected = Header{}
+	}
+	var payloadVal any
+	if payload != nil {
+		payloadVal = payload
+	}
+	return Marshal(Tag{
+		Number:  TagCOSESign1,
+		Content: []any{protectedBytes, map[int]any(unprotected), payloadVal, sig},
+	})
 }

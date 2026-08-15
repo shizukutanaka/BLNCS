@@ -552,15 +552,15 @@ func TestParseValueDigestsErrors(t *testing.T) {
 
 func TestParseDeviceKeyMissing(t *testing.T) {
 	// Non-map → nil key
-	if k := parseDeviceKey("string"); k != nil {
+	if k, ec := parseDeviceKey("string"); k != nil || ec != nil {
 		t.Error("non-map should return nil")
 	}
 	// Map without deviceKey → nil
-	if k := parseDeviceKey(map[any]any{}); k != nil {
+	if k, ec := parseDeviceKey(map[any]any{}); k != nil || ec != nil {
 		t.Error("missing deviceKey should return nil")
 	}
 	// deviceKey not a map → nil
-	if k := parseDeviceKey(map[any]any{"deviceKey": "bad"}); k != nil {
+	if k, ec := parseDeviceKey(map[any]any{"deviceKey": "bad"}); k != nil || ec != nil {
 		t.Error("non-map deviceKey should return nil")
 	}
 }
@@ -802,7 +802,7 @@ func TestParseDeviceKeyWrongCurve(t *testing.T) {
 	devKeyInfo := map[any]any{
 		msoDeviceKey: wrongCurveKey,
 	}
-	if k := parseDeviceKey(devKeyInfo); k != nil {
+	if k, ec := parseDeviceKey(devKeyInfo); k != nil || ec != nil {
 		t.Error("wrong curve should return nil device key")
 	}
 }
@@ -817,7 +817,7 @@ func TestParseDeviceKeyShortX(t *testing.T) {
 	devKeyInfo := map[any]any{
 		msoDeviceKey: shortXKey,
 	}
-	if k := parseDeviceKey(devKeyInfo); k != nil {
+	if k, ec := parseDeviceKey(devKeyInfo); k != nil || ec != nil {
 		t.Error("short x coordinate should return nil device key")
 	}
 }
