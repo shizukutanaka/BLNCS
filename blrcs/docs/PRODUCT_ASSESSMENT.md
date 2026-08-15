@@ -67,11 +67,14 @@ history in `CHANGELOG.md`.
    DID document, resolve, verify — is exercised end to end, so a credential
    from a P-256-only EUDI ecosystem interoperates.
 
+   Axis 141 added **mdoc ES256 issuance and device auth** (EC2 COSE_Key device
+   keys included), so the mdoc format is P-256 end to end.
+
    **Still Ed25519-only:** W3C VC proofs (`compliance.Issuer.Issue`, both the
-   `Ed25519Signature2020` and `eddsa-jcs-2022` suites), mdoc and SCITT
-   *signing* (verification already accepts ES256), and `kms/kms.go:412,440,466,469`,
+   `Ed25519Signature2020` and `eddsa-jcs-2022` suites), SCITT COSE receipt
+   *signing* (BLRCS-internal, so no interop pressure), `kms/kms.go:412,440,466,469`,
    whose hard-coded 32/64-byte size checks still contradict `docs/adr/0001`'s
-   crypto-agility claim. Holder binding (KB-JWT) is also Ed25519-only.
+   crypto-agility claim, and SD-JWT holder binding (KB-JWT).
 
 2. **mdoc presentation path — verification fixed, DC-API request still a stub.**
    *(Verification addressed by Axis 138: `ProcessResponse` now dispatches on

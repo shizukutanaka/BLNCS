@@ -51,6 +51,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   unbound. Adds the `FormatSDJWT`/`FormatMsoMdoc` constants. 7 new tests.
 
 ### Added
+- **`cbor`, `mdoc`: ES256 mdoc issuance and device auth (Axis 141).**
+  Completes the P-256 story — COSE *signing* was still Ed25519-only, so BLRCS
+  could consume a real mDL but not produce one. New `cbor.Sign1ES256` (raw
+  fixed-width `R‖S` per RFC 9053 §2.1, `*ecdsa.PrivateKey`-typed so keys cannot
+  cross paths), plus `IssuerPrivES256` / `DeviceKeyES256` on `mdoc.IssueParams`
+  with the device key as an EC2 COSE_Key (RFC 9052 §7) validated on-curve when
+  parsed back. Implementing it surfaced a real bug — mdoc stamped
+  `AlgEdDSA` on ES256 signatures, yielding well-formed but unverifiable
+  credentials — now fixed and closed as a class: both signers reject a
+  protected header declaring a different algorithm (`ErrAlgHeaderMismatch`).
+  10 new tests. SCITT COSE receipts remain EdDSA (BLRCS-internal, no interop
+  argument).
 - **`compliance`: ES256 SD-JWT issuance (Axis 137).** Completes the P-256
   story — BLRCS can now **issue** credentials a P-256-only EUDI ecosystem
   accepts, verified end to end (issue → publish EC JWK in a DID document →
