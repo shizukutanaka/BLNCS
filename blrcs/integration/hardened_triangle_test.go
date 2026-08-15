@@ -112,8 +112,8 @@ func TestHardenedTriangle_TxCodeProofBoundDCQLKeyBinding(t *testing.T) {
 		Format: "dc+sd-jwt",
 		Meta:   &openid4vp.CredentialQueryMeta{VCTValues: []string{"BatteryPassport"}},
 		Claims: []openid4vp.ClaimQuery{
-			{Path: []string{"batteryCategory"}},
-			{Path: []string{"carbonKgCO2e"}},
+			{Path: []any{"batteryCategory"}},
+			{Path: []any{"carbonKgCO2e"}},
 		},
 	}}}
 	reqURL, state, err := verifier.CreateRequestDCQL(q)
@@ -221,7 +221,7 @@ func TestHardenedTriangle_RevocationLifecycle(t *testing.T) {
 			ID:     "battery",
 			Format: "dc+sd-jwt",
 			Meta:   &openid4vp.CredentialQueryMeta{VCTValues: []string{"BatteryPassport"}},
-			Claims: []openid4vp.ClaimQuery{{Path: []string{"batteryCategory"}}},
+			Claims: []openid4vp.ClaimQuery{{Path: []any{"batteryCategory"}}},
 		}}}
 		reqURL, state, cerr := verifier.CreateRequestDCQL(q)
 		if cerr != nil {

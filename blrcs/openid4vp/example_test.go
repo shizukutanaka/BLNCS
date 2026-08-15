@@ -19,7 +19,7 @@ func Example_dcqlRequest() {
 				VCTValues: []string{"https://schema.europa.eu/dpp/sd-jwt-vc/v1"},
 			},
 			Claims: []openid4vp.ClaimQuery{
-				{Path: []string{"carbonKgCO2ePerKWh"}},
+				{Path: []any{"carbonKgCO2ePerKWh"}},
 			},
 		}},
 	}

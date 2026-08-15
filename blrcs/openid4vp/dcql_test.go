@@ -14,7 +14,7 @@ import (
 func makeCredQuery(id string, nClaims, pathDepth, nValues int) CredentialQuery {
 	claims := make([]ClaimQuery, nClaims)
 	for i := range claims {
-		path := make([]string, pathDepth)
+		path := make([]any, pathDepth)
 		for p := range path {
 			path[p] = "k"
 		}
@@ -33,7 +33,7 @@ func TestDCQLValidateHappy(t *testing.T) {
 			ID:     "dpp",
 			Format: "dc+sd-jwt",
 			Meta:   &CredentialQueryMeta{VCTValues: []string{"https://schema.europa.eu/dpp/sd-jwt-vc/v1"}},
-			Claims: []ClaimQuery{{Path: []string{"carbonKgCO2ePerKWh"}}},
+			Claims: []ClaimQuery{{Path: []any{"carbonKgCO2ePerKWh"}}},
 		}},
 	}
 	if err := q.Validate(); err != nil {
@@ -102,8 +102,8 @@ func TestDCQLValidateClaimSetsHappy(t *testing.T) {
 			ID:     "id-doc",
 			Format: "dc+sd-jwt",
 			Claims: []ClaimQuery{
-				{ID: "passport_number", Path: []string{"passportNumber"}},
-				{ID: "license_number", Path: []string{"licenseNumber"}},
+				{ID: "passport_number", Path: []any{"passportNumber"}},
+				{ID: "license_number", Path: []any{"licenseNumber"}},
 			},
 			ClaimSets: [][]string{{"passport_number"}, {"license_number"}},
 		}},
@@ -119,8 +119,8 @@ func TestDCQLValidateClaimSetsRequiresIDs(t *testing.T) {
 			ID:     "id-doc",
 			Format: "dc+sd-jwt",
 			Claims: []ClaimQuery{
-				{ID: "passport_number", Path: []string{"passportNumber"}},
-				{Path: []string{"licenseNumber"}}, // no id
+				{ID: "passport_number", Path: []any{"passportNumber"}},
+				{Path: []any{"licenseNumber"}}, // no id
 			},
 			ClaimSets: [][]string{{"passport_number"}},
 		}},
@@ -135,7 +135,7 @@ func TestDCQLValidateClaimSetsUnknownID(t *testing.T) {
 		Credentials: []CredentialQuery{{
 			ID:        "id-doc",
 			Format:    "dc+sd-jwt",
-			Claims:    []ClaimQuery{{ID: "a", Path: []string{"a"}}},
+			Claims:    []ClaimQuery{{ID: "a", Path: []any{"a"}}},
 			ClaimSets: [][]string{{"nonexistent"}},
 		}},
 	}
@@ -149,7 +149,7 @@ func TestDCQLValidateClaimSetsEmptyOption(t *testing.T) {
 		Credentials: []CredentialQuery{{
 			ID:        "id-doc",
 			Format:    "dc+sd-jwt",
-			Claims:    []ClaimQuery{{ID: "a", Path: []string{"a"}}},
+			Claims:    []ClaimQuery{{ID: "a", Path: []any{"a"}}},
 			ClaimSets: [][]string{{}},
 		}},
 	}
@@ -164,8 +164,8 @@ func TestDCQLValidateClaimSetsDuplicateClaimID(t *testing.T) {
 			ID:     "id-doc",
 			Format: "dc+sd-jwt",
 			Claims: []ClaimQuery{
-				{ID: "dup", Path: []string{"a"}},
-				{ID: "dup", Path: []string{"b"}},
+				{ID: "dup", Path: []any{"a"}},
+				{ID: "dup", Path: []any{"b"}},
 			},
 		}},
 	}
@@ -182,8 +182,8 @@ func TestMatchClaimsClaimSetsAlternative(t *testing.T) {
 		ID:     "id-doc",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{ID: "passport_number", Path: []string{"passportNumber"}},
-			{ID: "license_number", Path: []string{"licenseNumber"}},
+			{ID: "passport_number", Path: []any{"passportNumber"}},
+			{ID: "license_number", Path: []any{"licenseNumber"}},
 		},
 		ClaimSets: [][]string{{"passport_number"}, {"license_number"}},
 	}
@@ -208,9 +208,9 @@ func TestMatchClaimsClaimSetsMultiClaimOption(t *testing.T) {
 		ID:     "addr",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{ID: "street", Path: []string{"street"}},
-			{ID: "city", Path: []string{"city"}},
-			{ID: "poBox", Path: []string{"poBox"}},
+			{ID: "street", Path: []any{"street"}},
+			{ID: "city", Path: []any{"city"}},
+			{ID: "poBox", Path: []any{"poBox"}},
 		},
 		ClaimSets: [][]string{{"street", "city"}, {"poBox"}},
 	}
@@ -232,7 +232,7 @@ func TestMatchClaimsClaimSetsValueConstraint(t *testing.T) {
 		ID:     "cat",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{ID: "category", Path: []string{"category"}, Values: []any{"EV"}},
+			{ID: "category", Path: []any{"category"}, Values: []any{"EV"}},
 		},
 		ClaimSets: [][]string{{"category"}},
 	}
@@ -297,8 +297,8 @@ func TestCredentialQueryMatchClaims(t *testing.T) {
 		ID:     "dpp",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{Path: []string{"batteryCategory"}, Values: []any{"EV", "industrial"}},
-			{Path: []string{"carbonKgCO2ePerKWh"}},
+			{Path: []any{"batteryCategory"}, Values: []any{"EV", "industrial"}},
+			{Path: []any{"carbonKgCO2ePerKWh"}},
 		},
 	}
 	// All required claims present, value matches
@@ -325,8 +325,8 @@ func TestMatchClaimsCompositeValues(t *testing.T) {
 		ID:     "c",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{Path: []string{"roles"}, Values: []any{[]any{"admin", "user"}}},
-			{Path: []string{"meta"}, Values: []any{map[string]any{"k": "v"}}},
+			{Path: []any{"roles"}, Values: []any{[]any{"admin", "user"}}},
+			{Path: []any{"meta"}, Values: []any{map[string]any{"k": "v"}}},
 		},
 	}
 	// Matching composites must satisfy the query (no panic, structural equality).
@@ -349,7 +349,7 @@ func TestMatchClaimsCompositeValues(t *testing.T) {
 	// fail to match.
 	scalarQ := CredentialQuery{
 		ID: "s", Format: "dc+sd-jwt",
-		Claims: []ClaimQuery{{Path: []string{"x"}, Values: []any{"scalar"}}},
+		Claims: []ClaimQuery{{Path: []any{"x"}, Values: []any{"scalar"}}},
 	}
 	if scalarQ.MatchClaims(map[string]any{"x": []any{"composite"}}) {
 		t.Error("composite claim vs scalar allowed-value should not match")
@@ -363,8 +363,8 @@ func TestMatchClaimsEmptyPathSkipped(t *testing.T) {
 		ID:     "c",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{Path: nil},                       // empty path → skipped
-			{Path: []string{"present_claim"}}, // real constraint
+			{Path: nil},                    // empty path → skipped
+			{Path: []any{"present_claim"}}, // real constraint
 		},
 	}
 	if !cq.MatchClaims(map[string]any{"present_claim": "ok"}) {
@@ -378,7 +378,7 @@ func TestDCQLMarshalRoundTrip(t *testing.T) {
 			ID:     "dpp",
 			Format: "dc+sd-jwt",
 			Meta:   &CredentialQueryMeta{VCTValues: []string{"https://schema.europa.eu/dpp/sd-jwt-vc/v1"}},
-			Claims: []ClaimQuery{{Path: []string{"carbonKgCO2ePerKWh"}}},
+			Claims: []ClaimQuery{{Path: []any{"carbonKgCO2ePerKWh"}}},
 		}},
 	}
 	data, err := MarshalDCQL(q)
@@ -454,8 +454,8 @@ func TestMatchClaimsNestedPath(t *testing.T) {
 		ID:     "q",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{Path: []string{"address", "country"}},
-			{Path: []string{"name"}},
+			{Path: []any{"address", "country"}},
+			{Path: []any{"name"}},
 		},
 	}
 	presented := map[string]any{
@@ -475,7 +475,7 @@ func TestMatchClaimsNestedPathMissing(t *testing.T) {
 		ID:     "q",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{Path: []string{"address", "country"}},
+			{Path: []any{"address", "country"}},
 		},
 	}
 	// No nested "address" object → must not match.
@@ -501,7 +501,7 @@ func TestMatchClaimsNestedValues(t *testing.T) {
 		ID:     "q",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{Path: []string{"address", "country"}, Values: []any{"DE", "FR"}},
+			{Path: []any{"address", "country"}, Values: []any{"DE", "FR"}},
 		},
 	}
 	match := map[string]any{"address": map[string]any{"country": "DE"}}
@@ -523,7 +523,7 @@ func TestMatchClaimsNestedValues(t *testing.T) {
 func dcqlQuery(id string, claims ...string) DCQLQuery {
 	cqs := make([]ClaimQuery, 0, len(claims))
 	for _, c := range claims {
-		cqs = append(cqs, ClaimQuery{Path: []string{c}})
+		cqs = append(cqs, ClaimQuery{Path: []any{c}})
 	}
 	return DCQLQuery{Credentials: []CredentialQuery{{
 		ID:     id,
@@ -620,7 +620,7 @@ func TestDCQLConstraintVCTMismatch(t *testing.T) {
 		ID:     "dpp",
 		Format: "dc+sd-jwt",
 		Meta:   &CredentialQueryMeta{VCTValues: []string{"https://example.com/some-other-vct"}},
-		Claims: []ClaimQuery{{Path: []string{"batteryCategory"}}},
+		Claims: []ClaimQuery{{Path: []any{"batteryCategory"}}},
 	}}}
 	reqURL, state, _ := ver.CreateRequestDCQL(q)
 	// boundPresent issues with the default DPP vct, which is not in the query's set.
@@ -638,7 +638,7 @@ func TestEnforceDCQLConstraintsValueMatch(t *testing.T) {
 	q := &DCQLQuery{Credentials: []CredentialQuery{{
 		ID:     "dpp",
 		Format: "dc+sd-jwt",
-		Claims: []ClaimQuery{{Path: []string{"batteryCategory"}, Values: []any{"ev"}}},
+		Claims: []ClaimQuery{{Path: []any{"batteryCategory"}, Values: []any{"ev"}}},
 	}}}
 	ok := &compliance.VerifiedClaims{VCT: compliance.VCTDigitalProductPassport, Claims: map[string]any{"batteryCategory": "ev"}}
 	if err := enforceDCQLConstraints(q, ok); err != nil {
@@ -662,8 +662,8 @@ func TestEnforceDCQLCredentialSets(t *testing.T) {
 		Claims: map[string]any{"x": "1"},
 	}
 	base := []CredentialQuery{
-		{ID: "a", Format: "dc+sd-jwt", Claims: []ClaimQuery{{Path: []string{"x"}}}},
-		{ID: "b", Format: "dc+sd-jwt", Claims: []ClaimQuery{{Path: []string{"y"}}}},
+		{ID: "a", Format: "dc+sd-jwt", Claims: []ClaimQuery{{Path: []any{"x"}}}},
+		{ID: "b", Format: "dc+sd-jwt", Claims: []ClaimQuery{{Path: []any{"y"}}}},
 	}
 
 	cases := []struct {

@@ -52,6 +52,10 @@ var (
 	// values) work forces O(10⁹+) iterations in enforceDCQLConstraints — server DoS
 	// via a single Authorization Request.
 	ErrDCQLQueryTooComplex = errors.New("openid4vp: dcql_query exceeds complexity limits")
+	// ErrDCQLInvalidPath is returned when a ClaimQuery path component is not one
+	// of the three forms OpenID4VP §6.3 allows: a string (object key), a
+	// non-negative integer (array index), or null (all elements of an array).
+	ErrDCQLInvalidPath = errors.New("openid4vp: dcql_query claim path segment is not a string, non-negative integer, or null")
 )
 
 // ============================================================================

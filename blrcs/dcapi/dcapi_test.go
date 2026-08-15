@@ -179,7 +179,7 @@ func TestBuildForVerifierDCQL(t *testing.T) {
 			ID:     "dpp",
 			Format: "dc+sd-jwt",
 			Meta:   &openid4vp.CredentialQueryMeta{VCTValues: []string{"https://schema.europa.eu/dpp/sd-jwt-vc/v1"}},
-			Claims: []openid4vp.ClaimQuery{{Path: []string{"carbonKgCO2ePerKWh"}}},
+			Claims: []openid4vp.ClaimQuery{{Path: []any{"carbonKgCO2ePerKWh"}}},
 		}},
 	}
 	call, err := BuildForVerifierDCQL(query, "nonce-xyz", "https://verify.blrcs", "https://verify.blrcs/cb")
