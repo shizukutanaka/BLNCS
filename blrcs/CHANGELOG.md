@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`openid4vp`: DCQL claims paths could not address array elements (Axis
+  140).** OpenID4VP §6.3 allows a path component to be a string (object key),
+  a non-negative integer (array index) or null (all elements), but
+  `ClaimQuery.Path` was `[]string` — the latter two were inexpressible — and
+  the walker descended objects only. So after Axis 139 a verifier could accept
+  a credential with selectively-disclosed array elements but not constrain
+  them. `Path` is now `[]any` and `resolvePath` returns every selected value.
+  Wildcard + `values` matches when **any** selected value is in the allowlist
+  (identical to before for single-valued paths). Components are validated up
+  front (`ErrDCQLInvalidPath`); a fractional or negative index is rejected
+  rather than truncated. 9 new tests; the `[]any` change rippled to `dcapi`
+  and `integration` call sites.
 - **`compliance`: RFC 9901 array-element and recursive disclosures were
   rejected as malformed (Axis 139).** The resolver understood only the flat,
   top-level `[salt, name, value]` shape whose digest sat in the top-level

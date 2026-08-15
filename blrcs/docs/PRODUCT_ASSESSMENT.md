@@ -97,8 +97,9 @@ history in `CHANGELOG.md`.
    *(Addressed for verification by Axis 139: array-element (`[salt, value]` +
    `{"...": digest}`) and recursive (nested `_sd`) disclosures now resolve at
    any depth, so credentials from conforming third-party issuers verify.)*
-   **Remaining:** BLRCS issuance still emits only flat, top-level disclosures,
-   and DCQL `walkPath` descends objects but not into array elements.
+   **Remaining:** BLRCS issuance still emits only flat, top-level disclosures.
+   *(DCQL array paths were addressed by Axis 140: `ClaimQuery.Path` is now
+   `[]any` and resolves object keys, array indices and null wildcards.)*
 
 5. **Issuance flows limited.** Pre-authorized code flow only
    (`openid4vci/openid4vci.go:1127` rejects other grant types); no
