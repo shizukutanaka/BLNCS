@@ -23,6 +23,7 @@
 package openid4vp
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -98,8 +99,13 @@ type AuthorizationRequest struct {
 	// エンコードされた JSON オブジェクト。設定時、ProcessResponse は holder の
 	// KB-JWT が transaction_data_hashes でこれらを束縛していることを要求する
 	// (決済/同意を提示に暗号的に結び付ける)。
-	TransactionData []string  `json:"transaction_data,omitempty"`
-	CreatedAt       time.Time `json:"-"` // サーバ内部
+	TransactionData []string `json:"transaction_data,omitempty"`
+	// ClientMetadata — OpenID4VP §5.1 client_metadata。response encryption を
+	// 有効にした verifier はここに `jwks` (暗号化用 EC/P-256 公開鍵) と
+	// `encrypted_response_enc_values_supported` を載せ、ウォレットに暗号化応答の
+	// 送り方を伝える。空なら送出しない。
+	ClientMetadata map[string]any `json:"client_metadata,omitempty"`
+	CreatedAt      time.Time      `json:"-"` // サーバ内部
 }
 
 // AuthorizationResponse — Walletから受け取るレスポンス
@@ -312,6 +318,15 @@ type Verifier struct {
 	// response_uri を差し替える relay 攻撃を検知できる。鍵が無い場合は従来どおり
 	// 署名なし request のみ (back-compat)。署名検証鍵は ed25519.PrivateKey.Public()。
 	RequestSigningKey ed25519.PrivateKey
+
+	// ResponseEncryptionKey — 任意 (HAIP / OpenID4VP §8.3 response encryption)。
+	// P-256 秘密鍵を設定すると verifier は (a) request の client_metadata で対応する
+	// 公開 JWK と `direct_post.jwt` response_mode を広告し、(b) ウォレットが暗号化して
+	// 送る Authorization Response (JWE: ECDH-ES + A128GCM) を DecryptResponse で復号
+	// してから検証する。HAIP は P-256 上の ECDH-ES を必須とし、Chrome/Safari の
+	// Digital Credentials API は既に暗号化応答を送る。nil の場合は従来どおり平文
+	// direct_post のみ (back-compat)。鍵は必ず P-256 であること。
+	ResponseEncryptionKey *ecdsa.PrivateKey
 }
 
 // NewVerifier — Apple式の1行構築。secure-by-default で RequireKeyBinding=true。
@@ -388,6 +403,9 @@ func (v *Verifier) CreateRequestTx(def PresentationDefinition, transactionData [
 		TransactionData:        transactionData,
 		CreatedAt:              time.Now().UTC(),
 	}
+	if err := v.applyResponseEncryption(req); err != nil {
+		return "", "", err
+	}
 	if err := v.store.Save(state, req, v.DefaultTTL); err != nil {
 		return "", "", err
 	}
@@ -426,6 +444,9 @@ func (v *Verifier) CreateRequestDCQL(query DCQLQuery) (requestURL string, state 
 		State:        state,
 		DCQLQuery:    &query,
 		CreatedAt:    time.Now().UTC(),
+	}
+	if err := v.applyResponseEncryption(req); err != nil {
+		return "", "", err
 	}
 	if err := v.store.Save(state, req, v.DefaultTTL); err != nil {
 		return "", "", err
@@ -470,6 +491,15 @@ func buildRequestURL(req *AuthorizationRequest, signKey ed25519.PrivateKey, ttl 
 			return "", fmt.Errorf("openid4vp: marshal transaction_data: %w", err)
 		}
 		q.Set("transaction_data", string(b))
+	}
+	if len(req.ClientMetadata) > 0 {
+		// OpenID4VP §5.1: client_metadata carries the verifier's response-encryption
+		// JWK and supported enc values so the wallet can encrypt its response.
+		b, err := json.Marshal(req.ClientMetadata)
+		if err != nil {
+			return "", fmt.Errorf("openid4vp: marshal client_metadata: %w", err)
+		}
+		q.Set("client_metadata", string(b))
 	}
 	// RFC 9101 JAR (by value): 署名鍵があれば request 全体の署名付き JWT を同梱。
 	if len(signKey) == ed25519.PrivateKeySize {

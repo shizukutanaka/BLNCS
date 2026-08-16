@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // AuthorizeHandler — verifier app が利用する request 生成エンドポイント
@@ -90,14 +89,7 @@ func (v *Verifier) CallbackHandler(onSuccess func(*VerifiedPresentation)) http.H
 			writeCallbackError(w, "body read: "+err.Error())
 			return
 		}
-		var resp *AuthorizationResponse
-		if strings.HasPrefix(ct, "application/x-www-form-urlencoded") {
-			resp, err = ParseResponseForm(string(bodyBytes))
-		} else {
-			// JSON fallback — 一部 wallet 実装に対応
-			resp = &AuthorizationResponse{}
-			err = json.Unmarshal(bodyBytes, resp)
-		}
+		resp, err := v.parseSubmission(ct, bodyBytes)
 		if err != nil {
 			writeCallbackError(w, "parse: "+err.Error())
 			return
