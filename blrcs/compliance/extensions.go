@@ -1,7 +1,9 @@
 package compliance
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -10,6 +12,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"blrcs/ecdsakey"
 )
 
 // PrivateKey — ed25519 private key (SCITT 署名、MCP dispatch 用)
@@ -52,8 +56,12 @@ type VerifiedClaims struct {
 	NotBefore int64          `json:"nbf,omitempty"` // RFC 9901: not-before (optional)
 	Claims    map[string]any `json:"claims"`
 
-	// HolderKey — cnf.jwk から復元した holder 公開鍵 (発行時にバインドされていれば non-nil)。
+	// HolderKey — cnf.jwk から復元した Ed25519 holder 公開鍵 (発行時にバインドされていれば non-nil)。
 	HolderKey ed25519.PublicKey `json:"-"`
+	// HolderKeyES256 — cnf.jwk が P-256 (EC) の場合の holder 公開鍵。SEC1 uncompressed
+	// point (0x04||X||Y)。HolderKey / HolderKeyES256 は高々一方が non-nil。EUDI
+	// wallet の device key は P-256 なので、その KB-JWT (ES256) を検証するために必要。
+	HolderKeyES256 []byte `json:"-"`
 	// KeyBound — この提示が有効な KB-JWT で holder にバインドされていれば true。
 	KeyBound bool `json:"-"`
 	// Status — status_list claim から復元した失効参照 (あれば non-nil)。CheckRevoked で使う。
@@ -168,14 +176,29 @@ func buildSDJWT(signer jwsSigner, issuerID, vct, subject string, sdClaims, clear
 	if validFor > 0 {
 		payload["exp"] = now.Add(validFor).Unix()
 	}
-	// Holder key binding: cnf.jwk (RFC 7800 / SD-JWT-VC)
-	if len(holderPub) == ed25519.PublicKeySize {
+	// Holder key binding: cnf.jwk (RFC 7800 / SD-JWT-VC). Accepts an Ed25519 key
+	// (32 bytes → OKP) or a P-256 key as an uncompressed SEC1 point
+	// (65 bytes → EC), so an issuer can bind to whichever curve the holder's
+	// device uses. EUDI wallets use P-256.
+	switch len(holderPub) {
+	case ed25519.PublicKeySize:
 		payload["cnf"] = map[string]any{
 			"jwk": map[string]any{
 				"kty": "OKP",
 				"crv": "Ed25519",
 				"x":   base64.RawURLEncoding.EncodeToString(holderPub),
 			},
+		}
+	case ecdsakey.P256UncompressedSize:
+		if _, err := ecdsakey.ParseP256PublicKey(holderPub); err == nil {
+			payload["cnf"] = map[string]any{
+				"jwk": map[string]any{
+					"kty": "EC",
+					"crv": "P-256",
+					"x":   base64.RawURLEncoding.EncodeToString(holderPub[1 : 1+ecdsakey.P256CoordSize]),
+					"y":   base64.RawURLEncoding.EncodeToString(holderPub[1+ecdsakey.P256CoordSize:]),
+				},
+			}
 		}
 	}
 	// Credential status (revocation): draft-ietf-oauth-status-list `status` claim
@@ -464,7 +487,7 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	} else if ok {
 		vc.NotBefore = nbf
 	}
-	vc.HolderKey = extractHolderKey(payload)
+	vc.HolderKey, vc.HolderKeyES256 = extractHolderKey(payload)
 	vc.Status = extractStatus(payload)
 
 	// SD-JWT-VC: vct は必須クレーム (draft-ietf-oauth-sd-jwt-vc §3.2.2.2)。
@@ -519,14 +542,14 @@ func VerifySDJWTWithBinding(sdjwt string, pub ed25519.PublicKey, opts VerifyOpti
 	// Key binding: cnf 有り credential は常に KB-JWT を検証 (nonce/aud バインド)。
 	// holder key の無い credential を拒否するかは呼び出し側のポリシー
 	// (opts.RequireKeyBinding) に委ねる。OpenID4VP verifier は既定で要求する。
-	if vc.HolderKey != nil || opts.RequireKeyBinding {
-		if vc.HolderKey == nil {
+	if vc.HolderKey != nil || vc.HolderKeyES256 != nil || opts.RequireKeyBinding {
+		if vc.HolderKey == nil && vc.HolderKeyES256 == nil {
 			return nil, ErrHolderKeyRequired
 		}
 		if kbSegment == "" {
 			return nil, ErrKeyBindingMissing
 		}
-		if err := verifyKBJWT(kbSegment, sdjwt, vc.HolderKey, opts, now, leeway); err != nil {
+		if err := verifyKBJWT(kbSegment, sdjwt, vc.HolderKey, vc.HolderKeyES256, opts, now, leeway); err != nil {
 			return nil, err
 		}
 		vc.KeyBound = true
@@ -578,37 +601,59 @@ func numericDateClaim(payload map[string]any, key string) (int64, bool, error) {
 }
 
 // extractHolderKey — cnf.jwk (OKP/Ed25519) から holder 公開鍵を復元 (無ければ nil)。
-func extractHolderKey(payload map[string]any) ed25519.PublicKey {
+func extractHolderKey(payload map[string]any) (ed25519.PublicKey, []byte) {
 	cnf, ok := payload["cnf"].(map[string]any)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	jwk, ok := cnf["jwk"].(map[string]any)
 	if !ok {
-		return nil
+		return nil, nil
 	}
-	// RFC 7800 cnf.jwk MUST be a well-formed JWK. Pin the key type: only an
-	// OKP/Ed25519 JWK is a valid holder key here. Without this check a cnf
-	// carrying e.g. {"kty":"EC","crv":"P-256","x":<32 bytes>} (or a JWK with no
-	// kty/crv at all) would have its `x` silently reinterpreted as an Ed25519
-	// public key — a cross-algorithm type confusion and a spec-conformance gap.
-	// (didresolver.jwkToEd25519 and mdoc.parseDeviceKey already pin kty/crv;
-	// this brings the holder-binding path in line.)
-	if kty, _ := jwk["kty"].(string); kty != "OKP" {
-		return nil
+	// RFC 7800 cnf.jwk MUST be a well-formed JWK. Pin the key type so `x` is not
+	// silently reinterpreted across algorithms: an OKP/Ed25519 JWK yields the
+	// Ed25519 holder key, an EC/P-256 JWK the P-256 one. Any other kty/crv (or a
+	// missing one) yields no holder key rather than a coerced one.
+	kty, _ := jwk["kty"].(string)
+	crv, _ := jwk["crv"].(string)
+	switch {
+	case kty == "OKP" && crv == "Ed25519":
+		x, ok := jwk["x"].(string)
+		if !ok {
+			return nil, nil
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(x)
+		if err != nil || len(raw) != ed25519.PublicKeySize {
+			return nil, nil
+		}
+		return ed25519.PublicKey(raw), nil
+
+	case kty == "EC" && crv == "P-256":
+		xs, _ := jwk["x"].(string)
+		ys, _ := jwk["y"].(string)
+		if xs == "" || ys == "" {
+			return nil, nil
+		}
+		x, err := base64.RawURLEncoding.DecodeString(xs)
+		if err != nil || len(x) != ecdsakey.P256CoordSize {
+			return nil, nil
+		}
+		y, err := base64.RawURLEncoding.DecodeString(ys)
+		if err != nil || len(y) != ecdsakey.P256CoordSize {
+			return nil, nil
+		}
+		sec1 := make([]byte, 0, ecdsakey.P256UncompressedSize)
+		sec1 = append(sec1, 0x04)
+		sec1 = append(sec1, x...)
+		sec1 = append(sec1, y...)
+		// Reject a point that is not on the curve before it becomes a holder key
+		// (invalid-curve defence at the parse boundary).
+		if _, err := ecdsakey.ParseP256PublicKey(sec1); err != nil {
+			return nil, nil
+		}
+		return nil, sec1
 	}
-	if crv, _ := jwk["crv"].(string); crv != "Ed25519" {
-		return nil
-	}
-	x, ok := jwk["x"].(string)
-	if !ok {
-		return nil
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(x)
-	if err != nil || len(raw) != ed25519.PublicKeySize {
-		return nil
-	}
-	return ed25519.PublicKey(raw)
+	return nil, nil
 }
 
 // audienceMatches — KB-JWT の aud (文字列 or 文字列配列, JWT 仕様) と期待値を照合。
@@ -627,7 +672,7 @@ func audienceMatches(aud any, want string) bool {
 }
 
 // verifyKBJWT — 末尾 KB-JWT を holder 鍵で検証し nonce/aud/sd_hash を照合。
-func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, opts VerifyOptions, now time.Time, leeway time.Duration) error {
+func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, holderP256 []byte, opts VerifyOptions, now time.Time, leeway time.Duration) error {
 	segs := strings.SplitN(kb, ".", 3)
 	if len(segs) != 3 {
 		return ErrKeyBindingInvalid
@@ -641,16 +686,37 @@ func verifyKBJWT(kb, presentation string, holderPub ed25519.PublicKey, opts Veri
 		Typ  string   `json:"typ"`
 		Crit []string `json:"crit"`
 	}
-	// Reject unknown critical params (RFC 7515 §4.1.11) along with the pinned
-	// typ/alg — BLRCS implements no KB-JWT header extensions.
-	if err := json.Unmarshal(hdrBytes, &hdr); err != nil || hdr.Typ != "kb+jwt" || hdr.Alg != "EdDSA" || len(hdr.Crit) > 0 {
+	// Reject unknown critical params (RFC 7515 §4.1.11) and pin typ — BLRCS
+	// implements no KB-JWT header extensions.
+	if err := json.Unmarshal(hdrBytes, &hdr); err != nil || hdr.Typ != "kb+jwt" || len(hdr.Crit) > 0 {
 		return ErrKeyBindingInvalid
 	}
 	sigBytes, err := base64.RawURLEncoding.DecodeString(segs[2])
 	if err != nil {
 		return ErrKeyBindingInvalid
 	}
-	if !ed25519.Verify(holderPub, []byte(segs[0]+"."+segs[1]), sigBytes) {
+	// The KB-JWT alg MUST match the algorithm of the key the issuer bound in
+	// cnf. Dispatching on the presented alg alone would let a holder bound to an
+	// Ed25519 key sign the KB-JWT with a P-256 key it also controls (or vice
+	// versa) — the binding must be to THE key in cnf, so the alg is required to
+	// name that key's algorithm.
+	signingInput := []byte(segs[0] + "." + segs[1])
+	switch hdr.Alg {
+	case "EdDSA":
+		if len(holderPub) != ed25519.PublicKeySize {
+			return ErrKeyBindingInvalid
+		}
+		if !ed25519.Verify(holderPub, signingInput, sigBytes) {
+			return ErrKeyBindingInvalid
+		}
+	case "ES256":
+		if len(holderP256) != ecdsakey.P256UncompressedSize {
+			return ErrKeyBindingInvalid
+		}
+		if !ecdsakey.VerifyES256(holderP256, signingInput, sigBytes) {
+			return ErrKeyBindingInvalid
+		}
+	default:
 		return ErrKeyBindingInvalid
 	}
 	plBytes, err := base64.RawURLEncoding.DecodeString(segs[1])
@@ -799,6 +865,35 @@ func PresentWithKeyBindingTx(sdjwt string, reveal []string, holderPriv ed25519.P
 	if len(holderPriv) != ed25519.PrivateKeySize {
 		return "", ErrHolderKeyRequired
 	}
+	return presentWithKB(sdjwt, reveal, "EdDSA", nonce, aud, transactionData, now,
+		func(signingInput []byte) []byte { return ed25519.Sign(holderPriv, signingInput) })
+}
+
+// PresentWithKeyBindingES256 is PresentWithKeyBindingTx for a P-256 holder key,
+// producing an ES256-signed KB-JWT — what an EUDI wallet emits, since its device
+// key is P-256.
+func PresentWithKeyBindingES256(sdjwt string, reveal []string, holderPriv *ecdsa.PrivateKey, nonce, aud string, transactionData []string, now time.Time) (string, error) {
+	if holderPriv == nil || holderPriv.Curve != elliptic.P256() {
+		return "", ErrHolderKeyRequired
+	}
+	return presentWithKB(sdjwt, reveal, "ES256", nonce, aud, transactionData, now,
+		func(signingInput []byte) []byte {
+			d := sha256.Sum256(signingInput)
+			r, s, err := ecdsa.Sign(rand.Reader, holderPriv, d[:])
+			if err != nil {
+				return nil
+			}
+			out := make([]byte, ecdsakey.ES256SignatureSize)
+			r.FillBytes(out[:ecdsakey.P256CoordSize])
+			s.FillBytes(out[ecdsakey.P256CoordSize:])
+			return out
+		})
+}
+
+// presentWithKB builds a selective-disclosure presentation and appends a KB-JWT
+// signed by the caller-supplied signer. The sd_hash / transaction_data logic is
+// identical across algorithms, so only the alg header and the signature differ.
+func presentWithKB(sdjwt string, reveal []string, alg, nonce, aud string, transactionData []string, now time.Time, sign func([]byte) []byte) (string, error) {
 	presented, err := Present(sdjwt, reveal)
 	if err != nil {
 		return "", err
@@ -808,7 +903,7 @@ func PresentWithKeyBindingTx(sdjwt string, reveal []string, holderPriv ed25519.P
 	}
 	// sd_hash: 末尾 '~' までを含む提示文字列の SHA-256。
 	h := sha256.Sum256([]byte(presented))
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"kb+jwt"}`))
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"` + alg + `","typ":"kb+jwt"}`))
 	payloadClaims := map[string]any{
 		"iat":     now.Unix(),
 		"aud":     aud,
@@ -825,7 +920,10 @@ func PresentWithKeyBindingTx(sdjwt string, reveal []string, holderPriv ed25519.P
 	}
 	plBytes, _ := json.Marshal(payloadClaims)
 	payload := base64.RawURLEncoding.EncodeToString(plBytes)
-	sig := ed25519.Sign(holderPriv, []byte(header+"."+payload))
+	sig := sign([]byte(header + "." + payload))
+	if sig == nil {
+		return "", fmt.Errorf("compliance: KB-JWT signing failed")
+	}
 	kbjwt := header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(sig)
 	return presented + kbjwt, nil
 }

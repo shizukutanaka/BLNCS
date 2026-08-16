@@ -706,25 +706,25 @@ func TestVerifySDJWTWithBindingCNFBadX(t *testing.T) {
 func TestExtractHolderKeyEdgeCases(t *testing.T) {
 	// cnf is a map but has no "jwk" key → nil
 	noJWK := map[string]any{"cnf": map[string]any{"other": "value"}}
-	if k := extractHolderKey(noJWK); k != nil {
+	if k, ec := extractHolderKey(noJWK); k != nil || ec != nil {
 		t.Error("cnf without jwk should return nil")
 	}
 
 	// cnf is a map, jwk is a non-map value → nil
 	badJWK := map[string]any{"cnf": map[string]any{"jwk": "not-a-map"}}
-	if k := extractHolderKey(badJWK); k != nil {
+	if k, ec := extractHolderKey(badJWK); k != nil || ec != nil {
 		t.Error("cnf with non-map jwk should return nil")
 	}
 
 	// cnf.jwk present but "x" is not a string → nil
 	noX := map[string]any{"cnf": map[string]any{"jwk": map[string]any{"kty": "OKP"}}}
-	if k := extractHolderKey(noX); k != nil {
+	if k, ec := extractHolderKey(noX); k != nil || ec != nil {
 		t.Error("jwk without x should return nil")
 	}
 
 	// cnf.jwk.x is valid base64url but wrong length → nil
 	shortX := map[string]any{"cnf": map[string]any{"jwk": map[string]any{"x": "dG9vc2hvcnQ"}}} // "tooshort"
-	if k := extractHolderKey(shortX); k != nil {
+	if k, ec := extractHolderKey(shortX); k != nil || ec != nil {
 		t.Error("jwk.x with wrong length should return nil")
 	}
 
@@ -737,7 +737,7 @@ func TestExtractHolderKeyEdgeCases(t *testing.T) {
 	wrongKty := map[string]any{"cnf": map[string]any{"jwk": map[string]any{
 		"kty": "EC", "crv": "P-256", "x": validX,
 	}}}
-	if k := extractHolderKey(wrongKty); k != nil {
+	if k, ec := extractHolderKey(wrongKty); k != nil || ec != nil {
 		t.Error("non-OKP kty must be rejected")
 	}
 
@@ -745,13 +745,13 @@ func TestExtractHolderKeyEdgeCases(t *testing.T) {
 	wrongCrv := map[string]any{"cnf": map[string]any{"jwk": map[string]any{
 		"kty": "OKP", "crv": "X25519", "x": validX,
 	}}}
-	if k := extractHolderKey(wrongCrv); k != nil {
+	if k, ec := extractHolderKey(wrongCrv); k != nil || ec != nil {
 		t.Error("non-Ed25519 crv must be rejected")
 	}
 
 	// Missing kty entirely must be rejected (no kty ⇒ not a valid JWK).
 	noKty := map[string]any{"cnf": map[string]any{"jwk": map[string]any{"x": validX}}}
-	if k := extractHolderKey(noKty); k != nil {
+	if k, ec := extractHolderKey(noKty); k != nil || ec != nil {
 		t.Error("jwk without kty must be rejected")
 	}
 
@@ -759,7 +759,7 @@ func TestExtractHolderKeyEdgeCases(t *testing.T) {
 	good := map[string]any{"cnf": map[string]any{"jwk": map[string]any{
 		"kty": "OKP", "crv": "Ed25519", "x": validX,
 	}}}
-	if k := extractHolderKey(good); string(k) != string(pub) {
+	if k, _ := extractHolderKey(good); string(k) != string(pub) {
 		t.Error("valid OKP/Ed25519 jwk must return the embedded key")
 	}
 }
