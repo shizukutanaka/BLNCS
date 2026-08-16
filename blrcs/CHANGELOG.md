@@ -7,6 +7,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`compliance`: KB-JWT holder binding was Ed25519-only, blocking real EUDI
+  presentations (Axis 142).** An EUDI wallet's device key is P-256, so its
+  key-binding JWT is ES256-signed and its `cnf` key is EC/P-256, but the
+  verifier pinned the KB-JWT alg to EdDSA and the cnf key to OKP/Ed25519 — so
+  a presentation could not complete even though the credential (Axis 137) and
+  its disclosure resolution (Axis 136/139) were already P-256 capable. This
+  closes the last gap in the P-256 presentation loop. `extractHolderKey` now
+  yields either the Ed25519 or the P-256 holder key (EC/P-256 validated
+  on-curve via `ecdsakey.ParseP256PublicKey` — invalid-curve defence at the
+  parse boundary); `verifyKBJWT` dispatches on the KB-JWT alg but **requires**
+  it to name the algorithm of the key the issuer bound in `cnf`, so an EdDSA
+  KB-JWT against a P-256 cnf (or vice versa) is rejected — the binding is to
+  THE cnf key, closing alg-confusion. `buildSDJWT` embeds an EC/P-256 cnf for
+  a 65-byte SEC1 holder key; `PresentWithKeyBindingES256` emits the ES256
+  KB-JWT (raw R‖S per RFC 7518 §3.4), sharing the sd_hash/transaction_data
+  logic with the Ed25519 path. 6 new tests + a public-API E2E driver. W3C VC
+  proofs and SCITT receipt signing remain the last Ed25519-only paths.
 - **`openid4vp`: DCQL claims paths could not address array elements (Axis
   140).** OpenID4VP §6.3 allows a path component to be a string (object key),
   a non-negative integer (array index) or null (all elements), but
