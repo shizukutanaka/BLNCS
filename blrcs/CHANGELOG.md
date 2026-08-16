@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`jwe`, `openid4vp`: encrypted OpenID4VP Authorization Response (Axis 143).**
+  HAIP and OpenID4VP §8.3 require verifiers to accept an encrypted Authorization
+  Response and pin ECDH-ES direct key agreement on P-256 with A128GCM — what
+  Chrome/Safari's Digital Credentials API emit — but BLRCS had no JWE, so the
+  holder's disclosed claims travelled in cleartext through the browser/relay
+  boundary. The gap was blocked on P-256, now delivered by the Axis 135–142 arc.
+  New stdlib-only `jwe` package (RFC 7516 compact serialization, RFC 7518 §4.6
+  ECDH-ES with the NIST SP 800-56A Concat KDF, §5.3 A128GCM), anchored on the
+  RFC 7518 Appendix C worked example — its published derived key is reproduced
+  byte-for-byte, so interop is proven. Only the one ECDH-ES/A128GCM pair is
+  implemented; any other alg/enc, or the JWE Encrypted Key that direct agreement
+  forbids, is rejected before any crypto. Wired into the verifier:
+  `ResponseEncryptionKey` (P-256) makes the request advertise the encryption JWK
+  in client_metadata and switch response_mode to `direct_post.jwt`; the callback
+  transparently decrypts a `response` JWE before verifying. Verifiers without the
+  key are unchanged (plaintext direct_post). 17 new tests + a public-API E2E
+  driver.
+
 ### Fixed
 - **`compliance`: KB-JWT holder binding was Ed25519-only, blocking real EUDI
   presentations (Axis 142).** An EUDI wallet's device key is P-256, so its

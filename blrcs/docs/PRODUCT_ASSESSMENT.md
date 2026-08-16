@@ -98,9 +98,13 @@ history in `CHANGELOG.md`.
    package is solid, but an mdoc cannot flow through a live
    OpenID4VP/DC-API session.
 
-3. **No response encryption.** No JWE / `direct_post.jwt` / `dc_api.jwt`
-   (HAIP mandates ECDH-ES on P-256; Chrome/Safari already ship it). Depends
-   on weakness 1.
+3. **Response encryption — addressed for direct_post.jwt (Axis 143).** The new
+   stdlib-only `jwe` package implements ECDH-ES + A128GCM on P-256 (RFC
+   7516/7518, verified against the RFC 7518 Appendix C vector), and the
+   OpenID4VP verifier advertises its encryption JWK + `direct_post.jwt` and
+   decrypts an encrypted `response` before verifying. **Remaining:** the DC-API
+   `dc_api.jwt` variant and additional content-encryption algorithms
+   (A256GCM/AES-CBC-HMAC) are not implemented — only the HAIP-mandated pair.
 
 4. **Selective disclosure — verification complete, issuance still flat.**
    *(Addressed for verification by Axis 139: array-element (`[salt, value]` +
