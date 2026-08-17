@@ -116,9 +116,15 @@ history in `CHANGELOG.md`.
    through the independently-written verifier, including the EUDI combination of
    a nested credential, a P-256 holder key and an ES256 KB-JWT.
 
-5. **Issuance flows limited.** Pre-authorized code flow only
-   (`openid4vci/openid4vci.go:1127` rejects other grant types); no
-   authorization code flow + PKCE.
+5. **Issuance flows — addressed (Axis 146).** The authorization code flow is
+   implemented (`openid4vci/authcode.go`) with mandatory RFC 7636 PKCE
+   (`openid4vci/pkce.go`, S256 only, anchored on the Appendix B vector), so an
+   issuer that authenticates the user itself is now expressible alongside the
+   pre-authorized flow. User authentication is supplied by the deploying issuer
+   through a callback rather than implemented here. **Remaining:** Pushed
+   Authorization Requests (RFC 9126) and `authorization_details` (RFC 9396)
+   scoping are not implemented; the offer grants a single pre-registered
+   credential configuration.
 
 6. **Trust-model layer thin.** `verifier_info` absent; RP-registration /
    trust-list chaining absent (client_id prefixes are syntax-checked only);

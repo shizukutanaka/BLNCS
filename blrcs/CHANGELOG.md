@@ -7,6 +7,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`openid4vci`: authorization code flow with mandatory PKCE (Axis 146).** The
+  token endpoint accepted only the pre-authorized code grant, which fits just the
+  case where the issuer already knows the subject and hands them a code out of
+  band. It could not express the ordinary case — a wallet that discovers an
+  issuer and needs the user to authenticate *at* the issuer — which OpenID4VCI
+  1.0 §4.1.1 defines and the EUDI ARF assumes. New `pkce.go` implements RFC 7636
+  S256, anchored on the Appendix B worked example (its published challenge is
+  reproduced byte-for-byte); `plain` is rejected rather than supported, since it
+  protects against nothing in PKCE's threat model, OAuth 2.1 forbids it, and
+  accepting it enables a method-downgrade on the authorization request. New
+  `authcode.go` adds `CreateAuthorizationCodeOffer` / `Authorize` /
+  `ExchangeAuthorizationCode`; user authentication stays the deploying issuer's
+  decision, supplied through the same callback seam the package already uses.
+  Bindings, each with a test for the attack it stops: PKCE required, exact
+  `redirect_uri` matching (RFC 6749 §3.1.2.3), `client_id` matching, codes that
+  are single-use *and burned by a failed redemption* (§4.1.2, §10.5), single-use
+  `issuer_state`, claims kept off the front channel, the authenticated subject
+  overriding the offer's, `response_type=code` only, and every token-endpoint
+  failure collapsed to one byte-identical response so redemption is not an
+  oracle. 20 new tests.
+
+### Added
 - **`compliance`: nested, recursive and array-element disclosure at issuance
   (Axis 145).** Axis 139 taught the verifier all three RFC 9901 disclosure
   shapes at any depth, but issuance emitted only flat top-level properties — a
