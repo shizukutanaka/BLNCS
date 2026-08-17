@@ -130,11 +130,17 @@ history in `CHANGELOG.md`.
    `trusted_authorities` (§6.1.1) is implemented for all three registered types
    with fail-closed evaluation delegated to `Verifier.TrustedAuthorityChecker`,
    so a verifier can finally tell the wallet *whose* credentials it accepts.
+   Axis 148 added the **mdoc issuer PKI**: `x5chain` (RFC 9360) on issuance and
+   `VerifyChain` validating IACA→DSC to caller-supplied roots, with the embedded
+   chain treated as evidence rather than authority (attacker-rooted chains and
+   genuine-DSC/foreign-signature documents both rejected).
+   `AuthorityKeyIdentifier`/`ChainMatchesAKI` let the `aki` authority type be
+   satisfied from a validated chain in-tree.
+
    **Remaining:** `verifier_info` absent; RP-registration / trust-list chaining
    absent (client_id prefixes are syntax-checked only); no wallet attestation
-   (WUA/WIA); no mdoc IACA→DSC→VICAL PKI (bare-key mdoc issuance) — which is
-   also what would let the `aki` authority type be evaluated in-tree rather than
-   through the checker callback.
+   (WUA/WIA); VICAL (the signed trust-list format for distributing IACA roots)
+   is not implemented — roots are supplied directly.
 
 7. **Legacy W3C VC proof suite.** `compliance/compliance.go:82,148,193` uses
    pre-Data-Integrity `Ed25519Signature2020`, while a correct

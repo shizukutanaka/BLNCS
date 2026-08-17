@@ -7,6 +7,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`mdoc`, `cbor`: x5chain and IACA→DSC certificate validation (Axis 148).**
+  mdoc issuance and verification were bare-key — `Verify` required the caller to
+  already hold and trust the issuer key out of band — while every real mdoc
+  ecosystem is X.509. ISO/IEC 18013-5 Annex B defines a long-lived IACA root per
+  issuing authority with short-lived Document Signer Certificates under it, and
+  the DSC travels with the credential in the COSE `x5chain` header (RFC 9360
+  label 33), so a verifier holding only the roots can verify a document from an
+  issuer it has never seen. `Issue` gained `IssuerAuthUnprotected` (built by
+  `X5ChainHeader`, bstr for one certificate and an array of bstr for a chain per
+  §2); `VerifyChain` validates to caller-supplied roots and then verifies
+  issuerAuth **with the key from the validated leaf**. The embedded chain is
+  evidence, never authority: an attacker-rooted chain is rejected, a *genuine*
+  DSC attached to a document signed by a different key is rejected
+  (`ErrDSCKeyMismatch` — without this the chain would be decorative), no
+  configured roots refuses rather than trusting the document, and a missing or
+  malformed x5chain is an error rather than a silent downgrade to bare-key.
+  `ChainVerifyOptions.Now` supports validating an archived document as of its
+  signing time. `AuthorityKeyIdentifier`/`ChainMatchesAKI` let Axis 147's
+  `trusted_authorities` `aki` type be satisfied from a validated chain. New
+  `cbor.ParseSign1Headers` reads headers before the verifying key is known, and
+  is documented as returning unauthenticated values. Bare-key `Verify` and
+  chain-free output are unchanged. VICAL remains out of scope. 10 new tests.
+
+### Added
 - **`openid4vp`: DCQL `trusted_authorities` (Axis 147).** A query could say what
   claims it wanted but not whose credential it would accept — OpenID4VP 1.0
   §6.1.1 defines `trusted_authorities` for that, and `dcql.go` explicitly scoped
