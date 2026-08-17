@@ -129,8 +129,26 @@ history in `CHANGELOG.md`.
    `eddsa-jcs-2022` implementation already exists in-repo
    (`didwebvh/proof.go` + `multiformats/jcs.go`) scoped to DID log entries.
 
-8. **Repo-level gaps.** `blrcs/.github/workflows/ci.yml` never runs (GitHub
-   only executes workflows at the repo root); the GitHub repo
+8. **Repo-level gaps — partly addressed (Axis 144).** The CI workflow and the
+   Dependabot config both lived under `blrcs/.github/`, where GitHub never reads
+   them, so *nothing* in the described suite had ever gated a commit.
+
+   **Done:** Dependabot moved to `.github/dependabot.yml` (its gomod entry also
+   pointed at `/` while the module lives in `/blrcs`). The workflow body was
+   corrected — build all commands rather than three of four, discover all 20 fuzz
+   targets rather than naming 4, enforce gofmt, enforce the zero-dependency
+   guarantee, test the declared Go floor as well as stable — and already assumes
+   the root location.
+
+   **Blocked, needs a maintainer:** the CI identity maintaining this repo lacks
+   the GitHub `workflows` permission, so it cannot write under the root
+   `.github/workflows/`. Until someone runs
+   `git mv blrcs/.github/workflows/ci.yml .github/workflows/blrcs-go.yml`
+   (or grants that permission), **CI still does not run.**
+
+   **Remaining:** the issue/PR templates under `blrcs/.github/` are dead-lettered
+   the same way (deliberately left — moving them changes contributor UX for the
+   whole repo, including the legacy Python tree); the GitHub repo
    description/topics still describe the unrelated legacy Python project.
 
 ## 過剰 (Excess) — quantified

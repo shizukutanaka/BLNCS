@@ -1,0 +1,29 @@
+version: 2
+# Dependabot only reads .github/dependabot.yml at the REPOSITORY ROOT. This file
+# previously lived at blrcs/.github/dependabot.yml, where it was never loaded, so
+# neither the Go module nor the Actions pinned in CI were ever monitored.
+updates:
+  # Go modules — BLRCS is zero-dependency, so this mainly guards the toolchain
+  # and any test-only indirect modules from drifting. The module lives in the
+  # blrcs/ subdirectory, not at the repo root.
+  - package-ecosystem: "gomod"
+    directory: "/blrcs"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "build"
+
+  # GitHub Actions used in CI workflows. Workflows are resolved from the root
+  # .github/workflows/ directory, so this entry must point at "/".
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "ci"
+    commit-message:
+      prefix: "ci"

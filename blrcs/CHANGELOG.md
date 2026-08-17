@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **CI had never run a single job (Axis 144).** GitHub resolves workflows only
+  from the root `.github/workflows/` and Dependabot only from the root
+  `.github/dependabot.yml`, but both lived under `blrcs/.github/` — so the
+  2100+ tests, 20 fuzz targets, govulncheck, golangci-lint and SBOM job the
+  config described had never gated a commit, and neither the module nor the
+  pinned Actions were monitored. **Dependabot is fixed** (moved to
+  `.github/dependabot.yml`; its gomod entry also pointed at `/` while the module
+  lives in `/blrcs`). **The workflow is corrected but still needs a maintainer to
+  install it**: the CI identity maintaining this repo lacks the GitHub
+  `workflows` permission and cannot write under the root `.github/workflows/`,
+  so `blrcs/.github/workflows/ci.yml` carries the fixes plus a header stating it
+  must be moved (`git mv blrcs/.github/workflows/ci.yml
+  .github/workflows/blrcs-go.yml`) to take effect. Its body already assumes the
+  root location (`defaults.run.working-directory: blrcs`, `blrcs/**` path
+  filters, `blrcs/`-prefixed artifact paths). Gaps fixed in it: build all
+  commands (`blrcs-mcp` was never build-checked), discover all 20 fuzz targets
+  from source rather than naming 4 by hand, enforce gofmt, enforce the
+  zero-dependency guarantee (`go mod tidy` no-op + no go.sum + no external
+  modules), and test both the Go floor go.mod declares and stable.
+
 ### Added
 - **`jwe`, `openid4vp`: encrypted OpenID4VP Authorization Response (Axis 143).**
   HAIP and OpenID4VP §8.3 require verifiers to accept an encrypted Authorization
