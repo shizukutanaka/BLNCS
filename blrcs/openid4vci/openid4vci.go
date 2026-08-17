@@ -148,9 +148,14 @@ type Issuer struct {
 	// あり得るため、pre-auth/token より長い既定値にしている。
 	NotificationTTL time.Duration
 
-	mu            sync.Mutex
-	preAuths      map[string]*preAuthEntry      // code → entry
-	tokens        map[string]*preAuthEntry      // access_token → same entry
+	mu       sync.Mutex
+	preAuths map[string]*preAuthEntry // code → entry
+	tokens   map[string]*preAuthEntry // access_token → same entry
+	// Authorization code grant state (Axis 146). Kept separate from preAuths
+	// because an authorization-code offer holds its claims until the user
+	// authenticates, rather than binding them to a redeemable code up front.
+	authzSessions map[string]*authzSession      // issuer_state → pending offer
+	authzCodes    map[string]*authzCodeEntry    // authorization code → bindings
 	nonces        map[string]time.Time          // Nonce Endpoint c_nonce → expiry (single-use)
 	notifications map[string]*notificationEntry // notification_id → entry (single-use)
 	lastGC        time.Time                     // 最後に期限切れ掃除を実行した時刻
@@ -1123,8 +1128,29 @@ func (iss *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 		writeVCIError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
-	if r.Form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:pre-authorized_code" {
-		writeVCIError(w, http.StatusBadRequest, "unsupported_grant_type", "only pre-auth supported")
+	switch grant := r.Form.Get("grant_type"); grant {
+	case "urn:ietf:params:oauth:grant-type:pre-authorized_code":
+		// handled below
+	case GrantTypeAuthorizationCode:
+		tr, err := iss.ExchangeAuthorizationCode(
+			r.Form.Get("code"),
+			r.Form.Get("code_verifier"),
+			r.Form.Get("redirect_uri"),
+			r.Form.Get("client_id"),
+		)
+		if err != nil {
+			// One error for every failure mode (unknown/expired/replayed code,
+			// redirect_uri or client_id mismatch, PKCE mismatch): distinguishing
+			// them would tell an attacker which binding to attack next (CWE-209).
+			writeVCIError(w, http.StatusBadRequest, "invalid_grant", "authorization code, code_verifier, redirect_uri or client_id invalid")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(tr)
+		return
+	default:
+		writeVCIError(w, http.StatusBadRequest, "unsupported_grant_type", "supported grants: pre-authorized_code, authorization_code")
 		return
 	}
 	code := r.Form.Get("pre-authorized_code")
