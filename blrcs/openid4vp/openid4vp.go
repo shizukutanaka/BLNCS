@@ -327,6 +327,17 @@ type Verifier struct {
 	// Digital Credentials API は既に暗号化応答を送る。nil の場合は従来どおり平文
 	// direct_post のみ (back-compat)。鍵は必ず P-256 であること。
 	ResponseEncryptionKey *ecdsa.PrivateKey
+
+	// TrustedAuthorityChecker — 任意 (OpenID4VP §6.1.1 trusted_authorities)。
+	// DCQL query が発行者の信頼アンカーを制約する場合、その評価を行うコールバック。
+	// X.509 チェーンの解決、ETSI Trusted List の取得・検証、OpenID Federation の
+	// チェーン解決はいずれもネットワーク I/O と独自の信頼設定を伴うため、
+	// network-free な検証コアからは切り離してある。
+	//
+	// trusted_authorities を含む query に対してこれが未設定なら、提示は **拒否**
+	// される (fail-closed)。受理してしまうと、ウォレットには発行者制約を広告して
+	// おきながら一切適用しないことになり、制約が無い場合より危険なため。
+	TrustedAuthorityChecker TrustedAuthorityChecker
 }
 
 // NewVerifier — Apple式の1行構築。secure-by-default で RequireKeyBinding=true。
@@ -603,7 +614,7 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 	// クレーム制約の充足チェック。dcql_query (v1.0) があればそちらを優先し、
 	// なければ従来の PresentationDefinition.RequiredClaims を使う。
 	if req.DCQLQuery != nil {
-		if err := enforceDCQLConstraints(req.DCQLQuery, verified); err != nil {
+		if err := enforceDCQLConstraints(req.DCQLQuery, verified, v.TrustedAuthorityChecker); err != nil {
 			return nil, err
 		}
 	} else {

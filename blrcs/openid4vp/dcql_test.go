@@ -641,11 +641,11 @@ func TestEnforceDCQLConstraintsValueMatch(t *testing.T) {
 		Claims: []ClaimQuery{{Path: []any{"batteryCategory"}, Values: []any{"ev"}}},
 	}}}
 	ok := &compliance.VerifiedClaims{VCT: compliance.VCTDigitalProductPassport, Claims: map[string]any{"batteryCategory": "ev"}}
-	if err := enforceDCQLConstraints(q, ok); err != nil {
+	if err := enforceDCQLConstraints(q, ok, nil); err != nil {
 		t.Fatalf("matching value should satisfy: %v", err)
 	}
 	bad := &compliance.VerifiedClaims{VCT: compliance.VCTDigitalProductPassport, Claims: map[string]any{"batteryCategory": "industrial"}}
-	if err := enforceDCQLConstraints(q, bad); !errors.Is(err, ErrDCQLUnsatisfied) {
+	if err := enforceDCQLConstraints(q, bad, nil); !errors.Is(err, ErrDCQLUnsatisfied) {
 		t.Fatalf("non-matching value should fail: %v", err)
 	}
 }
@@ -680,7 +680,7 @@ func TestEnforceDCQLCredentialSets(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			q := &DCQLQuery{Credentials: base, CredentialSets: c.sets}
-			err := enforceDCQLConstraints(q, vc)
+			err := enforceDCQLConstraints(q, vc, nil)
 			if c.wantErr && !errors.Is(err, ErrDCQLUnsatisfied) {
 				t.Fatalf("want ErrDCQLUnsatisfied, got %v", err)
 			}

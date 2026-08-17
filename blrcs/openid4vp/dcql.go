@@ -61,6 +61,11 @@ type CredentialQuery struct {
 	// ではなく "この組合せか、あの組合せか" を表す — 例: パスポート番号 か
 	// 運転免許証番号のどちらかを開示)。
 	ClaimSets [][]string `json:"claim_sets,omitempty"`
+	// TrustedAuthorities — 発行者の信頼アンカー制約 (§6.1.1)。空なら発行者を
+	// 制約しない。指定時、提示された credential の発行者がいずれかのエントリに
+	// 一致しなければ拒否する。評価には Verifier.TrustedAuthorityChecker が必要で、
+	// 未設定なら fail-closed で拒否する (trusted_authorities.go 参照)。
+	TrustedAuthorities []TrustedAuthority `json:"trusted_authorities,omitempty"`
 }
 
 // CredentialQueryMeta — フォーマット固有メタデータ。
@@ -177,6 +182,13 @@ func (q *DCQLQuery) Validate() error {
 					}
 				}
 			}
+		}
+	}
+	// trusted_authorities は §6.1.1 の登録済み type のみ、values は非空。
+	for i := range q.Credentials {
+		c := &q.Credentials[i]
+		if err := validateTrustedAuthorities(c.ID, c.TrustedAuthorities); err != nil {
+			return err
 		}
 	}
 	// credential_sets の options は既知の id を参照すること
@@ -314,18 +326,35 @@ func matchOneClaim(claim *ClaimQuery, presented map[string]any) bool {
 //     (see CredentialSetQuery.UnmarshalJSON).
 //
 // Returns ErrDCQLUnsatisfied when the presentation does not meet the query.
-func enforceDCQLConstraints(q *DCQLQuery, vc *compliance.VerifiedClaims) error {
+func enforceDCQLConstraints(q *DCQLQuery, vc *compliance.VerifiedClaims, checker TrustedAuthorityChecker) error {
 	satisfied := make(map[string]bool, len(q.Credentials))
 	anySatisfied := false
+	// A query whose claims match but whose issuer restriction cannot be evaluated
+	// must fail loudly rather than fall through to ErrDCQLUnsatisfied, which would
+	// look like an ordinary claim mismatch and hide a misconfigured verifier.
+	var authErr error
 	for i := range q.Credentials {
 		cq := &q.Credentials[i]
-		if credentialSatisfiesQuery(cq, vc) {
-			satisfied[cq.ID] = true
-			anySatisfied = true
+		if !credentialSatisfiesQuery(cq, vc) {
+			continue
 		}
+		// The issuer restriction is checked only for queries the credential
+		// otherwise satisfies: an unrelated query's trust anchors say nothing
+		// about this credential.
+		if err := checkTrustedAuthorities(cq, vc, checker); err != nil {
+			if authErr == nil {
+				authErr = err
+			}
+			continue
+		}
+		satisfied[cq.ID] = true
+		anySatisfied = true
 	}
 	if len(q.CredentialSets) == 0 {
 		if !anySatisfied {
+			if authErr != nil {
+				return authErr
+			}
 			return ErrDCQLUnsatisfied
 		}
 		return nil
@@ -336,6 +365,9 @@ func enforceDCQLConstraints(q *DCQLQuery, vc *compliance.VerifiedClaims) error {
 			continue
 		}
 		if !optionSatisfied(set.Options, satisfied) {
+			if authErr != nil {
+				return authErr
+			}
 			return ErrDCQLUnsatisfied
 		}
 	}
