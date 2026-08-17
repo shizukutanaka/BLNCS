@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`openid4vp`: DCQL `trusted_authorities` (Axis 147).** A query could say what
+  claims it wanted but not whose credential it would accept — OpenID4VP 1.0
+  §6.1.1 defines `trusted_authorities` for that, and `dcql.go` explicitly scoped
+  it out. Without it a verifier's only issuer control is its private
+  `TrustedIssuers` map, which the wallet cannot see, so the wallet cannot pick a
+  credential the verifier will accept and the user is walked through a disclosure
+  that is then refused. All three registered types (`aki`, `etsi_tl`,
+  `openid_federation`) are validated and matched with §6.1.1's OR-at-both-levels
+  semantics. Evaluation is delegated to `Verifier.TrustedAuthorityChecker`
+  because resolving an X.509 chain, an ETSI Trusted List or a federation chain
+  needs network I/O and separate trust config that this network-free core
+  deliberately excludes — and **a restricted query with no checker is refused,
+  not accepted**, since a restriction advertised to the wallet but silently
+  unenforced is worse than none. A checker error also refuses rather than
+  degrading to "unrestricted", and the unverifiable case is distinguishable from
+  an ordinary claim mismatch so a misconfigured verifier is not hidden. Queries
+  without the member are unrestricted and unchanged on the wire. 12 new tests.
+
+### Added
 - **`openid4vci`: authorization code flow with mandatory PKCE (Axis 146).** The
   token endpoint accepted only the pre-authorized code grant, which fits just the
   case where the issuer already knows the subject and hands them a code out of

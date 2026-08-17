@@ -126,11 +126,15 @@ history in `CHANGELOG.md`.
    scoping are not implemented; the offer grants a single pre-registered
    credential configuration.
 
-6. **Trust-model layer thin.** `verifier_info` absent; RP-registration /
-   trust-list chaining absent (client_id prefixes are syntax-checked only);
-   no wallet attestation (WUA/WIA); no mdoc IACA→DSC→VICAL PKI (bare-key
-   mdoc issuance); DCQL `trusted_authorities` explicitly scoped out
-   (`openid4vp/dcql.go:179`).
+6. **Trust-model layer — issuer-side query constraint added (Axis 147).** DCQL
+   `trusted_authorities` (§6.1.1) is implemented for all three registered types
+   with fail-closed evaluation delegated to `Verifier.TrustedAuthorityChecker`,
+   so a verifier can finally tell the wallet *whose* credentials it accepts.
+   **Remaining:** `verifier_info` absent; RP-registration / trust-list chaining
+   absent (client_id prefixes are syntax-checked only); no wallet attestation
+   (WUA/WIA); no mdoc IACA→DSC→VICAL PKI (bare-key mdoc issuance) — which is
+   also what would let the `aki` authority type be evaluated in-tree rather than
+   through the checker callback.
 
 7. **Legacy W3C VC proof suite.** `compliance/compliance.go:82,148,193` uses
    pre-Data-Integrity `Ed25519Signature2020`, while a correct
