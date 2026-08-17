@@ -106,13 +106,15 @@ history in `CHANGELOG.md`.
    `dc_api.jwt` variant and additional content-encryption algorithms
    (A256GCM/AES-CBC-HMAC) are not implemented — only the HAIP-mandated pair.
 
-4. **Selective disclosure — verification complete, issuance still flat.**
-   *(Addressed for verification by Axis 139: array-element (`[salt, value]` +
-   `{"...": digest}`) and recursive (nested `_sd`) disclosures now resolve at
-   any depth, so credentials from conforming third-party issuers verify.)*
-   **Remaining:** BLRCS issuance still emits only flat, top-level disclosures.
-   *(DCQL array paths were addressed by Axis 140: `ClaimQuery.Path` is now
-   `[]any` and resolves object keys, array indices and null wildcards.)*
+4. **Selective disclosure — complete (Axes 139, 140, 145).** Verification
+   resolves array-element (`[salt, value]` + `{"...": digest}`) and recursive
+   (nested `_sd`) disclosures at any depth (Axis 139); DCQL claim paths address
+   object keys, array indices and null wildcards (Axis 140); and **issuance now
+   emits all three shapes** via the `SD()` marker, with `PresentPaths` /
+   `PresentPathsWithKeyBinding{,ES256}` for path-addressed presentation that
+   auto-includes ancestor disclosures (Axis 145). The round trip is exercised
+   through the independently-written verifier, including the EUDI combination of
+   a nested credential, a P-256 holder key and an ES256 KB-JWT.
 
 5. **Issuance flows limited.** Pre-authorized code flow only
    (`openid4vci/openid4vci.go:1127` rejects other grant types); no

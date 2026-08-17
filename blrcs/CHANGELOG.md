@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`compliance`: nested, recursive and array-element disclosure at issuance
+  (Axis 145).** Axis 139 taught the verifier all three RFC 9901 disclosure
+  shapes at any depth, but issuance emitted only flat top-level properties — a
+  claim was disclosable whole or not at all, so revealing `address` revealed
+  every field in it. An `SD()` marker anywhere in a claim tree now makes that
+  position disclosable: object members become 3-element disclosures whose digest
+  joins that object's own `_sd`, array elements become 2-element disclosures
+  replaced in place by `{"...": digest}` (length and order preserved), and
+  because the walk is bottom-up a disclosed value may still carry `_sd`/`...` —
+  recursive disclosure. Trees with no marker are unchanged, so existing callers
+  are unaffected. `PresentPaths` addresses claims by DCQL-style `[]any` paths and
+  auto-includes the ancestor disclosures each selection needs (name-based
+  `Present` could not reach array elements at all, and an orphaned nested
+  disclosure must be rejected as unused); `DisclosablePaths` enumerates what a
+  credential offers; `PresentPathsWithKeyBinding{,ES256}` pair paths with the
+  KB-JWT OpenID4VP requires. Fail-closed at issuance on reserved/structural
+  disclosable names, a caller-supplied literal `_sd`, a misplaced `SD()` marker,
+  and unknown presentation paths. Also fixed two discarded `json.Marshal` errors
+  that turned an unencodable claim value into a signed but permanently
+  unverifiable credential. Decoys now apply at every `_sd`-bearing object (never
+  to arrays, whose length is semantic). 15 new tests.
+
 ### Fixed
 - **CI had never run a single job (Axis 144).** GitHub resolves workflows only
   from the root `.github/workflows/` and Dependabot only from the root
