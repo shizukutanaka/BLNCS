@@ -226,32 +226,40 @@ func buildSDJWT(signer jwsSigner, issuerID, vct, subject string, sdClaims, clear
 			return "", nil, fmt.Errorf("compliance: claim %q appears in both sdClaims and clearClaims", k)
 		}
 	}
-	// Clear claims → JWT body 直接
+	var disclosures []Disclosure
+	decoys := signer.decoyCount()
+
+	// Clear claims → JWT body 直接。値の内部に SD() マーカーがあれば、その位置で
+	// nested / array-element disclosure に変換される (Axis 145)。マーカーが無ければ
+	// 値はそのまま — 既存呼び出し側の出力は不変。
 	for k, v := range clearClaims {
-		payload[k] = v
+		redacted, err := redactTree(v, decoys, 1, &disclosures)
+		if err != nil {
+			return "", nil, fmt.Errorf("compliance: clearClaims[%q]: %w", k, err)
+		}
+		payload[k] = redacted
 	}
 	// SD claims → hash digests in _sd array, disclosures appended
-	var disclosures []Disclosure
 	var sdDigests []string
 	for name, value := range sdClaims {
-		salt, err := randomB64(16)
+		// 値を先に redact する (bottom-up)。こうすると開示された値の中に `_sd` /
+		// `...` が残るため、RFC 9901 の recursive disclosure になる。
+		redacted, err := redactTree(value, decoys, 1, &disclosures)
 		if err != nil {
-			return "", nil, err
+			return "", nil, fmt.Errorf("compliance: sdClaims[%q]: %w", name, err)
 		}
-		d := Disclosure{Salt: salt, Name: name, Value: value}
-		// Encode: base64url(json([salt, name, value]))
-		arr, _ := json.Marshal([]any{salt, name, value})
-		d.Encoded = base64.RawURLEncoding.EncodeToString(arr)
+		d, err := newObjectDisclosure(name, redacted)
+		if err != nil {
+			return "", nil, fmt.Errorf("compliance: sdClaims[%q]: %w", name, err)
+		}
 		disclosures = append(disclosures, d)
-		// Digest: SHA-256(encoded)
-		h := sha256.Sum256([]byte(d.Encoded))
-		sdDigests = append(sdDigests, base64.RawURLEncoding.EncodeToString(h[:]))
+		sdDigests = append(sdDigests, digestOf(d.Encoded))
 	}
 	// Decoy digests (draft-ietf-oauth-sd-jwt §5.6): hashes of fresh random salts
 	// with no corresponding disclosure. They are indistinguishable from real
 	// digests (same SHA-256 length) and obscure the true number of selectively-
 	// disclosable claims, improving holder unlinkability.
-	for n := 0; n < signer.decoyCount(); n++ {
+	for n := 0; n < decoys; n++ {
 		salt, err := randomB64(32)
 		if err != nil {
 			return "", nil, err
@@ -276,7 +284,14 @@ func buildSDJWT(signer jwsSigner, issuerID, vct, subject string, sdClaims, clear
 	// verifiers that only accept the old value.
 	header := `{"alg":"` + signer.jwsAlg() + `","typ":"` + signer.sdjwtTyp() + `"}`
 	headerB64 := base64.RawURLEncoding.EncodeToString([]byte(header))
-	payloadBytes, _ := json.Marshal(payload)
+	// Surface the Marshal error rather than discarding it: a clearClaims value
+	// that cannot be JSON-encoded (channel, func, cyclic reference, non-finite
+	// float) makes Marshal fail, and signing the resulting nil payload would
+	// return a well-formed-looking credential that can never verify.
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: payload: %v", ErrDisclosableValue, err)
+	}
 	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadBytes)
 	sigInput := headerB64 + "." + payloadB64
 	sig, err := signer.signJWS([]byte(sigInput))
@@ -865,8 +880,11 @@ func PresentWithKeyBindingTx(sdjwt string, reveal []string, holderPriv ed25519.P
 	if len(holderPriv) != ed25519.PrivateKeySize {
 		return "", ErrHolderKeyRequired
 	}
-	return presentWithKB(sdjwt, reveal, "EdDSA", nonce, aud, transactionData, now,
-		func(signingInput []byte) []byte { return ed25519.Sign(holderPriv, signingInput) })
+	presented, err := Present(sdjwt, reveal)
+	if err != nil {
+		return "", err
+	}
+	return presentWithKB(presented, "EdDSA", nonce, aud, transactionData, now, ed25519KBSigner(holderPriv))
 }
 
 // PresentWithKeyBindingES256 is PresentWithKeyBindingTx for a P-256 holder key,
@@ -876,28 +894,70 @@ func PresentWithKeyBindingES256(sdjwt string, reveal []string, holderPriv *ecdsa
 	if holderPriv == nil || holderPriv.Curve != elliptic.P256() {
 		return "", ErrHolderKeyRequired
 	}
-	return presentWithKB(sdjwt, reveal, "ES256", nonce, aud, transactionData, now,
-		func(signingInput []byte) []byte {
-			d := sha256.Sum256(signingInput)
-			r, s, err := ecdsa.Sign(rand.Reader, holderPriv, d[:])
-			if err != nil {
-				return nil
-			}
-			out := make([]byte, ecdsakey.ES256SignatureSize)
-			r.FillBytes(out[:ecdsakey.P256CoordSize])
-			s.FillBytes(out[ecdsakey.P256CoordSize:])
-			return out
-		})
+	presented, err := Present(sdjwt, reveal)
+	if err != nil {
+		return "", err
+	}
+	return presentWithKB(presented, "ES256", nonce, aud, transactionData, now, es256KBSigner(holderPriv))
+}
+
+// PresentPathsWithKeyBinding is PresentPaths plus an EdDSA KB-JWT. Nested and
+// array-element disclosures (Axis 145) are only addressable by path, so this is
+// the entry point a holder needs to use them in an OpenID4VP flow, where key
+// binding is required.
+func PresentPathsWithKeyBinding(sdjwt string, paths [][]any, holderPriv ed25519.PrivateKey, nonce, aud string, transactionData []string, now time.Time) (string, error) {
+	if len(holderPriv) != ed25519.PrivateKeySize {
+		return "", ErrHolderKeyRequired
+	}
+	presented, err := PresentPaths(sdjwt, paths)
+	if err != nil {
+		return "", err
+	}
+	return presentWithKB(presented, "EdDSA", nonce, aud, transactionData, now, ed25519KBSigner(holderPriv))
+}
+
+// PresentPathsWithKeyBindingES256 is PresentPathsWithKeyBinding for a P-256
+// holder key — the combination an EUDI wallet presenting a nested credential
+// actually needs.
+func PresentPathsWithKeyBindingES256(sdjwt string, paths [][]any, holderPriv *ecdsa.PrivateKey, nonce, aud string, transactionData []string, now time.Time) (string, error) {
+	if holderPriv == nil || holderPriv.Curve != elliptic.P256() {
+		return "", ErrHolderKeyRequired
+	}
+	presented, err := PresentPaths(sdjwt, paths)
+	if err != nil {
+		return "", err
+	}
+	return presentWithKB(presented, "ES256", nonce, aud, transactionData, now, es256KBSigner(holderPriv))
+}
+
+// ed25519KBSigner returns the KB-JWT signing function for an Ed25519 holder key.
+func ed25519KBSigner(priv ed25519.PrivateKey) func([]byte) []byte {
+	return func(signingInput []byte) []byte { return ed25519.Sign(priv, signingInput) }
+}
+
+// es256KBSigner returns the KB-JWT signing function for a P-256 holder key.
+// ES256 signatures are raw fixed-width R‖S (RFC 7518 §3.4), not ASN.1 DER.
+func es256KBSigner(priv *ecdsa.PrivateKey) func([]byte) []byte {
+	return func(signingInput []byte) []byte {
+		d := sha256.Sum256(signingInput)
+		r, s, err := ecdsa.Sign(rand.Reader, priv, d[:])
+		if err != nil {
+			return nil
+		}
+		out := make([]byte, ecdsakey.ES256SignatureSize)
+		r.FillBytes(out[:ecdsakey.P256CoordSize])
+		s.FillBytes(out[ecdsakey.P256CoordSize:])
+		return out
+	}
 }
 
 // presentWithKB builds a selective-disclosure presentation and appends a KB-JWT
 // signed by the caller-supplied signer. The sd_hash / transaction_data logic is
 // identical across algorithms, so only the alg header and the signature differ.
-func presentWithKB(sdjwt string, reveal []string, alg, nonce, aud string, transactionData []string, now time.Time, sign func([]byte) []byte) (string, error) {
-	presented, err := Present(sdjwt, reveal)
-	if err != nil {
-		return "", err
-	}
+// presented is an already-built selective-disclosure presentation (from Present
+// or PresentPaths); this function only appends the KB-JWT, so the two selection
+// styles share one binding implementation.
+func presentWithKB(presented string, alg, nonce, aud string, transactionData []string, now time.Time, sign func([]byte) []byte) (string, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
