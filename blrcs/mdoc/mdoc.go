@@ -144,6 +144,15 @@ type IssueParams struct {
 	// EdDSA. Real mDLs are ES256-signed, so this is what a P-256-only ecosystem
 	// expects. Exactly one of IssuerPriv / IssuerPrivES256 must be set.
 	IssuerPrivES256 *ecdsa.PrivateKey
+	// IssuerAuthUnprotected are extra COSE unprotected headers for issuerAuth.
+	// Its purpose is the x5chain header (RFC 9360 label 33) carrying the Document
+	// Signer Certificate, so a verifier holding only the IACA roots can validate
+	// a document from an issuer it has never seen — see X5ChainHeader and
+	// VerifyChain in x509chain.go. Unprotected is the right bucket: the chain is
+	// not integrity-critical because it is validated against the verifier's own
+	// configured roots however it arrived. Nil keeps the previous bare-key output
+	// byte-for-byte.
+	IssuerAuthUnprotected cbor.Header
 	// DeviceKeyES256 binds the credential to a P-256 holder key instead of an
 	// Ed25519 one, encoding deviceKeyInfo as an EC2 COSE_Key. Mutually exclusive
 	// with DeviceKey.
@@ -241,9 +250,9 @@ func Issue(p IssueParams) ([]byte, error) {
 	// credential unverifiable (and stamping ES256 on an EdDSA one likewise).
 	var issuerAuth []byte
 	if p.IssuerPrivES256 != nil {
-		issuerAuth, err = cbor.Sign1ES256(cbor.Header{cbor.HeaderAlg: cbor.AlgES256}, nil, msoTagged, nil, p.IssuerPrivES256)
+		issuerAuth, err = cbor.Sign1ES256(cbor.Header{cbor.HeaderAlg: cbor.AlgES256}, p.IssuerAuthUnprotected, msoTagged, nil, p.IssuerPrivES256)
 	} else {
-		issuerAuth, err = cbor.Sign1(cbor.Header{cbor.HeaderAlg: cbor.AlgEdDSA}, nil, msoTagged, nil, p.IssuerPriv)
+		issuerAuth, err = cbor.Sign1(cbor.Header{cbor.HeaderAlg: cbor.AlgEdDSA}, p.IssuerAuthUnprotected, msoTagged, nil, p.IssuerPriv)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("mdoc: sign issuerAuth: %w", err)

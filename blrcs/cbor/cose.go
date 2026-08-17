@@ -478,3 +478,41 @@ func Sign1ES256(protected, unprotected Header, payload, externalAAD []byte, priv
 		Content: []any{protectedBytes, map[int]any(unprotected), payloadVal, sig},
 	})
 }
+
+// ParseSign1Headers decodes only the header maps of a COSE_Sign1, WITHOUT
+// verifying the signature.
+//
+// This exists for headers a verifier must read before it knows which key to
+// verify with — most importantly `x5chain` (RFC 9360), where the certificate
+// that carries the signing key is itself in the message. The returned headers
+// are therefore UNAUTHENTICATED: treat them as a hint about which key to try,
+// never as a fact. Callers must still verify the signature afterwards, and must
+// anchor anything trust-bearing (a certificate chain) to their own configured
+// roots rather than to the message.
+func ParseSign1Headers(data []byte) (protected, unprotected Header, err error) {
+	v, err := Unmarshal(data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cbor/cose: decode: %w", err)
+	}
+	tag, ok := v.(Tag)
+	if !ok || tag.Number != TagCOSESign1 {
+		return nil, nil, ErrCOSEInvalidTag
+	}
+	arr, ok := tag.Content.([]any)
+	if !ok || len(arr) != 4 {
+		return nil, nil, ErrCOSEBadStructure
+	}
+	protectedBytes, ok := arr[0].([]byte)
+	if !ok {
+		return nil, nil, fmt.Errorf("%w: protected must be bstr", ErrCOSEBadStructure)
+	}
+	protected, err = parseHeader(protectedBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	unprotected = Header{}
+	if rawMap, ok := arr[1].(map[any]any); ok {
+		unprotected = Header(IntMap(rawMap))
+	}
+	return protected, unprotected, nil
+}
