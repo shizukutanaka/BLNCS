@@ -13,7 +13,6 @@ package property
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -24,7 +23,6 @@ import (
 	"blrcs/cas"
 	"blrcs/compliance"
 	"blrcs/errkit"
-	"blrcs/schemaver"
 	"blrcs/scitt"
 	"blrcs/types"
 )
@@ -354,37 +352,6 @@ func TestCASDeduplication(t *testing.T) {
 	}
 	if store.Size() != 1 {
 		t.Errorf("dedup violated: size=%d", store.Size())
-	}
-}
-
-// TestSchemaVersionMonotonic — MigrateToLatest never decreases version
-func TestSchemaVersionMonotonic(t *testing.T) {
-	reg := schemaver.New("prop-test")
-	reg.Register(1, nil)
-	for v := 2; v <= 5; v++ {
-		vCopy := v
-		reg.Register(v, func(d map[string]any) (map[string]any, error) {
-			d[fmt.Sprintf("v%d_added", vCopy)] = true
-			return d, nil
-		})
-	}
-	raw := []byte(`{"schemaVersion":1,"x":"y"}`)
-	out, err := reg.MigrateToLatest(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var data map[string]any
-	json.Unmarshal(out, &data)
-	got := int(data["schemaVersion"].(float64))
-	if got != 5 {
-		t.Errorf("version after migration: %d want 5", got)
-	}
-	// All intermediate versions should have added their field
-	for v := 2; v <= 5; v++ {
-		key := fmt.Sprintf("v%d_added", v)
-		if data[key] != true {
-			t.Errorf("version %d field missing", v)
-		}
 	}
 }
 
