@@ -1,7 +1,17 @@
 # BLRCS Product Assessment — 長所・短所・改善案
 
-Status date: post-Axis 149 (branch `claude/deepresearch-ultrathink-improve-YbA9t`;
-`main` carries the product as published via PR #1). Sections carry their own
+Status date: post-Axis 150 (branch `claude/deepresearch-ultrathink-improve-YbA9t`).
+
+**Shipping state:** `main` carries BLRCS at roughly Axis 128 (49 packages).
+Axes 129–150 — 48 commits, including the whole P-256/EUDI arc, the JWE
+response encryption, nested selective disclosure, the OpenID4VCI
+authorization-code flow, the mdoc PKI, and several fail-closed security fixes
+— are **not on main**. Earlier revisions of this document claimed "`main`
+carries the product as published via PR #1"; that is false. PR #1 was CLOSED,
+not merged (the product reached main by another route, at an earlier state).
+Corrected at Axis 150 after checking the PR list rather than trusting the note.
+
+Sections carry their own
 "addressed by Axis N" notes; anything not so marked was last verified at Axis
 132 and should be re-checked against the tree before being relied on — this
 document has been stale before (it claimed `eddsa-jcs-2022` was missing when
