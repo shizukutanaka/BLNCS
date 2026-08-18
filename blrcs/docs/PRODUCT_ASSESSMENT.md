@@ -1,8 +1,13 @@
 # BLRCS Product Assessment — 長所・短所・改善案
 
-Status date: post-Axis 132 (branch `claude/deepresearch-ultrathink-improve-YbA9t`;
-`main` carries the product as published via PR #1). Every file:line reference in
-this document was re-verified against the tree at that state.
+Status date: post-Axis 149 (branch `claude/deepresearch-ultrathink-improve-YbA9t`;
+`main` carries the product as published via PR #1). Sections carry their own
+"addressed by Axis N" notes; anything not so marked was last verified at Axis
+132 and should be re-checked against the tree before being relied on — this
+document has been stale before (it claimed `eddsa-jcs-2022` was missing when
+`compliance/dataintegrity.go` already implemented it, and claimed `builder` /
+`kms` / `i18n` were README-documented public API when the README only listed
+their names in a table).
 
 This assessment synthesizes (a) a 20-agent standards-research workflow that
 audited the codebase against the current state of 10 standards tracks
@@ -57,8 +62,8 @@ history in `CHANGELOG.md`.
 
 ## 短所 (Weaknesses)
 
-1. **P-256 coverage is now partial, not absent — remaining gaps are W3C VC /
-   mdoc / SCITT signing and `kms`.** *(Largely addressed by Axes 135-137.)*
+1. **P-256 coverage — near complete; W3C VC proofs and SCITT signing remain.**
+   *(Addressed across Axes 135-142, 148.)*
 
    **Done:** ES256 verification for JOSE (SD-JWT) and COSE (mdoc/SCITT) via the
    `ecdsakey` package; P-256 key resolution via `didresolver.ResolveAllKeys`
@@ -76,11 +81,14 @@ history in `CHANGELOG.md`.
    `PresentWithKeyBindingES256` emits one — so a real EUDI wallet's P-256
    device-key presentation now completes end to end.
 
+   Axis 148 added the **mdoc issuer PKI** (`x5chain`, IACA→DSC validation), which
+   accepts both Ed25519 and P-256 document signer certificates.
+
    **Still Ed25519-only:** W3C VC proofs (`compliance.Issuer.Issue`, both the
-   `Ed25519Signature2020` and `eddsa-jcs-2022` suites), SCITT COSE receipt
-   *signing* (BLRCS-internal, so no interop pressure), and
-   `kms/kms.go:412,440,466,469`, whose hard-coded 32/64-byte size checks still
-   contradict `docs/adr/0001`'s crypto-agility claim.
+   `Ed25519Signature2020` and `eddsa-jcs-2022` suites) and SCITT COSE receipt
+   *signing* (BLRCS-internal, so no interop pressure). The former `kms`
+   contradiction is gone: Axis 149 deleted the package, and `docs/adr/0001`
+   carries an amendment naming the seams that actually provide agility.
 
 2. **mdoc presentation path — verification fixed, DC-API request still a stub.**
    *(Verification addressed by Axis 138: `ProcessResponse` now dispatches on
@@ -169,25 +177,36 @@ history in `CHANGELOG.md`.
    whole repo, including the legacy Python tree); the GitHub repo
    description/topics still describe the unrelated legacy Python project.
 
-## 過剰 (Excess) — quantified
+## 過剰 (Excess) — resolved (Axis 149)
 
-A first-principles pass (rather than a spec checklist) also asks what the
-codebase carries that delivers nothing. 13 packages have **zero non-test
-internal callers** (~8,500 LoC):
+A first-principles pass asked what the codebase carries that delivers nothing.
+The answer, measured with `go list -deps ./cmd/...` against a non-test importer
+search rather than assumed: 13 packages reachable from no binary and imported by
+no non-test file.
 
-- **Legitimate public API** — library consumers call these directly and the
-  README documents them: `builder`, `kms`, `i18n`.
-- **Unwired infrastructure** (~5,600 LoC): `apispec`, `apiversion`, `openapi`,
-  `schemaver`, `httpchain`, `replay`, `saga`, `ctx`, `otelbridge`, `compose`.
-  Earlier axes triaged several of these as "deliberate extension points". From
-  first principles that framing is generous: in a **security** product, code
-  that nothing calls is audit surface and maintenance burden delivering zero
-  value, and it inflates the "53 packages" figure the project reports.
+  apispec apiversion builder compose ctx httpchain i18n kms openapi
+  otelbridge replay saga schemaver
 
-**Recommendation**: remove the unwired set, or wire the parts that earn their
-place. This is deliberately *not* done unilaterally — deleting ~5,600 LoC is
-hard to reverse and the owner may value some of it — so it is surfaced here as
-an explicit, separately-confirmable decision.
+**All 13 were deleted** — 4,196 non-test LoC + 5,791 test LoC = 9,987 lines; 56
+packages → 43. Earlier axes triaged several as "deliberate extension points";
+from first principles that was generous. In a security product, code nothing
+calls is audit surface and maintenance burden returning zero value.
+
+Two consequences worth recording:
+
+- `kms` carried the hard-coded 32/64-byte key-size checks that contradicted
+  `docs/adr/0001`'s crypto-agility claim. Deleting the package resolved that
+  weakness instead of retrofitting a part that should not exist. ADR-0001 now
+  carries an amendment naming the seams that actually provide agility.
+- The README's headline example used `builder`. Rather than restore it, the
+  example was rewritten against the direct API — a struct literal, which is what
+  the rest of the codebase uses and is no less readable. Both README examples
+  are now compiled and executed as a check, not merely asserted.
+
+**Kept deliberately:** `conformance` (891 LoC) has no internal importers but is a
+deliverable rather than dead weight — language-independent conformance vectors
+so third parties can validate compatible implementations, with its own test
+asserting the reference implementation passes every vector.
 
 ## 改善案 (Improvements)
 

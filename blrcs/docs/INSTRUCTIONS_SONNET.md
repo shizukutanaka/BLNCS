@@ -129,17 +129,17 @@ for the large/architectural tracks — do **not** start those here.
 - **Accept:** verifier_info round-trips through request build/parse and the JAR
   path.
 
-### S5 — kms crypto-agility honesty (ADR-0001 correction)
+### S5 — kms crypto-agility honesty (ADR-0001 correction) — ✅ DONE (Axis 149)
 
-- **Why:** `kms/kms.go:412,440,466,469` hard-check Ed25519 32/64-byte sizes,
-  contradicting `docs/adr/0001`'s claim that a PQ/ECDSA signer slots in without
-  touching issuance. Pick ONE: (a) minimal — correct the ADR text to state the
-  current Ed25519-only reality and point to the P-256 track; or (b) real —
-  introduce an algorithm-aware length table keyed by a key-type enum so the
-  size checks are parameterized. Prefer (a) unless the P-256 Opus track (O1)
-  has already landed, in which case do (b).
-- **Files:** `kms/kms.go`, `docs/adr/0001-selective-disclosure-sd-jwt.md`.
-- **Accept:** ADR and code agree; tests unchanged or extended.
+- **Resolved by deletion, not by either option offered here.** The task proposed
+  (a) correcting the ADR text or (b) parameterising `kms`'s size checks. The
+  measured answer was that `kms` had zero non-test importers and was reachable
+  from no binary, so option (b) would have been optimising a part that should
+  not exist. Axis 149 deleted the package (with 12 others) and amended
+  `docs/adr/0001` to name the seams that actually provide agility — the
+  `jwsSigner` interface, the COSE algorithm registry, `RegisterJWSVerifier` with
+  per-call `AllowedAlgs`, and `ecdsakey`. Both halves of the acceptance
+  criterion hold: ADR and code agree, and no test needed changing.
 
 ### S6 — `eddsa-jcs-2022` Data Integrity suite for `compliance.Credential`
 

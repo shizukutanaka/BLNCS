@@ -44,7 +44,7 @@ Code follows three design philosophies:
 
 ### Error handling
 
-Use `errkit` for all public API error returns at boundary layers (`ctx/`, `compose/`). Internal packages (`compliance/`, `scitt/`, etc.) may use `errors.New` / `fmt.Errorf`.
+Use `errkit` for public API error returns at boundary layers (`httpmw/`, `mcp/`). Internal packages (`compliance/`, `scitt/`, etc.) may use `errors.New` / `fmt.Errorf`, and wrap sentinels with `%w` so `errors.Is` keeps working for callers.
 
 ```go
 // ✅ boundary layer

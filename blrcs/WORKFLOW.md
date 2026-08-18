@@ -41,7 +41,6 @@ Do not chase these to 100% — the uncovered lines require unreachable condition
 - `doctor` ~79% — error branches need OS-level crypto failure.
 - `conformance` ~72% — bounded by the number of reference vectors.
 - `mcp` ~85% — SSE streaming paths are not unit-testable.
-- `ctx` ~81% — error wrapping paths need the underlying primitive to fail.
 
 Add a genuine reachable test instead of contorting these.
 
