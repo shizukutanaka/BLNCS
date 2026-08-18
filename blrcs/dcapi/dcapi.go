@@ -94,15 +94,23 @@ func BuildForVerifier(def openid4vp.PresentationDefinition, nonce, clientID, res
 	if err != nil {
 		return nil, err
 	}
-	// Safari向け org-iso-mdoc はMVPではstub (同じPDを含めるが本来はdoctype+nameSpace形式)
-	safariData, err := buildMdocData(def, nonce, clientID, responseURI)
-	if err != nil {
-		return nil, err
-	}
+	// Only the protocol this library can actually service is advertised.
+	//
+	// This previously also offered ProtocolISOmDoc carrying a hand-made envelope
+	// ({client_id, nonce, response_mode, presentation_definition_compat}). No
+	// such shape exists in any specification: org-iso-mdoc requires an ISO
+	// 18013-7 Annex C DeviceRequest. Advertising it was strictly harmful — a
+	// browser that PREFERRED the mdoc entry would negotiate a protocol we cannot
+	// fulfil, so the verifier lost a working OpenID4VP exchange in exchange for a
+	// failure, while the caller believed an mdoc request had been built.
+	//
+	// Implementing it for real needs (a) a CBOR DeviceRequest per Annex C and
+	// (b) the OpenID4VPDCAPIHandover SessionTranscript to bind the response —
+	// mdoc.VerifyChain and openid4vp's mdoc path already handle verification once
+	// those bytes exist. Until then the honest advertisement is one protocol.
 	call := &GetCall{}
 	call.Digital.Requests = []Request{
 		{Protocol: ProtocolOpenID4VPUnsigned, Data: chromeData},
-		{Protocol: ProtocolISOmDoc, Data: safariData},
 	}
 	return call, nil
 }
@@ -152,24 +160,6 @@ func buildOpenID4VPData(def openid4vp.PresentationDefinition, nonce, clientID, r
 		data["response_uri"] = responseURI
 	}
 	return json.Marshal(data)
-}
-
-// buildMdocData — Safari向け org-iso-mdoc request body
-// ISO 18013-7 Annex C (W3C DCAPI profile) 形式
-// MVP: minimal envelope, full mdoc negotiator は専用パッケージが必要
-func buildMdocData(def openid4vp.PresentationDefinition, nonce, clientID, responseURI string) (json.RawMessage, error) {
-	// 最小 deviceRequest: org.iso.18013.5.1.mDL namespace の item request
-	// 実運用では mdoc responder層と統合
-	mdocReq := map[string]any{
-		"client_id":                      clientID,
-		"nonce":                          nonce,
-		"response_mode":                  "dc_api",
-		"presentation_definition_compat": def,
-	}
-	if responseURI != "" {
-		mdocReq["response_uri"] = responseURI
-	}
-	return json.Marshal(mdocReq)
 }
 
 // ============================================================================

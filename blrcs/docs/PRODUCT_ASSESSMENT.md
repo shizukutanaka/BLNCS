@@ -98,13 +98,20 @@ history in `CHANGELOG.md`.
    still open upstream; an unconfigured one fails closed. **Remaining:** the
    DC-API request side below.)*
 
-   Original finding: `openid4vp/openid4vp.go:499`
-   `ProcessResponse` unconditionally verifies the vp_token as SD-JWT
-   (`:544`), never branching on the matched DCQL query's Format;
-   `dcapi/dcapi.go:157-173` `buildMdocData` emits an "MVP: minimal envelope"
-   instead of an ISO 18013-7 Annex-C DeviceRequest. The standalone `mdoc`
-   package is solid, but an mdoc cannot flow through a live
-   OpenID4VP/DC-API session.
+   The `buildMdocData` stub was **deleted** (Axis 150) rather than left in
+   place. It emitted `{client_id, nonce, response_mode,
+   presentation_definition_compat}` — a shape in no specification — under the
+   `org-iso-mdoc` protocol id, and `BuildForVerifier` advertised it on every
+   call. That was strictly worse than not offering the protocol: a browser
+   preferring the mdoc entry would negotiate something the library cannot
+   fulfil, losing a working OpenID4VP exchange, while the caller believed an
+   mdoc request had been built. Three tests asserted the broken shape and were
+   corrected to assert its absence.
+
+   **Remaining:** a real DC-API mdoc request needs (a) a CBOR DeviceRequest per
+   ISO 18013-7 Annex C and (b) the OpenID4VPDCAPIHandover SessionTranscript to
+   bind the response. Verification for both already exists (Axis 138's mdoc
+   path, Axis 148's `VerifyChain`); only the request construction is missing.
 
 3. **Response encryption — addressed for direct_post.jwt (Axis 143).** The new
    stdlib-only `jwe` package implements ECDH-ES + A128GCM on P-256 (RFC
@@ -150,10 +157,19 @@ history in `CHANGELOG.md`.
    (WUA/WIA); VICAL (the signed trust-list format for distributing IACA roots)
    is not implemented — roots are supplied directly.
 
-7. **Legacy W3C VC proof suite.** `compliance/compliance.go:82,148,193` uses
-   pre-Data-Integrity `Ed25519Signature2020`, while a correct
-   `eddsa-jcs-2022` implementation already exists in-repo
-   (`didwebvh/proof.go` + `multiformats/jcs.go`) scoped to DID log entries.
+7. **Legacy W3C VC proof suite — fixed (Axis 150).** The default is now
+   `DataIntegrityProof` / `eddsa-jcs-2022`; the field was inverted to
+   `LegacyProofSuite` so Go's zero value points at the current W3C REC rather
+   than a suite off the standards track. Verify dispatches on
+   type/cryptosuite, so existing credentials are unaffected, and the legacy
+   suite stays reachable for verifiers that accept only it.
+
+   Flipping it exposed a latent bug: `issueBatteryPassport` mutates the Annex
+   XIII attributes after `Issue` has signed, then re-signed by hand-rolling
+   the *legacy* construction regardless of the issuer's suite — so an
+   `eddsa-jcs-2022` issuer produced a `DataIntegrityProof` credential with a
+   legacy proofValue: permanently unverifiable, with no signal. Now re-signs
+   through `attachProof`.
 
 8. **Repo-level gaps — partly addressed (Axis 144).** The CI workflow and the
    Dependabot config both lived under `blrcs/.github/`, where GitHub never reads

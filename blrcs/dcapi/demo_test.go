@@ -93,8 +93,9 @@ func TestDemoAuthorize(t *testing.T) {
 	if out.State == "" {
 		t.Error("state empty")
 	}
-	if out.DCAPI == nil || len(out.DCAPI.Digital.Requests) != 2 {
-		t.Errorf("DC-API structure: %+v", out.DCAPI)
+	// One request: only the protocol the library can service (see Axis 150).
+	if out.DCAPI == nil || len(out.DCAPI.Digital.Requests) != 1 {
+		t.Errorf("want exactly 1 DC-API request, got %+v", out.DCAPI)
 	}
 }
 
