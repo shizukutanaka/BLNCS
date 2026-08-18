@@ -7,15 +7,20 @@ name: BLRCS (Go)
 #
 # GitHub executes workflows ONLY from the repository-root .github/workflows/
 # directory. Sitting at blrcs/.github/workflows/, this file has never run a
-# single job — the test matrix, 20 fuzz targets, govulncheck, golangci-lint
-# and SBOM job below have never gated a commit. The body has been corrected
-# and is ready to run as-is once moved (it already assumes the root location:
-# see defaults.run.working-directory and the blrcs/-prefixed artifact paths).
+# single job. The body has been corrected and is ready to run as-is once moved
+# (it already assumes the root location: see defaults.run.working-directory and
+# the blrcs/-prefixed artifact paths).
 #
 # The move is not automated here because the CI identity that maintains this
 # repository lacks the GitHub `workflows` permission and so cannot create or
 # update files under the root .github/workflows/ directory. A maintainer must
 # run the command above, or grant that permission.
+#
+# NOTE: the gate itself does not depend on this file. `make verify` in blrcs/
+# runs the complete gate — build, gofmt, vet, zero-dependency proof, race
+# tests, lint, and every fuzz target — in about 45 seconds. This workflow
+# exists to run that same command on every push; it is not a second definition
+# of what "passing" means.
 # ###########################################################################
 on:
   push:
@@ -29,7 +34,6 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same ref supersedes an in-flight run.
 concurrency:
   group: blrcs-go-${{ github.ref }}
   cancel-in-progress: true
@@ -39,12 +43,14 @@ defaults:
     working-directory: blrcs
 
 jobs:
-  test:
+  # The gate. One target, identical to what a developer runs locally, so CI and
+  # local cannot disagree about whether a change passes.
+  verify:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # Test the version go.mod declares (the real support floor) and current
+        # The version go.mod declares (the real support floor) and current
         # stable, so a regression on either is caught.
         go: ['1.22', 'stable']
     runs-on: ${{ matrix.os }}
@@ -55,63 +61,21 @@ jobs:
           go-version: ${{ matrix.go }}
           cache-dependency-path: blrcs/go.mod
 
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test (race)
-        run: go test -race -count=1 ./...
-
-      - name: Build all commands
-        # ./... rather than an enumerated list: the old workflow named three of
-        # the four cmd/ binaries, so blrcs-mcp was never build-checked.
-        run: go build ./...
-
-  format:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Install golangci-lint
+        # make verify SKIPs lint when the tool is absent rather than failing, so
+        # CI must install it explicitly — otherwise the gate would silently run
+        # weaker here than on a developer machine.
+        uses: golangci/golangci-lint-action@v6
         with:
-          go-version: 'stable'
-          cache-dependency-path: blrcs/go.mod
+          version: latest
+          working-directory: blrcs
+          args: --timeout=5m
 
-      - name: gofmt
-        # The tree is kept gofmt-clean; CI never enforced it before.
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "::error::gofmt reported unformatted files:"
-            echo "$unformatted"
-            exit 1
-          fi
+      - name: make verify
+        run: make verify
 
-      - name: go.mod tidy + zero-dependency check
-        # BLRCS advertises zero external dependencies. Prove it rather than
-        # trusting it: `go mod tidy` must be a no-op, and it must not produce a
-        # go.sum — a go.sum appearing means a real dependency crept in.
-        run: |
-          set -euo pipefail
-          cp go.mod go.mod.orig
-          go mod tidy
-          if ! diff -q go.mod go.mod.orig >/dev/null; then
-            echo "::error::go mod tidy changed go.mod — commit the tidied file"
-            diff go.mod.orig go.mod || true
-            exit 1
-          fi
-          rm -f go.mod.orig
-          if [ -f go.sum ]; then
-            echo "::error::a go.sum exists — BLRCS's zero-dependency guarantee is broken"
-            cat go.sum
-            exit 1
-          fi
-          # With zero dependencies `go list -m all` prints only the main module.
-          external=$(go list -m all | tail -n +2)
-          if [ -n "$external" ]; then
-            echo "::error::external module requirements found:"
-            echo "$external"
-            exit 1
-          fi
-
+  # Extras that produce artifacts rather than pass/fail signal, so they are not
+  # part of `verify` and do not need the OS matrix.
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -120,45 +84,12 @@ jobs:
         with:
           go-version: 'stable'
           cache-dependency-path: blrcs/go.mod
-
-      - name: Coverage
-        run: |
-          go test -coverprofile=coverage.out ./...
-          go tool cover -func=coverage.out | tail -1
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
+      - run: make cover
+      - uses: actions/upload-artifact@v4
         with:
           name: coverage
-          # Paths in `uses:` steps are NOT affected by defaults.run.working-directory.
+          # Paths in `uses:` steps ignore defaults.run.working-directory.
           path: blrcs/coverage.out
-
-  fuzz:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-          cache-dependency-path: blrcs/go.mod
-
-      - name: Fuzz (seed corpus + 10s each)
-        # The old workflow fuzzed 4 of the 20 targets by name, so most were never
-        # exercised and a newly-added target was silently never run. Enumerate
-        # them from the source instead, so new targets are picked up automatically.
-        run: |
-          set -euo pipefail
-          targets=$(grep -rho '^func Fuzz[A-Za-z0-9_]*' ./fuzz/ | sed 's/^func //' | sort -u)
-          if [ -z "$targets" ]; then
-            echo "::error::no fuzz targets discovered"
-            exit 1
-          fi
-          echo "Discovered targets:"; echo "$targets"
-          for t in $targets; do
-            echo "::group::fuzz $t"
-            go test -run='^$' -fuzz="^${t}$" -fuzztime=10s ./fuzz/
-            echo "::endgroup::"
-          done
 
   security:
     runs-on: ubuntu-latest
@@ -168,18 +99,10 @@ jobs:
         with:
           go-version: 'stable'
           cache-dependency-path: blrcs/go.mod
-
       - name: govulncheck (known CVEs, incl. the Go toolchain itself)
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          working-directory: blrcs
-          args: --timeout=5m
 
   sbom:
     runs-on: ubuntu-latest
@@ -189,14 +112,11 @@ jobs:
         with:
           go-version: 'stable'
           cache-dependency-path: blrcs/go.mod
-
       - name: Generate SBOM (CycloneDX)
         run: |
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest
           cyclonedx-gomod mod -json -output sbom.cyclonedx.json
-
-      - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: sbom
           path: blrcs/sbom.cyclonedx.json

@@ -95,6 +95,23 @@ integration suite:
 go test ./integration/
 ```
 
+## Verifying a change
+
+One command is the complete gate — build, gofmt, vet, the zero-dependency
+proof, race tests, lint, and every fuzz target — in about 45 seconds:
+
+```bash
+make verify
+```
+
+CI runs exactly this target, so a green local run and a green CI run mean the
+same thing. While editing a single package, `make check PKG=compliance` is the
+fast inner loop.
+
+The README examples above are executable Go Examples
+(`compliance/example_test.go`) run by `go test`, so documentation that stops
+being true fails the build rather than rotting quietly.
+
 ## Architecture
 
 ```
