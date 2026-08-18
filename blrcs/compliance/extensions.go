@@ -1217,10 +1217,17 @@ func (i *Issuer) issueBatteryPassport(claim BatteryPassportClaim, validFor time.
 		attrs["separateCollection"] = "true"
 	}
 	cred.Subject.Attrs = attrs
-	// Re-sign
-	canonical, _ := canonicalPayload(cred)
-	sig := ed25519.Sign(i.privateKey, canonical)
-	cred.Proof.ProofValue = base64.StdEncoding.EncodeToString(sig)
+	// Re-sign through attachProof so the signature matches the issuer's chosen
+	// SUITE. This previously hand-rolled ed25519 over canonicalPayload, which is
+	// the legacy Ed25519Signature2020 construction: an issuer using
+	// eddsa-jcs-2022 therefore produced a DataIntegrityProof-typed credential
+	// carrying a legacy base64 proofValue — signed, returned, and permanently
+	// unverifiable, with no signal to the caller. (Same class as the mdoc COSE
+	// alg-header mismatch of Axis 141.) The Created timestamp is preserved so
+	// re-signing does not move the proof's clock.
+	if err := i.attachProof(cred, cred.Proof.Created); err != nil {
+		return nil, fmt.Errorf("compliance: re-sign battery passport: %w", err)
+	}
 	return cred, nil
 }
 

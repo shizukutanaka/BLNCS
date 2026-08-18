@@ -18,7 +18,7 @@ func diIssuer(t *testing.T) *Issuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iss.DataIntegrity = true
+	// eddsa-jcs-2022 is now the default; nothing to set.
 	return iss
 }
 
@@ -89,14 +89,29 @@ func TestDataIntegrityWithStatus(t *testing.T) {
 	}
 }
 
-// TestDefaultStillEd25519Signature2020 proves the default issuer path is
-// unchanged (byte-compatible with the legacy suite) — a default-issued
-// credential carries no cryptosuite and a base64 proofValue.
-func TestDefaultStillEd25519Signature2020(t *testing.T) {
-	iss, _ := NewIssuer("did:web:default.example") // DataIntegrity=false
+// TestDefaultIsDataIntegrity proves the DEFAULT issuer emits the current W3C
+// suite. A compliance product whose zero value ships a suite that is off the
+// W3C standards track is itself a conformance defect, so this is the assertion
+// that keeps the default honest (Axis 149 inverted it).
+func TestDefaultIsDataIntegrity(t *testing.T) {
+	iss, _ := NewIssuer("did:web:default.example") // LegacyProofSuite=false
+	cred, _ := iss.Issue(PassportClaim{ProductID: "P1"}, 0)
+	if cred.Proof.Type != "DataIntegrityProof" || cred.Proof.Cryptosuite != CryptosuiteEdDSAJCS2022 {
+		t.Fatalf("default should be DataIntegrityProof/eddsa-jcs-2022: %+v", cred.Proof)
+	}
+	if err := Verify(cred, iss.PublicKey()); err != nil {
+		t.Fatalf("default verify failed: %v", err)
+	}
+}
+
+// TestLegacyProofSuiteOptIn proves the old suite is still reachable, byte-shape
+// unchanged, for operators facing a verifier that accepts only it.
+func TestLegacyProofSuiteOptIn(t *testing.T) {
+	iss, _ := NewIssuer("did:web:legacy.example")
+	iss.LegacyProofSuite = true
 	cred, _ := iss.Issue(PassportClaim{ProductID: "P1"}, 0)
 	if cred.Proof.Type != "Ed25519Signature2020" || cred.Proof.Cryptosuite != "" {
-		t.Fatalf("default should be Ed25519Signature2020 with no cryptosuite: %+v", cred.Proof)
+		t.Fatalf("opt-in should be Ed25519Signature2020 with no cryptosuite: %+v", cred.Proof)
 	}
 	// Decode rather than sniff the first character: base64-std output legitimately
 	// begins with "z" roughly 1 time in 64, so a prefix check here is flaky.
@@ -122,5 +137,55 @@ func TestDataIntegrityCrossSuiteRejected(t *testing.T) {
 	cred.Proof.Cryptosuite = ""
 	if err := Verify(cred, di.PublicKey()); err == nil {
 		t.Fatal("a DI proof verified under the legacy branch should fail")
+	}
+}
+
+// TestBatteryPassportProofMatchesSuite is the regression guard for a latent bug
+// the Axis 149 default flip exposed: issueBatteryPassport mutates the subject
+// after Issue has already signed, then re-signs. That re-sign hand-rolled
+// ed25519 over canonicalPayload — the LEGACY construction — regardless of the
+// issuer's suite, so an eddsa-jcs-2022 issuer produced a DataIntegrityProof
+// credential carrying a legacy base64 proofValue: signed, returned, and
+// permanently unverifiable, with no signal to the caller.
+//
+// Both suites must round-trip, and the mutated Annex XIII attributes must be
+// covered by whichever signature is produced.
+func TestBatteryPassportProofMatchesSuite(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		iss, err := NewIssuer("did:web:battery.example")
+		if err != nil {
+			t.Fatal(err)
+		}
+		iss.LegacyProofSuite = legacy
+
+		cred, err := iss.IssueBatteryPassport(BatteryPassportClaim{
+			BatteryID:                   "BAT-001",
+			Category:                    BatteryCategoryEV,
+			Chemistry:                   "LFP",
+			CarbonFootprintKgCO2ePerKWh: 42.0,
+			DueDiligenceReportURL:       "https://example.eu/dd.pdf",
+			RenewableContentPct:         30,
+		}, 24*time.Hour)
+		if err != nil {
+			t.Fatalf("legacy=%v issue: %v", legacy, err)
+		}
+		wantType := "DataIntegrityProof"
+		if legacy {
+			wantType = "Ed25519Signature2020"
+		}
+		if cred.Proof.Type != wantType {
+			t.Errorf("legacy=%v: proof type = %q want %q", legacy, cred.Proof.Type, wantType)
+		}
+		if err := Verify(cred, iss.PublicKey()); err != nil {
+			t.Fatalf("legacy=%v: battery passport must verify under its own suite: %v", legacy, err)
+		}
+		// The post-Issue mutation must be inside the signature, not outside it.
+		if cred.Subject.Attrs["chemistry"] != "LFP" {
+			t.Fatalf("legacy=%v: Annex XIII attrs missing: %v", legacy, cred.Subject.Attrs)
+		}
+		cred.Subject.Attrs["chemistry"] = "NMC"
+		if err := Verify(cred, iss.PublicKey()); err == nil {
+			t.Errorf("legacy=%v: tampering with a signed attribute must be detected", legacy)
+		}
 	}
 }

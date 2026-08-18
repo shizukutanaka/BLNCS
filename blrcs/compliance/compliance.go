@@ -111,12 +111,22 @@ type Issuer struct {
 	// 既定 0 (後方互換: 挙動変化なし)。プライバシ重視の発行者は数個設定する。
 	DecoyDigests int
 
-	// DataIntegrity — true なら W3C VC (compliance.Credential) の発行時に、
-	// レガシーな Ed25519Signature2020 ではなく現行 REC の eddsa-jcs-2022 Data
-	// Integrity cryptosuite (W3C EdDSA Cryptosuites v1.0) で署名する。既定 false
-	// は後方互換 (Ed25519Signature2020, 挙動・バイト列とも不変)。Verify は proof の
-	// type/cryptosuite を見て両方式を自動判別するため、検証側の切替は不要。
-	DataIntegrity bool
+	// LegacyProofSuite — true なら W3C VC (compliance.Credential) の発行時に、
+	// 現行 REC の eddsa-jcs-2022 ではなく旧 Ed25519Signature2020 で署名する。
+	//
+	// 既定 (false) は eddsa-jcs-2022 = W3C Data Integrity 1.0 + EdDSA Cryptosuites
+	// v1.0。Ed25519Signature2020 は Data Integrity 以前のスイートで、W3C の
+	// standards track から外れている。DPP のような *適合性* を主張するプロダクトが
+	// 非推奨スイートを既定で発行するのは、それ自体が適合性の欠陥になる。
+	//
+	// Verify は proof の type/cryptosuite を見て両方式を自動判別するため、既存
+	// クレデンシャルの検証は影響を受けない。旧スイートしか受理しないレガシー
+	// verifier 相手に発行する必要がある運用者のみ true を設定する。
+	//
+	// (Axis 149 以前は DataIntegrity bool として既定が逆だった。フィールドを反転
+	//  したのは、Go のゼロ値が「現行標準」を指すようにするため — 既定値は何も
+	//  書かなかった人が得るものであり、それは非推奨スイートであってはならない。)
+	LegacyProofSuite bool
 
 	// SDJWTVCType — 発行する SD-JWT-VC の JWS `typ` ヘッダ値。空なら現行の
 	// draft-ietf-oauth-sd-jwt-vc 推奨値 `dc+sd-jwt` を使う。
@@ -209,38 +219,35 @@ func (i *Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential
 
 // attachProof sets cred.Proof (metadata + ProofValue) using the issuer's
 // selected cryptosuite. Default is Ed25519Signature2020 (fixed-field
-// canonicalPayload, base64-std proofValue); i.DataIntegrity switches to the
+// canonicalPayload, base64-std proofValue); i.LegacyProofSuite switches back to the
 // current-REC eddsa-jcs-2022 Data Integrity suite (JCS hashData, multibase
 // proofValue — see dataintegrity.go). The proof metadata is set BEFORE the
 // signature so both suites bind proofPurpose/verificationMethod (the
 // Ed25519Signature2020 path binds them via canonicalPayload; the DI path binds
 // them via the hashed proof config), preventing post-issuance tampering.
 func (i *Issuer) attachProof(cred *Credential, now time.Time) error {
-	if i.DataIntegrity {
+	if i.LegacyProofSuite {
 		cred.Proof = &Proof{
-			Type:               "DataIntegrityProof",
-			Cryptosuite:        CryptosuiteEdDSAJCS2022,
+			Type:               "Ed25519Signature2020",
 			Created:            now,
 			VerificationMethod: i.ID + "#key-1",
 			ProofPurpose:       "assertionMethod",
 		}
-		if err := signDataIntegrity(cred, i.privateKey); err != nil {
-			return err
+		payload, err := canonicalPayload(cred)
+		if err != nil {
+			return fmt.Errorf("canonicalize: %w", err)
 		}
+		cred.Proof.ProofValue = base64.StdEncoding.EncodeToString(ed25519.Sign(i.privateKey, payload))
 		return nil
 	}
 	cred.Proof = &Proof{
-		Type:               "Ed25519Signature2020",
+		Type:               "DataIntegrityProof",
+		Cryptosuite:        CryptosuiteEdDSAJCS2022,
 		Created:            now,
 		VerificationMethod: i.ID + "#key-1",
 		ProofPurpose:       "assertionMethod",
 	}
-	payload, err := canonicalPayload(cred)
-	if err != nil {
-		return fmt.Errorf("canonicalize: %w", err)
-	}
-	cred.Proof.ProofValue = base64.StdEncoding.EncodeToString(ed25519.Sign(i.privateKey, payload))
-	return nil
+	return signDataIntegrity(cred, i.privateKey)
 }
 
 // IssueWithStatus — W3C Bitstring Status List entry を付与して DPP 発行。
