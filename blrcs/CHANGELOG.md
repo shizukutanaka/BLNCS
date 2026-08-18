@@ -7,6 +7,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **One gate: `make verify` (Axis 151).** There were three disagreeing
+  definitions of "passing": `make ci` (vet+test+cover+build — no race detector,
+  no gofmt, no lint, no dependency check), the GitHub workflow's job list (which
+  had never executed), and whatever maintainers ran by hand. A gate that differs
+  from the one CI runs is not a gate. `make verify` is now the single definition
+  — fmt-check, dup-check, vet, deps-check, build, race tests, lint, fuzz-smoke,
+  cheapest-first — and the workflow's job body is literally `make verify`; `make
+  ci` is an alias. Runs in ~46s. Holes closed while consolidating: `lint` ended
+  in `|| echo "(not installed)"` which swallowed real failures too; `build`
+  enumerated four binaries so a new command was never build-checked; `fuzz`
+  hardcoded 3 of 20 targets, silently skipping every one added since it was
+  written; `test` had neither `-race` nor `-count`. Added `deps-check`, which
+  *proves* the zero-dependency claim (tidy no-op + no go.sum + no external
+  modules) instead of trusting it.
+- **README examples are now executable (Axis 151).** They live in
+  `compliance/example_test.go` as Go Examples with Output assertions, run by
+  `go test`. The previous README example was written against the deleted
+  `builder` package and kept claiming to work because nothing ever compiled it.
+
+### Changed
 - **BREAKING: `compliance` defaults to `eddsa-jcs-2022` (Axis 150).** The W3C VC
   proof default was `Ed25519Signature2020`, a pre-Data-Integrity suite off the
   W3C standards track, while the current REC suite sat behind an opt-in nothing

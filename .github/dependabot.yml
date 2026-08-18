@@ -1,11 +1,23 @@
 version: 2
-# Dependabot only reads .github/dependabot.yml at the REPOSITORY ROOT. This file
-# previously lived at blrcs/.github/dependabot.yml, where it was never loaded, so
-# neither the Go module nor the Actions pinned in CI were ever monitored.
+# This repository hosts TWO projects, so the ecosystem list is the union of
+# both. Dependabot only reads .github/dependabot.yml at the REPOSITORY ROOT;
+# a copy previously sat at blrcs/.github/dependabot.yml where it was never
+# loaded, so the Go module was never monitored at all.
 updates:
-  # Go modules — BLRCS is zero-dependency, so this mainly guards the toolchain
-  # and any test-only indirect modules from drifting. The module lives in the
-  # blrcs/ subdirectory, not at the repo root.
+  # --- legacy Python project (repository root) ---
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # --- BLRCS Go module (blrcs/ subdirectory, NOT the root) ---
+  # BLRCS is zero-dependency, so this mainly guards the toolchain and any
+  # test-only indirect modules from drifting. `make verify` fails if an
+  # external module ever appears.
   - package-ecosystem: "gomod"
     directory: "/blrcs"
     schedule:
@@ -16,14 +28,13 @@ updates:
     commit-message:
       prefix: "build"
 
-  # GitHub Actions used in CI workflows. Workflows are resolved from the root
-  # .github/workflows/ directory, so this entry must point at "/".
+  # --- GitHub Actions used by the workflows (resolved from the root) ---
+  # The allow/automerge keys below are preserved verbatim from PR #7.
   - package-ecosystem: "github-actions"
     directory: "/"
+    allow:
+      - dependency-type: "direct"
+    automerge:
+      - dependency-type: "direct"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
-    labels:
-      - "ci"
-    commit-message:
-      prefix: "ci"
