@@ -74,9 +74,27 @@ func TestAuthorizationCodeFlowRoundTrip(t *testing.T) {
 	if ac["issuer_state"] != issuerState {
 		t.Errorf("issuer_state mismatch: %v vs %s", ac["issuer_state"], issuerState)
 	}
-	// Claims must never appear in the front-channel offer.
-	if strings.Contains(offerURL, "carbonKgCO2ePerKWh") || strings.Contains(offerURL, "42") {
-		t.Error("claims leaked into the offer URL")
+	// Claims must never appear in the front-channel offer. Asserted
+	// STRUCTURALLY — the offer must carry exactly the members the spec defines
+	// and nothing else — rather than by substring-matching the URL.
+	//
+	// The original form of this check was `strings.Contains(offerURL, "42")`,
+	// looking for the carbon value. The offer URL also carries a random 43-char
+	// base64 issuer_state, in which the two characters "42" occur by chance
+	// roughly 1-2% of the time, so the test failed intermittently for a reason
+	// unrelated to what it was testing. Searching a short literal in random
+	// base64 is a false-positive generator, not an assertion.
+	wantTop := map[string]bool{"credential_issuer": true, "credential_configuration_ids": true, "grants": true}
+	for k := range offer {
+		if !wantTop[k] {
+			t.Errorf("unexpected member %q in the credential offer — claims must stay issuer-side", k)
+		}
+	}
+	if len(ac) != 1 {
+		t.Errorf("authorization_code grant should carry only issuer_state, got %v", ac)
+	}
+	if _, present := ac["issuer_state"]; !present {
+		t.Error("authorization_code grant missing issuer_state")
 	}
 
 	verifier, err := GenerateCodeVerifier()

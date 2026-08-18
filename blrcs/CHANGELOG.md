@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **A flaky test I introduced in Axis 146 (Axis 152).**
+  `TestAuthorizationCodeFlowRoundTrip` asserted no claims leaked into the
+  credential offer with `strings.Contains(offerURL, "42")`. The offer URL also
+  carries a random 43-character base64 `issuer_state`, in which "42" occurs by
+  chance roughly 1–2% of the time — so the test failed intermittently for a
+  reason unrelated to what it tested. Replaced with a structural assertion: the
+  offer must carry exactly the members the spec defines and nothing else.
+  Verified over 60 consecutive runs. This is the third instance of one bug class
+  in this branch (after the base64 "z"-prefix sniff and the `sig[0] != 0x30`
+  DER check) — matching a short literal against random base64 is a
+  false-positive generator, not an assertion. A sweep found no others.
+
 ### Added
 - **`conformance`: P-256 / EUDI test vectors (Axis 152).** The reference suite
   covered everything the project could do *before* Axis 135 — GTIN, DID, SD-JWT,
