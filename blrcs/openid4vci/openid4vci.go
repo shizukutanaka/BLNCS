@@ -481,7 +481,7 @@ func (iss *Issuer) ExchangeCodeWithTxCode(code, txCode string) (*TokenResponse, 
 type CredentialRequest struct {
 	Format                    string          `json:"format"`
 	CredentialConfigurationID string          `json:"credential_configuration_id,omitempty"`
-	Proof                     json.RawMessage `json:"proof,omitempty"` // 単一鍵保有証明 (MVP では未必須)
+	Proof                     json.RawMessage `json:"proof,omitempty"` // 単一鍵保有証明。Issuer.RequireProof=true で必須化 (§8.2.1.1)
 	// Proofs — batch issuance 用の複数鍵保有証明 (OpenID4VCI 1.0 §8.2)。proof と
 	// 相互排他。設定時は proofs.jwt の各鍵ごとに1クレデンシャルを発行し、
 	// BatchCredentialResponse (credentials 配列) を返す。1回の往復で複数の単一使用

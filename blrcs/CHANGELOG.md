@@ -6,6 +6,42 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING: `compliance` defaults to `eddsa-jcs-2022` (Axis 150).** The W3C VC
+  proof default was `Ed25519Signature2020`, a pre-Data-Integrity suite off the
+  W3C standards track, while the current REC suite sat behind an opt-in nothing
+  set. A product whose claim is *compliance* shipping a deprecated suite in its
+  zero value is itself a conformance defect. `Issuer.DataIntegrity bool` is
+  replaced by `Issuer.LegacyProofSuite bool`, inverting the field so Go's zero
+  value points at the current standard — a default is what you get for writing
+  nothing, and that must not be the deprecated option. Verify already dispatches
+  on proof type/cryptosuite, so existing credentials are unaffected; callers who
+  set `DataIntegrity: true` get a compile error whose fix is deleting the line.
+
+### Fixed
+- **`compliance`: battery passports re-signed with the wrong suite (Axis 150).**
+  Exposed by the default flip. `issueBatteryPassport` calls `Issue` (which
+  signs), mutates `Type` and the Annex XIII `Subject.Attrs`, then re-signs — and
+  that re-sign hand-rolled ed25519 over `canonicalPayload`, the *legacy*
+  construction, whatever suite the issuer had chosen. An `eddsa-jcs-2022` issuer
+  therefore produced a `DataIntegrityProof`-typed credential carrying a legacy
+  base64 proofValue: signed, returned, and permanently unverifiable, with no
+  signal to the caller — the same class as Axis 141's mdoc alg-header mismatch.
+  Now re-signs through `attachProof`. Reachable before this axis by anyone
+  combining `DataIntegrity=true` with a battery passport; it had no test because
+  the two features were only ever exercised separately.
+- **`dcapi`: stopped advertising an mdoc protocol the library cannot service
+  (Axis 150).** `BuildForVerifier` attached an `org-iso-mdoc` request to every
+  DC-API call carrying `{client_id, nonce, response_mode,
+  presentation_definition_compat}` — a shape in no specification, where
+  org-iso-mdoc requires an ISO 18013-7 Annex C DeviceRequest. Strictly worse
+  than offering nothing: a browser preferring that entry negotiates a protocol
+  we cannot fulfil, losing a working OpenID4VP exchange, while the caller
+  believes an mdoc request was built. Deleted rather than guessed at from a
+  paywalled spec; what a real implementation needs is recorded in the code.
+  Three tests asserted the broken shape and were corrected to assert its
+  absence.
+
 ### Added
 - **`mdoc`, `cbor`: x5chain and IACA→DSC certificate validation (Axis 148).**
   mdoc issuance and verification were bare-key — `Verify` required the caller to
