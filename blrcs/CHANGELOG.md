@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`conformance`: P-256 / EUDI test vectors (Axis 152).** The reference suite
+  covered everything the project could do *before* Axis 135 — GTIN, DID, SD-JWT,
+  Merkle, GS1, VC, DCQL, tiers — while the entire P-256 arc shipped with no
+  vectors at all, so a third party could claim "BLRCS-compatible" while sharing
+  none of the cryptography a real EUDI deployment exercises. New `p256`
+  category, all vectors deterministic (ECDSA signing and JWE encryption are
+  randomised by design, so only the verification/derivation direction is a legal
+  vector): PKCE `S256` derivation lifted from **RFC 7636 Appendix B**; ES256
+  verification over raw R‖S (RFC 7518 §3.4 — an implementation emitting ASN.1
+  DER fails, which is the commonest ES256 interop mistake), valid and tampered;
+  JWE ECDH-ES + A128GCM decryption end to end, which covers the Concat KDF
+  OtherInfo construction that is the usual source of RFC 7518 §4.6 bugs;
+  fixed-width JWK coordinate encoding (§6.2.1.2); and off-curve point rejection.
+  A negative-control test asserts the runner *fails* deliberately corrupted
+  expectations, because "all vectors pass" is meaningless if a wrong one also
+  passes.
+
 ### Changed
 - **One gate: `make verify` (Axis 151).** There were three disagreeing
   definitions of "passing": `make ci` (vet+test+cover+build — no race detector,
