@@ -191,10 +191,17 @@ func canonicalPayload(c *Credential) ([]byte, error) {
 		proofPurpose, verificationMethod})
 }
 
-// Issue — DPP発行
-func (i *Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential, error) {
+// newPassportCredential builds the unsigned DPP credential shared by every
+// issuer and every proof suite. Extracted so the Ed25519 and ES256 issuers
+// cannot drift on @context, type, validity or the credentialStatus shape —
+// duplicating this is how two issuers end up emitting subtly different
+// credentials for the same product.
+//
+// status may be nil (no credentialStatus member). Returns the credential and
+// the `now` used, so the caller stamps the proof with the same instant.
+func newPassportCredential(issuerID string, claim PassportClaim, validFor time.Duration, status *CredentialStatus) (*Credential, time.Time, error) {
 	if claim.ProductID == "" {
-		return nil, ErrEmptyProductID
+		return nil, time.Time{}, ErrEmptyProductID
 	}
 	now := time.Now().UTC()
 	cred := &Credential{
@@ -203,13 +210,41 @@ func (i *Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential
 			"https://schema.europa.eu/dpp/v1",
 		},
 		Type:      []string{"VerifiableCredential", "DigitalProductPassport"},
-		Issuer:    i.ID,
+		Issuer:    issuerID,
 		ValidFrom: now,
 		Subject:   claim,
+		Status:    status,
 	}
 	if validFor > 0 {
 		exp := now.Add(validFor)
 		cred.ValidUntil = &exp
+	}
+	return cred, now, nil
+}
+
+// newStatusEntry builds the W3C Bitstring Status List entry, validating the
+// caller-supplied list URL and index.
+func newStatusEntry(statusListURL string, index int, purpose string) (*CredentialStatus, error) {
+	if statusListURL == "" {
+		return nil, errors.New("compliance: statusListCredential URL required")
+	}
+	if index < 0 {
+		return nil, errors.New("compliance: statusListIndex must be non-negative")
+	}
+	return &CredentialStatus{
+		ID:                   fmt.Sprintf("%s#%d", statusListURL, index),
+		Type:                 "BitstringStatusListEntry",
+		StatusPurpose:        purpose,
+		StatusListIndex:      fmt.Sprintf("%d", index),
+		StatusListCredential: statusListURL,
+	}, nil
+}
+
+// Issue — DPP発行
+func (i *Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential, error) {
+	cred, now, err := newPassportCredential(i.ID, claim, validFor, nil)
+	if err != nil {
+		return nil, err
 	}
 	if err := i.attachProof(cred, now); err != nil {
 		return nil, err
@@ -256,36 +291,13 @@ func (i *Issuer) attachProof(cred *Credential, now time.Time) error {
 // bit 位置。purpose は "revocation" | "suspension"。
 // credentialStatus は署名対象に含まれるため、改ざんは検証で検知される。
 func (i *Issuer) IssueWithStatus(claim PassportClaim, validFor time.Duration, statusListURL string, index int, purpose string) (*Credential, error) {
-	if claim.ProductID == "" {
-		return nil, ErrEmptyProductID
+	status, err := newStatusEntry(statusListURL, index, purpose)
+	if err != nil {
+		return nil, err
 	}
-	if statusListURL == "" {
-		return nil, errors.New("compliance: statusListCredential URL required")
-	}
-	if index < 0 {
-		return nil, errors.New("compliance: statusListIndex must be non-negative")
-	}
-	now := time.Now().UTC()
-	cred := &Credential{
-		Context: []string{
-			"https://www.w3.org/ns/credentials/v2",
-			"https://schema.europa.eu/dpp/v1",
-		},
-		Type:      []string{"VerifiableCredential", "DigitalProductPassport"},
-		Issuer:    i.ID,
-		ValidFrom: now,
-		Subject:   claim,
-		Status: &CredentialStatus{
-			ID:                   fmt.Sprintf("%s#%d", statusListURL, index),
-			Type:                 "BitstringStatusListEntry",
-			StatusPurpose:        purpose,
-			StatusListIndex:      fmt.Sprintf("%d", index),
-			StatusListCredential: statusListURL,
-		},
-	}
-	if validFor > 0 {
-		exp := now.Add(validFor)
-		cred.ValidUntil = &exp
+	cred, now, err := newPassportCredential(i.ID, claim, validFor, status)
+	if err != nil {
+		return nil, err
 	}
 	if err := i.attachProof(cred, now); err != nil {
 		return nil, err
@@ -316,12 +328,35 @@ func VerifyAt(cred *Credential, pub ed25519.PublicKey, now time.Time) error {
 	if cred.Proof.ProofPurpose != "assertionMethod" {
 		return ErrInvalidSig
 	}
-	// Dispatch on the proof suite: the current-REC eddsa-jcs-2022 Data Integrity
-	// proof (opt-in at issuance) vs. the default Ed25519Signature2020. Both are
-	// Ed25519 under the hood but differ in canonicalization and proofValue
-	// encoding, so verification must match what issuance produced.
-	if cred.Proof.Type == "DataIntegrityProof" && cred.Proof.Cryptosuite == CryptosuiteEdDSAJCS2022 {
-		return verifyDataIntegrity(cred, pub)
+	// Dispatch on the proof suite. Verification must match what issuance
+	// produced: the suites differ in canonicalization, signature algorithm and
+	// proofValue encoding.
+	//
+	// An unknown cryptosuite is REJECTED rather than falling through to the
+	// legacy Ed25519Signature2020 branch. Falling through would mean a
+	// credential claiming a suite we do not implement gets verified under
+	// different rules than it claims — the verifier would be honouring a
+	// construction nobody asked for.
+	if cred.Proof.Type == "DataIntegrityProof" {
+		switch cred.Proof.Cryptosuite {
+		case CryptosuiteEdDSAJCS2022:
+			return verifyDataIntegrity(cred, pub)
+		case CryptosuiteECDSAJCS2019:
+			// pub carries an uncompressed SEC1 P-256 point here. ed25519.PublicKey
+			// is a named []byte, so the existing signature accommodates it without
+			// an API break — the same approach VerifySDJWTWithBinding uses for
+			// ES256 SD-JWTs.
+			return verifyDataIntegrityES256(cred, pub)
+		default:
+			return fmt.Errorf("%w: unsupported cryptosuite %q", ErrInvalidSig, cred.Proof.Cryptosuite)
+		}
+	}
+	// Legacy Ed25519Signature2020. Guard the key length: ed25519.Verify panics
+	// on a wrong-length key and ed25519.PublicKey is a named []byte, so nothing
+	// at compile time stops one reaching here.
+	if len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("compliance: Ed25519Signature2020 verification key: %w: want %d bytes, got %d",
+			ErrInvalidSig, ed25519.PublicKeySize, len(pub))
 	}
 	sig, err := base64.StdEncoding.DecodeString(cred.Proof.ProofValue)
 	if err != nil {
@@ -426,6 +461,10 @@ func (s *SensorAttester) Attest(commit Commitment, actualValue float64) (*RangeP
 
 // VerifyRange — 認証済センサ公開鍵で範囲証明を検証
 func VerifyRange(pr *RangeProof, attesterPub ed25519.PublicKey) error {
+	// ed25519.Verify panics on a wrong-length key; fail closed instead.
+	if len(attesterPub) != ed25519.PublicKeySize {
+		return ErrInvalidSig
+	}
 	sig, err := base64.StdEncoding.DecodeString(pr.Signature)
 	if err != nil {
 		return fmt.Errorf("sig decode: %w", err)

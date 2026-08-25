@@ -186,3 +186,66 @@ func (i *ES256Issuer) IssueSDJWTVCStatus(vct, subject string, sdClaims, clearCla
 func (i *ES256Issuer) IssueSDJWTVCBound(vct, subject string, sdClaims, clearClaims map[string]any, holderPub []byte, validFor time.Duration) (string, []Disclosure, error) {
 	return buildSDJWT(i, i.ID, vct, subject, sdClaims, clearClaims, holderPub, nil, validFor)
 }
+
+// ============================================================================
+// W3C Verifiable Credentials — ecdsa-jcs-2019 (Axis 153)
+//
+// Until this axis ES256Issuer could issue SD-JWT VCs but not W3C VCs at all:
+// the Credential/attachProof path existed only on the Ed25519 *Issuer. That
+// made the W3C VC the ONE format a P-256-only EUDI ecosystem could not consume
+// from BLRCS, even after Axes 135-148 made SD-JWT, KB-JWT and mdoc P-256
+// capable end to end.
+//
+// The proof is W3C ECDSA Cryptosuites v1.0 `ecdsa-jcs-2019`, which shares its
+// entire hashData construction with `eddsa-jcs-2022` — only the signature
+// algorithm differs (see dataintegrity.go). There is deliberately no
+// LegacyProofSuite equivalent here: Ed25519Signature2020 is an Ed25519-only
+// suite, so there is no legacy ES256 shape to stay compatible with, and
+// offering a switch with one position would be a lie about the choice.
+// ============================================================================
+
+// Issue mints a W3C Verifiable Credential for the passport claim, signed with
+// the ecdsa-jcs-2019 Data Integrity suite. Verify it with compliance.Verify,
+// passing the bytes from PublicKey().
+func (i *ES256Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential, error) {
+	cred, now, err := newPassportCredential(i.ID, claim, validFor, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := i.attachProof(cred, now); err != nil {
+		return nil, err
+	}
+	return cred, nil
+}
+
+// IssueWithStatus is Issue with an embedded W3C Bitstring Status List entry, so
+// the credential is revocable. Field semantics match (*Issuer).IssueWithStatus.
+func (i *ES256Issuer) IssueWithStatus(claim PassportClaim, validFor time.Duration, statusListURL string, index int, purpose string) (*Credential, error) {
+	status, err := newStatusEntry(statusListURL, index, purpose)
+	if err != nil {
+		return nil, err
+	}
+	cred, now, err := newPassportCredential(i.ID, claim, validFor, status)
+	if err != nil {
+		return nil, err
+	}
+	if err := i.attachProof(cred, now); err != nil {
+		return nil, err
+	}
+	return cred, nil
+}
+
+// attachProof stamps the ecdsa-jcs-2019 proof metadata and signs. Metadata is
+// set BEFORE signing so proofPurpose and verificationMethod are inside the
+// hashed proof config and cannot be tampered with post-issuance — the same
+// ordering guarantee the Ed25519 issuer relies on.
+func (i *ES256Issuer) attachProof(cred *Credential, now time.Time) error {
+	cred.Proof = &Proof{
+		Type:               "DataIntegrityProof",
+		Cryptosuite:        CryptosuiteECDSAJCS2019,
+		Created:            now,
+		VerificationMethod: i.ID + "#key-1",
+		ProofPurpose:       "assertionMethod",
+	}
+	return signDataIntegrityES256(cred, i.privateKey)
+}

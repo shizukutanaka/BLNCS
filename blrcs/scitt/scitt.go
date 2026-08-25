@@ -498,6 +498,11 @@ func receiptSigPayload(r *Receipt) []byte {
 // VerifyReceipt — TS署名検証 + 包含証明検証
 // 検証には登録時のstatementが必要 (監査用)
 func VerifyReceipt(r *Receipt, stmt Statement, tsPub ed25519.PublicKey) error {
+	// ed25519.Verify panics on a wrong-length key (ed25519.PublicKey is a named
+	// []byte, so the compiler permits one). Fail closed rather than crash.
+	if len(tsPub) != ed25519.PublicKeySize {
+		return ErrBadReceipt
+	}
 	sig, err := base64.StdEncoding.DecodeString(r.TSSignature)
 	if err != nil {
 		return ErrBadReceipt
