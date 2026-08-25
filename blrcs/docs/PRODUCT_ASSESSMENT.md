@@ -94,9 +94,12 @@ history in `CHANGELOG.md`.
    Axis 148 added the **mdoc issuer PKI** (`x5chain`, IACA→DSC validation), which
    accepts both Ed25519 and P-256 document signer certificates.
 
-   **Still Ed25519-only:** W3C VC proofs (`compliance.Issuer.Issue`, both the
-   `Ed25519Signature2020` and `eddsa-jcs-2022` suites) and SCITT COSE receipt
-   *signing* (BLRCS-internal, so no interop pressure). The former `kms`
+   Axis 153 added **`ecdsa-jcs-2019` W3C VC proofs**, so `ES256Issuer` can now
+   issue W3C VCs — the last interop-relevant Ed25519-only path. The P-256 arc
+   is complete: every credential format BLRCS emits is P-256 capable.
+
+   **Still Ed25519-only:** SCITT COSE receipt *signing* only (BLRCS-internal,
+   so no interop pressure). The former `kms`
    contradiction is gone: Axis 149 deleted the package, and `docs/adr/0001`
    carries an amendment naming the seams that actually provide agility.
 
@@ -146,10 +149,14 @@ history in `CHANGELOG.md`.
    (`openid4vci/pkce.go`, S256 only, anchored on the Appendix B vector), so an
    issuer that authenticates the user itself is now expressible alongside the
    pre-authorized flow. User authentication is supplied by the deploying issuer
-   through a callback rather than implemented here. **Remaining:** Pushed
-   Authorization Requests (RFC 9126) and `authorization_details` (RFC 9396)
-   scoping are not implemented; the offer grants a single pre-registered
-   credential configuration.
+   through a callback rather than implemented here. Axis 154 added **PAR
+   (RFC 9126)**: `/par`, `PushAuthorizationRequest` / `AuthorizeByRequestURI`,
+   single-use references burned by a failed redemption, and the two stale
+   metadata fields corrected. **Remaining:** `authorization_details` (RFC 9396)
+   scoping — the field is carried through PAR but deliberately not echoed as
+   *granted* in the token response, since echoing an unvalidated request as
+   granted would be a false claim; the offer still grants a single
+   pre-registered credential configuration.
 
 6. **Trust-model layer — issuer-side query constraint added (Axis 147).** DCQL
    `trusted_authorities` (§6.1.1) is implemented for all three registered types

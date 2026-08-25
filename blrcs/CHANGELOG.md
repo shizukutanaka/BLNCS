@@ -20,6 +20,51 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   false-positive generator, not an assertion. A sweep found no others.
 
 ### Added
+- **`openid4vci`: Pushed Authorization Requests, RFC 9126 (Axis 154).** The
+  authorization request reached the issuer only through the front channel —
+  client_id, redirect_uri, scope, the PKCE challenge and any
+  `authorization_details` all visible to the user agent, browser history and
+  referrers. PAR inverts that: the client POSTs the request directly over TLS
+  and receives an opaque one-time `request_uri`, so the front channel carries
+  only a reference. It pairs with Axis 146's mandatory PKCE — PKCE binds the
+  code to its requester, PAR keeps the request itself off the browser.
+  `PushAuthorizationRequest` validates with exactly the checks `Authorize`
+  applies, at PUSH time (§2.2: an unusable request must fail on the back
+  channel where the client can act on it, not later in the browser where the
+  user cannot); `AuthorizeByRequestURI` redeems it, single-use and **burned by
+  a failed redemption**, with a constant-time client_id binding (§2.2). The
+  `/par` endpoint returns 201 + `no-store`, rejects a nested `request_uri`
+  (§2.1), and collapses every validation failure to one identical body. 10 new
+  tests.
+- **`compliance`: `ecdsa-jcs-2019` W3C VC proofs (Axis 153).** `ES256Issuer`
+  could not issue a W3C Verifiable Credential at all — the Credential path
+  existed only on the Ed25519 issuer — so the W3C VC was the one format a
+  P-256-only EUDI ecosystem could not consume, even after Axes 135–148. The
+  suite shares its entire hashData construction with `eddsa-jcs-2022`, so this
+  touched no canonicalization code. `VerifyAt` now switches on cryptosuite and
+  **rejects an unknown one** instead of falling through to legacy rules the
+  credential never claimed. `newPassportCredential`/`newStatusEntry` extracted
+  so the two issuers cannot drift on @context, type, validity or status shape.
+
+### Fixed
+- **Remote panic on a wrong-length verification key (Axis 153).** `ed25519.Verify`
+  *panics* on a key that is not 32 bytes, and `ed25519.PublicKey` is a named
+  `[]byte` — so nothing at compile time stops a P-256 point or garbage reaching
+  it. Neither Data Integrity verification nor the legacy Ed25519Signature2020
+  path length-checked the key, so a caller passing the wrong key type to the
+  public `Verify` API crashed the process instead of receiving an error; on a
+  verifier service that is a remote DoS. Audited every `ed25519.Verify` call in
+  the tree: most were already guarded, four were not — `verifyDataIntegrity`,
+  `VerifyAt`'s legacy branch, `VerifyRange` and `scitt.VerifyReceipt` — and all
+  now fail closed. Also added the signature-length check `didwebvh/proof.go`
+  performs and compliance's equivalent omitted.
+- **`openid4vci`: stale issuer metadata (Axis 154).** `grant_types_supported`
+  advertised only the pre-authorized code even after Axis 146 added the
+  authorization code grant, so a wallet could not discover a flow the issuer
+  supports; and `response_types_supported` was `["vp_token"]`, an OpenID4VP
+  presentation value that never belonged in issuer metadata (now `["code"]`).
+
+### Added
 - **`conformance`: P-256 / EUDI test vectors (Axis 152).** The reference suite
   covered everything the project could do *before* Axis 135 — GTIN, DID, SD-JWT,
   Merkle, GS1, VC, DCQL, tiers — while the entire P-256 arc shipped with no

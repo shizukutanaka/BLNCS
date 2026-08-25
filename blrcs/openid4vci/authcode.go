@@ -351,6 +351,13 @@ func (iss *Issuer) gcAuthzLocked(now time.Time) {
 			delete(iss.authzCodes, k)
 		}
 	}
+	// Pushed requests expire the same way: a client that pushes and never
+	// redeems must not leave state behind for the process's lifetime.
+	for k, p := range iss.parRequests {
+		if now.After(p.expiresAt) {
+			delete(iss.parRequests, k)
+		}
+	}
 }
 
 // matchesRegisteredURI compares a requested redirect_uri against the registered

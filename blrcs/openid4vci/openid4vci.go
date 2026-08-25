@@ -154,8 +154,12 @@ type Issuer struct {
 	// Authorization code grant state (Axis 146). Kept separate from preAuths
 	// because an authorization-code offer holds its claims until the user
 	// authenticates, rather than binding them to a redeemable code up front.
-	authzSessions map[string]*authzSession      // issuer_state → pending offer
-	authzCodes    map[string]*authzCodeEntry    // authorization code → bindings
+	authzSessions map[string]*authzSession   // issuer_state → pending offer
+	authzCodes    map[string]*authzCodeEntry // authorization code → bindings
+	// parRequests holds validated Pushed Authorization Requests awaiting
+	// redemption by request_uri (RFC 9126, Axis 154). Keyed by the full
+	// request_uri including its URN prefix.
+	parRequests   map[string]*parkedRequest
 	nonces        map[string]time.Time          // Nonce Endpoint c_nonce → expiry (single-use)
 	notifications map[string]*notificationEntry // notification_id → entry (single-use)
 	lastGC        time.Time                     // 最後に期限切れ掃除を実行した時刻
@@ -1053,15 +1057,25 @@ func (iss *Issuer) Metadata() map[string]any {
 		configs[id] = entry
 	}
 	return map[string]any{
-		"credential_issuer":                   iss.URL,
-		"credential_endpoint":                 iss.URL + "/credential",
-		"token_endpoint":                      iss.URL + "/token",
-		"nonce_endpoint":                      iss.URL + "/nonce",
-		"notification_endpoint":               iss.URL + "/notification",
-		"credential_configurations_supported": configs,
-		"grant_types_supported":               []string{"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
-		"response_types_supported":            []string{"vp_token"},
-		"jwks_uri":                            iss.URL + "/.well-known/jwks.json",
+		"credential_issuer":                     iss.URL,
+		"credential_endpoint":                   iss.URL + "/credential",
+		"token_endpoint":                        iss.URL + "/token",
+		"nonce_endpoint":                        iss.URL + "/nonce",
+		"notification_endpoint":                 iss.URL + "/notification",
+		"credential_configurations_supported":   configs,
+		"pushed_authorization_request_endpoint": iss.URL + "/par",
+		// Both grants the token endpoint actually accepts. This advertised only
+		// the pre-authorized code even after Axis 146 added the authorization
+		// code grant, so a wallet could not discover a flow the issuer supports.
+		"grant_types_supported": []string{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code",
+			GrantTypeAuthorizationCode,
+		},
+		// "code", not "vp_token": vp_token is an OpenID4VP presentation response
+		// type and never belonged in ISSUER metadata. Authorize accepts only
+		// response_type=code.
+		"response_types_supported": []string{"code"},
+		"jwks_uri":                 iss.URL + "/.well-known/jwks.json",
 	}
 }
 
@@ -1097,6 +1111,7 @@ func (iss *Issuer) Handler() http.Handler {
 	mux.HandleFunc("/nonce", iss.handleNonce)
 	mux.HandleFunc("/credential", iss.handleCredential)
 	mux.HandleFunc("/notification", iss.handleNotification)
+	mux.HandleFunc("/par", iss.handlePAR)
 	return mux
 }
 
