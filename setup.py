@@ -107,7 +107,6 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
@@ -120,7 +119,7 @@ setup(
         "bitcoin", "lightning-network", "cryptocurrency", "payments", 
         "blockchain", "finance", "monitoring", "management", "automation"
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     install_requires=prod_requirements,
     extras_require={
         "dev": dev_requirements,
@@ -156,7 +155,7 @@ setup(
     project={
         "readme": "README.md",
         "license": {"text": "MIT"},
-        "requires-python": ">=3.8",
+        "requires-python": ">=3.9",
         "dynamic": ["version"],
         "dependencies": prod_requirements
     }
