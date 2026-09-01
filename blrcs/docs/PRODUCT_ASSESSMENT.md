@@ -1,16 +1,34 @@
 # BLRCS Product Assessment — 長所・短所・改善案
 
-Status date: post-Axis 154 (branch `claude/deepresearch-ultrathink-improve-YbA9t`).
+Status date: post-Axis 155 (branch `claude/deepresearch-ultrathink-improve-YbA9t`).
 
-**Shipping state:** `main` carries BLRCS at roughly Axis 128 (49 packages).
-Axes 129–154 — 55 commits, including the whole P-256/EUDI arc, the JWE
+**Shipping state:** `main` carries BLRCS at roughly Axis 128 (53 packages —
+counted directly from `origin/main`; earlier revisions said 49, which no
+measurement supports).
+Axes 129–155 — 57 commits, including the whole P-256/EUDI arc, the JWE
 response encryption, nested selective disclosure, the OpenID4VCI
-authorization-code flow, the mdoc PKI, and several fail-closed security fixes
-— are **not on main**. Earlier revisions of this document claimed "`main`
-carries the product as published via PR #1"; that is false. PR #1 was CLOSED,
-not merged (the product reached main by another route, at an earlier state).
-Corrected at Axis 150 after checking the PR list rather than trusting the note.
-PR #8 now proposes these axes to `main`; it is open and unmerged.
+authorization-code flow, the mdoc PKI, the SCITT ES256 receipts, and several
+fail-closed security fixes — are **not on main**. PR #8 now proposes these axes
+to `main`; it is open and unmerged.
+
+**Correction of a correction (Axis 155).** Axis 150 replaced the original note
+("`main` carries the product as published via PR #1") with the claim that PR #1
+"was CLOSED, not merged". That replacement is false, and the original note was
+right. GitHub marks a merged pull request `state: closed` *and* sets
+`merged_at`; Axis 150 read only the state field. Verified two ways: PR #1 has
+`merged_at = 2026-07-17T16:08:19Z`, and `git merge-base --is-ancestor` confirms
+PR #1's head commit is an ancestor of `origin/main`, whose history contains the
+merge commit `67d7f7e "Merge #1: BLRCS — EU Digital Product Passport …"`.
+A correction that introduces a new false claim is the same defect as the one it
+fixes; it is recorded here rather than quietly overwritten.
+
+**Package arithmetic, re-measured (Axis 155).** Directory counts taken from
+`git ls-tree` on each ref, using the measure that equals `go list ./...` (43 on
+this branch): `main` has 53 package directories, the branch has 43. The branch
+deletes 13 (`apispec apiversion builder compose ctx httpchain i18n kms openapi
+otelbridge replay saga schemaver`) and adds 3 (`bundle ecdsakey jwe`) —
+53 − 13 + 3 = 43, which reconciles. The `−10,020 LoC` figure is the deletion
+commit's own diffstat (`0c81c14`, 27 files changed, 10020 deletions).
 
 Sections carry their own
 "addressed by Axis N" notes; anything not so marked was last verified at Axis
@@ -314,7 +332,15 @@ third-party consumer, whose change would break `Ledger` and the `storage`
 keypair interface. Remaining: VICAL / ISO 18013-7 Annex C absent (paywalled specs — implementing from memory
 recreates the `org-iso-mdoc` fabrication class); wallet attestation absent
 (drafts still moving); legacy Python CI red on every `main` run since 2025-11
-(pre-existing, owner action); dependabot `automerge:` key is not a real key.
+(pre-existing, owner action); and the dependabot `automerge:` key in
+`.github/dependabot.yml` — **claim downgraded (Axis 155)**: earlier revisions
+asserted flatly that this is not a real Dependabot key, but that was never
+verified, and this environment cannot reach the schema documentation to settle
+it. What is actually known: the key was introduced by PR #7 and preserved
+verbatim; no Dependabot pull request has appeared in the three weeks since,
+though that is weak evidence either way because the actions were freshly
+bumped in PR #6. The owner can settle it in one click on the repository's
+Dependabot page, which reports a configuration error if a key is invalid.
 
 ### Verdict
 

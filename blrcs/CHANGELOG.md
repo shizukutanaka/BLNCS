@@ -38,6 +38,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   header kid each make the suite fail.
 
 ### Fixed
+- **A correction that was itself false (Axis 155).** Axis 150 rewrote the
+  assessment's shipping-state note to say PR #1 "was CLOSED, not merged". That
+  is wrong and the note it replaced was right: GitHub marks a merged pull
+  request `state: closed` *and* sets `merged_at`, and Axis 150 read only the
+  state field. PR #1 has `merged_at = 2026-07-17T16:08:19Z`, its head commit is
+  an ancestor of `origin/main` (`git merge-base --is-ancestor`), and main's
+  history contains the merge commit `67d7f7e`. Recorded in
+  `docs/PRODUCT_ASSESSMENT.md` as a correction of a correction rather than
+  silently overwritten.
+- **Unsupported package counts (Axis 155).** The assessment said `main` carries
+  49 packages; no measurement supports that. Re-measured from `git ls-tree` on
+  each ref using the measure that equals `go list ./...`: main 53, branch 43,
+  with 13 packages deleted and 3 added (53 − 13 + 3 = 43). The `−10,020 LoC`
+  figure was checked and stands — it is the deletion commit's diffstat
+  (`0c81c14`, 27 files, 10020 deletions).
+- **An unverified claim stated as fact (Axis 155).** The assessment asserted the
+  dependabot `automerge:` key "is not a real key". That was never verified and
+  cannot be verified from this environment (egress to the schema documentation
+  is blocked). Downgraded to what is actually known, with the one-click check
+  the owner can run.
+
+### Fixed
 - **A flaky test I introduced in Axis 146 (Axis 152).**
   `TestAuthorizationCodeFlowRoundTrip` asserted no claims leaked into the
   credential offer with `strings.Contains(offerURL, "42")`. The offer URL also
