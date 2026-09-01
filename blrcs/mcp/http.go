@@ -487,6 +487,11 @@ type bucket struct {
 	last   time.Time
 }
 
+// NewTokenBucketLimiter returns a per-principal token bucket admitting rate
+// requests per second, allowing bursts of up to burst requests.
+//
+// The number of tracked principals is capped at defaultMaxBuckets so that an
+// attacker cycling principal identifiers cannot grow the map without bound.
 func NewTokenBucketLimiter(rate, burst float64) *TokenBucketLimiter {
 	return &TokenBucketLimiter{
 		buckets:    make(map[string]*bucket),

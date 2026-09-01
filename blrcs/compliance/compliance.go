@@ -98,6 +98,18 @@ type Proof struct {
 // Issuer — 発行者 (製造者/倉庫/運送業者)
 // ============================================================================
 
+// Issuer issues Digital Product Passport credentials signed with Ed25519:
+// W3C Verifiable Credentials (compliance.Credential) carrying an
+// eddsa-jcs-2022 DataIntegrityProof, and SD-JWT / SD-JWT VC presentations with
+// selective disclosure.
+//
+// It is the Ed25519 counterpart to ES256Issuer. Use this one for the
+// Ed25519-only subsystems (SCITT, did:webvh, status lists); use ES256Issuer
+// when the credential must be verifiable by a P-256-only EUDI wallet.
+//
+// The zero value is not usable — construct with NewIssuer (fresh key) or
+// NewIssuerFromKey (caller-supplied key). The exported fields below are
+// optional settings whose zero values are the recommended behaviour.
 type Issuer struct {
 	ID         string // DID 例: did:web:factory.example/passport
 	privateKey ed25519.PrivateKey
