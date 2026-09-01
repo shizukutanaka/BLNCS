@@ -131,8 +131,10 @@ func (i *ES256Issuer) PublicKey() []byte {
 // JWK or a Multikey.
 func (i *ES256Issuer) PublicKeyECDSA() *ecdsa.PublicKey { return &i.privateKey.PublicKey }
 
-// Alg reports the JOSE algorithm this issuer signs with.
-func (i *ES256Issuer) Alg() string { return "ES256" }
+// Alg reports the JOSE algorithm this issuer signs with. It delegates to the
+// same value the signing path uses, so what the issuer advertises cannot drift
+// from what it actually puts in the JWS header.
+func (i *ES256Issuer) Alg() string { return i.jwsAlg() }
 
 func (i *ES256Issuer) jwsAlg() string  { return "ES256" }
 func (i *ES256Issuer) decoyCount() int { return i.DecoyDigests }

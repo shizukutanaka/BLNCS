@@ -6,6 +6,7 @@ package storage_test
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
 	"strings"
@@ -149,5 +150,41 @@ func TestEncryptedStorageBlobPassThrough(t *testing.T) {
 	rawGot, err := underlying.LoadBlob("revocation-list")
 	if err != nil || string(rawGot) != "plain-data" {
 		t.Errorf("underlying blob should be plaintext: %q, %v", rawGot, err)
+	}
+}
+
+// TestEncryptedStorageKeyPairPassesThrough pins the delegation: the transparency
+// service key pair is NOT in scope for EncryptedStorage's encryption (only
+// statements are — see the type's doc comment), so both halves must reach the
+// underlying store unchanged. A pass-through wired to the wrong underlying
+// method would still compile and still look like it worked; this asserts the
+// value actually lands where the underlying store can read it back.
+func TestEncryptedStorageKeyPairPassesThrough(t *testing.T) {
+	underlying := storage.NewMemoryStorage()
+	es := storage.NewEncryptedStorage(underlying, newTestCipher(t))
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := es.SaveKeyPair(pub, priv); err != nil {
+		t.Fatalf("SaveKeyPair: %v", err)
+	}
+
+	gotPub, gotPriv, err := es.LoadKeyPair()
+	if err != nil {
+		t.Fatalf("LoadKeyPair: %v", err)
+	}
+	if !bytes.Equal(gotPub, pub) || !bytes.Equal(gotPriv, priv) {
+		t.Fatal("key pair did not round-trip through EncryptedStorage")
+	}
+
+	// And it reached the underlying store, not some private copy.
+	directPub, directPriv, err := underlying.LoadKeyPair()
+	if err != nil {
+		t.Fatalf("underlying LoadKeyPair: %v", err)
+	}
+	if !bytes.Equal(directPub, pub) || !bytes.Equal(directPriv, priv) {
+		t.Fatal("key pair did not reach the underlying store")
 	}
 }

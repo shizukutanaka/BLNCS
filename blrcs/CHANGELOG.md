@@ -7,6 +7,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Tests for the last genuinely uncovered paths (Axis 156).** Found by
+  measurement, not by guessing where tests were thin — and the first
+  measurement was itself wrong, which is the point. `go test -coverprofile`
+  over `./...` reported 89.9% and 18 zero-coverage functions, but Go only
+  instruments the package under test, so cross-package exercise is not counted:
+  `cbor.Sign1ES256` showed 0% while the SCITT ES256 tests were calling it.
+  Re-measured with `-coverpkg=./...`: 90.6%, and only five genuinely uncovered
+  functions outside `cmd/` wiring. Three were real gaps, now closed:
+  - `didresolver.multibaseToPublicKey` P-256 branch — a DID document publishing
+    its verification method as a Multikey (`publicKeyMultibase`) rather than a
+    JWK. Multikey is the form W3C Data Integrity recommends, so a P-256 issuer
+    publishing a did:web document that way was never exercised.
+  - `compliance.ES256Issuer.Alg` — now asserted to equal the `alg` that actually
+    appears in the header of a credential the issuer produces, so what it
+    advertises cannot drift from what it signs.
+  - `compliance.ES256Issuer.PublicKeyECDSA` — asserted to agree with
+    `PublicKey()` and to verify a signature made by the private half, rather
+    than merely returning non-nil.
+  - `storage.EncryptedStorage.SaveKeyPair` — asserted to reach the underlying
+    store, since a pass-through wired to the wrong method still compiles.
+
+  The fifth, `telemetry.NopRecorder.Record`, has an empty body: zero statements,
+  so 0.0% is a measurement artifact with nothing to cover. Coverage now 90.8%.
+
+### Changed
+- **One definition of the ES256 algorithm string (Axis 156).**
+  `ES256Issuer.Alg()` and `jwsAlg()` each carried their own `"ES256"` literal.
+  `Alg()` now delegates to `jwsAlg()`. Mutation-checked: making them disagree
+  fails the new header assertion.
+
+### Added
 - **SCITT COSE receipts can be signed with P-256 / ES256 (Axis 155).**
   `IssueCOSEReceiptES256` signs a COSE_Sign1 receipt with `cbor.Sign1ES256`
   (COSE alg `-7`, raw R||S per RFC 9053 section 2.1); `VerifyCOSEReceipt` and
