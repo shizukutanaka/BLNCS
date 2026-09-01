@@ -38,6 +38,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   header kid each make the suite fail.
 
 ### Fixed
+- **The red CI checks diagnosed, not just labelled (Axis 155).** Previous
+  revisions said only that the failing checks were "pre-existing legacy Python
+  CI". Reading the job logs gives three independent root causes, all in the
+  workflow files and none caused by this branch: (1) `requirements.txt` pins
+  `numpy>=1.26.0`, which ships no Python 3.8 wheel, while the matrix includes
+  3.8 — those legs can never install; (2) the job uses containers/`services`
+  across a three-OS matrix, so Windows fails with "Container operations are only
+  supported on Linux runners" and macOS with "docker: command not found";
+  (3) fail-fast cancels the sibling legs, which is why the red-check count
+  varies per run. Fixes: drop 3.8 from the matrix (or relax the numpy pin) and
+  pin the container-using job to `ubuntu-latest`. Not applied here: they live in
+  `.github/workflows/`, which this identity cannot author.
 - **A stale backlog presented as current (Axis 155).** `docs/PRODUCT_ASSESSMENT.md`
   described the two instruction documents as "the remaining code-verified
   backlog", but axes 129–155 completed most of it: O1, O3, O4, O5, O7, S3 and

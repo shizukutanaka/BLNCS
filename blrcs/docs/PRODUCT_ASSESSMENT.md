@@ -355,7 +355,19 @@ third-party consumer, whose change would break `Ledger` and the `storage`
 keypair interface. Remaining: VICAL / ISO 18013-7 Annex C absent (paywalled specs — implementing from memory
 recreates the `org-iso-mdoc` fabrication class); wallet attestation absent
 (drafts still moving); legacy Python CI red on every `main` run since 2025-11
-(pre-existing, owner action); and the dependabot `automerge:` key in
+(pre-existing, owner action) — **now diagnosed (Axis 155)** rather than merely
+labelled: three independent root causes, all in the workflow files, none caused
+by this branch. (1) `requirements.txt` pins `numpy>=1.26.0`, which publishes no
+Python 3.8 wheel, while the matrix includes 3.8 — those legs can never install
+(`No matching distribution found for numpy>=1.26.0`). (2) The job declares
+container/`services` usage but runs on a three-OS matrix: Windows fails with
+`Container operations are only supported on Linux runners`, macOS with
+`docker: command not found`. (3) Fail-fast then cancels the sibling legs, which
+is why the number of red checks varies between runs. Fixes: drop 3.8 from the
+matrix (or relax the numpy pin, if the code still supports 3.8) and restrict the
+container-using job to `ubuntu-latest`. All three live in
+`.github/workflows/`, which the authoring identity cannot modify — hence
+diagnosed here rather than fixed; and the dependabot `automerge:` key in
 `.github/dependabot.yml` — **claim downgraded (Axis 155)**: earlier revisions
 asserted flatly that this is not a real Dependabot key, but that was never
 verified, and this environment cannot reach the schema documentation to settle
