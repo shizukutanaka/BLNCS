@@ -18,6 +18,14 @@
 #
 # The repository hosts two projects, so the Go gate runs only when the push
 # actually carries changes under blrcs/.
+#
+# Known limitation, stated rather than left implicit: the decision of *whether*
+# to run comes from the pushed commit range, but `make verify` runs against the
+# working tree. With a dirty tree those are not the same thing — the gate result
+# describes what is on disk, not what is being pushed. This is the ordinary
+# pre-push trade-off (running against the pushed commits would mean checking out
+# each one), and it is the safer direction: a dirty tree can only make the gate
+# stricter, never let a bad push through that a clean tree would have caught.
 
 set -eu
 
@@ -60,5 +68,3 @@ if ! make -C "$repo_root/blrcs" verify; then
 	echo "pre-push: fix it, or bypass deliberately with 'git push --no-verify'." >&2
 	exit 1
 fi
-
-# (verified end-to-end: see CHANGELOG Axis 160)

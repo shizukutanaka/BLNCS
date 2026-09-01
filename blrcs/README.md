@@ -116,7 +116,9 @@ make hooks    # git config core.hooksPath .githooks
 
 `.githooks/pre-push` then runs `make verify` whenever a push carries changes
 under `blrcs/`, and aborts the push if it fails (`git push --no-verify`
-bypasses it deliberately).
+bypasses it deliberately). It decides *whether* to run from the pushed commit
+range but verifies the working tree, so with a dirty tree those are not the same
+thing — the ordinary pre-push trade-off, erring strict.
 
 **Honest note on CI:** earlier revisions of this file said "CI runs exactly this
 target". It does not — `blrcs/.github/workflows/ci.yml` is correct and ready,

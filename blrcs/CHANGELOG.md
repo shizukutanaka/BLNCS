@@ -25,6 +25,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   the one that matters, because a hook that cannot block is a check that cannot
   fail — a deliberately broken tree makes it print the abort message and exit 1.
 
+  Then tested again, because "the script works when I run it" and "the hook
+  works when git runs it" are two different claims and only the first had been
+  checked. The first end-to-end attempt appeared to refute the second: a real
+  `git push` against a deliberately broken tree **succeeded**. The hook was
+  right and the test was wrong — the commit touched only `.githooks/`, so the
+  range check correctly skipped the Go gate. Repeated with a commit that touches
+  `blrcs/`, the push is refused with exit 1. Worth recording because a
+  false alarm answered by re-reading the evidence is the same discipline as a
+  real defect answered by fixing it.
+
+  That flawed attempt also surfaced a limitation now stated in the hook itself:
+  *whether* to run is decided from the pushed commit range, but `make verify`
+  runs against the working tree. With a dirty tree those differ. It is the
+  ordinary pre-push trade-off and errs in the safe direction — a dirty tree can
+  only make the gate stricter, never admit a push a clean tree would have
+  caught.
+
   This is not a replacement for CI: it runs on a developer's machine and
   `git push --no-verify` bypasses it. It is the automatic execution that exists
   until a maintainer runs the one-line `git mv`.
