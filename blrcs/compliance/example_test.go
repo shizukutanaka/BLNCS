@@ -5,89 +5,93 @@ import (
 	"time"
 
 	"blrcs/compliance"
+	"blrcs/types"
 )
 
-// Demonstrates issuing and verifying a Digital Product Passport.
-func Example_issueDPP() {
-	issuer, _ := compliance.NewIssuer("did:web:factory.example")
-	cred, _ := issuer.Issue(compliance.PassportClaim{
-		ProductID:    "04012345678901",
-		Category:     "battery/ev",
-		CarbonKgCO2e: 48.5,
-	}, 365*24*time.Hour)
-	err := compliance.Verify(cred, issuer.PublicKey())
-	fmt.Println("verified:", err == nil)
-	// Output: verified: true
-}
+// ============================================================================
+// These are the README's "Library usage" examples, as executable Go Examples.
+//
+// They live here rather than only in README.md because documentation that is
+// not compiled rots silently: the previous README example was written against
+// the `builder` package and kept claiming to work for as long as nobody tried
+// it. A Go Example with an Output comment is compiled AND run by `go test`, so
+// the front-door documentation now fails the build the moment it stops being
+// true. Keep these and README.md in sync.
+//
+// Only deterministic values are printed — issuance uses fresh salts, keys and
+// timestamps, so anything else would make the Output comment flaky.
+// ============================================================================
 
-// Demonstrates SD-JWT selective disclosure — revealing only chosen fields.
-func Example_selectiveDisclosure() {
-	issuer, _ := compliance.NewIssuer("did:web:factory.example")
-	sdjwt, _, _ := issuer.IssueSDJWT("holder-1",
-		map[string]any{"carbon": 48.5, "secret": "hidden"},
-		map[string]any{"public": "always"},
-		time.Hour,
-	)
-	presented, _ := compliance.Present(sdjwt, []string{"carbon"})
-	vc, _ := compliance.VerifySDJWT(presented, issuer.PublicKey())
-	fmt.Println("carbon:", vc.Claims["carbon"])
-	fmt.Println("secret leaked:", vc.Claims["secret"] != nil)
+// Example_issueCredential is the README's W3C Verifiable Credential example.
+func Example_issueCredential() {
+	issuer, err := compliance.NewIssuer("did:web:factory.example")
+	if err != nil {
+		panic(err)
+	}
+
+	cred, err := issuer.Issue(compliance.PassportClaim{
+		ProductID:     types.MustGTIN("04012345678901").String(),
+		Category:      "battery/ev",
+		OriginCountry: types.MustCountryCode("JP").String(),
+		Manufacturer:  issuer.ID,
+		CarbonKgCO2e:  48.5,
+		Recyclability: 0.82,
+	}, 10*365*24*time.Hour)
+	if err != nil {
+		panic(err)
+	}
+
+	// The default suite is the current W3C REC, not the legacy one.
+	fmt.Println("proof:", cred.Proof.Type, cred.Proof.Cryptosuite)
+	fmt.Println("product:", cred.Subject.ProductID)
+	fmt.Println("verify:", compliance.Verify(cred, issuer.PublicKey()))
+
 	// Output:
-	// carbon: 48.5
-	// secret leaked: false
+	// proof: DataIntegrityProof eddsa-jcs-2022
+	// product: 04012345678901
+	// verify: <nil>
 }
 
-// Demonstrates building a GS1 Digital Link URI.
-func Example_gs1DigitalLink() {
-	uri, _ := compliance.BuildDLURI("id.gs1.org", compliance.GS1Key{
-		GTIN: "04012345678901", Serial: "SN-001",
-	})
-	fmt.Println(uri)
-	// Output: https://id.gs1.org/01/04012345678901/21/SN-001
-}
+// Example_nestedSelectiveDisclosure is the README's selective-disclosure
+// example: mark disclosable positions with SD, present by path, and the holder
+// reveals one nested field without its siblings.
+func Example_nestedSelectiveDisclosure() {
+	issuer, err := compliance.NewIssuer("did:web:factory.example")
+	if err != nil {
+		panic(err)
+	}
 
-// Demonstrates the GS1 Digital Link discovery flow: a scanned GTIN resolves to a
-// linkset that routes to the DPP, conformity doc, and sustainability info.
-func Example_gs1DigitalLinkDiscovery() {
-	// A QR code encodes this GTIN-based Digital Link URI.
-	uri, _ := compliance.BuildDLURI("id.example.com", compliance.GS1Key{GTIN: "04012345678901"})
+	sdjwt, _, err := issuer.IssueSDJWTVC("DigitalProductPassport", "battery-001",
+		nil, map[string]any{
+			"address": map[string]any{
+				"country": compliance.SD("JP"),
+				"city":    compliance.SD("Osaka"),
+			},
+			"markets": []any{compliance.SD("JP"), compliance.SD("DE")},
+		}, time.Hour)
+	if err != nil {
+		panic(err)
+	}
 
-	// Resolving it returns a linkset routing to each related resource by linkType.
-	ls := compliance.NewLinkset(uri).
-		Add(compliance.LinkTypeDPP,
-			compliance.Link{Href: "https://dpp.example/p/1", Type: "application/vc+ld+json"}).
-		Add(compliance.LinkTypeCertification,
-			compliance.Link{Href: "https://doc.example/conformity.pdf", Type: "application/pdf"})
+	// Reveal only the country. Ancestor disclosures are included automatically.
+	presented, err := compliance.PresentPaths(sdjwt, [][]any{{"address", "country"}})
+	if err != nil {
+		panic(err)
+	}
+	vc, err := compliance.VerifySDJWT(presented, issuer.PublicKey())
+	if err != nil {
+		panic(err)
+	}
 
-	fmt.Println("anchor:", ls.Anchor)
-	fmt.Println("passport:", ls.Get(compliance.LinkTypeDPP)[0].Href)
+	address := vc.Claims["address"].(map[string]any)
+	_, cityDisclosed := address["city"]
+	_, marketsDisclosed := vc.Claims["markets"]
+	fmt.Println("country:", address["country"])
+	fmt.Println("city disclosed:", cityDisclosed)
+	fmt.Println("markets disclosed:", marketsDisclosed)
+
 	// Output:
-	// anchor: https://id.example.com/01/04012345678901
-	// passport: https://dpp.example/p/1
-}
-
-// Demonstrates the ESPR three-tier access model: public data is always readable,
-// restricted/authority data is selectively disclosed.
-func Example_threeTierAccess() {
-	iss, _ := compliance.NewIssuer("did:web:factory.example")
-
-	claims := compliance.NewTieredClaims().
-		Set("carbonKgCO2ePerKWh", 12.5, compliance.TierPublic).          // consumer-visible
-		Set("materialComposition", "NMC811", compliance.TierRestricted). // recyclers
-		Set("supplierContract", "ref-9982", compliance.TierAuthority)    // market surveillance
-
-	// A market-surveillance authority is entitled to everything.
-	authView := claims.ClaimsAtOrBelow(compliance.TierAuthority)
-	// A consumer sees only public data.
-	publicView := claims.ClaimsAtOrBelow(compliance.TierPublic)
-
-	fmt.Println("authority sees:", len(authView), "claims")
-	fmt.Println("consumer sees:", len(publicView), "claim")
-
-	_, disclosures, _ := iss.IssueSDJWTTiered("battery-1", claims, 0)
-	fmt.Println("selectively-disclosable (non-public):", len(disclosures))
-	// Output:
-	// authority sees: 3 claims
-	// consumer sees: 1 claim
-	// selectively-disclosable (non-public): 2
+	// country: JP
+	// city disclosed: false
+	// markets disclosed: true
 }

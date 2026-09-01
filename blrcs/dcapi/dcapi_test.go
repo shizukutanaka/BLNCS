@@ -41,9 +41,17 @@ func TestBuildForVerifier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 両ブラウザ向け要求が生成される
-	if len(call.Digital.Requests) != 2 {
-		t.Fatalf("want 2 requests, got %d", len(call.Digital.Requests))
+	// Only the protocol this library can actually service is advertised.
+	// This asserted 2 before Axis 150: the second was an org-iso-mdoc request
+	// carrying a hand-made envelope that matches no specification, so a browser
+	// preferring it would negotiate a protocol we cannot fulfil.
+	if len(call.Digital.Requests) != 1 {
+		t.Fatalf("want 1 request, got %d", len(call.Digital.Requests))
+	}
+	for _, r := range call.Digital.Requests {
+		if r.Protocol == ProtocolISOmDoc {
+			t.Error("org-iso-mdoc must not be advertised until a real ISO 18013-7 Annex C DeviceRequest is built")
+		}
 	}
 
 	// Chrome向け openid4vp-v1-unsigned が含まれる
@@ -72,8 +80,8 @@ func TestBuildForVerifier(t *testing.T) {
 	if !foundChrome {
 		t.Error("Chrome/Firefox payload missing")
 	}
-	if !foundSafari {
-		t.Error("Safari payload missing")
+	if foundSafari {
+		t.Error("org-iso-mdoc must not be advertised without a real Annex C DeviceRequest")
 	}
 }
 
@@ -147,8 +155,9 @@ func TestToJavaScript(t *testing.T) {
 	if !strings.Contains(js, "openid4vp-v1-unsigned") {
 		t.Error("missing protocol id")
 	}
-	if !strings.Contains(js, "org-iso-mdoc") {
-		t.Error("missing mdoc protocol id")
+	// org-iso-mdoc is deliberately absent: see BuildForVerifier.
+	if strings.Contains(js, "org-iso-mdoc") {
+		t.Error("org-iso-mdoc must not be advertised without a real Annex C DeviceRequest")
 	}
 }
 
@@ -179,7 +188,7 @@ func TestBuildForVerifierDCQL(t *testing.T) {
 			ID:     "dpp",
 			Format: "dc+sd-jwt",
 			Meta:   &openid4vp.CredentialQueryMeta{VCTValues: []string{"https://schema.europa.eu/dpp/sd-jwt-vc/v1"}},
-			Claims: []openid4vp.ClaimQuery{{Path: []string{"carbonKgCO2ePerKWh"}}},
+			Claims: []openid4vp.ClaimQuery{{Path: []any{"carbonKgCO2ePerKWh"}}},
 		}},
 	}
 	call, err := BuildForVerifierDCQL(query, "nonce-xyz", "https://verify.blrcs", "https://verify.blrcs/cb")

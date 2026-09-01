@@ -1,77 +1,95 @@
-name: CI
+name: BLRCS (Go)
 
+# ###########################################################################
+# THIS FILE DOES NOT RUN WHERE IT CURRENTLY LIVES. To activate it:
+#
+#     git mv blrcs/.github/workflows/ci.yml .github/workflows/blrcs-go.yml
+#
+# GitHub executes workflows ONLY from the repository-root .github/workflows/
+# directory. Sitting at blrcs/.github/workflows/, this file has never run a
+# single job. The body has been corrected and is ready to run as-is once moved
+# (it already assumes the root location: see defaults.run.working-directory and
+# the blrcs/-prefixed artifact paths).
+#
+# The move is not automated here because the CI identity that maintains this
+# repository lacks the GitHub `workflows` permission and so cannot create or
+# update files under the root .github/workflows/ directory. A maintainer must
+# run the command above, or grant that permission.
+#
+# NOTE: the gate itself does not depend on this file. `make verify` in blrcs/
+# runs the complete gate — build, gofmt, vet, zero-dependency proof, race
+# tests, lint, and every fuzz target — in about 45 seconds. This workflow
+# exists to run that same command on every push; it is not a second definition
+# of what "passing" means.
+# ###########################################################################
 on:
   push:
     branches: [main]
+    paths: ['blrcs/**', '.github/workflows/blrcs-go.yml']
   pull_request:
     branches: [main]
+    paths: ['blrcs/**', '.github/workflows/blrcs-go.yml']
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: blrcs-go-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: blrcs
+
 jobs:
-  test:
+  # The gate. One target, identical to what a developer runs locally, so CI and
+  # local cannot disagree about whether a change passes.
+  verify:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ['1.22']
+        # The version go.mod declares (the real support floor) and current
+        # stable, so a regression on either is caught.
+        go: ['1.22', 'stable']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
+          cache-dependency-path: blrcs/go.mod
 
-      - name: Vet
-        run: go vet ./...
+      - name: Install golangci-lint
+        # make verify SKIPs lint when the tool is absent rather than failing, so
+        # CI must install it explicitly — otherwise the gate would silently run
+        # weaker here than on a developer machine.
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: blrcs
+          args: --timeout=5m
 
-      - name: Test
-        run: go test -v -race ./...
+      - name: make verify
+        run: make verify
 
-      - name: Build
-        run: |
-          go build ./cmd/blrcs/
-          go build ./cmd/blrcs-mcpd/
-          go build ./cmd/blrcs-demo/
-
+  # Extras that produce artifacts rather than pass/fail signal, so they are not
+  # part of `verify` and do not need the OS matrix.
   coverage:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-
-      - name: Coverage
-        run: |
-          go test -coverprofile=coverage.out ./...
-          go tool cover -func=coverage.out | tail -1
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
+          go-version: 'stable'
+          cache-dependency-path: blrcs/go.mod
+      - run: make cover
+      - uses: actions/upload-artifact@v4
         with:
           name: coverage
-          path: coverage.out
-
-  fuzz:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
-      - name: Fuzz DID (10s)
-        run: go test -run='^$' -fuzz=FuzzDID -fuzztime=10s ./fuzz/
-
-      - name: Fuzz GTIN (10s)
-        run: go test -run='^$' -fuzz=FuzzGTIN -fuzztime=10s ./fuzz/
-
-      - name: Fuzz SD-JWT (10s)
-        run: go test -run='^$' -fuzz=FuzzSDJWT -fuzztime=10s ./fuzz/
-
-      - name: Fuzz TieredClaims (10s)
-        run: go test -run='^$' -fuzz=FuzzTieredClaims -fuzztime=10s ./fuzz/
+          # Paths in `uses:` steps ignore defaults.run.working-directory.
+          path: blrcs/coverage.out
 
   security:
     runs-on: ubuntu-latest
@@ -79,18 +97,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-
-      - name: govulncheck (known CVEs)
+          go-version: 'stable'
+          cache-dependency-path: blrcs/go.mod
+      - name: govulncheck (known CVEs, incl. the Go toolchain itself)
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
-
-      - name: gosec + golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m
 
   sbom:
     runs-on: ubuntu-latest
@@ -98,15 +110,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-
+          go-version: 'stable'
+          cache-dependency-path: blrcs/go.mod
       - name: Generate SBOM (CycloneDX)
         run: |
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest
           cyclonedx-gomod mod -json -output sbom.cyclonedx.json
-
-      - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: sbom
-          path: sbom.cyclonedx.json
+          path: blrcs/sbom.cyclonedx.json

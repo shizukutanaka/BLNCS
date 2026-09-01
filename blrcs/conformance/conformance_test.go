@@ -1213,3 +1213,63 @@ func TestRunVectorPanicRecovery(t *testing.T) {
 		t.Error("expected at least one result")
 	}
 }
+
+// TestP256VectorsAreExercised guards against the failure mode this suite is
+// most vulnerable to: a category that silently passes everything. "All vectors
+// pass" is only meaningful if a WRONG vector fails, so this asserts both that
+// p256 vectors exist in the reference suite and that the runner rejects
+// deliberately corrupted expectations.
+func TestP256VectorsAreExercised(t *testing.T) {
+	suite := ReferenceSuite()
+	var p256Count int
+	for _, v := range suite.Vectors {
+		if v.Category == "p256" {
+			p256Count++
+		}
+	}
+	if p256Count < 6 {
+		t.Fatalf("expected the P-256 vectors to be present, found %d", p256Count)
+	}
+
+	// Each of these is a real operation with a deliberately wrong expectation.
+	// If the runner returns Passed for any of them it is not checking anything.
+	mustFail := []TestVector{
+		{
+			ID: "neg/pkce-wrong-challenge", Category: "p256",
+			Input:    json.RawMessage(`{"op":"pkce_s256","verifier":"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}`),
+			Expected: json.RawMessage(`{"challenge":"definitely-not-the-right-challenge"}`),
+		},
+		{
+			ID: "neg/es256-valid-sig-claimed-invalid", Category: "p256",
+			Input: json.RawMessage(`{"op":"es256_verify",` +
+				`"sec1":"0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",` +
+				`"msg":"424c52435320636f6e666f726d616e636520455332353620766563746f72207631",` +
+				`"sig":"942428c565ea1ca9410b971a4a8ad67318f67e7a1de0d0be92416978db149a2539385d5a33db7d1d517527fc4c69c7d6860d47cd1092d10e8ab742eefb4f52d9"}`),
+			Expected: json.RawMessage(`{"valid":false}`),
+		},
+		{
+			ID: "neg/jwe-wrong-plaintext", Category: "p256",
+			Input: json.RawMessage(`{"op":"jwe_decrypt",` +
+				`"privD":"c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",` +
+				`"compact":"eyJhbGciOiJFQ0RILUVTIiwiZW5jIjoiQTEyOEdDTSIsImVwayI6eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwieCI6IlA4YzVxdVpoaUl3NWhHZWpsQzdQT2p5RGpLVDlyeTJ3Mk9LVGhCLUVHMjgiLCJ5IjoieDRGRGxzd2FRaUdsWHhGUTE3YW9veV9odUFRRHFDdUplNC0yMC1Uc0lXbyJ9LCJhcHUiOiJZbXh5WTNNIn0..AOfPw_7RnH1O7yen.o0WMrQ9Om6EA6yfDtTb8xQdSIzakiyYzYRZCvhRDg1nPl5DwWMfV.krXhBtCcB5-lBxboj357Vw",` +
+				`}`),
+			Expected: json.RawMessage(`{"valid":true,"plaintext":"wrong"}`),
+		},
+		{
+			ID: "neg/off-curve-claimed-valid", Category: "p256",
+			Input:    json.RawMessage(`{"op":"p256_point","point":"0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462298"}`),
+			Expected: json.RawMessage(`{"valid":true}`),
+		},
+		{
+			ID: "neg/unknown-op", Category: "p256",
+			Input:    json.RawMessage(`{"op":"no_such_operation"}`),
+			Expected: json.RawMessage(`{}`),
+		},
+	}
+	for _, v := range mustFail {
+		res := runVector(v)
+		if res.Passed {
+			t.Errorf("%s: a wrong expectation must FAIL, but the runner passed it", v.ID)
+		}
+	}
+}

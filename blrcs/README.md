@@ -56,21 +56,36 @@ BLRCS_DATA_DIR=/data BLRCS_ENCRYPTION_KEY=$(openssl rand -hex 32) blrcs-mcpd
 
 ```go
 import (
+    "time"
+
     "blrcs/compliance"
-    "blrcs/builder"
     "blrcs/types"
 )
 
 issuer, _ := compliance.NewIssuer("did:web:factory.example")
 
-cred, err := builder.NewDPP().
-    Issuer(types.MustDID(issuer.ID)).
-    ProductID(types.MustGTIN("04012345678901")).
-    Category("battery/ev").
-    OriginCountry(types.MustCountryCode("JP")).
-    Carbon(types.MustCarbonFootprint(48.5)).
-    Recyclability(types.MustPercent(82)).
-    Build(issuer)
+cred, err := issuer.Issue(compliance.PassportClaim{
+    ProductID:     types.MustGTIN("04012345678901").String(),
+    Category:      "battery/ev",
+    OriginCountry: types.MustCountryCode("JP").String(),
+    Manufacturer:  issuer.ID,
+    CarbonKgCO2e:  48.5,
+    Recyclability: 0.82,
+}, 10*365*24*time.Hour)
+```
+
+Selective disclosure, including nested and array-element claims, is issued by
+marking positions with `compliance.SD` and presented by path:
+
+```go
+sdjwt, _, _ := issuer.IssueSDJWTVC("DigitalProductPassport", "battery-001",
+    nil, map[string]any{
+        "address": map[string]any{"country": compliance.SD("JP"), "city": compliance.SD("Osaka")},
+        "markets": []any{compliance.SD("JP"), compliance.SD("DE")},
+    }, time.Hour)
+
+// Reveal only the country; ancestors are included automatically.
+presented, _ := compliance.PresentPaths(sdjwt, [][]any{{"address", "country"}})
 ```
 
 For the end-to-end factory flow (SCITT + webhook + CAS + DID resolution), see the
@@ -80,23 +95,39 @@ integration suite:
 go test ./integration/
 ```
 
+## Verifying a change
+
+One command is the complete gate — build, gofmt, vet, the zero-dependency
+proof, race tests, lint, and every fuzz target — in about 45 seconds:
+
+```bash
+make verify
+```
+
+CI runs exactly this target, so a green local run and a green CI run mean the
+same thing. While editing a single package, `make check PKG=compliance` is the
+fast inner loop.
+
+The README examples above are executable Go Examples
+(`compliance/example_test.go`) run by `go test`, so documentation that stops
+being true fails the build rather than rotting quietly.
+
 ## Architecture
 
 ```
 core domain          compliance / scitt / storage / revocation
-typed primitives     types / builder / errkit / telemetry / ctx
+typed primitives     types / errkit / telemetry
 standards            openid4vp / openid4vci / dcapi / mdoc / mcp / vctmeta / conformance
-crypto/keys          kms / atrest
+crypto/keys          ecdsakey (P-256) / jwe (ECDH-ES+A128GCM) / atrest
 encoding             cbor (RFC 8949 + COSE_Sign1 RFC 9052) / jsonschema (draft 2020-12 subset)
 multiformats         base58btc / multihash / JCS (RFC 8785) — did:webvh primitives
-hardening            recovery / replay / saga / fuzz / property / schemaver
-observability        metrics / otelbridge / doctor / healthprobe / diag
+hardening            recovery / fuzz / property
+observability        metrics / doctor / healthprobe / diag
 privacy              privacy
-trust/distribution   didresolver / didwebvh / webhook / cas / compose
-http composition     httpchain / httpmw (recovery+trace+log+auth+CORS+rate-limit)
+trust/distribution   didresolver / didwebvh / webhook / cas
+http composition     httpmw (recovery+trace+log+auth+CORS+rate-limit)
 TLS                  tlsharden (Modern / Strict / mTLS / hardened server timeouts)
-config/spec          openapi / apispec / apiversion / config / capability / semconv
-i18n                 i18n
+config/spec          config / capability / semconv
 integration          integration (E2E triangle test)
 ```
 

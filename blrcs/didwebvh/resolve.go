@@ -28,6 +28,10 @@ type CreateParams struct {
 	// pointer to false leaves portability disabled (the spec default); only
 	// the genesis entry may set this true.
 	Portable *bool
+	// Watchers optionally declares the watcher URLs willing to monitor this DID
+	// (spec §Parameters). nil omits the parameter (active list defaults to
+	// empty); a pointer to a (possibly empty) slice sets the active list.
+	Watchers *[]string
 	// VersionTime is the genesis time (defaults to now UTC).
 	VersionTime time.Time
 	// StateExtra lets the caller add fields to the genesis DID document.
@@ -65,6 +69,7 @@ func Create(p CreateParams) (*LogEntry, string, error) {
 			NextKeyHashes: p.NextKeyHashes,
 			Witness:       p.Witness,
 			Portable:      p.Portable,
+			Watchers:      p.Watchers,
 		},
 		State: state,
 	}
@@ -119,7 +124,11 @@ type UpdateParams struct {
 	// false permanently disables further moves. A pointer to true is only
 	// valid on the FIRST entry of a log — Verify rejects it here since Update
 	// only ever appends a non-genesis entry.
-	Portable    *bool
+	Portable *bool
+	// Watchers (re)declares the watcher URL list from this entry on. nil omits it
+	// (retains the most recent prior value); a pointer to a (possibly empty) slice
+	// replaces the active list — an explicit empty slice clears it.
+	Watchers    *[]string
 	VersionTime time.Time
 	Deactivate  bool
 }
@@ -162,6 +171,7 @@ func Update(p UpdateParams) (*LogEntry, error) {
 			Deactivated:   p.Deactivate,
 			Witness:       p.Witness,
 			Portable:      p.Portable,
+			Watchers:      p.Watchers,
 		},
 		State: p.NewState,
 	}
@@ -193,6 +203,11 @@ type Resolution struct {
 	VersionID   string
 	VersionTime string
 	Deactivated bool
+	// Watchers is the active watcher URL list in effect at the latest entry
+	// (spec §Parameters: resolvers MUST expose this in resolution metadata). It
+	// reflects the most recent entry that explicitly set `watchers`, with omitted
+	// entries retaining the prior value; nil/empty when no watcher was ever set.
+	Watchers []string
 }
 
 // Verify validates a complete did:webvh log and returns the resolved DID
@@ -235,7 +250,8 @@ func Verify(log []LogEntry) (*Resolution, error) {
 		currentUpdateKeys    []string
 		pendingNextHashes    []string // nextKeyHashes committed by the previous entry
 		deactivated          bool
-		portableInEffect     = false // spec default; entry 0 applies its own declaration below
+		portableInEffect     = false  // spec default; entry 0 applies its own declaration below
+		activeWatchers       []string // most recent explicitly-set watchers list (spec default: empty)
 	)
 
 	for i := range log {
@@ -307,6 +323,14 @@ func Verify(log []LogEntry) (*Resolution, error) {
 			}
 		}
 
+		// 5c. Watchers (spec §Parameters): an explicitly-present watchers value
+		//     replaces the active list; an omitted (nil) value retains the prior.
+		//     Not a verification gate — just tracked so Resolution can expose the
+		//     active list in metadata as the spec requires.
+		if entry.Parameters.Watchers != nil {
+			activeWatchers = *entry.Parameters.Watchers
+		}
+
 		// 6. Determine the update keys authorized to sign THIS entry.
 		//    Genesis is self-authorizing; later entries are authorized by the
 		//    keys in effect from the previous entry.
@@ -365,6 +389,7 @@ func Verify(log []LogEntry) (*Resolution, error) {
 		VersionID:   last.VersionID,
 		VersionTime: last.VersionTime,
 		Deactivated: deactivated,
+		Watchers:    activeWatchers,
 	}, nil
 }
 

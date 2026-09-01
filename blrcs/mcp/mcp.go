@@ -15,6 +15,10 @@
 //	register_scitt      — 透明性ログ登録
 //	get_scitt_receipt   — 受領証取得
 //	ledger_checkpoint   — 署名済みtree head
+//	search_passports    — SCITT ledger を subject/issuer で検索 (EN 18222)
+//	build_dpp_bundle    — 自己完結・オフライン検証可能な DPP バンドル生成
+//	anchor_dpp_bundle   — バンドルに archive timestamp を付与/更新 (LTV/ERS)
+//	verify_dpp_bundle   — バンドルをネットワーク無しで検証
 //	issue_sdjwt         — SD-JWT VC発行 (選択開示、status_list claim 自動埋込み)
 //	verify_sdjwt        — SD-JWT VC検証 (exp/KB-JWT込み)
 //	check_revocation    — W3C Bitstring Status List 失効確認
@@ -57,6 +61,7 @@ import (
 	"sync"
 	"time"
 
+	"blrcs/bundle"
 	"blrcs/capability"
 	"blrcs/compliance"
 	"blrcs/didresolver"
@@ -573,6 +578,26 @@ func toolDefs() []tool {
 			InputSchema: rawJSON(`{"type":"object","properties":{}}`),
 		},
 		{
+			Name:        "search_passports",
+			Description: "Search the SCITT ledger for statements by subject (productId/batteryId) and/or issuer (manufacturer DID) using a secondary index — no full-ledger scan (CEN-CENELEC EN 18222 lifecycle searchability). Returns {count, results:[{index, issuer, subject, iat, payloadHash}]}; pass each index to get_scitt_receipt for the full statement + inclusion proof. Both filters together return their intersection; at least one is required.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"subject":{"type":"string","description":"productId / batteryId to search for"},"issuer":{"type":"string","description":"manufacturer/issuer DID to search for"}}}`),
+		},
+		{
+			Name:        "build_dpp_bundle",
+			Description: "Package an issued credential into a self-contained, long-term-verifiable DPP bundle: the credential plus the issuer key, and optionally a signed status-list snapshot and a did:webvh provenance log. The artifact verifies with ZERO network calls, so a passport stays checkable for the product's 10-25 year life even when the issuer's server is gone and the scan point (recycler, port, customs) is offline. Call anchor_dpp_bundle next to add the trusted timestamp that long-term validation requires.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"credential":{"type":"string","description":"The SD-JWT VC (from issue_sdjwt)"},"issuerId":{"type":"string","description":"Registered issuer that signed the credential (preferred — the server looks up its key)"},"issuerPublicKeyB64":{"type":"string","description":"Alternative to issuerId: base64-std Ed25519 public key that signed the credential"},"statusToken":{"type":"string","description":"Optional signed Status List Token snapshot"},"statusPublicKeyB64":{"type":"string","description":"base64-std key that signed statusToken"},"issuerDidLog":{"type":"array","description":"Optional did:webvh log proving the issuer key's provenance"}},"required":["credential"]}`),
+		},
+		{
+			Name:        "anchor_dpp_bundle",
+			Description: "Add an archive timestamp to a DPP bundle using this server's SCITT transparency ledger as the timestamping authority. This supplies the component ETSI long-term validation requires but that stapled evidence alone cannot: proof the credential existed at a trusted time, while the issuer key was still valid. Call again later (before the in-use algorithms weaken) to RENEW — each renewal is taken over the whole bundle including prior anchors, per RFC 4998 Evidence Record Syntax, so older evidence is carried forward.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"bundleJson":{"type":"string","description":"The bundle from build_dpp_bundle"},"issuerId":{"type":"string","description":"Registered issuer whose key submits the anchor statement"}},"required":["bundleJson","issuerId"]}`),
+		},
+		{
+			Name:        "verify_dpp_bundle",
+			Description: "Verify a DPP bundle with NO network access. Always checks the credential signature and validity window; additionally checks issuer-key provenance, revocation and the archive-timestamp chain ONLY when the bundle carries that evidence. The result reports exactly which checks ran, so a missing status snapshot is never mistaken for 'not revoked'. Set the require* flags to fail closed when a required check has no evidence.",
+			InputSchema: rawJSON(`{"type":"object","properties":{"bundleJson":{"type":"string"},"requireProvenance":{"type":"boolean"},"requireRevocationCheck":{"type":"boolean"},"requireTimestamp":{"type":"boolean","description":"Demand a verifiable archive timestamp (long-term validation)"},"maxStatusAgeSeconds":{"type":"integer","description":"Reject a status snapshot older than this many seconds"}},"required":["bundleJson"]}`),
+		},
+		{
 			Name:        "issue_sdjwt",
 			Description: "Issue an SD-JWT VC with selective disclosure. sdClaims become selectively disclosable; clearClaims are always visible. Embeds a status_list claim (revocable via revoke_passport, checkable via check_revocation/get_revocation_list). Returns the full SD-JWT token, a list of disclosures, and the statusListIndex.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"subject":{"type":"string"},"sdClaims":{"type":"object","description":"Claims to make selectively disclosable"},"clearClaims":{"type":"object","description":"Claims always visible in the JWT"},"validForDays":{"type":"integer","default":365}},"required":["issuerId","subject","sdClaims"]}`),
@@ -595,16 +620,16 @@ func toolDefs() []tool {
 		{
 			Name:        "create_did_webvh",
 			Description: "Create a new did:webvh genesis log entry (verifiable history + optional pre-rotation commitment + optional witness requirement + optional portability). issuerId must be a registered issuer whose key becomes the genesis update key. Returns the new DID and a one-entry log — keep it and pass it to update_did_webvh/verify_did_webvh_log; this server does not persist did:webvh logs.",
-			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"didPath":{"type":"string","description":"Method-specific id without the SCID, e.g. example.com:dids:org-1"},"nextKeyHashes":{"type":"array","items":{"type":"string"},"description":"Optional pre-rotation commitment hashes"},"stateExtra":{"type":"object","description":"Extra fields for the genesis DID document"},"witness":{"type":"object","description":"Optional witness requirement: {threshold, witnesses:[{id: did:key DID}]}. Collect proofs from each witness via sign_witness_proof and pass them as witnessLog to verify_did_webvh_log."},"portable":{"type":"boolean","description":"Optional: set true to allow this DID to later be moved to a different domain/path via update_did_webvh while retaining its SCID. Only settable at genesis; defaults to false (not portable)."}},"required":["issuerId","didPath"]}`),
+			InputSchema: rawJSON(`{"type":"object","properties":{"issuerId":{"type":"string"},"didPath":{"type":"string","description":"Method-specific id without the SCID, e.g. example.com:dids:org-1"},"nextKeyHashes":{"type":"array","items":{"type":"string"},"description":"Optional pre-rotation commitment hashes"},"stateExtra":{"type":"object","description":"Extra fields for the genesis DID document"},"witness":{"type":"object","description":"Optional witness requirement: {threshold, witnesses:[{id: did:key DID}]}. Collect proofs from each witness via sign_witness_proof and pass them as witnessLog to verify_did_webvh_log."},"portable":{"type":"boolean","description":"Optional: set true to allow this DID to later be moved to a different domain/path via update_did_webvh while retaining its SCID. Only settable at genesis; defaults to false (not portable)."},"watchers":{"type":"array","items":{"type":"string"},"description":"Optional watcher URLs monitoring this DID (spec §Parameters). Exposed in verify_did_webvh_log's result; not a verification gate."}},"required":["issuerId","didPath"]}`),
 		},
 		{
 			Name:        "update_did_webvh",
 			Description: "Append a new signed entry to an existing did:webvh log (key rotation, document update, deactivation, (re)declaring a witness requirement, or moving domain/path if the log was created with portable=true). signKeyIssuerId must be a registered issuer whose key currently holds update authority over the log. Returns the extended log.",
-			InputSchema: rawJSON(`{"type":"object","properties":{"signKeyIssuerId":{"type":"string"},"log":{"type":"array","description":"The existing verified log (array of LogEntry)"},"newState":{"type":"object","description":"The new DID document"},"updateKeys":{"type":"array","items":{"type":"string"},"description":"Multikey-encoded keys that take update authority from this entry on"},"nextKeyHashes":{"type":"array","items":{"type":"string"}},"deactivate":{"type":"boolean"},"witness":{"type":"object","description":"Optional witness requirement to declare from this entry on: {threshold, witnesses:[{id: did:key DID}]}"},"portable":{"type":"boolean","description":"Optional: set false to permanently disable further domain/path moves. Omit to retain whatever was previously in effect. Cannot be set true here — portability may only be enabled at genesis."}},"required":["signKeyIssuerId","log"]}`),
+			InputSchema: rawJSON(`{"type":"object","properties":{"signKeyIssuerId":{"type":"string"},"log":{"type":"array","description":"The existing verified log (array of LogEntry)"},"newState":{"type":"object","description":"The new DID document"},"updateKeys":{"type":"array","items":{"type":"string"},"description":"Multikey-encoded keys that take update authority from this entry on"},"nextKeyHashes":{"type":"array","items":{"type":"string"}},"deactivate":{"type":"boolean"},"witness":{"type":"object","description":"Optional witness requirement to declare from this entry on: {threshold, witnesses:[{id: did:key DID}]}"},"portable":{"type":"boolean","description":"Optional: set false to permanently disable further domain/path moves. Omit to retain whatever was previously in effect. Cannot be set true here — portability may only be enabled at genesis."},"watchers":{"type":"array","items":{"type":"string"},"description":"Optional: (re)declare watcher URLs from this entry on. Omit to retain the prior list; an empty array clears it."}},"required":["signKeyIssuerId","log"]}`),
 		},
 		{
 			Name:        "verify_did_webvh_log",
-			Description: "Validate a complete did:webvh log (SCID self-certification, entry hash-chaining, sequential versions, update-key authorization, pre-rotation commitments, and — when witnessLog is supplied or any entry declares Parameters.Witness — witness threshold enforcement) and return the resolved DID document. Returns {valid, did, scid, document, versionId, versionTime, deactivated} or {valid:false, reason}.",
+			Description: "Validate a complete did:webvh log (SCID self-certification, entry hash-chaining, sequential versions, update-key authorization, pre-rotation commitments, and — when witnessLog is supplied or any entry declares Parameters.Witness — witness threshold enforcement) and return the resolved DID document. Returns {valid, did, scid, document, versionId, versionTime, deactivated, watchers} or {valid:false, reason}.",
 			InputSchema: rawJSON(`{"type":"object","properties":{"log":{"type":"array","description":"Array of LogEntry as returned by create_did_webvh/update_did_webvh"},"witnessLog":{"type":"array","description":"Optional did-witness.json content: [{versionId, proof:[...]}], collected via sign_witness_proof"}},"required":["log"]}`),
 		},
 		{
@@ -797,6 +822,14 @@ func (s *Server) dispatch(name string, args json.RawMessage) (string, error) {
 		return s.toolRegisterSCITT(args)
 	case "get_scitt_receipt":
 		return s.toolGetSCITTReceipt(args)
+	case "search_passports":
+		return s.toolSearchPassports(args)
+	case "build_dpp_bundle":
+		return s.toolBuildDPPBundle(args)
+	case "anchor_dpp_bundle":
+		return s.toolAnchorDPPBundle(args)
+	case "verify_dpp_bundle":
+		return s.toolVerifyDPPBundle(args)
 	case "ledger_checkpoint":
 		return s.toolCheckpoint(args)
 	case "issue_sdjwt":
@@ -1423,6 +1456,11 @@ func (s *Server) toolCreateDIDWebVH(args json.RawMessage) (string, error) {
 		// or false leaves portability disabled (the spec default) — only the
 		// genesis entry may ever set this true.
 		Portable *bool `json:"portable"`
+		// Watchers optionally lists watcher URLs monitoring this DID (spec
+		// §Parameters). Omitted leaves the active list empty; a (possibly empty)
+		// array sets it. Watchers are exposed in verify_did_webvh_log's result
+		// but are not a verification gate.
+		Watchers *[]string `json:"watchers"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
@@ -1443,6 +1481,7 @@ func (s *Server) toolCreateDIDWebVH(args json.RawMessage) (string, error) {
 		StateExtra:    in.StateExtra,
 		Witness:       in.Witness,
 		Portable:      in.Portable,
+		Watchers:      in.Watchers,
 	})
 	if err != nil {
 		return "", err
@@ -1474,6 +1513,10 @@ func (s *Server) toolUpdateDIDWebVH(args json.RawMessage) (string, error) {
 		// didwebvh.Update's underlying Verify contract — only the genesis entry
 		// may ever set it.
 		Portable *bool `json:"portable"`
+		// Watchers (re)declares the watcher URL list from this entry on. Omitted
+		// retains the prior value; a (possibly empty) array replaces it — an empty
+		// array clears the list.
+		Watchers *[]string `json:"watchers"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", err
@@ -1496,6 +1539,7 @@ func (s *Server) toolUpdateDIDWebVH(args json.RawMessage) (string, error) {
 		Deactivate:    in.Deactivate,
 		Witness:       in.Witness,
 		Portable:      in.Portable,
+		Watchers:      in.Watchers,
 	})
 	if err != nil {
 		return "", err
@@ -1535,6 +1579,7 @@ func (s *Server) toolVerifyDIDWebVHLog(args json.RawMessage) (string, error) {
 		"versionId":   res.VersionID,
 		"versionTime": res.VersionTime,
 		"deactivated": res.Deactivated,
+		"watchers":    res.Watchers,
 	})
 	return string(b), nil
 }
@@ -1773,6 +1818,184 @@ func (s *Server) toolCheckpoint(_ json.RawMessage) (string, error) {
 	cp := s.ledger.SignedCheckpoint()
 	b, _ := json.Marshal(cp)
 	return string(b), nil
+}
+
+// toolSearchPassports queries the SCITT ledger's secondary index for statements
+// by subject (productId/batteryId) and/or issuer (manufacturer DID) — the DPP
+// lifecycle-searchability capability (CEN-CENELEC EN 18222). Returns matching
+// {index, issuer, subject, iat, payloadHash} entries; use each index with
+// get_scitt_receipt to fetch the full statement + inclusion proof. When both
+// subject and issuer are given, returns their intersection (statements matching
+// both). At least one filter is required.
+func (s *Server) toolSearchPassports(args json.RawMessage) (string, error) {
+	var in struct {
+		Subject string `json:"subject"`
+		Issuer  string `json:"issuer"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	if in.Subject == "" && in.Issuer == "" {
+		return "", errors.New("mcp: search_passports requires at least one of subject or issuer")
+	}
+	var results []scitt.SearchResult
+	switch {
+	case in.Subject != "" && in.Issuer != "":
+		// Intersection: filter the (usually smaller) subject match set by issuer.
+		for _, r := range s.ledger.FindBySubject(in.Subject) {
+			if r.Issuer == in.Issuer {
+				results = append(results, r)
+			}
+		}
+	case in.Subject != "":
+		results = s.ledger.FindBySubject(in.Subject)
+	default:
+		results = s.ledger.FindByIssuer(in.Issuer)
+	}
+	b, _ := json.Marshal(map[string]any{
+		"count":   len(results),
+		"results": results,
+	})
+	return string(b), nil
+}
+
+// ============================================================================
+// Long-term offline DPP bundle tools (Axis 134)
+//
+// See the blrcs/bundle package doc for the design rationale: ETSI long-term
+// validation needs a trusted timestamp alongside the key chain and revocation
+// data, and RFC 4998 requires renewing that timestamp as a chain before the
+// in-use algorithms weaken. This server's SCITT ledger acts as the TSA.
+// ============================================================================
+
+func (s *Server) toolBuildDPPBundle(args json.RawMessage) (string, error) {
+	var in struct {
+		Credential string `json:"credential"`
+		// IssuerID names a registered issuer whose public key the server looks
+		// up. Preferred over IssuerPublicKeyB64: nothing else in the tool
+		// surface hands a caller the raw key, so requiring it would make this
+		// tool effectively uncallable by an agent.
+		IssuerID           string              `json:"issuerId"`
+		IssuerPublicKeyB64 string              `json:"issuerPublicKeyB64"`
+		StatusToken        string              `json:"statusToken"`
+		StatusPublicKeyB64 string              `json:"statusPublicKeyB64"`
+		IssuerDIDLog       []didwebvh.LogEntry `json:"issuerDidLog"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	var issuerKey []byte
+	switch {
+	case in.IssuerID != "":
+		s.mu.RLock()
+		iss, ok := s.issuers[in.IssuerID]
+		s.mu.RUnlock()
+		if !ok {
+			return "", fmt.Errorf("unknown issuer: %s", in.IssuerID)
+		}
+		issuerKey = iss.PublicKey()
+	case in.IssuerPublicKeyB64 != "":
+		k, err := base64.StdEncoding.DecodeString(in.IssuerPublicKeyB64)
+		if err != nil {
+			return "", fmt.Errorf("mcp: issuerPublicKeyB64: %w", err)
+		}
+		issuerKey = k
+	default:
+		return "", errors.New("mcp: either issuerId or issuerPublicKeyB64 is required")
+	}
+	opts := bundle.BuildOptions{StatusToken: in.StatusToken, IssuerDIDLog: in.IssuerDIDLog}
+	if in.StatusPublicKeyB64 != "" {
+		sk, err := base64.StdEncoding.DecodeString(in.StatusPublicKeyB64)
+		if err != nil {
+			return "", fmt.Errorf("mcp: statusPublicKeyB64: %w", err)
+		}
+		opts.StatusKey = sk
+	}
+	b, err := bundle.Build(in.Credential, issuerKey, opts)
+	if err != nil {
+		return "", err
+	}
+	raw, err := b.Marshal()
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// toolAnchorDPPBundle takes (or renews) the archive timestamp using this
+// server's transparency ledger, returning the extended bundle.
+func (s *Server) toolAnchorDPPBundle(args json.RawMessage) (string, error) {
+	var in struct {
+		BundleJSON string `json:"bundleJson"`
+		IssuerID   string `json:"issuerId"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	s.mu.RLock()
+	iss, ok := s.issuers[in.IssuerID]
+	s.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("unknown issuer: %s", in.IssuerID)
+	}
+	b, err := bundle.Parse([]byte(in.BundleJSON))
+	if err != nil {
+		return "", err
+	}
+	if err := b.Anchor(s.ledger, iss.PrivateKey(), iss.ID); err != nil {
+		return "", err
+	}
+	raw, err := b.Marshal()
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func (s *Server) toolVerifyDPPBundle(args json.RawMessage) (string, error) {
+	var in struct {
+		BundleJSON             string `json:"bundleJson"`
+		RequireProvenance      bool   `json:"requireProvenance"`
+		RequireRevocationCheck bool   `json:"requireRevocationCheck"`
+		RequireTimestamp       bool   `json:"requireTimestamp"`
+		MaxStatusAgeSeconds    int    `json:"maxStatusAgeSeconds"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", err
+	}
+	b, err := bundle.Parse([]byte(in.BundleJSON))
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	res, err := bundle.Verify(b, bundle.Options{
+		RequireProvenance:      in.RequireProvenance,
+		RequireRevocationCheck: in.RequireRevocationCheck,
+		RequireTimestamp:       in.RequireTimestamp,
+		MaxStatusAge:           time.Duration(in.MaxStatusAgeSeconds) * time.Second,
+	})
+	if err != nil {
+		return verifyResult(false, err.Error()), nil //nolint:nilerr
+	}
+	out := map[string]any{
+		"valid":             true,
+		"subject":           res.Claims.Subject,
+		"issuer":            res.Claims.Issuer,
+		"vct":               res.Claims.VCT,
+		"claims":            res.Claims.Claims,
+		"checkedProvenance": res.CheckedProvenance,
+		"checkedRevocation": res.CheckedRevocation,
+		"checkedTimestamp":  res.CheckedTimestamp,
+		"revoked":           res.Revoked,
+		"anchorCount":       res.AnchorCount,
+	}
+	if res.CheckedProvenance {
+		out["issuerDid"] = res.IssuerDID
+	}
+	if res.CheckedTimestamp && len(res.AnchorTimes) > 0 {
+		out["earliestAnchor"] = res.AnchorTimes[0]
+	}
+	bs, _ := json.Marshal(out)
+	return string(bs), nil
 }
 
 // ============================================================================

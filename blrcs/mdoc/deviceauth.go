@@ -1,6 +1,7 @@
 package mdoc
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/subtle"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"blrcs/cbor"
+	"blrcs/ecdsakey"
 )
 
 // ============================================================================
@@ -92,6 +94,16 @@ func SignDeviceAuth(docType string, sessionTranscript []byte, devicePriv ed25519
 	return cbor.Sign1(cbor.Header{}, nil, payload, nil, devicePriv)
 }
 
+// SignDeviceAuthES256 is SignDeviceAuth for a P-256 device key, producing a
+// COSE_Sign1 with alg ES256 — what a real mDL holder device emits.
+func SignDeviceAuthES256(docType string, sessionTranscript []byte, devicePriv *ecdsa.PrivateKey) ([]byte, error) {
+	payload, err := deviceAuthenticationBytes(docType, sessionTranscript)
+	if err != nil {
+		return nil, err
+	}
+	return cbor.Sign1ES256(cbor.Header{}, nil, payload, nil, devicePriv)
+}
+
 // VerifyDeviceAuth verifies a deviceSignature against the device key, checking both
 // the COSE_Sign1 signature and that its payload equals the expected
 // DeviceAuthenticationBytes for docType + sessionTranscript.
@@ -103,7 +115,12 @@ func VerifyDeviceAuth(deviceSignature []byte, docType string, sessionTranscript 
 // algorithm allowlist (see cbor.Verify1WithAlgs). A nil/empty allowedAlgs
 // accepts any registered algorithm, identical to VerifyDeviceAuth.
 func VerifyDeviceAuthWithAlgs(deviceSignature []byte, docType string, sessionTranscript []byte, deviceKey ed25519.PublicKey, allowedAlgs []int) error {
-	if len(deviceKey) != ed25519.PublicKeySize {
+	// Accept an Ed25519 key (32 bytes) or a P-256 key as an uncompressed SEC1
+	// point (65 bytes). The parameter is typed ed25519.PublicKey for backward
+	// compatibility, but that is a named []byte and cbor.Verify1WithAlgs
+	// dispatches on the COSE alg in the protected header, so the right verifier
+	// is selected by the credential rather than by this type.
+	if len(deviceKey) != ed25519.PublicKeySize && len(deviceKey) != ecdsakey.P256UncompressedSize {
 		return ErrNoDeviceKey
 	}
 	want, err := deviceAuthenticationBytes(docType, sessionTranscript)
@@ -179,7 +196,12 @@ func VerifyDocument(document []byte, issuerPub ed25519.PublicKey, sessionTranscr
 	if docType != "" && vd.DocType != "" && docType != vd.DocType {
 		return nil, ErrDocTypeMismatch
 	}
-	if len(vd.DeviceKey) != ed25519.PublicKeySize {
+	// Pick whichever device key the credential bound itself to.
+	deviceKey := vd.DeviceKey
+	if len(deviceKey) == 0 {
+		deviceKey = vd.DeviceKeyES256
+	}
+	if len(deviceKey) == 0 {
 		return nil, ErrNoDeviceKey
 	}
 
@@ -206,7 +228,7 @@ func VerifyDocument(document []byte, issuerPub ed25519.PublicKey, sessionTranscr
 	if bindDocType == "" {
 		bindDocType = docType
 	}
-	if err := VerifyDeviceAuth(sigBytes, bindDocType, sessionTranscript, vd.DeviceKey); err != nil {
+	if err := VerifyDeviceAuth(sigBytes, bindDocType, sessionTranscript, deviceKey); err != nil {
 		return nil, err
 	}
 	return vd, nil

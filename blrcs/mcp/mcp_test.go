@@ -64,14 +64,14 @@ func TestToolsList(t *testing.T) {
 	resp := callRaw(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 	result := resp["result"].(map[string]any)
 	tools := result["tools"].([]any)
-	if len(tools) != 33 {
-		t.Fatalf("expected 33 tools, got %d", len(tools))
+	if len(tools) != 37 {
+		t.Fatalf("expected 37 tools, got %d", len(tools))
 	}
 	names := make(map[string]bool)
 	for _, tl := range tools {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
-	for _, want := range []string{"issue_passport", "issue_battery_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "issue_sdjwt", "verify_sdjwt", "check_revocation", "revoke_passport", "get_revocation_list", "get_server_capabilities", "create_credential_offer", "issue_mdoc", "verify_mdoc", "build_gs1_link", "parse_gs1_link", "build_gs1_linkset", "parse_gs1_linkset", "create_presentation_request", "get_presentation_result", "resolve_did", "discover_did_services", "verify_passport_by_did", "verify_sdjwt_by_did", "create_did_webvh", "update_did_webvh", "verify_did_webvh_log", "sign_witness_proof", "resolve_vct_metadata", "validate_claims_against_vct"} {
+	for _, want := range []string{"issue_passport", "issue_battery_passport", "verify_passport", "attest_range", "verify_range", "register_scitt", "get_scitt_receipt", "ledger_checkpoint", "search_passports", "build_dpp_bundle", "anchor_dpp_bundle", "verify_dpp_bundle", "issue_sdjwt", "verify_sdjwt", "check_revocation", "revoke_passport", "get_revocation_list", "get_server_capabilities", "create_credential_offer", "issue_mdoc", "verify_mdoc", "build_gs1_link", "parse_gs1_link", "build_gs1_linkset", "parse_gs1_linkset", "create_presentation_request", "get_presentation_result", "resolve_did", "discover_did_services", "verify_passport_by_did", "verify_sdjwt_by_did", "create_did_webvh", "update_did_webvh", "verify_did_webvh_log", "sign_witness_proof", "resolve_vct_metadata", "validate_claims_against_vct"} {
 		if !names[want] {
 			t.Errorf("tool %s missing", want)
 		}
@@ -133,6 +133,65 @@ func TestAttestAndVerifyRangeRoundTrip(t *testing.T) {
 	text := resp["result"].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string)
 	if !strings.Contains(text, `"valid":true`) {
 		t.Fatalf("range proof invalid: %s", text)
+	}
+}
+
+// TestSearchPassportsViaMCP proves the Axis 132 search_passports tool queries
+// the ledger's secondary index by subject and issuer, and requires a filter.
+func TestSearchPassportsViaMCP(t *testing.T) {
+	srv, iss, _ := setupServer(t)
+	reg := func(subject string) {
+		toolCall(t, srv, 1, "register_scitt", map[string]any{
+			"issuerId": iss.ID, "subject": subject, "contentType": "text/plain", "payload": "p-" + subject,
+		})
+	}
+	reg("product-1")
+	reg("product-1")
+	reg("product-2")
+
+	// By subject.
+	res := toolCall(t, srv, 2, "search_passports", map[string]any{"subject": "product-1"})
+	var out struct {
+		Count   int `json:"count"`
+		Results []struct {
+			Index   uint64 `json:"index"`
+			Subject string `json:"subject"`
+			Issuer  string `json:"issuer"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(toolCallText(t, res)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Count != 2 || len(out.Results) != 2 {
+		t.Fatalf("subject product-1: want 2, got %d", out.Count)
+	}
+	if out.Results[0].Subject != "product-1" {
+		t.Errorf("wrong subject in result: %s", out.Results[0].Subject)
+	}
+
+	// By issuer (all three).
+	res = toolCall(t, srv, 3, "search_passports", map[string]any{"issuer": iss.ID})
+	out.Count = 0
+	if err := json.Unmarshal([]byte(toolCallText(t, res)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Count != 3 {
+		t.Errorf("issuer search: want 3, got %d", out.Count)
+	}
+
+	// Intersection (subject AND issuer).
+	res = toolCall(t, srv, 4, "search_passports", map[string]any{"subject": "product-2", "issuer": iss.ID})
+	out.Count = 0
+	if err := json.Unmarshal([]byte(toolCallText(t, res)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Count != 1 {
+		t.Errorf("intersection: want 1, got %d", out.Count)
+	}
+
+	// No filter → error.
+	if errRes := toolCall(t, srv, 5, "search_passports", map[string]any{}); !errRes["isError"].(bool) {
+		t.Error("search_passports with no filter should error")
 	}
 }
 

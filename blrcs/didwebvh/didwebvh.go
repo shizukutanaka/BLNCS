@@ -104,6 +104,17 @@ type Parameters struct {
 	// this entry on, and how many of them (threshold) — see witness.go. nil
 	// means no witness requirement is in effect for this entry.
 	Witness *Witness `json:"witness,omitempty"`
+	// Watchers — spec §Parameters: "a JSON array containing a list of URLs that
+	// have notified the DID Controller that they are willing to watch the DID."
+	// Watchers are an out-of-band monitoring/caching signal and are NOT enforced
+	// in verification; a resolver MUST expose the active watcher list in
+	// resolution metadata (see Resolution.Watchers). A nil pointer means the
+	// parameter is omitted from this entry (the FIRST entry then defaults to the
+	// empty list; a LATER entry retains the most recent prior value). A non-nil
+	// pointer to an empty slice explicitly clears the watcher list; a non-nil
+	// pointer to a non-empty slice replaces the active set. Unlike Portable there
+	// are no restrictions on when watchers may be introduced or changed.
+	Watchers *[]string `json:"watchers,omitempty"`
 }
 
 // Proof is a W3C Data Integrity proof (eddsa-jcs-2022) on a log entry.

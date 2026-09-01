@@ -40,6 +40,15 @@ func TestRegisterJWSVerifierEnablesAlg(t *testing.T) {
 	sdjwt, _, _ := iss.IssueSDJWT("s", map[string]any{"a": 1}, nil, time.Hour)
 
 	const alg = "EdDSA-test"
+	// The verifier registry is package-global, so remove the entry afterwards.
+	// Without this the test is not idempotent: a second run (go test -count=2,
+	// used to shake out flakes) would find the alg already registered and the
+	// "pre-register" assertion below would fail.
+	t.Cleanup(func() {
+		jwsMu.Lock()
+		delete(jwsVerifiers, alg)
+		jwsMu.Unlock()
+	})
 	// Before registration the custom alg is rejected.
 	forged := reHeaderAlg(t, sdjwt, iss.PrivateKey(), alg)
 	if _, err := VerifySDJWT(forged, iss.PublicKey()); err != ErrSDJWTUnsupportedAlg {

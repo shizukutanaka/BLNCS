@@ -81,6 +81,40 @@ func TestDIDWebVHFullLifecycleViaMCP(t *testing.T) {
 	}
 }
 
+// TestDIDWebVHWatchersViaMCP proves the Axis 131 watchers parameter round-trips
+// through create_did_webvh and is surfaced in verify_did_webvh_log's result.
+func TestDIDWebVHWatchersViaMCP(t *testing.T) {
+	srv, iss, _ := setupServer(t)
+
+	createResult := toolCall(t, srv, 1, "create_did_webvh", map[string]any{
+		"issuerId": iss.ID,
+		"didPath":  "example.com:dids:watched",
+		"watchers": []string{"https://watcher.example/notify"},
+	})
+	var createOut struct {
+		DID string              `json:"did"`
+		Log []didwebvh.LogEntry `json:"log"`
+	}
+	if err := json.Unmarshal([]byte(toolCallText(t, createResult)), &createOut); err != nil {
+		t.Fatal(err)
+	}
+
+	verifyResult := toolCall(t, srv, 2, "verify_did_webvh_log", map[string]any{"log": createOut.Log})
+	var verifyOut struct {
+		Valid    bool     `json:"valid"`
+		Watchers []string `json:"watchers"`
+	}
+	if err := json.Unmarshal([]byte(toolCallText(t, verifyResult)), &verifyOut); err != nil {
+		t.Fatal(err)
+	}
+	if !verifyOut.Valid {
+		t.Fatal("log should be valid")
+	}
+	if len(verifyOut.Watchers) != 1 || verifyOut.Watchers[0] != "https://watcher.example/notify" {
+		t.Errorf("watchers not surfaced via MCP verify: %v", verifyOut.Watchers)
+	}
+}
+
 // TestCreateDIDWebVHMissingDIDPath verifies required-field validation.
 func TestCreateDIDWebVHMissingDIDPath(t *testing.T) {
 	srv, iss, _ := setupServer(t)

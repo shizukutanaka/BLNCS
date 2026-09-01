@@ -23,6 +23,7 @@
 package openid4vp
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -52,6 +53,10 @@ var (
 	// values) work forces O(10⁹+) iterations in enforceDCQLConstraints — server DoS
 	// via a single Authorization Request.
 	ErrDCQLQueryTooComplex = errors.New("openid4vp: dcql_query exceeds complexity limits")
+	// ErrDCQLInvalidPath is returned when a ClaimQuery path component is not one
+	// of the three forms OpenID4VP §6.3 allows: a string (object key), a
+	// non-negative integer (array index), or null (all elements of an array).
+	ErrDCQLInvalidPath = errors.New("openid4vp: dcql_query claim path segment is not a string, non-negative integer, or null")
 )
 
 // ============================================================================
@@ -94,8 +99,13 @@ type AuthorizationRequest struct {
 	// エンコードされた JSON オブジェクト。設定時、ProcessResponse は holder の
 	// KB-JWT が transaction_data_hashes でこれらを束縛していることを要求する
 	// (決済/同意を提示に暗号的に結び付ける)。
-	TransactionData []string  `json:"transaction_data,omitempty"`
-	CreatedAt       time.Time `json:"-"` // サーバ内部
+	TransactionData []string `json:"transaction_data,omitempty"`
+	// ClientMetadata — OpenID4VP §5.1 client_metadata。response encryption を
+	// 有効にした verifier はここに `jwks` (暗号化用 EC/P-256 公開鍵) と
+	// `encrypted_response_enc_values_supported` を載せ、ウォレットに暗号化応答の
+	// 送り方を伝える。空なら送出しない。
+	ClientMetadata map[string]any `json:"client_metadata,omitempty"`
+	CreatedAt      time.Time      `json:"-"` // サーバ内部
 }
 
 // AuthorizationResponse — Walletから受け取るレスポンス
@@ -272,6 +282,14 @@ type Verifier struct {
 	// そのまま渡される。
 	AllowedAlgs []string
 
+	// MdocSessionTranscript — ISO 18013-5 SessionTranscript bytes that an
+	// mso_mdoc presentation's DeviceAuth must be bound to. REQUIRED to verify
+	// an mso_mdoc vp_token: without it the presentation is not bound to this
+	// session and is replayable, so ProcessResponse rejects rather than
+	// verifying unbound (see mdoc.go for why these bytes are supplied and not
+	// constructed here).
+	MdocSessionTranscript []byte
+
 	// TrustedIssuers — DCQL フロー用の DID→公開鍵マップ (JSON 非送信)。
 	// dcql_query は PresentationDefinition.AcceptableIssuers を持たないため、
 	// CreateRequestDCQL で発行した request の応答検証はこの集合を信頼アンカーとして
@@ -300,6 +318,26 @@ type Verifier struct {
 	// response_uri を差し替える relay 攻撃を検知できる。鍵が無い場合は従来どおり
 	// 署名なし request のみ (back-compat)。署名検証鍵は ed25519.PrivateKey.Public()。
 	RequestSigningKey ed25519.PrivateKey
+
+	// ResponseEncryptionKey — 任意 (HAIP / OpenID4VP §8.3 response encryption)。
+	// P-256 秘密鍵を設定すると verifier は (a) request の client_metadata で対応する
+	// 公開 JWK と `direct_post.jwt` response_mode を広告し、(b) ウォレットが暗号化して
+	// 送る Authorization Response (JWE: ECDH-ES + A128GCM) を DecryptResponse で復号
+	// してから検証する。HAIP は P-256 上の ECDH-ES を必須とし、Chrome/Safari の
+	// Digital Credentials API は既に暗号化応答を送る。nil の場合は従来どおり平文
+	// direct_post のみ (back-compat)。鍵は必ず P-256 であること。
+	ResponseEncryptionKey *ecdsa.PrivateKey
+
+	// TrustedAuthorityChecker — 任意 (OpenID4VP §6.1.1 trusted_authorities)。
+	// DCQL query が発行者の信頼アンカーを制約する場合、その評価を行うコールバック。
+	// X.509 チェーンの解決、ETSI Trusted List の取得・検証、OpenID Federation の
+	// チェーン解決はいずれもネットワーク I/O と独自の信頼設定を伴うため、
+	// network-free な検証コアからは切り離してある。
+	//
+	// trusted_authorities を含む query に対してこれが未設定なら、提示は **拒否**
+	// される (fail-closed)。受理してしまうと、ウォレットには発行者制約を広告して
+	// おきながら一切適用しないことになり、制約が無い場合より危険なため。
+	TrustedAuthorityChecker TrustedAuthorityChecker
 }
 
 // NewVerifier — Apple式の1行構築。secure-by-default で RequireKeyBinding=true。
@@ -376,6 +414,9 @@ func (v *Verifier) CreateRequestTx(def PresentationDefinition, transactionData [
 		TransactionData:        transactionData,
 		CreatedAt:              time.Now().UTC(),
 	}
+	if err := v.applyResponseEncryption(req); err != nil {
+		return "", "", err
+	}
 	if err := v.store.Save(state, req, v.DefaultTTL); err != nil {
 		return "", "", err
 	}
@@ -414,6 +455,9 @@ func (v *Verifier) CreateRequestDCQL(query DCQLQuery) (requestURL string, state 
 		State:        state,
 		DCQLQuery:    &query,
 		CreatedAt:    time.Now().UTC(),
+	}
+	if err := v.applyResponseEncryption(req); err != nil {
+		return "", "", err
 	}
 	if err := v.store.Save(state, req, v.DefaultTTL); err != nil {
 		return "", "", err
@@ -458,6 +502,15 @@ func buildRequestURL(req *AuthorizationRequest, signKey ed25519.PrivateKey, ttl 
 			return "", fmt.Errorf("openid4vp: marshal transaction_data: %w", err)
 		}
 		q.Set("transaction_data", string(b))
+	}
+	if len(req.ClientMetadata) > 0 {
+		// OpenID4VP §5.1: client_metadata carries the verifier's response-encryption
+		// JWK and supported enc values so the wallet can encrypt its response.
+		b, err := json.Marshal(req.ClientMetadata)
+		if err != nil {
+			return "", fmt.Errorf("openid4vp: marshal client_metadata: %w", err)
+		}
+		q.Set("client_metadata", string(b))
 	}
 	// RFC 9101 JAR (by value): 署名鍵があれば request 全体の署名付き JWT を同梱。
 	if len(signKey) == ed25519.PrivateKeySize {
@@ -528,6 +581,14 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 		AllowedAlgs:             v.AllowedAlgs,
 		ExpectedTransactionData: req.TransactionData,
 	}
+	// Dispatch on the format the query actually asked for. Verifying every
+	// vp_token as an SD-JWT — as this did before Axis 138 — meant an mso_mdoc
+	// presentation failed with a misleading "signature/issuer mismatch" instead
+	// of being verified (or honestly refused).
+	if isMdoc, wantDoctype := mdocQueryFromDCQL(req.DCQLQuery); isMdoc {
+		return v.processMdocResponse(resp, req, acceptable, wantDoctype)
+	}
+
 	var verified *compliance.VerifiedClaims
 	var usedIssuer string
 	// Read the (unverified) iss claim once and verify against exactly that
@@ -553,7 +614,7 @@ func (v *Verifier) ProcessResponse(resp *AuthorizationResponse) (*VerifiedPresen
 	// クレーム制約の充足チェック。dcql_query (v1.0) があればそちらを優先し、
 	// なければ従来の PresentationDefinition.RequiredClaims を使う。
 	if req.DCQLQuery != nil {
-		if err := enforceDCQLConstraints(req.DCQLQuery, verified); err != nil {
+		if err := enforceDCQLConstraints(req.DCQLQuery, verified, v.TrustedAuthorityChecker); err != nil {
 			return nil, err
 		}
 	} else {

@@ -43,7 +43,7 @@ import (
 // TestVector — 1つのコンフォーマンステストケース
 type TestVector struct {
 	ID       string          `json:"id"`       // unique識別子
-	Category string          `json:"category"` // gtin|did|sdjwt|merkle|gs1
+	Category string          `json:"category"` // gtin|did|sdjwt|merkle|gs1|vc|dcql|tier|p256
 	Desc     string          `json:"desc"`
 	Input    json.RawMessage `json:"input"`
 	Expected json.RawMessage `json:"expected"`
@@ -129,6 +129,8 @@ func runVector(v TestVector) Result {
 		return runDCQL(v)
 	case "tier":
 		return runTier(v)
+	case "p256":
+		return runP256(v)
 	}
 	r.Reason = "unknown category: " + v.Category
 	return r
@@ -598,6 +600,85 @@ func ReferenceSuite() *VectorSuite {
 	return &VectorSuite{
 		Version: "1.0",
 		Vectors: []TestVector{
+			// ---- P-256 / EUDI (Axes 135-148) ----
+			// RFC 7636 Appendix B: the specification's own published pair, so
+			// passing proves agreement with the RFC and not merely with BLRCS.
+			{
+				ID: "p256/pkce-rfc7636-appendix-b", Category: "p256",
+				Desc: "PKCE S256 code_challenge derivation (RFC 7636 Appendix B)",
+				Input: raw(map[string]any{
+					"op":       "pkce_s256",
+					"verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+				}),
+				Expected: raw(map[string]any{"challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"}),
+			},
+			// ES256 signatures are raw fixed-width R||S (RFC 7518 §3.4), NOT
+			// ASN.1 DER. An implementation that emits DER fails this vector,
+			// which is the single most common ES256 interop mistake.
+			{
+				ID: "p256/es256-verify-valid", Category: "p256",
+				Desc: "ES256 verification over raw R||S (RFC 7518 §3.4)",
+				Input: raw(map[string]any{
+					"op":   "es256_verify",
+					"sec1": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+					"msg":  "424c52435320636f6e666f726d616e636520455332353620766563746f72207631",
+					"sig":  "942428c565ea1ca9410b971a4a8ad67318f67e7a1de0d0be92416978db149a2539385d5a33db7d1d517527fc4c69c7d6860d47cd1092d10e8ab742eefb4f52d9",
+				}),
+				Expected: raw(map[string]any{"valid": true}),
+			},
+			{
+				ID: "p256/es256-verify-tampered", Category: "p256",
+				Desc: "ES256 verification rejects a flipped signature bit",
+				Input: raw(map[string]any{
+					"op":   "es256_verify",
+					"sec1": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+					"msg":  "424c52435320636f6e666f726d616e636520455332353620766563746f72207631",
+					"sig":  "942428c565ea1ca9410b971a4a8ad67318f67e7a1de0d0be92416978db149a2539385d5a33db7d1d517527fc4c69c7d6860d47cd1092d10e8ab742eefb4f52d8",
+				}),
+				Expected: raw(map[string]any{"valid": false}),
+			},
+			// End-to-end ECDH-ES + Concat KDF + A128GCM. The KDF's OtherInfo
+			// construction (RFC 7518 §4.6.2) is the part most often got wrong;
+			// a wrong one decrypts to nothing, so this vector catches it.
+			// The private key is published deliberately — conformance vectors
+			// are public and this key exists only to make the vector checkable.
+			{
+				ID: "p256/jwe-decrypt-ecdh-es-a128gcm", Category: "p256",
+				Desc: "JWE ECDH-ES + A128GCM decryption (RFC 7516 / RFC 7518 §4.6, §5.3)",
+				Input: raw(map[string]any{
+					"op":      "jwe_decrypt",
+					"privD":   "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
+					"compact": "eyJhbGciOiJFQ0RILUVTIiwiZW5jIjoiQTEyOEdDTSIsImVwayI6eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwieCI6IlA4YzVxdVpoaUl3NWhHZWpsQzdQT2p5RGpLVDlyeTJ3Mk9LVGhCLUVHMjgiLCJ5IjoieDRGRGxzd2FRaUdsWHhGUTE3YW9veV9odUFRRHFDdUplNC0yMC1Uc0lXbyJ9LCJhcHUiOiJZbXh5WTNNIn0..AOfPw_7RnH1O7yen.o0WMrQ9Om6EA6yfDtTb8xQdSIzakiyYzYRZCvhRDg1nPl5DwWMfV.krXhBtCcB5-lBxboj357Vw",
+				}),
+				Expected: raw(map[string]any{"valid": true, "plaintext": "{\"vp_token\":\"conformance\",\"state\":\"v1\"}"}),
+			},
+			// RFC 7518 §6.2.1.2: JWK coordinates are FIXED-WIDTH — padded to the
+			// full field length, not a minimal big-endian integer.
+			{
+				ID: "p256/point-to-jwk-coords", Category: "p256",
+				Desc: "SEC1 uncompressed point to fixed-width JWK coordinates (RFC 7518 §6.2.1.2)",
+				Input: raw(map[string]any{
+					"op":    "p256_point",
+					"point": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+				}),
+				Expected: raw(map[string]any{
+					"valid": true,
+					"x":     "YP7UuiVanTHJYet0xjVtaMBJuJI7Yfps5mliLmDyn7Y",
+					"y":     "eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk",
+				}),
+			},
+			// An off-curve point must be REJECTED, not coerced. Accepting one is
+			// the invalid-curve attack.
+			{
+				ID: "p256/point-off-curve-rejected", Category: "p256",
+				Desc: "Off-curve point rejected (invalid-curve defence)",
+				Input: raw(map[string]any{
+					"op":    "p256_point",
+					"point": "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462298",
+				}),
+				Expected: raw(map[string]any{"valid": false}),
+			},
+
 			// GTIN
 			{
 				ID: "gtin/valid-14digit", Category: "gtin",

@@ -7,6 +7,525 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **SCITT COSE receipts can be signed with P-256 / ES256 (Axis 155).**
+  `IssueCOSEReceiptES256` signs a COSE_Sign1 receipt with `cbor.Sign1ES256`
+  (COSE alg `-7`, raw R||S per RFC 9053 section 2.1); `VerifyCOSEReceipt` and
+  `VerifyCOSEReceiptWithAlgs` now take the raw public key as `[]byte` so a SEC1
+  P-256 key (65-byte uncompressed or 33-byte compressed) can be supplied
+  alongside the existing 32-byte Ed25519 form. The change is source-compatible:
+  `ed25519.PublicKey` is a named slice type and remains assignable to the
+  widened parameter, so every existing caller compiles unchanged. Payload
+  construction is shared by both signers (`coseReceiptPayload`), so an ES256
+  receipt and an EdDSA receipt cover exactly the same bytes.
+
+  This closes the last algorithm gap on an interoperable artifact. The prior
+  assessment justified leaving SCITT Ed25519-only as "internal, no interop
+  pressure" — but `cose_receipt.go`'s own package doc states the COSE receipt
+  exists to be "interoperable with IETF SCITT-compliant verifiers". The
+  justification was an unexamined claim contradicted by the file it described.
+  The JSON receipt, checkpoint, witness cosignature and statement paths remain
+  Ed25519 deliberately: they are the internal/back-compat formats with no
+  third-party consumer, and changing them would break `Ledger`'s key fields and
+  the `storage` `LoadKeyPair`/`SaveKeyPair` interface.
+
+  Tests (`scitt/cose_receipt_es256_test.go`) cover the ES256 round trip with
+  both SEC1 encodings, an assertion that the protected header declares the
+  algorithm that actually signed (and the kid it claims), tamper rejection,
+  wrong-key rejection, inclusion-proof enforcement under ES256, cross-algorithm
+  confusion refused in both directions via the allowlist, and nine malformed
+  key shapes against both receipt algorithms without a panic. Each test was
+  mutation-checked: blanking the root hash, corrupting it, and falsifying the
+  header kid each make the suite fail.
+
+### Fixed
+- **The red CI checks diagnosed, not just labelled (Axis 155).** Previous
+  revisions said only that the failing checks were "pre-existing legacy Python
+  CI". Reading the job logs gives three independent root causes, all in the
+  workflow files and none caused by this branch: (1) `requirements.txt` pins
+  `numpy>=1.26.0`, which ships no Python 3.8 wheel, while the matrix includes
+  3.8 — those legs can never install; (2) the job uses containers/`services`
+  across a three-OS matrix, so Windows fails with "Container operations are only
+  supported on Linux runners" and macOS with "docker: command not found";
+  (3) fail-fast cancels the sibling legs, which is why the red-check count
+  varies per run. Fixes: drop 3.8 from the matrix (or relax the numpy pin) and
+  pin the container-using job to `ubuntu-latest`. Not applied here: they live in
+  `.github/workflows/`, which this identity cannot author.
+- **A stale backlog presented as current (Axis 155).** `docs/PRODUCT_ASSESSMENT.md`
+  described the two instruction documents as "the remaining code-verified
+  backlog", but axes 129–155 completed most of it: O1, O3, O4, O5, O7, S3 and
+  S6 are done, O2 and S5 were resolved by deletion, O6 is partial. Listing
+  finished work as pending is the same defect as claiming unfinished work is
+  done. Replaced with a status table where every row cites evidence in the tree.
+  Genuinely open: S1 (mdoc `transaction_data`), S2 (did:webvh `/whois`), S4
+  (`verifier_info` carry); blocked: S7 (CI at repository root). Those three were
+  left open deliberately — this environment's egress allowlist blocks
+  `openid.net` and `docs.github.com` (verified by request), and implementing a
+  wire format from memory is precisely how the fabricated `org-iso-mdoc`
+  envelope was written.
+- **A correction that was itself false (Axis 155).** Axis 150 rewrote the
+  assessment's shipping-state note to say PR #1 "was CLOSED, not merged". That
+  is wrong and the note it replaced was right: GitHub marks a merged pull
+  request `state: closed` *and* sets `merged_at`, and Axis 150 read only the
+  state field. PR #1 has `merged_at = 2026-07-17T16:08:19Z`, its head commit is
+  an ancestor of `origin/main` (`git merge-base --is-ancestor`), and main's
+  history contains the merge commit `67d7f7e`. Recorded in
+  `docs/PRODUCT_ASSESSMENT.md` as a correction of a correction rather than
+  silently overwritten.
+- **Unsupported package counts (Axis 155).** The assessment said `main` carries
+  49 packages; no measurement supports that. Re-measured from `git ls-tree` on
+  each ref using the measure that equals `go list ./...`: main 53, branch 43,
+  with 13 packages deleted and 3 added (53 − 13 + 3 = 43). The `−10,020 LoC`
+  figure was checked and stands — it is the deletion commit's diffstat
+  (`0c81c14`, 27 files, 10020 deletions).
+- **An unverified claim stated as fact (Axis 155).** The assessment asserted the
+  dependabot `automerge:` key "is not a real key". That was never verified and
+  cannot be verified from this environment (egress to the schema documentation
+  is blocked). Downgraded to what is actually known, with the one-click check
+  the owner can run.
+
+### Fixed
+- **A flaky test I introduced in Axis 146 (Axis 152).**
+  `TestAuthorizationCodeFlowRoundTrip` asserted no claims leaked into the
+  credential offer with `strings.Contains(offerURL, "42")`. The offer URL also
+  carries a random 43-character base64 `issuer_state`, in which "42" occurs by
+  chance roughly 1–2% of the time — so the test failed intermittently for a
+  reason unrelated to what it tested. Replaced with a structural assertion: the
+  offer must carry exactly the members the spec defines and nothing else.
+  Verified over 60 consecutive runs. This is the third instance of one bug class
+  in this branch (after the base64 "z"-prefix sniff and the `sig[0] != 0x30`
+  DER check) — matching a short literal against random base64 is a
+  false-positive generator, not an assertion. A sweep found no others.
+
+### Added
+- **`openid4vci`: Pushed Authorization Requests, RFC 9126 (Axis 154).** The
+  authorization request reached the issuer only through the front channel —
+  client_id, redirect_uri, scope, the PKCE challenge and any
+  `authorization_details` all visible to the user agent, browser history and
+  referrers. PAR inverts that: the client POSTs the request directly over TLS
+  and receives an opaque one-time `request_uri`, so the front channel carries
+  only a reference. It pairs with Axis 146's mandatory PKCE — PKCE binds the
+  code to its requester, PAR keeps the request itself off the browser.
+  `PushAuthorizationRequest` validates with exactly the checks `Authorize`
+  applies, at PUSH time (§2.2: an unusable request must fail on the back
+  channel where the client can act on it, not later in the browser where the
+  user cannot); `AuthorizeByRequestURI` redeems it, single-use and **burned by
+  a failed redemption**, with a constant-time client_id binding (§2.2). The
+  `/par` endpoint returns 201 + `no-store`, rejects a nested `request_uri`
+  (§2.1), and collapses every validation failure to one identical body. 10 new
+  tests.
+- **`compliance`: `ecdsa-jcs-2019` W3C VC proofs (Axis 153).** `ES256Issuer`
+  could not issue a W3C Verifiable Credential at all — the Credential path
+  existed only on the Ed25519 issuer — so the W3C VC was the one format a
+  P-256-only EUDI ecosystem could not consume, even after Axes 135–148. The
+  suite shares its entire hashData construction with `eddsa-jcs-2022`, so this
+  touched no canonicalization code. `VerifyAt` now switches on cryptosuite and
+  **rejects an unknown one** instead of falling through to legacy rules the
+  credential never claimed. `newPassportCredential`/`newStatusEntry` extracted
+  so the two issuers cannot drift on @context, type, validity or status shape.
+
+### Fixed
+- **Remote panic on a wrong-length verification key (Axis 153).** `ed25519.Verify`
+  *panics* on a key that is not 32 bytes, and `ed25519.PublicKey` is a named
+  `[]byte` — so nothing at compile time stops a P-256 point or garbage reaching
+  it. Neither Data Integrity verification nor the legacy Ed25519Signature2020
+  path length-checked the key, so a caller passing the wrong key type to the
+  public `Verify` API crashed the process instead of receiving an error; on a
+  verifier service that is a remote DoS. Audited every `ed25519.Verify` call in
+  the tree: most were already guarded, four were not — `verifyDataIntegrity`,
+  `VerifyAt`'s legacy branch, `VerifyRange` and `scitt.VerifyReceipt` — and all
+  now fail closed. Also added the signature-length check `didwebvh/proof.go`
+  performs and compliance's equivalent omitted.
+- **`openid4vci`: stale issuer metadata (Axis 154).** `grant_types_supported`
+  advertised only the pre-authorized code even after Axis 146 added the
+  authorization code grant, so a wallet could not discover a flow the issuer
+  supports; and `response_types_supported` was `["vp_token"]`, an OpenID4VP
+  presentation value that never belonged in issuer metadata (now `["code"]`).
+
+### Added
+- **`conformance`: P-256 / EUDI test vectors (Axis 152).** The reference suite
+  covered everything the project could do *before* Axis 135 — GTIN, DID, SD-JWT,
+  Merkle, GS1, VC, DCQL, tiers — while the entire P-256 arc shipped with no
+  vectors at all, so a third party could claim "BLRCS-compatible" while sharing
+  none of the cryptography a real EUDI deployment exercises. New `p256`
+  category, all vectors deterministic (ECDSA signing and JWE encryption are
+  randomised by design, so only the verification/derivation direction is a legal
+  vector): PKCE `S256` derivation lifted from **RFC 7636 Appendix B**; ES256
+  verification over raw R‖S (RFC 7518 §3.4 — an implementation emitting ASN.1
+  DER fails, which is the commonest ES256 interop mistake), valid and tampered;
+  JWE ECDH-ES + A128GCM decryption end to end, which covers the Concat KDF
+  OtherInfo construction that is the usual source of RFC 7518 §4.6 bugs;
+  fixed-width JWK coordinate encoding (§6.2.1.2); and off-curve point rejection.
+  A negative-control test asserts the runner *fails* deliberately corrupted
+  expectations, because "all vectors pass" is meaningless if a wrong one also
+  passes.
+
+### Changed
+- **One gate: `make verify` (Axis 151).** There were three disagreeing
+  definitions of "passing": `make ci` (vet+test+cover+build — no race detector,
+  no gofmt, no lint, no dependency check), the GitHub workflow's job list (which
+  had never executed), and whatever maintainers ran by hand. A gate that differs
+  from the one CI runs is not a gate. `make verify` is now the single definition
+  — fmt-check, dup-check, vet, deps-check, build, race tests, lint, fuzz-smoke,
+  cheapest-first — and the workflow's job body is literally `make verify`; `make
+  ci` is an alias. Runs in ~46s. Holes closed while consolidating: `lint` ended
+  in `|| echo "(not installed)"` which swallowed real failures too; `build`
+  enumerated four binaries so a new command was never build-checked; `fuzz`
+  hardcoded 3 of 20 targets, silently skipping every one added since it was
+  written; `test` had neither `-race` nor `-count`. Added `deps-check`, which
+  *proves* the zero-dependency claim (tidy no-op + no go.sum + no external
+  modules) instead of trusting it.
+- **README examples are now executable (Axis 151).** They live in
+  `compliance/example_test.go` as Go Examples with Output assertions, run by
+  `go test`. The previous README example was written against the deleted
+  `builder` package and kept claiming to work because nothing ever compiled it.
+
+### Changed
+- **BREAKING: `compliance` defaults to `eddsa-jcs-2022` (Axis 150).** The W3C VC
+  proof default was `Ed25519Signature2020`, a pre-Data-Integrity suite off the
+  W3C standards track, while the current REC suite sat behind an opt-in nothing
+  set. A product whose claim is *compliance* shipping a deprecated suite in its
+  zero value is itself a conformance defect. `Issuer.DataIntegrity bool` is
+  replaced by `Issuer.LegacyProofSuite bool`, inverting the field so Go's zero
+  value points at the current standard — a default is what you get for writing
+  nothing, and that must not be the deprecated option. Verify already dispatches
+  on proof type/cryptosuite, so existing credentials are unaffected; callers who
+  set `DataIntegrity: true` get a compile error whose fix is deleting the line.
+
+### Fixed
+- **`compliance`: battery passports re-signed with the wrong suite (Axis 150).**
+  Exposed by the default flip. `issueBatteryPassport` calls `Issue` (which
+  signs), mutates `Type` and the Annex XIII `Subject.Attrs`, then re-signs — and
+  that re-sign hand-rolled ed25519 over `canonicalPayload`, the *legacy*
+  construction, whatever suite the issuer had chosen. An `eddsa-jcs-2022` issuer
+  therefore produced a `DataIntegrityProof`-typed credential carrying a legacy
+  base64 proofValue: signed, returned, and permanently unverifiable, with no
+  signal to the caller — the same class as Axis 141's mdoc alg-header mismatch.
+  Now re-signs through `attachProof`. Reachable before this axis by anyone
+  combining `DataIntegrity=true` with a battery passport; it had no test because
+  the two features were only ever exercised separately.
+- **`dcapi`: stopped advertising an mdoc protocol the library cannot service
+  (Axis 150).** `BuildForVerifier` attached an `org-iso-mdoc` request to every
+  DC-API call carrying `{client_id, nonce, response_mode,
+  presentation_definition_compat}` — a shape in no specification, where
+  org-iso-mdoc requires an ISO 18013-7 Annex C DeviceRequest. Strictly worse
+  than offering nothing: a browser preferring that entry negotiates a protocol
+  we cannot fulfil, losing a working OpenID4VP exchange, while the caller
+  believes an mdoc request was built. Deleted rather than guessed at from a
+  paywalled spec; what a real implementation needs is recorded in the code.
+  Three tests asserted the broken shape and were corrected to assert its
+  absence.
+
+### Added
+- **`mdoc`, `cbor`: x5chain and IACA→DSC certificate validation (Axis 148).**
+  mdoc issuance and verification were bare-key — `Verify` required the caller to
+  already hold and trust the issuer key out of band — while every real mdoc
+  ecosystem is X.509. ISO/IEC 18013-5 Annex B defines a long-lived IACA root per
+  issuing authority with short-lived Document Signer Certificates under it, and
+  the DSC travels with the credential in the COSE `x5chain` header (RFC 9360
+  label 33), so a verifier holding only the roots can verify a document from an
+  issuer it has never seen. `Issue` gained `IssuerAuthUnprotected` (built by
+  `X5ChainHeader`, bstr for one certificate and an array of bstr for a chain per
+  §2); `VerifyChain` validates to caller-supplied roots and then verifies
+  issuerAuth **with the key from the validated leaf**. The embedded chain is
+  evidence, never authority: an attacker-rooted chain is rejected, a *genuine*
+  DSC attached to a document signed by a different key is rejected
+  (`ErrDSCKeyMismatch` — without this the chain would be decorative), no
+  configured roots refuses rather than trusting the document, and a missing or
+  malformed x5chain is an error rather than a silent downgrade to bare-key.
+  `ChainVerifyOptions.Now` supports validating an archived document as of its
+  signing time. `AuthorityKeyIdentifier`/`ChainMatchesAKI` let Axis 147's
+  `trusted_authorities` `aki` type be satisfied from a validated chain. New
+  `cbor.ParseSign1Headers` reads headers before the verifying key is known, and
+  is documented as returning unauthenticated values. Bare-key `Verify` and
+  chain-free output are unchanged. VICAL remains out of scope. 10 new tests.
+
+### Added
+- **`openid4vp`: DCQL `trusted_authorities` (Axis 147).** A query could say what
+  claims it wanted but not whose credential it would accept — OpenID4VP 1.0
+  §6.1.1 defines `trusted_authorities` for that, and `dcql.go` explicitly scoped
+  it out. Without it a verifier's only issuer control is its private
+  `TrustedIssuers` map, which the wallet cannot see, so the wallet cannot pick a
+  credential the verifier will accept and the user is walked through a disclosure
+  that is then refused. All three registered types (`aki`, `etsi_tl`,
+  `openid_federation`) are validated and matched with §6.1.1's OR-at-both-levels
+  semantics. Evaluation is delegated to `Verifier.TrustedAuthorityChecker`
+  because resolving an X.509 chain, an ETSI Trusted List or a federation chain
+  needs network I/O and separate trust config that this network-free core
+  deliberately excludes — and **a restricted query with no checker is refused,
+  not accepted**, since a restriction advertised to the wallet but silently
+  unenforced is worse than none. A checker error also refuses rather than
+  degrading to "unrestricted", and the unverifiable case is distinguishable from
+  an ordinary claim mismatch so a misconfigured verifier is not hidden. Queries
+  without the member are unrestricted and unchanged on the wire. 12 new tests.
+
+### Added
+- **`openid4vci`: authorization code flow with mandatory PKCE (Axis 146).** The
+  token endpoint accepted only the pre-authorized code grant, which fits just the
+  case where the issuer already knows the subject and hands them a code out of
+  band. It could not express the ordinary case — a wallet that discovers an
+  issuer and needs the user to authenticate *at* the issuer — which OpenID4VCI
+  1.0 §4.1.1 defines and the EUDI ARF assumes. New `pkce.go` implements RFC 7636
+  S256, anchored on the Appendix B worked example (its published challenge is
+  reproduced byte-for-byte); `plain` is rejected rather than supported, since it
+  protects against nothing in PKCE's threat model, OAuth 2.1 forbids it, and
+  accepting it enables a method-downgrade on the authorization request. New
+  `authcode.go` adds `CreateAuthorizationCodeOffer` / `Authorize` /
+  `ExchangeAuthorizationCode`; user authentication stays the deploying issuer's
+  decision, supplied through the same callback seam the package already uses.
+  Bindings, each with a test for the attack it stops: PKCE required, exact
+  `redirect_uri` matching (RFC 6749 §3.1.2.3), `client_id` matching, codes that
+  are single-use *and burned by a failed redemption* (§4.1.2, §10.5), single-use
+  `issuer_state`, claims kept off the front channel, the authenticated subject
+  overriding the offer's, `response_type=code` only, and every token-endpoint
+  failure collapsed to one byte-identical response so redemption is not an
+  oracle. 20 new tests.
+
+### Added
+- **`compliance`: nested, recursive and array-element disclosure at issuance
+  (Axis 145).** Axis 139 taught the verifier all three RFC 9901 disclosure
+  shapes at any depth, but issuance emitted only flat top-level properties — a
+  claim was disclosable whole or not at all, so revealing `address` revealed
+  every field in it. An `SD()` marker anywhere in a claim tree now makes that
+  position disclosable: object members become 3-element disclosures whose digest
+  joins that object's own `_sd`, array elements become 2-element disclosures
+  replaced in place by `{"...": digest}` (length and order preserved), and
+  because the walk is bottom-up a disclosed value may still carry `_sd`/`...` —
+  recursive disclosure. Trees with no marker are unchanged, so existing callers
+  are unaffected. `PresentPaths` addresses claims by DCQL-style `[]any` paths and
+  auto-includes the ancestor disclosures each selection needs (name-based
+  `Present` could not reach array elements at all, and an orphaned nested
+  disclosure must be rejected as unused); `DisclosablePaths` enumerates what a
+  credential offers; `PresentPathsWithKeyBinding{,ES256}` pair paths with the
+  KB-JWT OpenID4VP requires. Fail-closed at issuance on reserved/structural
+  disclosable names, a caller-supplied literal `_sd`, a misplaced `SD()` marker,
+  and unknown presentation paths. Also fixed two discarded `json.Marshal` errors
+  that turned an unencodable claim value into a signed but permanently
+  unverifiable credential. Decoys now apply at every `_sd`-bearing object (never
+  to arrays, whose length is semantic). 15 new tests.
+
+### Fixed
+- **CI had never run a single job (Axis 144).** GitHub resolves workflows only
+  from the root `.github/workflows/` and Dependabot only from the root
+  `.github/dependabot.yml`, but both lived under `blrcs/.github/` — so the
+  2100+ tests, 20 fuzz targets, govulncheck, golangci-lint and SBOM job the
+  config described had never gated a commit, and neither the module nor the
+  pinned Actions were monitored. **Dependabot is fixed** (moved to
+  `.github/dependabot.yml`; its gomod entry also pointed at `/` while the module
+  lives in `/blrcs`). **The workflow is corrected but still needs a maintainer to
+  install it**: the CI identity maintaining this repo lacks the GitHub
+  `workflows` permission and cannot write under the root `.github/workflows/`,
+  so `blrcs/.github/workflows/ci.yml` carries the fixes plus a header stating it
+  must be moved (`git mv blrcs/.github/workflows/ci.yml
+  .github/workflows/blrcs-go.yml`) to take effect. Its body already assumes the
+  root location (`defaults.run.working-directory: blrcs`, `blrcs/**` path
+  filters, `blrcs/`-prefixed artifact paths). Gaps fixed in it: build all
+  commands (`blrcs-mcp` was never build-checked), discover all 20 fuzz targets
+  from source rather than naming 4 by hand, enforce gofmt, enforce the
+  zero-dependency guarantee (`go mod tidy` no-op + no go.sum + no external
+  modules), and test both the Go floor go.mod declares and stable.
+
+### Added
+- **`jwe`, `openid4vp`: encrypted OpenID4VP Authorization Response (Axis 143).**
+  HAIP and OpenID4VP §8.3 require verifiers to accept an encrypted Authorization
+  Response and pin ECDH-ES direct key agreement on P-256 with A128GCM — what
+  Chrome/Safari's Digital Credentials API emit — but BLRCS had no JWE, so the
+  holder's disclosed claims travelled in cleartext through the browser/relay
+  boundary. The gap was blocked on P-256, now delivered by the Axis 135–142 arc.
+  New stdlib-only `jwe` package (RFC 7516 compact serialization, RFC 7518 §4.6
+  ECDH-ES with the NIST SP 800-56A Concat KDF, §5.3 A128GCM), anchored on the
+  RFC 7518 Appendix C worked example — its published derived key is reproduced
+  byte-for-byte, so interop is proven. Only the one ECDH-ES/A128GCM pair is
+  implemented; any other alg/enc, or the JWE Encrypted Key that direct agreement
+  forbids, is rejected before any crypto. Wired into the verifier:
+  `ResponseEncryptionKey` (P-256) makes the request advertise the encryption JWK
+  in client_metadata and switch response_mode to `direct_post.jwt`; the callback
+  transparently decrypts a `response` JWE before verifying. Verifiers without the
+  key are unchanged (plaintext direct_post). 17 new tests + a public-API E2E
+  driver.
+
+### Fixed
+- **`compliance`: KB-JWT holder binding was Ed25519-only, blocking real EUDI
+  presentations (Axis 142).** An EUDI wallet's device key is P-256, so its
+  key-binding JWT is ES256-signed and its `cnf` key is EC/P-256, but the
+  verifier pinned the KB-JWT alg to EdDSA and the cnf key to OKP/Ed25519 — so
+  a presentation could not complete even though the credential (Axis 137) and
+  its disclosure resolution (Axis 136/139) were already P-256 capable. This
+  closes the last gap in the P-256 presentation loop. `extractHolderKey` now
+  yields either the Ed25519 or the P-256 holder key (EC/P-256 validated
+  on-curve via `ecdsakey.ParseP256PublicKey` — invalid-curve defence at the
+  parse boundary); `verifyKBJWT` dispatches on the KB-JWT alg but **requires**
+  it to name the algorithm of the key the issuer bound in `cnf`, so an EdDSA
+  KB-JWT against a P-256 cnf (or vice versa) is rejected — the binding is to
+  THE cnf key, closing alg-confusion. `buildSDJWT` embeds an EC/P-256 cnf for
+  a 65-byte SEC1 holder key; `PresentWithKeyBindingES256` emits the ES256
+  KB-JWT (raw R‖S per RFC 7518 §3.4), sharing the sd_hash/transaction_data
+  logic with the Ed25519 path. 6 new tests + a public-API E2E driver. W3C VC
+  proofs and SCITT receipt signing remain the last Ed25519-only paths.
+- **`openid4vp`: DCQL claims paths could not address array elements (Axis
+  140).** OpenID4VP §6.3 allows a path component to be a string (object key),
+  a non-negative integer (array index) or null (all elements), but
+  `ClaimQuery.Path` was `[]string` — the latter two were inexpressible — and
+  the walker descended objects only. So after Axis 139 a verifier could accept
+  a credential with selectively-disclosed array elements but not constrain
+  them. `Path` is now `[]any` and `resolvePath` returns every selected value.
+  Wildcard + `values` matches when **any** selected value is in the allowlist
+  (identical to before for single-valued paths). Components are validated up
+  front (`ErrDCQLInvalidPath`); a fractional or negative index is rejected
+  rather than truncated. 9 new tests; the `[]any` change rippled to `dcapi`
+  and `integration` call sites.
+- **`compliance`: RFC 9901 array-element and recursive disclosures were
+  rejected as malformed (Axis 139).** The resolver understood only the flat,
+  top-level `[salt, name, value]` shape whose digest sat in the top-level
+  `_sd`, so a credential from any conforming issuer using array-element
+  (`[salt, value]` + `{"...": digest}`) or recursive (nested `_sd`)
+  disclosures was refused — an interop failure that looks like tampering. New
+  `disclosure.go` walks the payload and substitutes disclosures at any depth,
+  enforcing the spec's MUSTs: each digest referenced at most once, every
+  presented disclosure used, distinct `_sd` strings, single-key `...`
+  placeholders, collision checks at every depth, and rejection of shape
+  confusion in both directions. Recursion is depth-bounded. Also stops the
+  issuer emitting the invalid `"_sd": null` for credentials with no
+  disclosable claims (tolerated on the verify side for older credentials).
+  New error sentinels wrap `ErrSDJWTMalformed` so `errors.Is` callers are
+  unaffected. 17 new tests. Verification only — issuance still emits flat
+  disclosures, which no longer blocks interop.
+- **`openid4vp`: mso_mdoc presentations were mis-routed to the SD-JWT verifier
+  (Axis 138).** `ProcessResponse` verified every vp_token as an SD-JWT
+  whatever format the DCQL query requested, so an mdoc presentation failed
+  with a misleading "signature/issuer mismatch"; and
+  `CredentialQuery.Meta.DoctypeValue` was declared but never read, so any
+  doctype was accepted. Now dispatches on format: the mdoc path decodes the
+  DeviceResponse, verifies issuerAuth and DeviceAuth, and enforces the
+  doctype twice (envelope, then the MSO-attested value, since the envelope is
+  unauthenticated until the signature verifies). **SessionTranscript is
+  supplied, not invented** — it is the replay defence, and while OpenID4VP
+  Annex C defines the DC-API form, the vanilla (direct_post) form is still
+  open upstream (OpenID4VP#402/#519, HAIP#137). An mdoc presentation with no
+  configured `Verifier.MdocSessionTranscript` is **rejected**, not verified
+  unbound. Adds the `FormatSDJWT`/`FormatMsoMdoc` constants. 7 new tests.
+
+### Added
+- **`cbor`, `mdoc`: ES256 mdoc issuance and device auth (Axis 141).**
+  Completes the P-256 story — COSE *signing* was still Ed25519-only, so BLRCS
+  could consume a real mDL but not produce one. New `cbor.Sign1ES256` (raw
+  fixed-width `R‖S` per RFC 9053 §2.1, `*ecdsa.PrivateKey`-typed so keys cannot
+  cross paths), plus `IssuerPrivES256` / `DeviceKeyES256` on `mdoc.IssueParams`
+  with the device key as an EC2 COSE_Key (RFC 9052 §7) validated on-curve when
+  parsed back. Implementing it surfaced a real bug — mdoc stamped
+  `AlgEdDSA` on ES256 signatures, yielding well-formed but unverifiable
+  credentials — now fixed and closed as a class: both signers reject a
+  protected header declaring a different algorithm (`ErrAlgHeaderMismatch`).
+  10 new tests. SCITT COSE receipts remain EdDSA (BLRCS-internal, no interop
+  argument).
+- **`compliance`: ES256 SD-JWT issuance (Axis 137).** Completes the P-256
+  story — BLRCS can now **issue** credentials a P-256-only EUDI ecosystem
+  accepts, verified end to end (issue → publish EC JWK in a DID document →
+  resolve → verify from the DID alone). New `ES256Issuer` is a distinct type,
+  not a flag: `Issuer.PrivateKey()` feeds Ed25519-only subsystems (SCITT,
+  did:webvh, status lists), so a mode flag would hand them a nil key at
+  runtime — a separate type makes that a compile error. The SD-JWT
+  construction is shared via an unexported `jwsSigner` seam, so decoys and
+  disclosure logic cannot fork per algorithm. Signatures use `FillBytes` for
+  the RFC 7518 §3.4 fixed 64-octet width (a leading-zero coordinate would
+  otherwise emit a short encoding conforming verifiers reject). Nonces rely on
+  Go's *hedged* ECDSA (k from an AES-CTR CSPRNG keyed by
+  `SHA2-512(priv.D‖entropy‖hash)`), which resists RNG failure while keeping
+  the fault-injection tolerance strict RFC 6979 determinism gives up. 9 new
+  tests. Scope: SD-JWT only — W3C VC, mdoc, SCITT and `kms` remain Ed25519.
+- **`didresolver`, `multiformats`: P-256 key resolution (Axis 136).** Axis 135
+  could verify an ES256 credential only if the key was already in hand — no
+  resolver path could return a P-256 key. Adds an algorithm-tagged
+  `PublicKey{Alg, Bytes}` + `ResolveAllKeys` covering did:web / did:webvh JWKs,
+  did:key, did:jwk and Multikey, so resolve-then-verify now works end to end.
+  Deliberately a **parallel** API: `ed25519.PublicKey` is a named `[]byte`, so
+  widening it would let a P-256 key masquerade as Ed25519; the legacy
+  Ed25519-typed functions are unchanged and `PublicKey.Ed25519()` returns
+  `ok=false` for P-256. Encodings verified against RFC 7518 §6.2 (32-octet
+  fixed-width `x`/`y`) and multicodec `p256-pub` = 0x1200 → varint `0x80 0x24`
+  + compressed point (hence `zDn…`). Invalid-curve points are rejected at the
+  resolution boundary; Ed25519 and P-256 multikeys cannot cross-decode.
+  10 new tests.
+- **`ecdsakey`, `compliance`, `cbor`: ES256 / P-256 verification (Axis 135).**
+  The assessment's #1 weakness — Ed25519-only, while the EUDI ARF and
+  OpenID4VC HAIP mandate P-256, so no real EUDI wallet could interoperate.
+  Adds the verify half via the existing algorithm registries (no core changes,
+  stdlib only). Encoding verified against the specs: RFC 7518 §3.4 and
+  RFC 9053 §2.1 both require the raw fixed-width `R‖S` concatenation (32+32
+  octets, leading zeros preserved) and neither permits ASN.1 DER — which is
+  what Go and most libraries emit by default — so a signature that is not
+  exactly 64 bytes is rejected as an encoding-confusion hazard. On-curve
+  validation via `crypto/ecdh` guards invalid-curve attacks; malleability is
+  documented rather than enforced (neither RFC requires low-S). 23 new tests.
+  Issuance-side P-256 and `didresolver` remain a separate, larger axis.
+- **`bundle`, `mcp`: long-term, offline-verifiable DPP bundle (Axis 134).**
+  A first-principles gap the standards backlog never surfaced: a DPP must stay
+  verifiable for the product's 10-25 year life at frequently-offline scan
+  points (recyclers, ports, customs), and after the issuer's server is gone —
+  yet every verification path fetched something at verify time. New `bundle`
+  package packages a credential with its issuer key, did:webvh provenance log,
+  signed status snapshot and archive timestamps into one artifact that
+  verifies with **zero network calls** (enforced by a test that fails on any
+  outbound dial). Design corrected by the long-term-signature literature:
+  ETSI LTV requires a trusted **timestamp** beside the key chain and
+  revocation data — without it a 2045 verifier cannot tell a legitimate 2026
+  signature from a later forgery with a dead key — and RFC 4998 (Evidence
+  Record Syntax) requires renewing that timestamp as a **chain**, each anchor
+  taken over the prior evidence, before the algorithms weaken. The SCITT
+  ledger serves as the timestamping authority. `Verify` reports which checks
+  actually ran (absence is never success) and fails closed on `Require*`.
+  New tools `build_dpp_bundle` / `anchor_dpp_bundle` / `verify_dpp_bundle`
+  (`TestToolsList` 34 → 37). 23 new tests.
+- **`compliance`: opt-in `eddsa-jcs-2022` Data Integrity suite for W3C VCs
+  (Axis 133).** Issued DPP credentials used the pre-Data-Integrity
+  `Ed25519Signature2020` suite; a correct `eddsa-jcs-2022` implementation
+  already existed in-repo (`didwebvh/proof.go` + `multiformats/jcs.go`),
+  scoped to DID-log entries. New `Issuer.DataIntegrity` flag (default false =
+  byte-unchanged legacy suite) switches issuance to a W3C `DataIntegrityProof`
+  with `cryptosuite=eddsa-jcs-2022`, reusing the same JCS+base58 hashData
+  construction (multibase `z`-prefixed proofValue). Both issue paths route
+  through a shared `attachProof`; `Verify` auto-dispatches on the proof
+  suite. 7 new tests. `eddsa-jcs-2022` is the current W3C REC (EdDSA
+  Cryptosuites v1.0, 2025-05-15).
+- **`docs`: product assessment + Opus/Sonnet work-instruction sheets.**
+  `docs/PRODUCT_ASSESSMENT.md` (長所/短所/改善案, every file:line re-verified),
+  `docs/INSTRUCTIONS_SONNET.md` (small/well-scoped tasks with in-repo patterns
+  to mirror + the mandatory per-axis discipline), and
+  `docs/INSTRUCTIONS_OPUS.md` (large/architectural tracks — ES256/P-256,
+  mdoc↔OpenID4VP dispatch, JWE, array/recursive disclosure, auth-code flow,
+  mdoc PKI, issuance agility — with staged milestones and stop-and-confirm
+  gates). Turns the remaining standards backlog into executable instructions
+  for future sessions.
+- **`scitt`, `mcp`: SCITT ledger lifecycle search index + `search_passports`
+  (Axis 132).** The ledger offered only append + linear scan — no way to
+  query "all passports for product X / manufacturer Y" (CEN-CENELEC EN 18222
+  lifecycle searchability). Added `bySubject`/`byIssuer` secondary indexes
+  maintained on `Register` and rebuilt on replay, `FindBySubject`/
+  `FindByIssuer` query methods returning indexed results (no full scan), and
+  a `search_passports` MCP tool (by subject and/or issuer; both = intersection).
+  `TestToolsList` 33 → 34. 4 new tests.
+- **`didwebvh`, `mcp`: did:webvh `watchers` parameter (Axis 131).** The
+  did:webvh v1.0 out-of-band monitoring signal — an array of URLs that have
+  agreed to watch a DID — was absent. Added as `Parameters.Watchers`
+  (`*[]string`, matching the `Portable` rigor so omit/retain vs. explicit
+  set/clear is representable). `Verify` tracks the active list across entries
+  (explicit replaces, omitted retains) and surfaces it as
+  `Resolution.Watchers`, satisfying the spec's "resolvers MUST expose the
+  active watcher list in resolution metadata" (watchers are not a
+  verification gate). `create_did_webvh`/`update_did_webvh` gained a
+  `watchers` arg; `verify_did_webvh_log` now returns `watchers`. 6 new tests.
+- **`openid4vci`: batch issuance (`proofs` → `credentials` array, Axis
+  130).** `CredentialRequest` carried only a singular `Proof`; there was no
+  plural `proofs`/`credentials` path. Batch issuance is the standard
+  mechanism for a wallet to obtain multiple single-use, unlinkable credential
+  copies in one round trip — the EUDI-approved-crypto mitigation for
+  presentation linkability. New `IssueBatchWithProofs` validates every proof
+  up-front (all-or-nothing: a failed batch issues nothing and leaves the
+  access token reusable), signs one credential per holder key, and returns
+  one `notification_id` for the whole response. Bounded by `maxBatchProofs`
+  (32). The security-sensitive crypto (proof/nonce validation, signer switch)
+  was extracted into shared helpers so single and batch paths use one code
+  path. `/credential` dispatches on request shape. 8 new tests including a
+  full HTTP-layer batch and a proof-key-binding/unlinkability check.
 - **`openid4vp`: DCQL `claim_sets` support (OpenID4VP 1.0 §6.3.1, Axis
   128).** `CredentialQuery` had a flat `Claims` list but no `ClaimSets`,
   and no logic requiring at least one claim-set option to be fully
@@ -146,6 +665,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   same capability data from a single source.
 
 ### Fixed
+- **`openid4vci`: `credential_configurations_supported` metadata shape (Axis
+  129).** `Metadata()` omitted `proof_types_supported` and used the
+  jwt_vc_json-style `credential_definition.type` shape for the SD-JWT-VC
+  format profile, where OpenID4VCI 1.0 Final wants a top-level `vct`. A
+  wallet reading the metadata for an SD-JWT-VC (`dc+sd-jwt`) config expects
+  `vct`, and needs `proof_types_supported` to know which proof algorithms the
+  issuer accepts. Now branches on the format: SD-JWT-VC configs emit `vct`,
+  other formats keep `credential_definition.type`; all configs advertise
+  `proof_types_supported = {"jwt": {"proof_signing_alg_values_supported":
+  ["EdDSA"]}}`, mirroring what `parseProofJWT` enforces. 2 new tests; verified
+  end-to-end against the built `blrcs-mcpd`.
 - **`openid4vp`: DC-API client_id prefix used the wrong wire string (Axis
   122).** OpenID4VP 1.0 Final §5.10 defines the DC-API Client Identifier
   Prefix as the literal `origin` (`origin:<calling origin>`); `clientid.go`

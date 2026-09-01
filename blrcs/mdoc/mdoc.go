@@ -29,6 +29,7 @@
 package mdoc
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -37,6 +38,7 @@ import (
 	"time"
 
 	"blrcs/cbor"
+	"blrcs/ecdsakey"
 )
 
 // MSO constants (ISO 18013-5 §9.1.2).
@@ -60,8 +62,11 @@ const (
 	coseKeyKty   = 1  // key type
 	coseKeyCrv   = -1 // curve (for OKP/EC2)
 	coseKeyXCoor = -2 // public key / x-coordinate
+	coseKeyYCoor = -3 // y-coordinate (EC2 only)
 	ktyOKP       = 1  // Octet Key Pair
+	ktyEC2       = 2  // Elliptic Curve, x/y coordinate pair
 	crvEd25519   = 6  // Ed25519
+	crvP256      = 1  // NIST P-256 (secp256r1)
 )
 
 // MSO payload map keys.
@@ -134,7 +139,24 @@ type IssueParams struct {
 	NameSpaces map[string][]Element // namespace → elements
 	Validity   ValidityInfo         // signed/validFrom/validUntil
 	DeviceKey  ed25519.PublicKey    // optional holder/device public key (binds the credential)
-	IssuerPriv ed25519.PrivateKey   // issuer signing key (issuerAuth)
+	IssuerPriv ed25519.PrivateKey   // issuer signing key (issuerAuth), EdDSA
+	// IssuerPrivES256 signs issuerAuth with ECDSA/P-256 (COSE alg -7) instead of
+	// EdDSA. Real mDLs are ES256-signed, so this is what a P-256-only ecosystem
+	// expects. Exactly one of IssuerPriv / IssuerPrivES256 must be set.
+	IssuerPrivES256 *ecdsa.PrivateKey
+	// IssuerAuthUnprotected are extra COSE unprotected headers for issuerAuth.
+	// Its purpose is the x5chain header (RFC 9360 label 33) carrying the Document
+	// Signer Certificate, so a verifier holding only the IACA roots can validate
+	// a document from an issuer it has never seen — see X5ChainHeader and
+	// VerifyChain in x509chain.go. Unprotected is the right bucket: the chain is
+	// not integrity-critical because it is validated against the verifier's own
+	// configured roots however it arrived. Nil keeps the previous bare-key output
+	// byte-for-byte.
+	IssuerAuthUnprotected cbor.Header
+	// DeviceKeyES256 binds the credential to a P-256 holder key instead of an
+	// Ed25519 one, encoding deviceKeyInfo as an EC2 COSE_Key. Mutually exclusive
+	// with DeviceKey.
+	DeviceKeyES256 *ecdsa.PublicKey
 }
 
 // Issue creates a signed IssuerSigned mdoc credential and returns its CBOR bytes.
@@ -202,7 +224,12 @@ func Issue(p IssueParams) ([]byte, error) {
 			viValidUntil: tdate(p.Validity.ValidUntil),
 		},
 	}
-	if p.DeviceKey != nil {
+	switch {
+	case p.DeviceKeyES256 != nil:
+		mso[msoDeviceKeyInfo] = map[string]any{
+			msoDeviceKey: deviceKeyCOSEP256(p.DeviceKeyES256),
+		}
+	case p.DeviceKey != nil:
 		mso[msoDeviceKeyInfo] = map[string]any{
 			msoDeviceKey: deviceKeyCOSE(p.DeviceKey),
 		}
@@ -218,8 +245,15 @@ func Issue(p IssueParams) ([]byte, error) {
 		return nil, err
 	}
 
-	protected := cbor.Header{cbor.HeaderAlg: cbor.AlgEdDSA}
-	issuerAuth, err := cbor.Sign1(protected, nil, msoTagged, nil, p.IssuerPriv)
+	// The protected header must declare the algorithm actually used: a verifier
+	// dispatches on it, so stamping EdDSA on an ES256 signature makes the
+	// credential unverifiable (and stamping ES256 on an EdDSA one likewise).
+	var issuerAuth []byte
+	if p.IssuerPrivES256 != nil {
+		issuerAuth, err = cbor.Sign1ES256(cbor.Header{cbor.HeaderAlg: cbor.AlgES256}, p.IssuerAuthUnprotected, msoTagged, nil, p.IssuerPrivES256)
+	} else {
+		issuerAuth, err = cbor.Sign1(cbor.Header{cbor.HeaderAlg: cbor.AlgEdDSA}, p.IssuerAuthUnprotected, msoTagged, nil, p.IssuerPriv)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("mdoc: sign issuerAuth: %w", err)
 	}
@@ -247,6 +281,24 @@ func deviceKeyCOSE(pub ed25519.PublicKey) map[int]any {
 		coseKeyKty:   ktyOKP,
 		coseKeyCrv:   crvEd25519,
 		coseKeyXCoor: []byte(pub),
+	}
+}
+
+// deviceKeyCOSEP256 builds an EC2 COSE_Key (RFC 9052 §7) for a P-256 device key:
+// kty=EC2, crv=P-256, with x and y each written as the fixed 32-octet big-endian
+// coordinate. FillBytes rather than Bytes() so a coordinate with a leading zero
+// is not silently shortened — a short coordinate changes the key's encoding and
+// therefore the MSO digest a verifier recomputes.
+func deviceKeyCOSEP256(pub *ecdsa.PublicKey) map[int]any {
+	x := make([]byte, ecdsakey.P256CoordSize)
+	y := make([]byte, ecdsakey.P256CoordSize)
+	pub.X.FillBytes(x)
+	pub.Y.FillBytes(y)
+	return map[int]any{
+		coseKeyKty:   ktyEC2,
+		coseKeyCrv:   crvP256,
+		coseKeyXCoor: x,
+		coseKeyYCoor: y,
 	}
 }
 

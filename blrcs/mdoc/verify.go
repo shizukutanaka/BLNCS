@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"blrcs/cbor"
+	"blrcs/ecdsakey"
 )
 
 // VerifiedDoc is the result of verifying an IssuerSigned mdoc.
@@ -15,7 +16,11 @@ type VerifiedDoc struct {
 	DocType    string
 	NameSpaces map[string]map[string]any // namespace → elementIdentifier → elementValue
 	Validity   ValidityInfo
-	DeviceKey  ed25519.PublicKey // nil if the credential has no device binding
+	DeviceKey  ed25519.PublicKey // nil if the credential has no Ed25519 device binding
+	// DeviceKeyES256 is the P-256 device key as an uncompressed SEC1 point,
+	// non-nil when deviceKeyInfo carries an EC2 COSE_Key. Exactly one of
+	// DeviceKey / DeviceKeyES256 is set on a device-bound credential.
+	DeviceKeyES256 []byte
 }
 
 // Verify checks an IssuerSigned mdoc against the issuer public key at time now.
@@ -100,7 +105,7 @@ func VerifyWithAlgs(issuerSigned []byte, issuerPub ed25519.PublicKey, now time.T
 	}
 
 	// --- device key (optional) ---
-	deviceKey := parseDeviceKey(msoMap[msoDeviceKeyInfo])
+	deviceKey, deviceKeyES256 := parseDeviceKey(msoMap[msoDeviceKeyInfo])
 
 	// --- IssuerNameSpaces: verify each disclosed item against its digest ---
 	disclosed := map[string]map[string]any{}
@@ -147,7 +152,7 @@ func VerifyWithAlgs(issuerSigned []byte, issuerPub ed25519.PublicKey, now time.T
 		DocType:    docType,
 		NameSpaces: disclosed,
 		Validity:   validity,
-		DeviceKey:  deviceKey,
+		DeviceKey:  deviceKey, DeviceKeyES256: deviceKeyES256,
 	}, nil
 }
 
@@ -282,28 +287,54 @@ func parseValueDigests(raw any) (map[string]map[int][]byte, error) {
 	return out, nil
 }
 
-func parseDeviceKey(raw any) ed25519.PublicKey {
+// parseDeviceKey reads deviceKeyInfo.deviceKey, returning either an Ed25519 key
+// or a P-256 key as an uncompressed SEC1 point. Both nil means the credential
+// carries no usable device binding — a malformed or unsupported key is treated
+// as absent rather than fatal, so an issuer publishing a curve this build cannot
+// verify does not make the whole credential unreadable.
+func parseDeviceKey(raw any) (ed25519.PublicKey, []byte) {
 	m, ok := raw.(map[any]any)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	dkRaw, ok := m[msoDeviceKey]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	dk, ok := dkRaw.(map[any]any)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	keyMap := cbor.IntMap(dk)
 	kty, _ := cbor.GetInt(keyMap[coseKeyKty])
 	crv, _ := cbor.GetInt(keyMap[coseKeyCrv])
-	if kty != ktyOKP || crv != crvEd25519 {
-		return nil
+
+	switch {
+	case kty == ktyOKP && crv == crvEd25519:
+		x, ok := cbor.GetBytes(keyMap[coseKeyXCoor])
+		if !ok || len(x) != ed25519.PublicKeySize {
+			return nil, nil
+		}
+		return ed25519.PublicKey(x), nil
+
+	case kty == ktyEC2 && crv == crvP256:
+		// EC2 COSE_Key (RFC 9052 §7): x and y are the fixed 32-octet big-endian
+		// coordinates. A short or long coordinate is rejected rather than padded,
+		// since one key would then have several encodings.
+		x, okX := cbor.GetBytes(keyMap[coseKeyXCoor])
+		y, okY := cbor.GetBytes(keyMap[coseKeyYCoor])
+		if !okX || !okY || len(x) != ecdsakey.P256CoordSize || len(y) != ecdsakey.P256CoordSize {
+			return nil, nil
+		}
+		sec1 := make([]byte, 0, ecdsakey.P256UncompressedSize)
+		sec1 = append(sec1, 0x04)
+		sec1 = append(sec1, x...)
+		sec1 = append(sec1, y...)
+		// Reject a point that is not on the curve before it becomes a device key.
+		if _, err := ecdsakey.ParseP256PublicKey(sec1); err != nil {
+			return nil, nil
+		}
+		return nil, sec1
 	}
-	x, ok := cbor.GetBytes(keyMap[coseKeyXCoor])
-	if !ok || len(x) != ed25519.PublicKeySize {
-		return nil
-	}
-	return ed25519.PublicKey(x)
+	return nil, nil
 }

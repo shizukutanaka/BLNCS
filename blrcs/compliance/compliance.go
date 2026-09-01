@@ -79,13 +79,19 @@ type CredentialStatus struct {
 	StatusListCredential string `json:"statusListCredential"` // status list VC の URL
 }
 
-// Proof — Ed25519Signature2020 (軽量, 32B鍵, 64B署名)
+// Proof — a Verifiable Credential proof. Two suites are supported:
+//   - Ed25519Signature2020 (default): Type="Ed25519Signature2020", ProofValue
+//     is base64-std over the fixed-field canonicalPayload. Cryptosuite empty.
+//   - eddsa-jcs-2022 (opt-in via Issuer.DataIntegrity): Type="DataIntegrityProof",
+//     Cryptosuite="eddsa-jcs-2022", ProofValue is multibase-base58btc over the
+//     JCS hashData construction (see dataintegrity.go).
 type Proof struct {
 	Type               string    `json:"type"`
+	Cryptosuite        string    `json:"cryptosuite,omitempty"` // "eddsa-jcs-2022" for DataIntegrityProof
 	Created            time.Time `json:"created"`
 	VerificationMethod string    `json:"verificationMethod"`
 	ProofPurpose       string    `json:"proofPurpose"`
-	ProofValue         string    `json:"proofValue"` // base64-std
+	ProofValue         string    `json:"proofValue"` // base64-std (Ed25519Signature2020) or multibase (DataIntegrity)
 }
 
 // ============================================================================
@@ -104,6 +110,23 @@ type Issuer struct {
 	// decoy を混ぜると真の claim 数が隠れ、unlinkability/プライバシが向上する。
 	// 既定 0 (後方互換: 挙動変化なし)。プライバシ重視の発行者は数個設定する。
 	DecoyDigests int
+
+	// LegacyProofSuite — true なら W3C VC (compliance.Credential) の発行時に、
+	// 現行 REC の eddsa-jcs-2022 ではなく旧 Ed25519Signature2020 で署名する。
+	//
+	// 既定 (false) は eddsa-jcs-2022 = W3C Data Integrity 1.0 + EdDSA Cryptosuites
+	// v1.0。Ed25519Signature2020 は Data Integrity 以前のスイートで、W3C の
+	// standards track から外れている。DPP のような *適合性* を主張するプロダクトが
+	// 非推奨スイートを既定で発行するのは、それ自体が適合性の欠陥になる。
+	//
+	// Verify は proof の type/cryptosuite を見て両方式を自動判別するため、既存
+	// クレデンシャルの検証は影響を受けない。旧スイートしか受理しないレガシー
+	// verifier 相手に発行する必要がある運用者のみ true を設定する。
+	//
+	// (Axis 149 以前は DataIntegrity bool として既定が逆だった。フィールドを反転
+	//  したのは、Go のゼロ値が「現行標準」を指すようにするため — 既定値は何も
+	//  書かなかった人が得るものであり、それは非推奨スイートであってはならない。)
+	LegacyProofSuite bool
 
 	// SDJWTVCType — 発行する SD-JWT-VC の JWS `typ` ヘッダ値。空なら現行の
 	// draft-ietf-oauth-sd-jwt-vc 推奨値 `dc+sd-jwt` を使う。
@@ -168,10 +191,17 @@ func canonicalPayload(c *Credential) ([]byte, error) {
 		proofPurpose, verificationMethod})
 }
 
-// Issue — DPP発行
-func (i *Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential, error) {
+// newPassportCredential builds the unsigned DPP credential shared by every
+// issuer and every proof suite. Extracted so the Ed25519 and ES256 issuers
+// cannot drift on @context, type, validity or the credentialStatus shape —
+// duplicating this is how two issuers end up emitting subtly different
+// credentials for the same product.
+//
+// status may be nil (no credentialStatus member). Returns the credential and
+// the `now` used, so the caller stamps the proof with the same instant.
+func newPassportCredential(issuerID string, claim PassportClaim, validFor time.Duration, status *CredentialStatus) (*Credential, time.Time, error) {
 	if claim.ProductID == "" {
-		return nil, ErrEmptyProductID
+		return nil, time.Time{}, ErrEmptyProductID
 	}
 	now := time.Now().UTC()
 	cred := &Credential{
@@ -180,29 +210,79 @@ func (i *Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential
 			"https://schema.europa.eu/dpp/v1",
 		},
 		Type:      []string{"VerifiableCredential", "DigitalProductPassport"},
-		Issuer:    i.ID,
+		Issuer:    issuerID,
 		ValidFrom: now,
 		Subject:   claim,
+		Status:    status,
 	}
 	if validFor > 0 {
 		exp := now.Add(validFor)
 		cred.ValidUntil = &exp
 	}
-	// Pre-set proof metadata (without ProofValue) so canonicalPayload binds
-	// proofPurpose and verificationMethod to the signature, preventing
-	// post-issuance tampering (W3C LD-Proofs / Ed25519Signature2020 pattern).
+	return cred, now, nil
+}
+
+// newStatusEntry builds the W3C Bitstring Status List entry, validating the
+// caller-supplied list URL and index.
+func newStatusEntry(statusListURL string, index int, purpose string) (*CredentialStatus, error) {
+	if statusListURL == "" {
+		return nil, errors.New("compliance: statusListCredential URL required")
+	}
+	if index < 0 {
+		return nil, errors.New("compliance: statusListIndex must be non-negative")
+	}
+	return &CredentialStatus{
+		ID:                   fmt.Sprintf("%s#%d", statusListURL, index),
+		Type:                 "BitstringStatusListEntry",
+		StatusPurpose:        purpose,
+		StatusListIndex:      fmt.Sprintf("%d", index),
+		StatusListCredential: statusListURL,
+	}, nil
+}
+
+// Issue — DPP発行
+func (i *Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential, error) {
+	cred, now, err := newPassportCredential(i.ID, claim, validFor, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := i.attachProof(cred, now); err != nil {
+		return nil, err
+	}
+	return cred, nil
+}
+
+// attachProof sets cred.Proof (metadata + ProofValue) using the issuer's
+// selected cryptosuite. Default is Ed25519Signature2020 (fixed-field
+// canonicalPayload, base64-std proofValue); i.LegacyProofSuite switches back to the
+// current-REC eddsa-jcs-2022 Data Integrity suite (JCS hashData, multibase
+// proofValue — see dataintegrity.go). The proof metadata is set BEFORE the
+// signature so both suites bind proofPurpose/verificationMethod (the
+// Ed25519Signature2020 path binds them via canonicalPayload; the DI path binds
+// them via the hashed proof config), preventing post-issuance tampering.
+func (i *Issuer) attachProof(cred *Credential, now time.Time) error {
+	if i.LegacyProofSuite {
+		cred.Proof = &Proof{
+			Type:               "Ed25519Signature2020",
+			Created:            now,
+			VerificationMethod: i.ID + "#key-1",
+			ProofPurpose:       "assertionMethod",
+		}
+		payload, err := canonicalPayload(cred)
+		if err != nil {
+			return fmt.Errorf("canonicalize: %w", err)
+		}
+		cred.Proof.ProofValue = base64.StdEncoding.EncodeToString(ed25519.Sign(i.privateKey, payload))
+		return nil
+	}
 	cred.Proof = &Proof{
-		Type:               "Ed25519Signature2020",
+		Type:               "DataIntegrityProof",
+		Cryptosuite:        CryptosuiteEdDSAJCS2022,
 		Created:            now,
 		VerificationMethod: i.ID + "#key-1",
 		ProofPurpose:       "assertionMethod",
 	}
-	payload, err := canonicalPayload(cred)
-	if err != nil {
-		return nil, fmt.Errorf("canonicalize: %w", err)
-	}
-	cred.Proof.ProofValue = base64.StdEncoding.EncodeToString(ed25519.Sign(i.privateKey, payload))
-	return cred, nil
+	return signDataIntegrity(cred, i.privateKey)
 }
 
 // IssueWithStatus — W3C Bitstring Status List entry を付与して DPP 発行。
@@ -211,48 +291,17 @@ func (i *Issuer) Issue(claim PassportClaim, validFor time.Duration) (*Credential
 // bit 位置。purpose は "revocation" | "suspension"。
 // credentialStatus は署名対象に含まれるため、改ざんは検証で検知される。
 func (i *Issuer) IssueWithStatus(claim PassportClaim, validFor time.Duration, statusListURL string, index int, purpose string) (*Credential, error) {
-	if claim.ProductID == "" {
-		return nil, ErrEmptyProductID
-	}
-	if statusListURL == "" {
-		return nil, errors.New("compliance: statusListCredential URL required")
-	}
-	if index < 0 {
-		return nil, errors.New("compliance: statusListIndex must be non-negative")
-	}
-	now := time.Now().UTC()
-	cred := &Credential{
-		Context: []string{
-			"https://www.w3.org/ns/credentials/v2",
-			"https://schema.europa.eu/dpp/v1",
-		},
-		Type:      []string{"VerifiableCredential", "DigitalProductPassport"},
-		Issuer:    i.ID,
-		ValidFrom: now,
-		Subject:   claim,
-		Status: &CredentialStatus{
-			ID:                   fmt.Sprintf("%s#%d", statusListURL, index),
-			Type:                 "BitstringStatusListEntry",
-			StatusPurpose:        purpose,
-			StatusListIndex:      fmt.Sprintf("%d", index),
-			StatusListCredential: statusListURL,
-		},
-	}
-	if validFor > 0 {
-		exp := now.Add(validFor)
-		cred.ValidUntil = &exp
-	}
-	cred.Proof = &Proof{
-		Type:               "Ed25519Signature2020",
-		Created:            now,
-		VerificationMethod: i.ID + "#key-1",
-		ProofPurpose:       "assertionMethod",
-	}
-	payload, err := canonicalPayload(cred)
+	status, err := newStatusEntry(statusListURL, index, purpose)
 	if err != nil {
-		return nil, fmt.Errorf("canonicalize: %w", err)
+		return nil, err
 	}
-	cred.Proof.ProofValue = base64.StdEncoding.EncodeToString(ed25519.Sign(i.privateKey, payload))
+	cred, now, err := newPassportCredential(i.ID, claim, validFor, status)
+	if err != nil {
+		return nil, err
+	}
+	if err := i.attachProof(cred, now); err != nil {
+		return nil, err
+	}
 	return cred, nil
 }
 
@@ -276,6 +325,39 @@ func VerifyAt(cred *Credential, pub ed25519.PublicKey, now time.Time) error {
 	if !cred.ValidFrom.IsZero() && cred.ValidFrom.After(now.Add(defaultLeeway)) {
 		return ErrNotYetValid
 	}
+	if cred.Proof.ProofPurpose != "assertionMethod" {
+		return ErrInvalidSig
+	}
+	// Dispatch on the proof suite. Verification must match what issuance
+	// produced: the suites differ in canonicalization, signature algorithm and
+	// proofValue encoding.
+	//
+	// An unknown cryptosuite is REJECTED rather than falling through to the
+	// legacy Ed25519Signature2020 branch. Falling through would mean a
+	// credential claiming a suite we do not implement gets verified under
+	// different rules than it claims — the verifier would be honouring a
+	// construction nobody asked for.
+	if cred.Proof.Type == "DataIntegrityProof" {
+		switch cred.Proof.Cryptosuite {
+		case CryptosuiteEdDSAJCS2022:
+			return verifyDataIntegrity(cred, pub)
+		case CryptosuiteECDSAJCS2019:
+			// pub carries an uncompressed SEC1 P-256 point here. ed25519.PublicKey
+			// is a named []byte, so the existing signature accommodates it without
+			// an API break — the same approach VerifySDJWTWithBinding uses for
+			// ES256 SD-JWTs.
+			return verifyDataIntegrityES256(cred, pub)
+		default:
+			return fmt.Errorf("%w: unsupported cryptosuite %q", ErrInvalidSig, cred.Proof.Cryptosuite)
+		}
+	}
+	// Legacy Ed25519Signature2020. Guard the key length: ed25519.Verify panics
+	// on a wrong-length key and ed25519.PublicKey is a named []byte, so nothing
+	// at compile time stops one reaching here.
+	if len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("compliance: Ed25519Signature2020 verification key: %w: want %d bytes, got %d",
+			ErrInvalidSig, ed25519.PublicKeySize, len(pub))
+	}
 	sig, err := base64.StdEncoding.DecodeString(cred.Proof.ProofValue)
 	if err != nil {
 		return fmt.Errorf("sig decode: %w", err)
@@ -285,9 +367,6 @@ func VerifyAt(cred *Credential, pub ed25519.PublicKey, now time.Time) error {
 		return fmt.Errorf("canonicalize: %w", err)
 	}
 	if !ed25519.Verify(pub, payload, sig) {
-		return ErrInvalidSig
-	}
-	if cred.Proof.ProofPurpose != "assertionMethod" {
 		return ErrInvalidSig
 	}
 	return nil
@@ -382,6 +461,10 @@ func (s *SensorAttester) Attest(commit Commitment, actualValue float64) (*RangeP
 
 // VerifyRange — 認証済センサ公開鍵で範囲証明を検証
 func VerifyRange(pr *RangeProof, attesterPub ed25519.PublicKey) error {
+	// ed25519.Verify panics on a wrong-length key; fail closed instead.
+	if len(attesterPub) != ed25519.PublicKeySize {
+		return ErrInvalidSig
+	}
 	sig, err := base64.StdEncoding.DecodeString(pr.Signature)
 	if err != nil {
 		return fmt.Errorf("sig decode: %w", err)
