@@ -29,6 +29,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   raw R‖S signature. Mutation-checked: mislabelling the ES256 signer fails it.
 
 ### Examined and deliberately not changed
+- **The other two signed-header construction sites (Axis 157).**
+  `openid4vp/jar.go` and `revocation/token.go` also build a JWS protected header
+  from a hardcoded `"EdDSA"` literal. Both are safe by construction: the literal
+  sits three lines above the `ed25519.Sign` call in the same function, over a
+  statically-typed `ed25519.PrivateKey`, so there is no parameter through which
+  the label and the signing act could be made to disagree. Giving them the
+  `kbSigner` treatment would add indirection without removing a risk. The sweep
+  for this defect class is therefore complete: one real instance
+  (`presentWithKB`), two sites safe by construction, one apparent duplicate
+  correctly rejected.
 - **`didwebvh.Cryptosuite` and `compliance.CryptosuiteEdDSAJCS2022` (Axis 157).**
   Both are `"eddsa-jcs-2022"`, which looks like a constant duplicated across two
   packages. They are not: one is the suite the did:webvh specification requires
