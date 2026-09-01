@@ -6,6 +6,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **SCITT COSE receipts can be signed with P-256 / ES256 (Axis 155).**
+  `IssueCOSEReceiptES256` signs a COSE_Sign1 receipt with `cbor.Sign1ES256`
+  (COSE alg `-7`, raw R||S per RFC 9053 section 2.1); `VerifyCOSEReceipt` and
+  `VerifyCOSEReceiptWithAlgs` now take the raw public key as `[]byte` so a SEC1
+  P-256 key (65-byte uncompressed or 33-byte compressed) can be supplied
+  alongside the existing 32-byte Ed25519 form. The change is source-compatible:
+  `ed25519.PublicKey` is a named slice type and remains assignable to the
+  widened parameter, so every existing caller compiles unchanged. Payload
+  construction is shared by both signers (`coseReceiptPayload`), so an ES256
+  receipt and an EdDSA receipt cover exactly the same bytes.
+
+  This closes the last algorithm gap on an interoperable artifact. The prior
+  assessment justified leaving SCITT Ed25519-only as "internal, no interop
+  pressure" — but `cose_receipt.go`'s own package doc states the COSE receipt
+  exists to be "interoperable with IETF SCITT-compliant verifiers". The
+  justification was an unexamined claim contradicted by the file it described.
+  The JSON receipt, checkpoint, witness cosignature and statement paths remain
+  Ed25519 deliberately: they are the internal/back-compat formats with no
+  third-party consumer, and changing them would break `Ledger`'s key fields and
+  the `storage` `LoadKeyPair`/`SaveKeyPair` interface.
+
+  Tests (`scitt/cose_receipt_es256_test.go`) cover the ES256 round trip with
+  both SEC1 encodings, an assertion that the protected header declares the
+  algorithm that actually signed (and the kid it claims), tamper rejection,
+  wrong-key rejection, inclusion-proof enforcement under ES256, cross-algorithm
+  confusion refused in both directions via the allowlist, and nine malformed
+  key shapes against both receipt algorithms without a panic. Each test was
+  mutation-checked: blanking the root hash, corrupting it, and falsifying the
+  header kid each make the suite fail.
+
 ### Fixed
 - **A flaky test I introduced in Axis 146 (Axis 152).**
   `TestAuthorizationCodeFlowRoundTrip` asserted no claims leaked into the

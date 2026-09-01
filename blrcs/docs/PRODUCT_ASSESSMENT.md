@@ -302,16 +302,25 @@ axes 129–154 was a confident, unexamined claim.
 
 ### Remaining weaknesses (known, with reasons)
 
-SCITT receipt signing is Ed25519-only (internal, no interop pressure);
-VICAL / ISO 18013-7 Annex C absent (paywalled specs — implementing from memory
+~~SCITT receipt signing is Ed25519-only (internal, no interop pressure)~~ —
+**this justification did not survive its own question (Axis 155).**
+`scitt/cose_receipt.go` states in its package doc that the COSE receipt exists
+to be "interoperable with IETF SCITT-compliant verifiers": the interop-facing
+half of SCITT was the half that spoke only EdDSA. Closed —
+`IssueCOSEReceiptES256` signs COSE receipts with P-256 (alg `-7`) and the
+verifiers accept SEC1 keys. The JSON receipt, checkpoint, witness cosignature
+and statement paths remain Ed25519 deliberately: internal formats with no
+third-party consumer, whose change would break `Ledger` and the `storage`
+keypair interface. Remaining: VICAL / ISO 18013-7 Annex C absent (paywalled specs — implementing from memory
 recreates the `org-iso-mdoc` fabrication class); wallet attestation absent
 (drafts still moving); legacy Python CI red on every `main` run since 2025-11
 (pre-existing, owner action); dependabot `automerge:` key is not a real key.
 
 ### Verdict
 
-Engineering-complete and verified: 2,030 tests, 20 fuzz targets, every
-credential format P-256-capable, all four defect classes fixed and pinned by
+Engineering-complete and verified: 2,037 tests, 20 fuzz targets, every
+artifact handed to a third party — SD-JWT VC, mdoc, W3C VC, and SCITT COSE
+receipts (Axis 155) — P-256-capable, all four defect classes fixed and pinned by
 regression tests. Delivery — merging PR #8 — is reserved to the owner by the
 repository's own Class C release rule, plus one owner-only command to activate
 CI: `git mv blrcs/.github/workflows/ci.yml .github/workflows/blrcs-go.yml`.
