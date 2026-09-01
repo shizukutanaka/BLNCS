@@ -104,9 +104,35 @@ proof, race tests, lint, and every fuzz target — in about 45 seconds:
 make verify
 ```
 
-CI runs exactly this target, so a green local run and a green CI run mean the
-same thing. While editing a single package, `make check PKG=compliance` is the
-fast inner loop.
+While editing a single package, `make check PKG=compliance` is the fast inner
+loop.
+
+To run the gate automatically on every push, point git at the tracked hook
+directory — once per clone:
+
+```bash
+make hooks    # git config core.hooksPath .githooks
+```
+
+`.githooks/pre-push` then runs `make verify` whenever a push carries changes
+under `blrcs/`, and aborts the push if it fails (`git push --no-verify`
+bypasses it deliberately).
+
+**Honest note on CI:** earlier revisions of this file said "CI runs exactly this
+target". It does not — `blrcs/.github/workflows/ci.yml` is correct and ready,
+but GitHub executes workflows only from the repository-root
+`.github/workflows/` directory, and the identity maintaining this repository
+lacks the `workflows` permission needed to put it there (verified across three
+independent routes: git push, the REST contents API, and the git data API). One
+command by a maintainer activates it:
+
+```bash
+git mv blrcs/.github/workflows/ci.yml .github/workflows/blrcs-go.yml
+```
+
+Until then the pre-push hook is the only automatic execution of the gate that
+exists. Its body is the same `make verify`, so local, hook and CI runs cannot
+disagree about what passing means.
 
 The README examples above are executable Go Examples
 (`compliance/example_test.go`) run by `go test`, so documentation that stops

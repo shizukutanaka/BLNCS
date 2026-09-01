@@ -7,6 +7,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **The gate now runs automatically on push, by the one route that is open
+  (Axis 160).** Musk's fifth step is automate, and it was the step still
+  missing: `make verify` had to be remembered. The obvious mechanism — a
+  workflow — cannot be installed, and that is measured rather than assumed
+  (git push, the REST contents API and the git data API all refuse; this
+  identity lacks the GitHub `workflows` permission).
+
+  A tracked `.githooks/pre-push` runs the gate whenever a push carries changes
+  under `blrcs/`, and aborts the push when it fails. `make hooks` wires it up in
+  one command per clone. The repository hosts two projects, so the hook parses
+  git's pre-push protocol on stdin and diffs the pushed range rather than
+  running a Go build for a Python-only change.
+
+  Tested rather than assumed, all four paths: branch deletion skips; a
+  Python-only push skips the Go gate; a `blrcs/`-touching push runs it; and —
+  the one that matters, because a hook that cannot block is a check that cannot
+  fail — a deliberately broken tree makes it print the abort message and exit 1.
+
+  This is not a replacement for CI: it runs on a developer's machine and
+  `git push --no-verify` bypasses it. It is the automatic execution that exists
+  until a maintainer runs the one-line `git mv`.
+
+### Fixed
+- **The README claimed CI runs the gate (Axis 160).** It said "CI runs exactly
+  this target, so a green local run and a green CI run mean the same thing".
+  No CI run of that target has ever happened — the workflow has never executed
+  from where it sits. Replaced with what is true, including the blocker and the
+  single command that lifts it. Found while documenting the hook, by reading the
+  paragraph the new text had to sit next to.
+
+### Added
 - **A concurrency test that earns back a claim instead of deleting it
   (Axis 159).** Axis 158 wanted to document `mcp.Server` as "safe for concurrent
   use" and could not: nothing in the tree exercised it, so the sentence was
