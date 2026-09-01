@@ -6,6 +6,38 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **A KB-JWT header could name an algorithm that did not sign it (Axis 157).**
+  `presentWithKB` took the JOSE `alg` string and the signing function as two
+  independent arguments, and built the protected header by concatenating that
+  string into JSON. The four call sites paired them correctly, but nothing
+  enforced it: `presentWithKB(presented, "EdDSA", …, es256KBSigner(k))` would
+  have compiled and emitted a holder-binding JWT whose header lies about its own
+  signature. This is the same defect the COSE path closed at Axis 150, still
+  open in the SD-JWT holder-binding path — found by asking where else an
+  algorithm label and the act of signing were separable.
+
+  The signing function now carries its own algorithm (`kbSigner{alg, sign}`), so
+  `presentWithKB` takes one argument instead of two and a mismatch is
+  unrepresentable rather than merely unlikely. The header is also marshalled
+  from a struct instead of concatenated. Header bytes are unchanged — every
+  existing key-binding test passes untouched.
+
+  `TestKBJWTHeaderAlgIsTheAlgorithmThatSigned` asserts the observable
+  consequence for both holder key types: the header names EdDSA only when the
+  Ed25519 key verifies it, and ES256 only when the P-256 key verifies a 64-byte
+  raw R‖S signature. Mutation-checked: mislabelling the ES256 signer fails it.
+
+### Examined and deliberately not changed
+- **`didwebvh.Cryptosuite` and `compliance.CryptosuiteEdDSAJCS2022` (Axis 157).**
+  Both are `"eddsa-jcs-2022"`, which looks like a constant duplicated across two
+  packages. They are not: one is the suite the did:webvh specification requires
+  for *log-entry* proofs, the other the suite W3C Data Integrity uses for
+  *credentials*. The packages import neither direction. Coupling them would
+  create a false dependency in which changing the credential default silently
+  changes did:webvh log verification. Recorded because "these two literals are
+  equal" is not the same claim as "these two things are the same thing".
+
 ### Added
 - **Tests for the last genuinely uncovered paths (Axis 156).** Found by
   measurement, not by guessing where tests were thin — and the first
