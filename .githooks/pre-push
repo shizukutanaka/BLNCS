@@ -60,3 +60,5 @@ if ! make -C "$repo_root/blrcs" verify; then
 	echo "pre-push: fix it, or bypass deliberately with 'git push --no-verify'." >&2
 	exit 1
 fi
+
+# (verified end-to-end: see CHANGELOG Axis 160)
