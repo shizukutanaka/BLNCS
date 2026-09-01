@@ -38,6 +38,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   header kid each make the suite fail.
 
 ### Fixed
+- **A stale backlog presented as current (Axis 155).** `docs/PRODUCT_ASSESSMENT.md`
+  described the two instruction documents as "the remaining code-verified
+  backlog", but axes 129–155 completed most of it: O1, O3, O4, O5, O7, S3 and
+  S6 are done, O2 and S5 were resolved by deletion, O6 is partial. Listing
+  finished work as pending is the same defect as claiming unfinished work is
+  done. Replaced with a status table where every row cites evidence in the tree.
+  Genuinely open: S1 (mdoc `transaction_data`), S2 (did:webvh `/whois`), S4
+  (`verifier_info` carry); blocked: S7 (CI at repository root). Those three were
+  left open deliberately — this environment's egress allowlist blocks
+  `openid.net` and `docs.github.com` (verified by request), and implementing a
+  wire format from memory is precisely how the fabricated `org-iso-mdoc`
+  envelope was written.
 - **A correction that was itself false (Axis 155).** Axis 150 rewrote the
   assessment's shipping-state note to say PR #1 "was CLOSED, not merged". That
   is wrong and the note it replaced was right: GitHub marks a merged pull

@@ -262,20 +262,43 @@ asserting the reference implementation passes every vector.
 
 ## 改善案 (Improvements)
 
-The remaining code-verified backlog, split into two execution tracks by
-required judgment depth. Full task specs live in the two instruction
-documents:
+**This section was stale and is re-measured (Axis 155).** It described the two
+instruction documents as "the remaining code-verified backlog" — but axes
+129–155 completed most of it. A backlog that lists finished work as pending is
+the same defect as a document that claims unfinished work is done. Every row
+below was checked against the tree, not against memory.
 
-- **`docs/INSTRUCTIONS_SONNET.md`** — small/medium, precisely-specified tasks
-  with an existing in-repo pattern to mirror (mdoc transaction_data parity,
-  did:webvh /whois, DCQL trusted_authorities scaffolding, verifier_info
-  carry, kms ADR correction, eddsa-jcs-2022 for VCs, CI workflow to repo
-  root).
-- **`docs/INSTRUCTIONS_OPUS.md`** — large/architectural tracks (ES256/P-256
-  end-to-end, mdoc↔OpenID4VP/DC-API dispatch, JWE response encryption,
-  SD-JWT array/recursive disclosure, authorization code flow, mdoc PKI,
-  issuance-side algorithm agility), each with staged milestones and
-  stop-and-confirm gates.
+| Item | Status | Evidence in tree |
+|---|---|---|
+| O1 ES256 / P-256 end to end | **done** | `ecdsakey/`, `compliance.ES256Issuer` |
+| O2 mdoc ↔ OpenID4VP / DC-API dispatch | **resolved by deletion** | `dcapi` no longer advertises `org-iso-mdoc`; it advertised a body no spec defines (Axis 150) |
+| O3 OpenID4VP response encryption (JWE) | **done** | `jwe/`, anchored on RFC 7518 App. C |
+| O4 SD-JWT array-element + recursive disclosure | **done** | `compliance`/`sdjwt` recursive disclosure |
+| O5 OpenID4VCI authorization code + PKCE | **done** (plus PAR, beyond the original scope) | `openid4vci/authcode.go`, `openid4vci/par.go` |
+| O6 mdoc PKI IACA → DSC → VICAL | **partial** | `x5chain` + IACA→DSC done; VICAL open, see `mdoc/x509chain.go:48-52` |
+| O7 issuance-side algorithm agility | **done** | `CryptosuiteECDSAJCS2019` + `_sd_alg` agility |
+| S3 DCQL `trusted_authorities` | **done** | `TrustedAuthorities` in `openid4vp/dcql.go` |
+| S5 kms crypto-agility ADR | **done by deletion** | package removed at Axis 149 |
+| S6 `eddsa-jcs-2022` for VCs | **done, and made the default** | `CryptosuiteEdDSAJCS2022` |
+| S1 mdoc `transaction_data` binding | **open** | no `transaction_data` in `mdoc/` |
+| S2 did:webvh `/whois` | **open** | no `whois` in any Go file |
+| S4 `verifier_info` carry | **open** | no `verifier_info` in `openid4vp/` |
+| S7 CI workflow at repository root | **blocked** | authoring identity lacks the `workflows` permission (tested; push refused). One `git mv` by a maintainer activates it |
+
+**Why S1, S2 and S4 were not implemented in this session, stated precisely.**
+Not because they are hard — because they cannot be grounded here. This
+environment's egress policy is an allowlist: `openid.net` and `docs.github.com`
+are both blocked (verified by request). Implementing a wire format from memory
+is exactly how `dcapi` came to advertise `org-iso-mdoc` with a
+`presentation_definition_compat` field that appears in no specification, and
+how the fabricated mdoc envelope got written in the first place. The correct
+move is to leave them open with the blocker named, not to produce confident
+guesses. Anyone with spec access can pick them up from the task specs in
+`docs/INSTRUCTIONS_SONNET.md`.
+
+This also sharpens an earlier claim: VICAL and ISO 18013-7 Annex C were
+described as excluded because the ISO specs are paywalled. True, but not the
+whole reason — in this session even the freely published specs are unreachable.
 
 Items deliberately **not** queued: BBS/PQC cryptosuites, PQ/T hybrids, HPKE,
 EPCIS (upstream specs still non-final — implementing now would chase moving
