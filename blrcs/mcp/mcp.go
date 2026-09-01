@@ -165,6 +165,16 @@ type contentBlock struct {
 // Server
 // ============================================================================
 
+// Server is the BLRCS Model Context Protocol server: it exposes issuance,
+// presentation, verification, revocation and transparency-log tools to an MCP
+// client, backed by a SCITT ledger and one or more registered issuers.
+//
+// In stdio mode the Server has no HTTP surface of its own; a caller that wants
+// OpenID4VCI endpoints mounts openid4vci.Issuer.Handler() separately and
+// registers it with RegisterVCIIssuer.
+//
+// The registries a Server holds (issuers, attesters) are guarded by a mutex.
+// Serve itself reads one request at a time from a single stream.
 type Server struct {
 	mu         sync.RWMutex
 	issuers    map[string]*compliance.Issuer
@@ -245,6 +255,11 @@ const (
 	revocationIndexBlobName = "revocation-next-index"
 )
 
+// NewServer returns a Server backed by in-memory storage: nothing it records
+// survives the process. tsID names the transparency service, serverDID the
+// server's own DID.
+//
+// Use NewServerWithStorage to persist the ledger and revocation state.
 func NewServer(tsID, serverDID string) (*Server, error) {
 	// Route through NewServerWithStorage (backed by an explicit MemoryStorage)
 	// rather than scitt.NewLedger's own internal storage.NewMemoryStorage — the

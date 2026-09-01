@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Documentation for four undocumented exported declarations (Axis 158).**
+  `compliance.Issuer`, `mcp.Server`, `mcp.NewServer` and
+  `mcp.NewTokenBucketLimiter` produced no output in `go doc` — and therefore
+  none on pkg.go.dev. `compliance.Issuer` is the flagship type of the flagship
+  package, and `ES256Issuer`'s own documentation ends "Use a regular Issuer for
+  those", pointing readers at a type that documented nothing.
+
+  Two things are worth recording about how this was found and written, because
+  both are the defect class this project keeps auditing for:
+
+  1. **The detector was wrong twice before it was right.** An awk heuristic
+     ("exported declaration whose previous line is not a comment") flagged 32
+     identifiers; most were false positives, because `errkit` and `semconv`
+     document their one-line families with a group comment. Switching to
+     `go doc` still misled, because `go doc` prints a type's doc comment *after*
+     the type body — `head` truncated it away and made the documented
+     `ES256Issuer` look undocumented. Only unambiguous full output settled it:
+     four genuine gaps, not 32.
+  2. **The first draft of the new documentation contained two false claims.**
+     It named a constructor `NewIssuerFromSeed` that does not exist (the real
+     pair is `NewIssuer` / `NewIssuerFromKey`), and asserted `mcp.Server` "is
+     safe for concurrent use" — a claim nothing in the tree establishes; there
+     is no concurrent-access test for the type. Both were caught by checking
+     each sentence against the code before committing, and corrected to what is
+     actually true.
+
 ### Fixed
 - **A KB-JWT header could name an algorithm that did not sign it (Axis 157).**
   `presentWithKB` took the JOSE `alg` string and the signing function as two
