@@ -884,7 +884,7 @@ func PresentWithKeyBindingTx(sdjwt string, reveal []string, holderPriv ed25519.P
 	if err != nil {
 		return "", err
 	}
-	return presentWithKB(presented, "EdDSA", nonce, aud, transactionData, now, ed25519KBSigner(holderPriv))
+	return presentWithKB(presented, nonce, aud, transactionData, now, ed25519KBSigner(holderPriv))
 }
 
 // PresentWithKeyBindingES256 is PresentWithKeyBindingTx for a P-256 holder key,
@@ -898,7 +898,7 @@ func PresentWithKeyBindingES256(sdjwt string, reveal []string, holderPriv *ecdsa
 	if err != nil {
 		return "", err
 	}
-	return presentWithKB(presented, "ES256", nonce, aud, transactionData, now, es256KBSigner(holderPriv))
+	return presentWithKB(presented, nonce, aud, transactionData, now, es256KBSigner(holderPriv))
 }
 
 // PresentPathsWithKeyBinding is PresentPaths plus an EdDSA KB-JWT. Nested and
@@ -913,7 +913,7 @@ func PresentPathsWithKeyBinding(sdjwt string, paths [][]any, holderPriv ed25519.
 	if err != nil {
 		return "", err
 	}
-	return presentWithKB(presented, "EdDSA", nonce, aud, transactionData, now, ed25519KBSigner(holderPriv))
+	return presentWithKB(presented, nonce, aud, transactionData, now, ed25519KBSigner(holderPriv))
 }
 
 // PresentPathsWithKeyBindingES256 is PresentPathsWithKeyBinding for a P-256
@@ -927,18 +927,32 @@ func PresentPathsWithKeyBindingES256(sdjwt string, paths [][]any, holderPriv *ec
 	if err != nil {
 		return "", err
 	}
-	return presentWithKB(presented, "ES256", nonce, aud, transactionData, now, es256KBSigner(holderPriv))
+	return presentWithKB(presented, nonce, aud, transactionData, now, es256KBSigner(holderPriv))
 }
 
-// ed25519KBSigner returns the KB-JWT signing function for an Ed25519 holder key.
-func ed25519KBSigner(priv ed25519.PrivateKey) func([]byte) []byte {
-	return func(signingInput []byte) []byte { return ed25519.Sign(priv, signingInput) }
+// kbSigner pairs a KB-JWT signing function with the JOSE algorithm it actually
+// produces. Passing the algorithm and the signer as two independent arguments
+// let a caller write a header naming one algorithm over a signature made by
+// another — the same defect the COSE path closed by making Sign1/Sign1ES256
+// reject a mismatched header. Binding them in one value makes that
+// unrepresentable rather than merely unlikely.
+type kbSigner struct {
+	alg  string
+	sign func([]byte) []byte
 }
 
-// es256KBSigner returns the KB-JWT signing function for a P-256 holder key.
+// ed25519KBSigner returns the KB-JWT signer for an Ed25519 holder key.
+func ed25519KBSigner(priv ed25519.PrivateKey) kbSigner {
+	return kbSigner{
+		alg:  "EdDSA",
+		sign: func(signingInput []byte) []byte { return ed25519.Sign(priv, signingInput) },
+	}
+}
+
+// es256KBSigner returns the KB-JWT signer for a P-256 holder key.
 // ES256 signatures are raw fixed-width R‖S (RFC 7518 §3.4), not ASN.1 DER.
-func es256KBSigner(priv *ecdsa.PrivateKey) func([]byte) []byte {
-	return func(signingInput []byte) []byte {
+func es256KBSigner(priv *ecdsa.PrivateKey) kbSigner {
+	return kbSigner{alg: "ES256", sign: func(signingInput []byte) []byte {
 		d := sha256.Sum256(signingInput)
 		r, s, err := ecdsa.Sign(rand.Reader, priv, d[:])
 		if err != nil {
@@ -948,7 +962,7 @@ func es256KBSigner(priv *ecdsa.PrivateKey) func([]byte) []byte {
 		r.FillBytes(out[:ecdsakey.P256CoordSize])
 		s.FillBytes(out[ecdsakey.P256CoordSize:])
 		return out
-	}
+	}}
 }
 
 // presentWithKB builds a selective-disclosure presentation and appends a KB-JWT
@@ -957,13 +971,20 @@ func es256KBSigner(priv *ecdsa.PrivateKey) func([]byte) []byte {
 // presented is an already-built selective-disclosure presentation (from Present
 // or PresentPaths); this function only appends the KB-JWT, so the two selection
 // styles share one binding implementation.
-func presentWithKB(presented string, alg, nonce, aud string, transactionData []string, now time.Time, sign func([]byte) []byte) (string, error) {
+func presentWithKB(presented string, nonce, aud string, transactionData []string, now time.Time, signer kbSigner) (string, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
 	// sd_hash: 末尾 '~' までを含む提示文字列の SHA-256。
 	h := sha256.Sum256([]byte(presented))
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"` + alg + `","typ":"kb+jwt"}`))
+	hdrBytes, err := json.Marshal(struct {
+		Alg string `json:"alg"`
+		Typ string `json:"typ"`
+	}{Alg: signer.alg, Typ: "kb+jwt"})
+	if err != nil {
+		return "", fmt.Errorf("compliance: encode KB-JWT header: %w", err)
+	}
+	header := base64.RawURLEncoding.EncodeToString(hdrBytes)
 	payloadClaims := map[string]any{
 		"iat":     now.Unix(),
 		"aud":     aud,
@@ -980,7 +1001,7 @@ func presentWithKB(presented string, alg, nonce, aud string, transactionData []s
 	}
 	plBytes, _ := json.Marshal(payloadClaims)
 	payload := base64.RawURLEncoding.EncodeToString(plBytes)
-	sig := sign([]byte(header + "." + payload))
+	sig := signer.sign([]byte(header + "." + payload))
 	if sig == nil {
 		return "", fmt.Errorf("compliance: KB-JWT signing failed")
 	}
