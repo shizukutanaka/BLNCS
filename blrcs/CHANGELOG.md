@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **A concurrency test that earns back a claim instead of deleting it
+  (Axis 159).** Axis 158 wanted to document `mcp.Server` as "safe for concurrent
+  use" and could not: nothing in the tree exercised it, so the sentence was
+  softened to what was actually established. Softening was the honest short-term
+  move, but the right end state is evidence, not a weaker sentence.
+  `TestServerConcurrentUse` now drives registration, capability snapshots and
+  JSON-RPC dispatch from eight goroutines each against one Server under the race
+  detector (which `make verify` always enables), and asserts that every one of
+  the 160 registrations landed — a lost update would mean the writers raced even
+  where the detector saw nothing. The claim is restored, with the test named in
+  the doc comment as its evidence.
+
+  Mutation-checked, because a concurrency test that cannot detect a race is
+  exactly the "check that cannot fail" this project keeps removing: deleting the
+  mutex from `RegisterIssuer` makes it report `WARNING: DATA RACE` and fail.
 - **Documentation for four undocumented exported declarations (Axis 158).**
   `compliance.Issuer`, `mcp.Server`, `mcp.NewServer` and
   `mcp.NewTokenBucketLimiter` produced no output in `go doc` — and therefore

@@ -173,8 +173,11 @@ type contentBlock struct {
 // OpenID4VCI endpoints mounts openid4vci.Issuer.Handler() separately and
 // registers it with RegisterVCIIssuer.
 //
-// The registries a Server holds (issuers, attesters) are guarded by a mutex.
-// Serve itself reads one request at a time from a single stream.
+// A Server is safe for concurrent use: its registries are mutex-guarded, and
+// TestServerConcurrentUse exercises registration, capability snapshots and
+// JSON-RPC dispatch from eight goroutines each under the race detector, which
+// `make verify` always enables. That test is the evidence for this sentence —
+// removing the lock from RegisterIssuer makes it report a data race.
 type Server struct {
 	mu         sync.RWMutex
 	issuers    map[string]*compliance.Issuer
