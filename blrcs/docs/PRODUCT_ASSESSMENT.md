@@ -263,3 +263,56 @@ Items deliberately **not** queued: BBS/PQC cryptosuites, PQ/T hybrids, HPKE,
 EPCIS (upstream specs still non-final — implementing now would chase moving
 targets); DPP access-tier actor roles (Battery Reg implementing act due
 2026-08-18 will define the roles; premature to guess).
+
+## ソクラテス的検証 (Socratic examination)
+
+Closing examination (post-Axis 154), applying one question to every claim this
+document and this codebase make: **how do we know?** The discipline: no claim
+stands here unless it traces to a named test or a recorded measurement. The
+session's own record justifies the method — every major defect found across
+axes 129–154 was a confident, unexamined claim.
+
+### Strengths, interrogated (claim → the test that settles it)
+
+| Claim | How we know |
+|---|---|
+| Zero dependencies | Enforced, not asserted: `make deps-check` fails the gate on any `go.mod` require |
+| Spec conformance | Byte-for-byte reproduction of published vectors: RFC 7518 App C (Concat KDF), RFC 7636 App B (PKCE S256); conformance runner proven able to fail via negative controls |
+| Fail-closed security | Each path tested against the attack it stops: chain-as-evidence, auth-code and PAR request_uri burn-on-any-attempt, KB-JWT alg↔cnf match, unknown-cryptosuite rejection, byte-identical collapsed error bodies |
+| One real gate | `make verify` (~46 s) caught its own creators twice: a staticcheck finding in Axis 152's new code, and a flaky assertion the author wrote in Axis 146 |
+| Docs tell the truth | 14 README examples run as `Example_*` tests under `go test` |
+
+### Defects, grouped by the question that exposed them (all fixed, with regression tests)
+
+- **"Does the label match the act?"** — COSE alg header naming an algorithm
+  that didn't sign; battery passport re-signed with the wrong suite; the
+  fabricated `org-iso-mdoc` envelope (deleted after checking the actual spec).
+- **"Can this check fail?"** — lint that swallowed failures; a CI workflow at
+  `blrcs/.github/workflows/` that had never executed; a fuzz list skipping
+  17 of 20 targets. Same defect class three times: green without checking.
+- **"What happens on bad input?"** — `ed25519.Verify` panics on non-32-byte
+  keys; four remotely reachable call sites guarded
+  (`TestWrongLengthKeyDoesNotPanic`, `TestVerifyRangeWrongKeyLengthDoesNotPanic`).
+- **"Does anyone call this?"** — 13 packages / 10,020 lines unreachable from
+  `./cmd/...`, measured then deleted (56 → 43 packages).
+- **"Is the document telling the truth?"** — three false claims in this very
+  file (corrected above); and the examiner's own untested claim that PR #8
+  could not be made mergeable — one tested push (merge commit `15ece73`)
+  proved it false. The method must apply to the examiner too.
+
+### Remaining weaknesses (known, with reasons)
+
+SCITT receipt signing is Ed25519-only (internal, no interop pressure);
+VICAL / ISO 18013-7 Annex C absent (paywalled specs — implementing from memory
+recreates the `org-iso-mdoc` fabrication class); wallet attestation absent
+(drafts still moving); legacy Python CI red on every `main` run since 2025-11
+(pre-existing, owner action); dependabot `automerge:` key is not a real key.
+
+### Verdict
+
+Engineering-complete and verified: 2,030 tests, 20 fuzz targets, every
+credential format P-256-capable, all four defect classes fixed and pinned by
+regression tests. Delivery — merging PR #8 — is reserved to the owner by the
+repository's own Class C release rule, plus one owner-only command to activate
+CI: `git mv blrcs/.github/workflows/ci.yml .github/workflows/blrcs-go.yml`.
+That reservation is the design working, not the work unfinished.
