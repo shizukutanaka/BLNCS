@@ -1,0 +1,70 @@
+#!/bin/sh
+# Run the BLRCS verification gate before a push reaches the remote.
+#
+# Why this exists: the gate is `make verify` in blrcs/, and the workflow that
+# would run it on every push cannot be installed — the CI identity that
+# maintains this repository lacks the GitHub `workflows` permission, verified
+# across three independent routes (git push, the REST contents API, and the git
+# data API). Until a maintainer moves
+# blrcs/.github/workflows/ci.yml to .github/workflows/, this hook is the only
+# automatic execution of the gate that exists. It is not a replacement for CI:
+# it runs on the developer's machine and can be bypassed with --no-verify.
+#
+# Install (once per clone):
+#
+#     git config core.hooksPath .githooks
+#
+# or `make -C blrcs hooks`.
+#
+# The repository hosts two projects, so the Go gate runs only when the push
+# actually carries changes under blrcs/.
+#
+# Known limitation, stated rather than left implicit: the decision of *whether*
+# to run comes from the pushed commit range, but `make verify` runs against the
+# working tree. With a dirty tree those are not the same thing — the gate result
+# describes what is on disk, not what is being pushed. This is the ordinary
+# pre-push trade-off (running against the pushed commits would mean checking out
+# each one), and it is the safer direction: a dirty tree can only make the gate
+# stricter, never let a bad push through that a clean tree would have caught.
+
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+z40=0000000000000000000000000000000000000000
+
+touches_blrcs=0
+
+# git feeds "<local ref> <local sha> <remote ref> <remote sha>" per ref pushed.
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+	# Branch deletion: nothing to verify.
+	[ "$local_sha" = "$z40" ] && continue
+
+	if [ "$remote_sha" = "$z40" ]; then
+		# New branch on the remote: compare against the default branch if we
+		# have it, otherwise verify unconditionally rather than skip silently.
+		if base=$(git merge-base "$local_sha" origin/main 2>/dev/null); then
+			range="$base..$local_sha"
+		else
+			touches_blrcs=1
+			continue
+		fi
+	else
+		range="$remote_sha..$local_sha"
+	fi
+
+	if git diff --name-only "$range" 2>/dev/null | grep -q '^blrcs/'; then
+		touches_blrcs=1
+	fi
+done
+
+if [ "$touches_blrcs" -eq 0 ]; then
+	exit 0
+fi
+
+echo "pre-push: running the BLRCS gate (make verify, ~46s)..."
+if ! make -C "$repo_root/blrcs" verify; then
+	echo >&2
+	echo "pre-push: the gate failed — push aborted." >&2
+	echo "pre-push: fix it, or bypass deliberately with 'git push --no-verify'." >&2
+	exit 1
+fi

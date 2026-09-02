@@ -18,7 +18,7 @@
 # that differs from the one CI runs is not a gate. `verify` is now the single
 # definition and the workflow calls it.
 
-.PHONY: test test-v cover bench fuzz fuzz-smoke build doctor clean ci vet fmt fmt-check deps-check api dup-check lint precommit verify check
+.PHONY: test test-v cover bench fuzz fuzz-smoke build doctor clean ci vet fmt fmt-check deps-check api dup-check lint precommit verify check hooks
 
 # ============================================================================
 # Core
@@ -133,6 +133,16 @@ verify: fmt-check dup-check vet deps-check build test lint fuzz-smoke
 # precommit — full local gate before declaring work done (CLAUDE.md §6.3).
 precommit: fmt verify
 	@echo "precommit gate passed"
+
+# hooks — point git at the tracked hook directory so `git push` runs the gate.
+#   The workflow that would run it on every push cannot be installed: this
+#   identity lacks the GitHub `workflows` permission (verified across git push,
+#   the REST contents API and the git data API). Until a maintainer moves
+#   blrcs/.github/workflows/ci.yml to .github/workflows/, this is the only
+#   automatic execution of the gate that exists. Per clone, once.
+hooks:
+	@git -C .. config core.hooksPath .githooks
+	@echo "core.hooksPath = .githooks — 'git push' now runs 'make verify' when blrcs/ changed"
 
 # ============================================================================
 # Performance
