@@ -381,6 +381,21 @@ Two readings, and the choice is the maintainer's:
 Either way the present state is unsatisfactory: the permissive reading's only
 authority is an uncited test comment.
 
+**A likely mechanism, from in-repo evidence rather than spec memory.** Searching
+the tree for what *does* cite §6.3 turns up an authorised empty case — but a
+different one. `openid4vp/dcql.go:56` documents `CredentialQuery.Claims`:
+"要求するクレーム群 (§6.3)。空なら全クレーム" — *an empty **Claims** list means
+the whole credential*. That is standard and correct. Nothing in the tree
+authorises the other empty case, an empty **Path** inside a `ClaimQuery`: the
+`Path` doc at `dcql.go:85` enumerates the three legal segment forms per §6.3
+and says nothing about emptiness, and the CHANGELOG's §6.3 entries likewise
+concern path *components*, not empty paths.
+
+Two distinct "empty" cases, one authorised and one not, resolving to the same
+permissive answer. Conflating them is the most economical explanation for how
+the behaviour arose, and it is a reason to check rather than to assume — in
+either direction.
+
 ### Remaining weaknesses (known, with reasons)
 
 ~~SCITT receipt signing is Ed25519-only (internal, no interop pressure)~~ —
