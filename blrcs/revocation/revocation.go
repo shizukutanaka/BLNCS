@@ -193,7 +193,10 @@ func (l *List) Sign(privKey ed25519.PrivateKey) (*SignedList, error) {
 		UpdatedAt: time.Now().UTC(),
 		Entries:   l.Entries(),
 	}
-	digest := computeDigest(signed)
+	digest, err := computeDigest(signed)
+	if err != nil {
+		return nil, err
+	}
 	sig := ed25519.Sign(privKey, digest)
 	signed.Signature = hex.EncodeToString(sig)
 	return signed, nil
@@ -208,7 +211,11 @@ func Verify(signed *SignedList, pubKey ed25519.PublicKey) error {
 	if err != nil {
 		return fmt.Errorf("%w: signature hex decode: %v", ErrInvalidSig, err)
 	}
-	digest := computeDigest(signed)
+	digest, err := computeDigest(signed)
+	if err != nil {
+		// Fail closed: a list whose digest cannot be computed is unverifiable.
+		return fmt.Errorf("%w: %v", ErrInvalidSig, err)
+	}
 	if !ed25519.Verify(pubKey, digest, sig) {
 		return ErrInvalidSig
 	}
@@ -259,7 +266,11 @@ func UnmarshalSignedList(data []byte) (*SignedList, error) {
 //
 // 重要: Signature フィールドを除外して computed (chicken-and-egg 解決)
 // entries は ID 順にソート済 (Sign で実施)
-func computeDigest(s *SignedList) []byte {
+// It returns an error rather than discarding one: json.Marshal fails on a
+// time.Time whose year falls outside [0,9999], and the discarded form then
+// hashed nil — so every list carrying such a timestamp shared one digest,
+// leaving issuer and entries unauthenticated.
+func computeDigest(s *SignedList) ([]byte, error) {
 	// 署名対象を deterministic に直列化
 	withoutSig := struct {
 		Issuer    string    `json:"issuer"`
@@ -270,7 +281,10 @@ func computeDigest(s *SignedList) []byte {
 		UpdatedAt: s.UpdatedAt,
 		Entries:   s.Entries,
 	}
-	body, _ := json.Marshal(withoutSig)
+	body, err := json.Marshal(withoutSig)
+	if err != nil {
+		return nil, fmt.Errorf("revocation: encode signing payload: %w", err)
+	}
 	h := sha256.Sum256(body)
-	return h[:]
+	return h[:], nil
 }

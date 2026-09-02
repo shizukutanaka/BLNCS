@@ -341,6 +341,70 @@ axes 129–154 was a confident, unexamined claim.
   could not be made mergeable — one tested push (merge commit `15ece73`)
   proved it false. The method must apply to the examiner too.
 
+### Resolved: DCQL empty `path` now fails closed (Axes 162–163)
+
+**A DCQL claim query with an empty `path` matches everything, and passes
+validation.** Measured, not inferred:
+
+```
+DCQLQuery{Credentials: [{Claims: [{Path: []}]}]}.Validate()  -> nil
+   ...MatchClaims(map[string]any{})                          -> true
+   ...MatchClaims({"totally": "unrelated"})                  -> true
+```
+
+`Validate` (`openid4vp/dcql.go`) checks every path *segment* and the depth
+*upper* bound, but never rejects an empty path; `matchOneClaim` then returns
+`true` for one. A verifier whose query-building code produces an empty path —
+a typo, a truncated config, a nil slice — gets a query that accepts any
+presentation while appearing to constrain a claim.
+
+The behaviour is **deliberate**: `TestMatchClaimsEmptyPathSkipped` and
+`TestObjectOnlyPathsUnchanged` both assert it. But neither cites an authority,
+while the neighbouring `TestPathSegmentValidation` cites §6.3 for which
+segments are legal. My recollection is that OpenID4VP 1.0 §6.3 makes `path`
+REQUIRED in a claims entry, which would make an empty path malformed rather
+than permissive — but this environment cannot reach `openid.net` to check, and
+changing wire-format semantics from memory is exactly how the fabricated
+`org-iso-mdoc` envelope was written. A fix was implemented, seen to break both
+tests, and **reverted** rather than pushed on an unverifiable premise.
+
+**Settled by the maintainer (Axis 163): fail closed.** `Validate` now rejects a
+claim entry with an empty path (`ErrDCQLInvalidPath`), and `matchOneClaim`
+returns false for one as defence in depth. The two tests that asserted the old
+behaviour were **rewritten to assert the new one, not deleted**, and a guard
+test was added for the case that is legitimately permissive — an empty `claims`
+list still means the whole credential — so the change cannot creep into it.
+Both halves are independently mutation-checked: reverting either the validator
+or the matcher fails the suite.
+
+The two readings that were weighed:
+
+- *Empty path is malformed* → `Validate` rejects it and `matchOneClaim` fails
+  closed. Consistent with how BLRCS treats every other input it does not
+  understand (unknown cryptosuite, unknown alg, untrusted chain): it refuses
+  rather than defaults to permit. **This is the reading that was adopted.**
+- *Empty path means "no constraint"* → current behaviour is correct, and the
+  two tests should cite the clause that says so, so the next reader need not
+  re-derive it.
+
+The permissive reading's only authority was an uncited test comment, which is
+why it did not survive being asked for one.
+
+**A likely mechanism, from in-repo evidence rather than spec memory.** Searching
+the tree for what *does* cite §6.3 turns up an authorised empty case — but a
+different one. `openid4vp/dcql.go:56` documents `CredentialQuery.Claims`:
+"要求するクレーム群 (§6.3)。空なら全クレーム" — *an empty **Claims** list means
+the whole credential*. That is standard and correct. Nothing in the tree
+authorises the other empty case, an empty **Path** inside a `ClaimQuery`: the
+`Path` doc at `dcql.go:85` enumerates the three legal segment forms per §6.3
+and says nothing about emptiness, and the CHANGELOG's §6.3 entries likewise
+concern path *components*, not empty paths.
+
+Two distinct "empty" cases, one authorised and one not, resolving to the same
+permissive answer. Conflating them is the most economical explanation for how
+the behaviour arose, and it is a reason to check rather than to assume — in
+either direction.
+
 ### Remaining weaknesses (known, with reasons)
 
 ~~SCITT receipt signing is Ed25519-only (internal, no interop pressure)~~ —

@@ -131,9 +131,11 @@ func TestObjectOnlyPathsUnchanged(t *testing.T) {
 	if matchOneClaim(&ClaimQuery{Path: []any{"address", "postcode"}}, c) {
 		t.Error("absent nested key should not match")
 	}
-	// An empty path still means "no constraint".
-	if !matchOneClaim(&ClaimQuery{}, c) {
-		t.Error("empty path should impose no constraint")
+	// An empty path fails closed (Axis 163): it selects nothing, so it cannot
+	// be satisfied. It used to be treated as "no constraint", which made such a
+	// query match everything.
+	if matchOneClaim(&ClaimQuery{}, c) {
+		t.Error("empty path must not be treated as satisfied")
 	}
 }
 
