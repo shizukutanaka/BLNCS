@@ -341,6 +341,46 @@ axes 129–154 was a confident, unexamined claim.
   could not be made mergeable — one tested push (merge commit `15ece73`)
   proved it false. The method must apply to the examiner too.
 
+### Open question, measured but not resolved (Axis 162)
+
+**A DCQL claim query with an empty `path` matches everything, and passes
+validation.** Measured, not inferred:
+
+```
+DCQLQuery{Credentials: [{Claims: [{Path: []}]}]}.Validate()  -> nil
+   ...MatchClaims(map[string]any{})                          -> true
+   ...MatchClaims({"totally": "unrelated"})                  -> true
+```
+
+`Validate` (`openid4vp/dcql.go`) checks every path *segment* and the depth
+*upper* bound, but never rejects an empty path; `matchOneClaim` then returns
+`true` for one. A verifier whose query-building code produces an empty path —
+a typo, a truncated config, a nil slice — gets a query that accepts any
+presentation while appearing to constrain a claim.
+
+The behaviour is **deliberate**: `TestMatchClaimsEmptyPathSkipped` and
+`TestObjectOnlyPathsUnchanged` both assert it. But neither cites an authority,
+while the neighbouring `TestPathSegmentValidation` cites §6.3 for which
+segments are legal. My recollection is that OpenID4VP 1.0 §6.3 makes `path`
+REQUIRED in a claims entry, which would make an empty path malformed rather
+than permissive — but this environment cannot reach `openid.net` to check, and
+changing wire-format semantics from memory is exactly how the fabricated
+`org-iso-mdoc` envelope was written. A fix was implemented, seen to break both
+tests, and **reverted** rather than pushed on an unverifiable premise.
+
+Two readings, and the choice is the maintainer's:
+
+- *Empty path is malformed* → `Validate` should reject it and `matchOneClaim`
+  should fail closed. Consistent with how BLRCS treats every other input it
+  does not understand (unknown cryptosuite, unknown alg, untrusted chain): it
+  refuses rather than defaults to permit.
+- *Empty path means "no constraint"* → current behaviour is correct, and the
+  two tests should cite the clause that says so, so the next reader need not
+  re-derive it.
+
+Either way the present state is unsatisfactory: the permissive reading's only
+authority is an uncited test comment.
+
 ### Remaining weaknesses (known, with reasons)
 
 ~~SCITT receipt signing is Ed25519-only (internal, no interop pressure)~~ —
