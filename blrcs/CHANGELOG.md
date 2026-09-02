@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Examined and deliberately not changed
+- **The "empty means allow" sweep, after Axis 163 (Axis 164).** The DCQL empty
+  `path` was one instance of a class — a missing value silently read as "no
+  constraint" — so the class was swept rather than left at one fix. Every other
+  instance in verification paths already fails closed: `RequiredClaims` empty →
+  `ErrDefinitionEmpty`; a resolver's trusted set empty → `ErrNotTrusted`; a
+  trusted-authority entry with empty `values` → `ErrTrustedAuthorityInvalid`
+  (the same shape as the DCQL fix, already present).
+
+  `checkTrustedAuthorities` is the model: a constraint present with no checker
+  wired returns `ErrTrustedAuthorityUnverifiable` rather than passing, a checker
+  that errors refuses rather than degrading into "unrestricted", and no match is
+  `ErrTrustedAuthorityUnsatisfied`. Its two legitimately permissive cases —
+  omitted `trusted_authorities`, omitted `claims` — are spec-authorised
+  optionality, not defaults standing in for a constraint.
+
+  One case that looks like the DCQL bug but is not: `VerifyCOSEReceiptWithAlgs`
+  with a nil allowlist accepts any registered algorithm. There the algorithm
+  only selects a verifier — the key must still verify the signature, so a wrong
+  algorithm fails anyway. The DCQL empty path removed a constraint outright with
+  nothing else to catch it. Superficially the same shape; materially different,
+  and worth writing down so the next sweep does not "fix" it.
+
 ### Fixed
 - **A DCQL query with an empty claim `path` matched everything (Axis 163).**
   `Validate` checked every path *segment* and the depth *upper* bound but never
