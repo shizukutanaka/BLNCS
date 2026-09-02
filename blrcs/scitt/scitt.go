@@ -386,14 +386,26 @@ func SignStatement(issuerPriv ed25519.PrivateKey, issuerID, subject, contentType
 		IssuedAt:    time.Now().UTC(),
 		IssuerKey:   base64.StdEncoding.EncodeToString(issuerPriv.Public().(ed25519.PublicKey)),
 	}
-	sigPayload := statementSigPayload(&stmt)
+	sigPayload, err := statementSigPayload(&stmt)
+	if err != nil {
+		return Statement{}, err
+	}
 	stmt.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(issuerPriv, sigPayload))
 	return stmt, nil
 }
 
-func statementSigPayload(s *Statement) []byte {
+// statementSigPayload builds the bytes a statement's signature covers.
+//
+// It returns an error rather than discarding one. The discarded form was an
+// integrity hazard, not a style issue: json.Marshal fails on a time.Time whose
+// year falls outside [0,9999], and the old code then signed and verified over
+// nil — so every statement carrying such a timestamp shared one signing
+// payload, leaving issuer, subject and payloadHash unauthenticated. Reachable
+// in-process (time.Now().AddDate(100000, 0, 0)), though not over the wire,
+// since Go's RFC 3339 parser rejects expanded years.
+func statementSigPayload(s *Statement) ([]byte, error) {
 	// 決定的: 署名対象フィールドを固定順JSON化
-	b, _ := json.Marshal(struct {
+	b, err := json.Marshal(struct {
 		I   string    `json:"i"`
 		Sub string    `json:"s"`
 		Cty string    `json:"c"`
@@ -401,7 +413,10 @@ func statementSigPayload(s *Statement) []byte {
 		Iat time.Time `json:"t"`
 		Ik  string    `json:"k"`
 	}{s.Issuer, s.Subject, s.ContentType, s.PayloadHash, s.IssuedAt, s.IssuerKey})
-	return b
+	if err != nil {
+		return nil, fmt.Errorf("scitt: encode statement signing payload: %w", err)
+	}
+	return b, nil
 }
 
 // VerifyStatement — 発行者署名検証
@@ -414,7 +429,13 @@ func VerifyStatement(s *Statement) error {
 	if err != nil {
 		return errors.New("scitt: bad sig encoding")
 	}
-	if !ed25519.Verify(ed25519.PublicKey(pub), statementSigPayload(s), sig) {
+	sigPayload, err := statementSigPayload(s)
+	if err != nil {
+		// Fail closed: a statement whose signing payload cannot be built is
+		// unverifiable, never verified.
+		return fmt.Errorf("%w: %v", ErrStatementMalformed, err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(pub), sigPayload, sig) {
 		return ErrBadReceipt
 	}
 	return nil

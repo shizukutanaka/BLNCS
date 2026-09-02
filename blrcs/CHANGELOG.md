@@ -6,6 +6,58 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Two signing payloads collapsed to empty on a marshal error (Axis 161).**
+  The discarded-`json.Marshal`-error bug had been fixed once, in SD-JWT
+  disclosures, but the class was never swept. Sweeping it found the same
+  pattern in two places that feed a signature:
+
+  - `scitt.statementSigPayload` returned `nil` when marshalling failed, and
+    both `SignStatement` and `VerifyStatement` used the result. `json.Marshal`
+    fails on a `time.Time` whose year lies outside [0, 9999], so every statement
+    carrying such a timestamp was signed and verified over the **same empty
+    payload** — one signature covered any of them, leaving issuer, subject and
+    payloadHash unauthenticated.
+  - `revocation.computeDigest` hashed `nil` on the same failure, and
+    `Entry.RevokedAt` is a `time.Time`. Two lists with different issuers and
+    different entries both digested to `sha256("")`, so a signature over one
+    verified the other.
+
+  Both now return an error; `Sign`/`SignStatement` propagate it and
+  `Verify`/`VerifyStatement` fail closed rather than verifying over empty bytes.
+
+  **Severity, measured rather than guessed.** Not remotely reachable: Go's
+  RFC 3339 parser rejects expanded years, so `+99999-01-01T00:00:00Z` fails to
+  unmarshal and no such statement can arrive over the wire. Reachable
+  in-process: `time.Now().AddDate(100000, 0, 0)` yields year 102026 and a
+  zero-length payload. A latent integrity bug, not a remote vulnerability —
+  fixed rather than filed because the fix is trivial and the failure mode is a
+  signature that authenticates nothing.
+
+  `TestNoCrossStatementSignatureReuse` and `TestNoCrossListSignatureReuse`
+  construct the exact forgery — a signature over the empty payload attached to
+  a statement or list it never covered — and require rejection. Both were
+  mutation-checked against a *faithful* reintroduction of the original code,
+  not an approximation: every new test fails under it.
+
+  Worth recording: the first version of the revocation test asserted only that
+  `Verify` returned `ErrInvalidSig`, which a broken implementation also does by
+  accident — it passed against the mutation. Mutation testing caught that the
+  test could not fail for the right reason, and it was replaced with the
+  forgery form above. A weak test is the same defect class as a check that
+  cannot fail; it just hides one level further in.
+
+### Examined and deliberately not changed
+- **The other discarded-marshal sites that feed signatures (Axis 161).**
+  `revocation/token.go` (status list token payload) and
+  `compliance.presentWithKB` (KB-JWT payload) also discard a marshal error, but
+  marshal only strings and `int64` — timestamps there are Unix seconds, not
+  `time.Time`, and no field is a float or `any`. `json.Marshal` cannot fail on
+  them, so the discarded error is unreachable rather than merely unlikely.
+  Verified by reading the types, not assumed from the pattern. The ~30 sites in
+  `mcp`, plus `dcapi`, `conformance` and the OpenID4VCI offer, serialize
+  responses rather than signed material and are outside an integrity sweep.
+
 ### Added
 - **The gate now runs automatically on push, by the one route that is open
   (Axis 160).** Musk's fifth step is automate, and it was the step still
