@@ -7,6 +7,49 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **A DCQL query with an empty claim `path` matched everything (Axis 163).**
+  `Validate` checked every path *segment* and the depth *upper* bound but never
+  rejected an empty path, and `matchOneClaim` returned true for one. Measured
+  before changing anything:
+
+  ```
+  DCQLQuery{Credentials: [{Claims: [{Path: []}]}]}.Validate() -> nil
+     ...MatchClaims(map[string]any{})                         -> true
+     ...MatchClaims({"totally": "unrelated"})                 -> true
+  ```
+
+  So a verifier whose query-building code produced an empty path — a typo, a
+  truncated config, a nil slice — got a query that accepted any presentation,
+  including an empty one, while appearing to constrain a claim. A check that
+  cannot fail, at the query level.
+
+  `Validate` now rejects it with `ErrDCQLInvalidPath`, and `matchOneClaim`
+  fails closed as defence in depth for a `ClaimQuery` built directly. This is
+  consistent with how the rest of BLRCS treats input it does not understand —
+  unknown cryptosuite, unknown alg, untrusted chain — which refuse rather than
+  default to permit.
+
+  **How this was decided matters more than the change.** The old behaviour was
+  deliberate: two tests asserted it. Neither cited an authority, while the
+  neighbouring `TestPathSegmentValidation` cites §6.3 for which segments are
+  legal. Searching the tree for what *does* cite §6.3 found an authorised empty
+  case — but a different one: `dcql.go:56` documents an empty `claims` **list**
+  as meaning the whole credential, which is standard. Nothing authorised an
+  empty `path`. Two distinct "empty" cases resolving to the same permissive
+  answer; conflating them is the most economical explanation.
+
+  A fix was written, seen to break both tests, and **reverted** rather than
+  pushed, because this environment cannot reach `openid.net` and changing
+  wire-format semantics from memory is how the fabricated `org-iso-mdoc`
+  envelope was written. The finding was recorded with both readings and the
+  evidence, and the maintainer settled it. The two tests were then **rewritten
+  to assert the new behaviour, not deleted**, and a guard test was added for the
+  legitimately permissive case so the change cannot creep into it.
+
+  Both halves mutation-checked independently: reverting either the validator or
+  the matcher fails the suite.
+
+### Fixed
 - **Two signing payloads collapsed to empty on a marshal error (Axis 161).**
   The discarded-`json.Marshal`-error bug had been fixed once, in SD-JWT
   disclosures, but the class was never swept. Sweeping it found the same

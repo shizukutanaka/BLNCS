@@ -356,19 +356,57 @@ func TestMatchClaimsCompositeValues(t *testing.T) {
 	}
 }
 
-// TestMatchClaimsEmptyPathSkipped verifies that a claim with an empty Path is
-// skipped (treated as a non-constraint) rather than failing the match.
-func TestMatchClaimsEmptyPathSkipped(t *testing.T) {
+// TestMatchClaimsEmptyPathFailsClosed pins the Axis 163 behaviour change.
+//
+// An empty Path used to be skipped as a non-constraint, which made a query
+// carrying one match every presentation — including an empty one — while its
+// author believed a claim was being required. It now fails closed: a claim
+// query that selects nothing cannot be satisfied. This is a different case
+// from an empty `claims` list, which still legitimately means "the whole
+// credential" (see TestMatchClaimsNoClaimsMatchesAnything below).
+func TestMatchClaimsEmptyPathFailsClosed(t *testing.T) {
 	cq := CredentialQuery{
 		ID:     "c",
 		Format: "dc+sd-jwt",
 		Claims: []ClaimQuery{
-			{Path: nil},                    // empty path → skipped
-			{Path: []any{"present_claim"}}, // real constraint
+			{Path: nil},                    // selects nothing → cannot be satisfied
+			{Path: []any{"present_claim"}}, // real constraint, satisfied below
 		},
 	}
+	if cq.MatchClaims(map[string]any{"present_claim": "ok"}) {
+		t.Error("a claim query with an empty path must not be treated as satisfied")
+	}
+	// The empty path is what fails: the same query without it matches.
+	cq.Claims = cq.Claims[1:]
 	if !cq.MatchClaims(map[string]any{"present_claim": "ok"}) {
-		t.Error("empty-path claim should be skipped; match should succeed")
+		t.Error("the remaining real constraint should still match")
+	}
+}
+
+// TestMatchClaimsNoClaimsMatchesAnything guards the case that is legitimately
+// permissive, so the fail-closed change above cannot creep into it: an empty
+// `claims` list means the whole credential (dcql.go, §6.3).
+func TestMatchClaimsNoClaimsMatchesAnything(t *testing.T) {
+	cq := CredentialQuery{ID: "c", Format: "dc+sd-jwt"}
+	if !cq.MatchClaims(map[string]any{"anything": 1}) {
+		t.Error("a query with no claims must match the whole credential")
+	}
+}
+
+// TestValidateRejectsEmptyClaimPath is the other half: the malformed query is
+// refused at validation, not merely unsatisfiable at match time.
+func TestValidateRejectsEmptyClaimPath(t *testing.T) {
+	q := DCQLQuery{Credentials: []CredentialQuery{{
+		ID:     "cred1",
+		Format: "dc+sd-jwt",
+		Claims: []ClaimQuery{{Path: []any{}}},
+	}}}
+	err := q.Validate()
+	if err == nil {
+		t.Fatal("Validate must reject a claim entry with an empty path")
+	}
+	if !errors.Is(err, ErrDCQLInvalidPath) {
+		t.Fatalf("want ErrDCQLInvalidPath, got %v", err)
 	}
 }
 

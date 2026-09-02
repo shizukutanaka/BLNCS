@@ -341,7 +341,7 @@ axes 129–154 was a confident, unexamined claim.
   could not be made mergeable — one tested push (merge commit `15ece73`)
   proved it false. The method must apply to the examiner too.
 
-### Open question, measured but not resolved (Axis 162)
+### Resolved: DCQL empty `path` now fails closed (Axes 162–163)
 
 **A DCQL claim query with an empty `path` matches everything, and passes
 validation.** Measured, not inferred:
@@ -368,18 +368,27 @@ changing wire-format semantics from memory is exactly how the fabricated
 `org-iso-mdoc` envelope was written. A fix was implemented, seen to break both
 tests, and **reverted** rather than pushed on an unverifiable premise.
 
-Two readings, and the choice is the maintainer's:
+**Settled by the maintainer (Axis 163): fail closed.** `Validate` now rejects a
+claim entry with an empty path (`ErrDCQLInvalidPath`), and `matchOneClaim`
+returns false for one as defence in depth. The two tests that asserted the old
+behaviour were **rewritten to assert the new one, not deleted**, and a guard
+test was added for the case that is legitimately permissive — an empty `claims`
+list still means the whole credential — so the change cannot creep into it.
+Both halves are independently mutation-checked: reverting either the validator
+or the matcher fails the suite.
 
-- *Empty path is malformed* → `Validate` should reject it and `matchOneClaim`
-  should fail closed. Consistent with how BLRCS treats every other input it
-  does not understand (unknown cryptosuite, unknown alg, untrusted chain): it
-  refuses rather than defaults to permit.
+The two readings that were weighed:
+
+- *Empty path is malformed* → `Validate` rejects it and `matchOneClaim` fails
+  closed. Consistent with how BLRCS treats every other input it does not
+  understand (unknown cryptosuite, unknown alg, untrusted chain): it refuses
+  rather than defaults to permit. **This is the reading that was adopted.**
 - *Empty path means "no constraint"* → current behaviour is correct, and the
   two tests should cite the clause that says so, so the next reader need not
   re-derive it.
 
-Either way the present state is unsatisfactory: the permissive reading's only
-authority is an uncited test comment.
+The permissive reading's only authority was an uncited test comment, which is
+why it did not survive being asked for one.
 
 **A likely mechanism, from in-repo evidence rather than spec memory.** Searching
 the tree for what *does* cite §6.3 turns up an authorised empty case — but a

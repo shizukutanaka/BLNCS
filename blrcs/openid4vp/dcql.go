@@ -144,6 +144,16 @@ func (q *DCQLQuery) Validate() error {
 		}
 		claimIDs := make(map[string]bool, len(c.Claims))
 		for j, claim := range c.Claims {
+			// OpenID4VP 1.0 §6.3 requires a `path` in a claims entry. An empty
+			// one selects nothing to constrain, and previously matched every
+			// presentation — a query that could not fail, while its author
+			// believed it was restricting a claim. Rejected rather than
+			// silently honoured; note this is a different case from an empty
+			// `claims` list, which legitimately means "the whole credential".
+			if len(claim.Path) == 0 {
+				return fmt.Errorf("%w: credential %q claim[%d] has an empty path; §6.3 requires one",
+					ErrDCQLInvalidPath, c.ID, j)
+			}
 			for k, seg := range claim.Path {
 				if !validPathSegment(seg) {
 					return fmt.Errorf("%w: credential %q claim %d path segment %d must be a string, a non-negative integer, or null",
@@ -281,7 +291,10 @@ func (cq *CredentialQuery) MatchClaims(presented map[string]any) bool {
 // presented claims (path resolution + optional value-set membership).
 func matchOneClaim(claim *ClaimQuery, presented map[string]any) bool {
 	if len(claim.Path) == 0 {
-		return true
+		// Fail closed. Validate rejects an empty path, so this is defence in
+		// depth for a ClaimQuery built directly: a query selecting nothing
+		// cannot be satisfied, and must not stand in for "matches anything".
+		return false
 	}
 	selected := resolvePath(presented, claim.Path)
 	if len(selected) == 0 {
