@@ -6,6 +6,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **MCP session IDs ignored an entropy failure (Axis 165).** `newSessionID` did
+  `_, _ = rand.Read(b[:])`. On the go 1.22 floor `crypto/rand.Read` can return
+  an error, and ignoring it leaves the buffer zeroed: every client would then
+  receive the identical ID `000…0`, colliding sessions and letting one caller
+  address another principal's. It now returns an error and the `initialize`
+  handler answers 500. Tests use a `randRead` seam to force the failure;
+  mutation-checked (re-discarding the error fails it). Other ignored
+  `rand.Read` sites were read and left alone: `httpmw` request IDs are log
+  correlators only, and the `doctor` salt is a self-test value.
+
 ### Examined and deliberately not changed
 - **The "empty means allow" sweep, after Axis 163 (Axis 164).** The DCQL empty
   `path` was one instance of a class — a missing value silently read as "no
