@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Examined and deliberately not changed
+- **HTTP servers and clients without timeouts or SSRF policy (Axis 167).**
+  Swept every `http.Server`, `http.Client` and bare `http.Get/ListenAndServe`.
+  `blrcs-mcpd` sets `ReadHeaderTimeout` (WriteTimeout is 0 deliberately, for
+  SSE). `didresolver`, `vctmeta` and `webhook` all refuse or re-validate
+  redirects and validate the IP at dial time. Only `openid4vci.WalletClient`
+  is plain (10 s timeout, default redirects); its `BaseURL` is supplied by the
+  SDK caller, not a remote party, so there is no SSRF path. No change.
+
 - **Unbounded network reads (Axis 166).** Swept every `io.ReadAll`, request
   `json.NewDecoder`, and `ParseForm` in non-test code. All inbound bodies are
   bounded (`http.MaxBytesReader`: 4 KiB notification, 64 KiB token/PAR,
