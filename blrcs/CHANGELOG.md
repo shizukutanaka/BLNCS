@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Examined and deliberately not changed
+- **Unchecked type assertions on the data path (Axis 168).** Five sites use a
+  bare `x.(T)`: `scitt` subtree cache and `telemetry` counter/histogram maps
+  (each map only ever stores one concrete type, written in the same package)
+  and `didwebvh` genesis creation, where `substituteSCID` on a
+  `map[string]any` always returns a `map[string]any`. None takes parsed or
+  remote input, so none can panic on it. No change.
+
 - **HTTP servers and clients without timeouts or SSRF policy (Axis 167).**
   Swept every `http.Server`, `http.Client` and bare `http.Get/ListenAndServe`.
   `blrcs-mcpd` sets `ReadHeaderTimeout` (WriteTimeout is 0 deliberately, for
