@@ -6,6 +6,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Examined and deliberately not changed
+- **Unbounded network reads (Axis 166).** Swept every `io.ReadAll`, request
+  `json.NewDecoder`, and `ParseForm` in non-test code. All inbound bodies are
+  bounded (`http.MaxBytesReader`: 4 KiB notification, 64 KiB token/PAR,
+  1-4 MiB JSON) and outbound reads use `io.LimitReader`. No form parse is
+  unbounded. Nothing to fix; recorded so the sweep is not repeated.
+
 ### Fixed
 - **MCP session IDs ignored an entropy failure (Axis 165).** `newSessionID` did
   `_, _ = rand.Read(b[:])`. On the go 1.22 floor `crypto/rand.Read` can return
