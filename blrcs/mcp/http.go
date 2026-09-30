@@ -170,7 +170,11 @@ func (h *HTTPHandler) handlePost(w http.ResponseWriter, r *http.Request, princip
 
 	// initialize: 新セッション発行
 	if peek.Method == "initialize" {
-		sid := newSessionID()
+		sid, err := newSessionID()
+		if err != nil {
+			writeHTTPError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
 		h.sessions.create(sid, principal)
 		w.Header().Set(sessionHeader, sid)
 	} else {
@@ -404,10 +408,20 @@ func (s *sessionStore) gc() {
 	s.mu.Unlock()
 }
 
-func newSessionID() string {
+// randRead is a seam so tests can force an entropy failure.
+var randRead = rand.Read
+
+// newSessionID returns a 128-bit random session identifier. It reports a
+// randomness failure instead of discarding it: on the go 1.22 floor
+// crypto/rand.Read can return an error, and ignoring it would hand every
+// client the same all-zero ID — session collision, and fixation of another
+// principal's session.
+func newSessionID() (string, error) {
 	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
+	if _, err := randRead(b[:]); err != nil {
+		return "", fmt.Errorf("mcp: session id entropy: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // ============================================================================

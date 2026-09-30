@@ -1,15 +1,22 @@
 # BLRCS Product Assessment — 長所・短所・改善案
 
-Status date: post-Axis 155 (branch `claude/deepresearch-ultrathink-improve-YbA9t`).
+Status date: post-Axis 164 (branch `claude/deepresearch-ultrathink-improve-YbA9t`).
 
-**Shipping state:** `main` carries BLRCS at roughly Axis 128 (53 packages —
-counted directly from `origin/main`; earlier revisions said 49, which no
-measurement supports).
-Axes 129–155 — 57 commits, including the whole P-256/EUDI arc, the JWE
+**This banner has now gone stale three times** (corrected at Axis 150, again at
+Axis 155, again here) — the same "the document does not match the tree"
+defect this assessment exists to catch, recurring in the file that catches it.
+Measured fresh each time this note is touched, not carried forward from memory:
+
+**Shipping state: shipped.** `main` is at `48ec53a` (PR #12 merged,
+2026-09-02) — Axes 129–163 are all on `main`: the P-256/EUDI arc, the JWE
 response encryption, nested selective disclosure, the OpenID4VCI
-authorization-code flow, the mdoc PKI, the SCITT ES256 receipts, and several
-fail-closed security fixes — are **not on main**. PR #8 now proposes these axes
-to `main`; it is open and unmerged.
+authorization-code flow, the mdoc PKI, the SCITT ES256 receipts, the pre-push
+gate automation, the two signing-payload integrity fixes, and the DCQL
+fail-closed fix — via PRs #8, #9, #10, #11 and #12, each merged only after
+explicit user authorization and each verified independently afterward with
+`git merge-base --is-ancestor`, not by trusting the merge API's response field.
+Axis 164 (a documentation-only sweep, recorded below) is one commit ahead of
+`main` on the branch, not yet shipped.
 
 **Correction of a correction (Axis 155).** Axis 150 replaced the original note
 ("`main` carries the product as published via PR #1") with the claim that PR #1

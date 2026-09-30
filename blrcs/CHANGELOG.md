@@ -6,6 +6,62 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Examined and deliberately not changed
+- **Unchecked type assertions on the data path (Axis 168).** Five sites use a
+  bare `x.(T)`: `scitt` subtree cache and `telemetry` counter/histogram maps
+  (each map only ever stores one concrete type, written in the same package)
+  and `didwebvh` genesis creation, where `substituteSCID` on a
+  `map[string]any` always returns a `map[string]any`. None takes parsed or
+  remote input, so none can panic on it. No change.
+
+- **HTTP servers and clients without timeouts or SSRF policy (Axis 167).**
+  Swept every `http.Server`, `http.Client` and bare `http.Get/ListenAndServe`.
+  `blrcs-mcpd` sets `ReadHeaderTimeout` (WriteTimeout is 0 deliberately, for
+  SSE). `didresolver`, `vctmeta` and `webhook` all refuse or re-validate
+  redirects and validate the IP at dial time. Only `openid4vci.WalletClient`
+  is plain (10 s timeout, default redirects); its `BaseURL` is supplied by the
+  SDK caller, not a remote party, so there is no SSRF path. No change.
+
+- **Unbounded network reads (Axis 166).** Swept every `io.ReadAll`, request
+  `json.NewDecoder`, and `ParseForm` in non-test code. All inbound bodies are
+  bounded (`http.MaxBytesReader`: 4 KiB notification, 64 KiB token/PAR,
+  1-4 MiB JSON) and outbound reads use `io.LimitReader`. No form parse is
+  unbounded. Nothing to fix; recorded so the sweep is not repeated.
+
+### Fixed
+- **MCP session IDs ignored an entropy failure (Axis 165).** `newSessionID` did
+  `_, _ = rand.Read(b[:])`. On the go 1.22 floor `crypto/rand.Read` can return
+  an error, and ignoring it leaves the buffer zeroed: every client would then
+  receive the identical ID `000…0`, colliding sessions and letting one caller
+  address another principal's. It now returns an error and the `initialize`
+  handler answers 500. Tests use a `randRead` seam to force the failure;
+  mutation-checked (re-discarding the error fails it). Other ignored
+  `rand.Read` sites were read and left alone: `httpmw` request IDs are log
+  correlators only, and the `doctor` salt is a self-test value.
+
+### Examined and deliberately not changed
+- **The "empty means allow" sweep, after Axis 163 (Axis 164).** The DCQL empty
+  `path` was one instance of a class — a missing value silently read as "no
+  constraint" — so the class was swept rather than left at one fix. Every other
+  instance in verification paths already fails closed: `RequiredClaims` empty →
+  `ErrDefinitionEmpty`; a resolver's trusted set empty → `ErrNotTrusted`; a
+  trusted-authority entry with empty `values` → `ErrTrustedAuthorityInvalid`
+  (the same shape as the DCQL fix, already present).
+
+  `checkTrustedAuthorities` is the model: a constraint present with no checker
+  wired returns `ErrTrustedAuthorityUnverifiable` rather than passing, a checker
+  that errors refuses rather than degrading into "unrestricted", and no match is
+  `ErrTrustedAuthorityUnsatisfied`. Its two legitimately permissive cases —
+  omitted `trusted_authorities`, omitted `claims` — are spec-authorised
+  optionality, not defaults standing in for a constraint.
+
+  One case that looks like the DCQL bug but is not: `VerifyCOSEReceiptWithAlgs`
+  with a nil allowlist accepts any registered algorithm. There the algorithm
+  only selects a verifier — the key must still verify the signature, so a wrong
+  algorithm fails anyway. The DCQL empty path removed a constraint outright with
+  nothing else to catch it. Superficially the same shape; materially different,
+  and worth writing down so the next sweep does not "fix" it.
+
 ### Fixed
 - **A DCQL query with an empty claim `path` matched everything (Axis 163).**
   `Validate` checked every path *segment* and the depth *upper* bound but never
