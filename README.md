@@ -1,10 +1,10 @@
 # BLNCS
 
 > **📦 BLRCS — EU Digital Product Passport / Verifiable Credentials suite (Go)**
-> A production-grade, zero-dependency Go implementation of EU Digital Product
+> A zero-dependency Go implementation of EU Digital Product
 > Passport (ESPR) & Battery Passport (Reg 2023/1542) with W3C Verifiable
 > Credentials, SD-JWT-VC, IETF SCITT, OpenID4VP/VCI, ISO 18013-5 mdoc,
-> did:webvh, and the W3C Digital Credentials API — **53 packages, 2000+ tests,
+> did:webvh, and the W3C Digital Credentials API — **53 packages, 1900+ tests,
 > 21 fuzz targets, 0 external dependencies.**
 > **→ See [`blrcs/`](./blrcs/) and its [README](./blrcs/README.md).**
 
@@ -16,9 +16,9 @@
 
 ### 2025年10月 - システム回復機能と設定管理の大幅強化
 - **🔧 Lightning Network自動回復システム**: ノード障害、チャネル接続問題、ピア接続エラーを自動検知・回復
-- **⚙️ 統一設定管理システム**: 環境変数、YAMLファイル、デフォルト値の優先順位管理
+- **⚙️ 設定管理システム**: 環境変数と設定ファイルによる構成管理
 - **🔌 Lightning API統合**: LND互換の包括的なAPI実装
-- **🌐 国際化システム**: 50言語対応のgettextベース多言語サポート
+- **🌐 国際化システム**: gettextベースの国際化フレームワーク（翻訳カタログは同梱されていません）
 - **🧪 テスト環境改善**: pytest設定と自動テストスクリプト
 
 **詳細は [IMPROVEMENT_IMPLEMENTATION_REPORT.md](./IMPROVEMENT_IMPLEMENTATION_REPORT.md) を参照**
@@ -27,10 +27,10 @@
 
 ## 概要 / Overview
 ### 日本語
-BLNCSは、Lightning Networkノードの運用・監視・保守を一元管理するソフトウェアです。CLI、FlaskベースのREST API、Tkinterダッシュボードを組み合わせ、ローカル検証から本番稼働まで同じ構成で扱えます。50言語対応の国際化システム、構成ファイルのホットリロード、役割別ログ出力、監視エンドポイントを備え、グローバルな業務システムに組み込みやすい構成となっています。
+BLNCSは、Lightning Networkノードの運用・監視・保守を一元管理するソフトウェアです。CLI、FlaskベースのREST API、Tkinterダッシュボードを組み合わせ、ローカル検証から運用まで同じ構成で扱えます。gettextベースの国際化フレームワーク（翻訳カタログは同梱されていません）、役割別ログ出力、監視エンドポイントを備えています。なお、本ソフトウェアは第三者によるセキュリティ監査やコンプライアンス認証を受けていません。
 
 ### English
-BLNCS is an integrated control system for Bitcoin Lightning Network infrastructure. It ships with a command-line interface, a Flask REST API, and a Tkinter dashboard so operators can deploy, monitor, and maintain nodes using a single toolset. With comprehensive internationalization support for 50+ languages, unified configuration management, structured logging, and health endpoints help teams align with operational governance requirements across global deployments.
+BLNCS is an integrated control system for Bitcoin Lightning Network infrastructure. It ships with a command-line interface, a Flask REST API, and a Tkinter dashboard so operators can deploy, monitor, and maintain nodes using a single toolset. It also provides a gettext-based internationalization framework (no translation catalogs are bundled), structured logging, and health endpoints. The software has not undergone a third-party security audit or any compliance certification.
 
 ## クイックスタート / Quick Start
 ### 日本語
@@ -72,7 +72,7 @@ python blncs_main.py status
 - `blncs/gui/net_utils.py`: GUI用HTTP/WSユーティリティ。再試行設定とタイムアウトを一元管理します。
 - `blncs/core/system_recovery.py`: **🆕 Lightning Network自動回復システム**。ノード障害や接続問題を自動検知・回復します。
 - `blncs/core/lightning_api.py`: **🆕 統一Lightning API**。LND/CLN互換の包括的なAPIを提供します。
-- `blncs/core/unified_config.py`: **🆕 統一設定管理**。環境変数・YAMLファイル・デフォルト値の優先順位管理。
+- `blncs/core/config.py`: 設定管理。`config/` 配下のJSON設定ファイルと環境変数を読み込みます。
 - `config/`: JSON構成ファイル群。`BLNCS_ENV`環境変数で読み込むファイルを切り替えます。
 - `logs/` と `backups/`: ログとバックアップの出力先。アクセス権限は最小限に保ってください。
 
@@ -90,32 +90,27 @@ python blncs_main.py status
 3. 機密情報は `BLNCS_API_AUTHENTICATION_JWT_SECRET` などの環境変数で注入します。
 4. `security.trusted_hosts` と `security.enforce_https` を有効化し、TLS終端リバースプロキシから `X-Forwarded-Proto` を受け取る構成にします。
 
-### **🆕 統一設定管理システム**
-BLNCS v2.0では、設定管理が大幅に強化されました：
-- **優先順位ベースの設定マージ**: 環境変数 → ローカル設定 → 環境別設定 → デフォルト設定
-- **YAML/JSON対応**: `config/*.yaml` または `config/*.json` 形式をサポート
-- **設定バリデーション**: 起動時に設定値の妥当性を自動検証
-- **ホットリロード**: 設定変更を反映するためにシステム再起動不要（開発環境）
+### 設定管理
+設定は `config/` 配下のJSONファイルで管理し、`BLNCS_ENV` で読み込むファイルを切り替えます（例: `config/production.json`）。環境変数による上書きも可能です。
 
-**設定ファイル例** (`config/production.yaml`):
-```yaml
-api:
-  host: "0.0.0.0"
-  port: 3000
-  cors_enabled: true
-
-lightning:
-  network: "mainnet"
-  host: "localhost"
-  port: 10009
-
-monitoring:
-  enabled: true
-  interval_seconds: 300
-
-security:
-  enforce_https: true
-  trusted_hosts: ["api.yourdomain.com"]
+**設定ファイル例** (`config/production.json`):
+```json
+{
+  "api": {
+    "host": "0.0.0.0",
+    "port": 3000,
+    "cors_enabled": true
+  },
+  "lightning": {
+    "network": "mainnet",
+    "host": "localhost",
+    "port": 10009
+  },
+  "security": {
+    "enforce_https": true,
+    "trusted_hosts": ["api.example.com"]
+  }
+}
 ```
 
 ### English
@@ -143,9 +138,10 @@ security:
 
 ## 🌐 国際化 / Internationalization
 
-BLNCSは50言語以上の多言語対応をサポートしており、グローバルな運用環境での利用に最適化されています。
+BLNCSには gettext ベースの国際化フレームワーク（`blncs/core/i18n_manager.py`）が実装されています。ただし、翻訳カタログ（`.po` / `.mo` ファイル）はリポジトリに同梱されておらず、現時点で翻訳済みの言語はありません。`locale/<言語>/LC_MESSAGES/` にコンパイル済みカタログを配置した言語だけが有効になり、カタログが無い場合は原語（英語）のまま表示されます（フォールバック言語は英語と日本語）。
 
 ### 対応言語 / Supported Languages
+カタログを用意できる言語コードの例（いずれも翻訳カタログの配置が必要です）:
 - 日本語 (Japanese) - ja
 - 英語 (English) - en (デフォルト)
 - スペイン語 (Spanish) - es
@@ -397,7 +393,6 @@ GUI関連テストはTkinterをスタブ化して実行されます。ヘッド�
 ## 参考ドキュメント / Additional Documentation
 - `docs/DEPLOYMENT_GUIDE_UNIFIED.md`: 導入・運用手順
 - `docs/API_REFERENCE_UNIFIED.md`: REST API詳細
-- `docs/TROUBLESHOOTING.md`: 障害対応ガイド
 - `docs/I18N_GUIDE.md`: 国際化 (i18n) ガイド
 - `README_PERSONAL.md`: 個人利用向けチュートリアル
 - `README_PRODUCTION.md`: 本番運用設計ガイド
@@ -434,10 +429,19 @@ POST /api/lightning/invoice
   "memo": "Payment description"
 }
 
-# Pay invoice
+# Pay invoice (two steps: the first POST only validates the invoice and
+# returns HTTP 428 with a single-use confirmation_token; the payment is
+# executed only when the same body is re-sent together with that token)
 POST /api/lightning/pay
 {
   "payment_request": "lnbc..."
+}
+# -> HTTP 428 { "confirmation_token": "...", ... }
+
+POST /api/lightning/pay
+{
+  "payment_request": "lnbc...",
+  "confirmation_token": "<token from the 428 response>"
 }
 
 # Decode invoice
@@ -446,6 +450,8 @@ POST /api/lightning/decode
   "payment_request": "lnbc..."
 }
 ```
+
+> **Payment guard**: `POST /api/lightning/pay` never pays on the first request. It checks the invoice amount against a per-payment limit (default **10,000 sats**; set the environment variable `BLNCS_PAY_MAX_AMOUNT_SATS` to change it, or `0` to block all payments) and returns HTTP 428 with a single-use `confirmation_token` (valid 120 seconds). The payment executes only when the same body is re-sent with that token. Invoices without an amount are refused, because their amount cannot be checked against the limit.
 
 #### System Management
 
@@ -546,7 +552,7 @@ curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
 
 ## Contributing
 
-We welcome contributions! Please see `CONTRIBUTING.md` for guidelines.
+We welcome contributions! Please open an issue or submit a pull request on GitHub.
 
 ### Development Process
 
@@ -574,18 +580,11 @@ This project is licensed under the MIT License - see `LICENSE` file for details.
 - **Discussions**: GitHub Discussions for questions and community support
 - **Documentation**: Comprehensive docs in `docs/` directory
 
-### Enterprise Support
-- **Priority Support**: Dedicated support channel
-- **Custom Development**: Feature development and customization
-- **SLA Guarantees**: 24/7 support with guaranteed response times
-- **Training**: Team training and onboarding
-- **Contact**: enterprise@yourdomain.com
-
 ---
 
 **Built for the Lightning Network community**
 
-**Security Notice**: This is production-grade software designed for mission-critical infrastructure. Always review security settings and perform thorough testing before production deployment.
+**Security Notice**: This software moves real funds on the Lightning Network and has not been audited or certified by any third party. Always review security settings and perform thorough testing before production deployment.
 
 ### High Performance
 - **Optimized Caching**: Intelligent response caching with LRU eviction
@@ -602,9 +601,7 @@ This project is licensed under the MIT License - see `LICENSE` file for details.
 - **Database Optimization**: Query performance monitoring and automatic tuning
 
 ### Compliance & Governance
-- **SOC 2 Type II**: Trust Services Criteria compliance
-- **GDPR**: Data protection and privacy controls
-- **PCI-DSS**: Payment card industry security standards
+- **No third-party certification**: This software has not obtained SOC 2, PCI-DSS, ISO 27001, or any other third-party audit or certification, and does not claim compliance with them.
 - **Audit Trail**: Complete operation history with tamper detection
 - **Compliance Reporting**: Automated compliance status reports
 
@@ -632,7 +629,7 @@ This project is licensed under the MIT License - see `LICENSE` file for details.
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/BLNCS.git
+git clone https://github.com/shizukutanaka/BLNCS.git
 cd BLNCS
 
 # Create virtual environment
@@ -1028,10 +1025,19 @@ POST /api/lightning/invoice
   "memo": "Payment description"
 }
 
-# Pay invoice
+# Pay invoice (two steps: the first POST only validates the invoice and
+# returns HTTP 428 with a single-use confirmation_token; the payment is
+# executed only when the same body is re-sent together with that token)
 POST /api/lightning/pay
 {
   "payment_request": "lnbc..."
+}
+# -> HTTP 428 { "confirmation_token": "...", ... }
+
+POST /api/lightning/pay
+{
+  "payment_request": "lnbc...",
+  "confirmation_token": "<token from the 428 response>"
 }
 
 # Decode invoice
@@ -1040,6 +1046,8 @@ POST /api/lightning/decode
   "payment_request": "lnbc..."
 }
 ```
+
+> **Payment guard**: `POST /api/lightning/pay` never pays on the first request. It checks the invoice amount against a per-payment limit (default **10,000 sats**; set the environment variable `BLNCS_PAY_MAX_AMOUNT_SATS` to change it, or `0` to block all payments) and returns HTTP 428 with a single-use `confirmation_token` (valid 120 seconds). The payment executes only when the same body is re-sent with that token. Invoices without an amount are refused, because their amount cannot be checked against the limit.
 
 #### System Management
 
@@ -1139,7 +1147,7 @@ curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see `CONTRIBUTING.md` for guidelines.
+We welcome contributions! Please open an issue or submit a pull request on GitHub.
 
 ### Development Process
 
@@ -1167,15 +1175,8 @@ This project is licensed under the MIT License - see `LICENSE` file for details.
 - **Discussions**: GitHub Discussions for questions and community support
 - **Documentation**: Comprehensive docs in `docs/` directory
 
-### Enterprise Support
-- **Priority Support**: Dedicated support channel
-- **Custom Development**: Feature development and customization
-- **SLA Guarantees**: 24/7 support with guaranteed response times
-- **Training**: Team training and onboarding
-- **Contact**: enterprise@yourdomain.com
-
 ---
 
 **Built for the Lightning Network community**
 
-**Security Notice**: This is production-grade software designed for mission-critical infrastructure. Always review security settings and perform thorough testing before production deployment.
+**Security Notice**: This software moves real funds on the Lightning Network and has not been audited or certified by any third party. Always review security settings and perform thorough testing before production deployment.
