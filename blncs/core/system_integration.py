@@ -81,7 +81,7 @@ class SystemIntegrationManager:
         results['component_status'] = self.get_component_status()
         results['optimization_time'] = time.time() - start_time
 
-        print(f"✅ System optimization completed in {results['optimization_time']".2f"}s")
+        print(f"✅ System optimization completed in {results['optimization_time']:.2f}s")
         print(f"   Components initialized: {results['components_initialized']}/{results['total_components']}")
 
         return results

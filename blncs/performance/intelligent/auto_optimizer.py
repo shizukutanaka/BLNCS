@@ -98,7 +98,7 @@ class WorkloadPredictor:
             train_score = self.model.score(X_train_scaled, y_train)
             test_score = self.model.score(X_test_scaled, y_test)
 
-            logger.info(f"Trained workload prediction model - Train R²: {train_score".3f"}, Test R²: {test_score".3f"}")
+            logger.info(f"Trained workload prediction model - Train R²: {train_score:.3f}, Test R²: {test_score:.3f}")
 
             return True
 
@@ -253,7 +253,7 @@ class AutoScaler:
                 return {
                     'action': 'scale_up',
                     'target_instances': target_instances,
-                    'reason': f'High utilization ({utilization".1f"}%) and predicted load'
+                    'reason': f'High utilization ({utilization:.1f}%) and predicted load'
                 }
 
         # Scale down logic
@@ -268,7 +268,7 @@ class AutoScaler:
                 return {
                     'action': 'scale_down',
                     'target_instances': target_instances,
-                    'reason': f'Low utilization ({utilization".1f"}%) and predicted load'
+                    'reason': f'Low utilization ({utilization:.1f}%) and predicted load'
                 }
 
         return {'action': 'none', 'reason': 'No scaling needed'}

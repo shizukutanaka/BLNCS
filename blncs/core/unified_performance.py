@@ -966,12 +966,6 @@ def get_system_health() -> Dict[str, Any]:
     optimizer = get_performance_optimizer()
     return optimizer.get_system_health()
 
-# Cleanup on shutdown
-import atexit
-def _cleanup_performance_optimizer():
-    global _performance_optimizer
-    if _performance_optimizer:
-
 def stop_network_monitoring():
     """Stop network monitoring"""
     optimizer = get_performance_optimizer()

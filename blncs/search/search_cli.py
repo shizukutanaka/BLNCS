@@ -176,7 +176,6 @@ class SearchCLI:
         for i, result in enumerate(results, 1):
             print(f"\n{i}. {result.title}")
             print(f"   Score: {result.score:.3f}")
-".3f"
             if hasattr(result, 'url') and result.url:
                 print(f"   URL: {result.url}")
             if hasattr(result, 'metadata') and result.metadata:

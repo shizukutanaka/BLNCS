@@ -279,9 +279,9 @@ class MemoryManager:
     def log_memory_usage(self, context: str = "general"):
         """Log current memory usage"""
         memory = self.get_memory_usage()
-        logger.info(f"Memory usage ({context}): RSS={memory['rss_mb']".1f"}MB, "
-                   f"VMS={memory['vms_mb']".1f"}MB, "
-                   f"System={memory['system_percent']".1f"}%")
+        logger.info(f"Memory usage ({context}): RSS={memory['rss_mb']:.1f}MB, "
+                   f"VMS={memory['vms_mb']:.1f}MB, "
+                   f"System={memory['system_percent']:.1f}%")
 
     def check_memory_threshold(self, threshold_mb: float = 1000) -> bool:
         """Check if memory usage exceeds threshold"""
