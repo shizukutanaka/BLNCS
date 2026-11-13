@@ -1,6 +1,15 @@
 """
 Commercial Unified API Server
 Enterprise-grade REST API with advanced features
+
+.. warning::
+   DEMONSTRATION / MOCK API.  The endpoints in this module return
+   simulated data and never execute real Lightning payments.  In
+   particular, ``POST /lightning/pay`` only simulates a payment.
+
+   The canonical payment API is ``POST /api/lightning/pay`` in
+   :mod:`blncs.api.unified_rest_api`, which enforces an amount limit
+   and an explicit confirmation step before paying.
 """
 
 from fastapi import FastAPI, HTTPException, Depends, Security, BackgroundTasks
@@ -319,14 +328,19 @@ async def send_payment(
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user)
 ):
-    """Send Lightning payment"""
+    """Simulate a Lightning payment (mock -- never pays a real invoice).
+
+    This demonstration endpoint exists only to show the API shape.
+    The canonical, guarded payment endpoint is POST /api/lightning/pay
+    in blncs.api.unified_rest_api.
+    """
     try:
         # Log payment attempt
         enterprise_logger.audit(
             event_type="payment_initiated",
             action="send_payment",
             resource="lightning_network",
-            result="pending",
+            result="simulated",
             user_id=current_user.get("sub"),
             metadata={
                 "amount": payment.amount,
@@ -334,7 +348,7 @@ async def send_payment(
             }
         )
 
-        # Simulate payment processing
+        # Simulate payment processing -- no real payment is executed.
         payment_hash = "abc123def456ghi789"
 
         # Background task for payment status updates
@@ -343,11 +357,16 @@ async def send_payment(
         result = {
             "payment_hash": payment_hash,
             "status": "pending",
+            "simulated": True,
             "amount": payment.amount,
             "fee": 10  # 10 sats fee
         }
 
-        return APIResponse(success=True, data=result, message="Payment initiated")
+        return APIResponse(
+            success=True,
+            data=result,
+            message="Simulated payment initiated (mock only -- no real payment was executed)",
+        )
 
     except Exception as e:
         enterprise_logger.error(f"Payment error: {e}")
