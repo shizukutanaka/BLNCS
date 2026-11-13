@@ -33,7 +33,7 @@ def test_maintenance_integration():
         status = scheduler.get_maintenance_status()
         print(f"Scheduler Active: {status['scheduler_active']}")
         print(f"Total Tasks: {status['total_tasks']}")
-        print(f"Success Rate: {status['success_rate']".1f"}%")
+        print(f"Success Rate: {status['success_rate']:.1f}%")
 
         # Test 3: Run a simple task synchronously
         print("\n⚡ Test 3: Run maintenance tasks synchronously")
@@ -41,7 +41,7 @@ def test_maintenance_integration():
 
         results = scheduler.run_tasks_now(['hourly_health_check'])
         for result in results:
-            print(f"  • {result['name']}: {result['status']} ({result['duration_seconds']".2f"}s)")
+            print(f"  • {result['name']}: {result['status']} ({result['duration_seconds']:.2f}s)")
 
         # Test 4: Run priority bundle
         print("\n🎯 Test 4: Run high priority maintenance bundle")
