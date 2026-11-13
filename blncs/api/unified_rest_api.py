@@ -6,6 +6,7 @@ Simple Flask-based API server with caching
 from flask import Flask, jsonify, request, g
 from flask_cors import CORS
 import logging
+import os
 import time
 from functools import wraps
 import threading
@@ -21,9 +22,18 @@ from werkzeug.exceptions import BadRequest, HTTPException
 
 from blncs.core.simple_auth import get_auth
 from blncs.core.security_validator import get_security_validator, ValidationResult
-from blncs.core.config_manager import UnifiedConfigManager
+
+try:  # The config_manager module is not present in this repository;
+    # mirror simple_auth.py and fall back to built-in defaults when
+    # it cannot be imported instead of failing to start.
+    from blncs.core.config_manager import UnifiedConfigManager
+except ImportError:  # pragma: no cover - exercised when module absent
+    UnifiedConfigManager = None  # type: ignore
+
+from blncs.core.payment_confirmation import PaymentConfirmationStore
 from blncs.core.rate_limiter import RateLimiter
 from blncs.core.unified_logging import get_logger
+from blncs.lightning.bolt11_amount import Bolt11AmountError, extract_amount_msat
 
 # 超高速グローバルキャッシュ
 from collections import OrderedDict
@@ -201,9 +211,72 @@ def cache_response(ttl=30, max_size=50):
         return wrapper
     return decorator
 
+# ---------------------------------------------------------------------------
+# Lightning payment guard settings
+#
+# Paying an invoice through the REST API is deliberately constrained:
+# every payment needs a single-use confirmation token (see
+# blncs.core.payment_confirmation) and must not exceed a per-payment
+# amount limit.  Both values can be set through the environment or the
+# application configuration; the defaults are conservative on purpose
+# so that larger payments require an explicit operator decision.
+# ---------------------------------------------------------------------------
+DEFAULT_MAX_PAYMENT_SATS = 10_000
+DEFAULT_CONFIRMATION_TTL_SECONDS = 120
+ENV_MAX_PAYMENT_SATS = "BLNCS_PAY_MAX_AMOUNT_SATS"
+ENV_CONFIRMATION_TTL_SECONDS = "BLNCS_PAY_CONFIRMATION_TTL_SECONDS"
+_MAX_CONFIRMATION_TTL_SECONDS = 3600
+
+
+def _parse_nonnegative_int(value) -> Optional[int]:
+    """Parse a non-negative int from config/env input, else None."""
+    if value is None:
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _resolve_payment_settings(config_source) -> Tuple[int, int]:
+    """Resolve (max_payment_sats, confirmation_ttl_seconds).
+
+    Precedence: environment variable, then app configuration, then the
+    built-in conservative default.  A max of 0 disables payments
+    entirely (every positive amount exceeds it).
+    """
+    max_sats = _parse_nonnegative_int(os.environ.get(ENV_MAX_PAYMENT_SATS))
+    if max_sats is None:
+        max_sats = _parse_nonnegative_int(
+            _config_get(config_source, 'payments.max_amount_sats', None)
+        )
+    if max_sats is None:
+        max_sats = DEFAULT_MAX_PAYMENT_SATS
+
+    ttl = _parse_nonnegative_int(os.environ.get(ENV_CONFIRMATION_TTL_SECONDS))
+    if ttl is None:
+        ttl = _parse_nonnegative_int(
+            _config_get(config_source, 'payments.confirmation_ttl_seconds', None)
+        )
+    if ttl is None or ttl <= 0:
+        ttl = DEFAULT_CONFIRMATION_TTL_SECONDS
+    if ttl > _MAX_CONFIRMATION_TTL_SECONDS:
+        ttl = _MAX_CONFIRMATION_TTL_SECONDS
+
+    return max_sats, ttl
+
+
 def create_app(config=None):
     """Create Flask application"""
-    config_source = config or UnifiedConfigManager()
+    if config is not None:
+        config_source = config
+    elif UnifiedConfigManager is not None:
+        config_source = UnifiedConfigManager()
+    else:
+        # Config module unavailable: run on built-in defaults, which
+        # _config_get already supplies for every lookup.
+        config_source = None
 
     app = Flask(__name__)
 
@@ -260,6 +333,9 @@ def create_app(config=None):
         burst_size = int(_config_get(config_source, 'api.rate_limiting.burst_size', requests_per_minute) or requests_per_minute)
         max_requests = max(requests_per_minute, burst_size, 1)
         rate_limiter = RateLimiter(max_requests=max_requests, window_seconds=rate_limit_window)
+
+    payment_max_amount_sats, payment_confirmation_ttl = _resolve_payment_settings(config_source)
+    payment_confirmations = PaymentConfirmationStore(ttl_seconds=payment_confirmation_ttl)
 
     @app.before_request
     def _apply_request_guards():
@@ -660,7 +736,19 @@ def create_app(config=None):
     @app.route('/api/lightning/pay', methods=['POST'])
     @_auth.require_auth('write')
     def pay_invoice(auth_token):
-        """Pay Lightning invoice"""
+        """Pay Lightning invoice (canonical, guarded payment path).
+
+        Two-step flow guarded by an amount limit:
+
+        1. POST ``{"payment_request": "..."}`` validates the invoice,
+           extracts its amount locally, enforces the per-payment limit
+           (default 10,000 sats; see BLNCS_PAY_MAX_AMOUNT_SATS), and
+           returns HTTP 428 with a single-use ``confirmation_token``.
+        2. POST the same body plus ``"confirmation_token"`` to execute.
+
+        Amountless invoices are refused because their amount cannot be
+        checked against the limit.
+        """
         try:
             from blncs.lightning.simple_client import SimpleLightningClient
 
@@ -677,6 +765,77 @@ def create_app(config=None):
                 return jsonify({'error': 'Invalid payment request', 'details': invoice_result.errors}), 400
 
             payment_request = invoice_result.sanitized_value
+
+            # --- Payment guard: amount limit + explicit confirmation ---
+            # The amount is taken from the invoice itself (BOLT11 HRP),
+            # never from a client-supplied field.
+            try:
+                amount_msat = extract_amount_msat(payment_request)
+            except Bolt11AmountError as amount_error:
+                return jsonify({
+                    'error': 'Invalid payment request',
+                    'details': [str(amount_error)],
+                }), 400
+
+            if amount_msat is None:
+                # Amountless invoices cannot be checked against the
+                # limit, so they are refused outright.
+                return jsonify({
+                    'error': 'Amountless invoices are not accepted: the amount '
+                             'cannot be verified against the payment limit',
+                }), 400
+
+            amount_sats = amount_msat // 1000
+
+            if amount_msat > payment_max_amount_sats * 1000:
+                logger.warning(
+                    "Payment refused: amount exceeds limit",
+                    extra={
+                        'amount_msat': amount_msat,
+                        'max_amount_sats': payment_max_amount_sats,
+                    },
+                )
+                return jsonify({
+                    'error': 'Payment amount exceeds the configured per-payment limit',
+                    'amount_sats': amount_sats,
+                    'amount_msat': amount_msat,
+                    'max_amount_sats': payment_max_amount_sats,
+                }), 403
+
+            confirmation_token = data.get('confirmation_token')
+            identity = str(getattr(auth_token, 'token_id', 'unknown'))
+
+            if not confirmation_token:
+                # Step 1: issue a single-use confirmation token bound
+                # to this caller, invoice, and amount.  Nothing is
+                # paid yet.
+                token, expires_at = payment_confirmations.issue(
+                    identity, payment_request, amount_msat
+                )
+                return jsonify({
+                    'confirmation_required': True,
+                    'message': 'Payment requires confirmation. Resubmit the same '
+                               'payment_request together with confirmation_token '
+                               'before it expires to execute the payment.',
+                    'confirmation_token': token,
+                    'expires_at': expires_at,
+                    'amount_sats': amount_sats,
+                    'amount_msat': amount_msat,
+                    'max_amount_sats': payment_max_amount_sats,
+                }), 428
+
+            # Step 2: the token is consumed on any attempt and must
+            # match the caller, invoice, and amount it was issued for.
+            if not payment_confirmations.consume(
+                confirmation_token, identity, payment_request, amount_msat
+            ):
+                logger.warning(
+                    "Payment refused: invalid confirmation token",
+                    extra={'token_id': identity},
+                )
+                return jsonify({
+                    'error': 'Invalid, expired, or already used confirmation token',
+                }), 403
 
             client = SimpleLightningClient()
             if not client.connected:
@@ -837,6 +996,11 @@ def create_app(config=None):
             if not client.connected:
                 client.connect()
 
+            insights_data = client.get_advanced_ai_insights()
+            return jsonify(insights_data)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/edge/status', methods=['GET'])
     @_auth.require_auth('read')
     def get_edge_computing_status(auth_token):
@@ -912,6 +1076,11 @@ def create_app(config=None):
             if not client.connected:
                 client.connect()
 
+            federated_data = client.get_federated_learning_status()
+            return jsonify(federated_data)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/observability/status', methods=['GET'])
     @_auth.require_auth('read')
     def get_observability_status(auth_token):
@@ -954,6 +1123,11 @@ def create_app(config=None):
 
             if not client.connected:
                 client.connect()
+
+            collaboration_data = client.get_collaboration_status()
+            return jsonify(collaboration_data)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/ux/advanced', methods=['GET'])
     @_auth.require_auth('read')
