@@ -1,6 +1,19 @@
 """
 Production-Ready REST API with Enterprise Security
 Government-grade API with comprehensive security and monitoring
+
+.. warning::
+   The Lightning endpoints in this module are DEMONSTRATION / MOCK
+   implementations.  They return simulated data and never execute
+   real Lightning payments.  In particular,
+   ``POST /api/v1/lightning/payments`` only simulates a payment --
+   its ``SUCCEEDED`` response does not mean any money moved -- and
+   ``POST /api/v1/lightning/invoices`` fabricates the invoice it
+   returns instead of asking a Lightning node to create one.
+
+   The canonical payment API is ``POST /api/lightning/pay`` in
+   :mod:`blncs.api.unified_rest_api`, which enforces an amount limit
+   and an explicit confirmation step before paying.
 """
 
 import asyncio
@@ -443,13 +456,20 @@ class ProductionAPI:
         @with_circuit_breaker('lightning')
         @monitor_api_request('/api/v1/lightning/invoices')
         def create_invoice():
+            """Fabricate a Lightning invoice (mock -- no node is asked
+            to create a real one).
+
+            The response is marked ``"simulated": True`` so it cannot
+            be mistaken for an invoice issued by a Lightning node.
+            """
             data = g.validated_data
 
-            # Mock invoice creation
+            # Mock invoice creation -- simulated data, marked as such.
             invoice = {
                 "payment_request": "lnbc" + "0" * 100,
                 "add_index": 123,
                 "payment_hash": "01" * 32,
+                "simulated": True,
                 "amount": data["amount"],
                 "memo": data.get("memo", ""),
                 "creation_date": int(time.time()),
@@ -477,13 +497,22 @@ class ProductionAPI:
         @self.limiter.limit("10 per minute")
         @monitor_api_request('/api/v1/lightning/payments')
         def pay_invoice():
+            """Simulate a Lightning payment (mock -- never pays a real
+            invoice).
+
+            The response is marked ``"simulated": True`` so the
+            fabricated ``SUCCEEDED`` result cannot be mistaken for a
+            real payment.  The canonical, guarded payment endpoint is
+            POST /api/lightning/pay in blncs.api.unified_rest_api.
+            """
             data = g.validated_data
 
-            # Mock payment processing
-            success = True  # Would be determined by actual payment
+            # Mock payment processing -- no real payment is executed.
+            success = True  # Simulation always "succeeds"; see "simulated".
             payment = {
                 "payment_hash": "02" * 32,
                 "payment_preimage": "03" * 32,
+                "simulated": True,
                 "payment_route": {
                     "total_amt": data.get("amount", 1000),
                     "total_fees": 1,
