@@ -9,6 +9,7 @@ import os
 import gettext
 from pathlib import Path
 
+__version__ = "2.0.0"
 __author__ = "BLNCS Team"
 __description__ = "Bitcoin Lightning Network Control System"
 

@@ -17,7 +17,7 @@ console = Console()
 
 
 @click.group()
-@click.version_option(version='1.0.0')
+@click.version_option(version='2.0.0')
 def cli():
     """BLNCS Personal - Lightning Network management for personal use"""
     pass

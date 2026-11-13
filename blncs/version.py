@@ -4,13 +4,13 @@ BLNCS Version Information
 Centralized version management for the Bitcoin Lightning Network Control System.
 """
 
-__version__ = "2.1.0"
+__version__ = "2.0.0"
 __author__ = "BLNCS Development Team"
 __description__ = "Bitcoin Lightning Network Control System"
 
 # Version components for more detailed tracking
 VERSION_MAJOR = 2
-VERSION_MINOR = 1
+VERSION_MINOR = 0
 VERSION_PATCH = 0
 
 # Build metadata

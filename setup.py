@@ -18,7 +18,7 @@ def get_version():
             match = re.search(r"__version__\s*=\s*['\"]([^'\"]*)['\"]", content)
             if match:
                 return match.group(1)
-    return "1.0.0"
+    return "2.0.0"
 
 # Read long description from README
 def get_long_description():
