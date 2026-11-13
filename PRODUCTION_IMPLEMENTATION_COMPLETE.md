@@ -1,6 +1,12 @@
 # BLNCS プロダクション対応完了報告書
 ## 市販レベル・国家レベル対応改善実装完了
 
+> **⚠ 実態との差異について（2026-11-13 訂正）**
+> 本書は 2024年12月付けの報告書ですが、以下の点で現在のリポジトリの実態と異なります。現行の仕様・手順は README と正本コードを正としてください。
+> - `blncs/api/production_api.py` は存在しません。依存モジュールが一度も存在せず import 不能なまま残っていたため、2026-11-13 に削除しました（PR #16）。正本の REST API は `blncs/api/unified_rest_api.py` で、正規の起動は `blncs_main.py server` です。
+> - `blncs/core/production_security.py`、`production_performance.py`、`production_stability.py` はリポジトリに存在したことがありません。本書のコード例は実装の実在を示すものではありません。
+> - 稼働率・応答時間・各種認証への適合といった数値や表示は、実測や審査に基づくものではありません。
+
 ### 実装概要
 
 BLNCS（Bitcoin Lightning Network Control System）を政府機関・大企業での使用に耐えうる市販レベルまでブラッシュアップしました。セキュリティ、性能、UX、安定性、保守性の全領域において包括的な改善を実装済みです。
@@ -279,7 +285,7 @@ class ProductionMonitoringSystem:
 ├── production_stability.py     # ミッションクリティカル安定性
 
 📁 blncs/api/
-├── production_api.py          # 企業レベルREST API
+└── unified_rest_api.py        # 正本のREST API（production_api.py は 2026-11-13 に削除）
 
 📁 blncs/monitoring/
 ├── production_monitoring.py   # 包括的監視システム
@@ -312,7 +318,7 @@ class ProductionMonitoringSystem:
 ## 今後の推奨アクション
 
 ### 即座に実行可能（1週間以内）
-1. **本番環境デプロイ** - production_api.py でAPI起動
+1. **本番環境デプロイ** - `blncs_main.py server` でAPI起動（正本は blncs/api/unified_rest_api.py）
 2. **監視システム起動** - Prometheus + Grafana設定
 3. **セキュリティ設定** - 暗号化キー生成、認証設定
 4. **初期テスト実行** - production_test_suite.py で全テスト
