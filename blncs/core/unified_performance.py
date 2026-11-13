@@ -909,7 +909,7 @@ class UnifiedPerformanceOptimizer:
         self.cache_optimizer.cache_stats.clear()
 
 
-def get_performance_monitor() -> PerformanceMonitor:
+def get_performance_monitor() -> 'PerformanceMonitor':
     """Get global performance monitor instance"""
     global _performance_monitor
     if _performance_monitor is None:
