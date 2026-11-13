@@ -25,7 +25,7 @@ jobs:
 
     - name: Run tests
       run: |
-        python run_quick_tests.py
+        python -m pytest tests/ -q
 
     - name: Build package
       run: |
