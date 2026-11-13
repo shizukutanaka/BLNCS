@@ -533,7 +533,7 @@ class TranslationQualityValidator:
 
         if ratio < 0.3:  # 30%未満
             result['issues'].append(f"Length mismatch: {ratio:.2%}")
-".2%"            result['suggestions'].append("Consider reviewing translation length")
+            result['suggestions'].append("Consider reviewing translation length")
 
     def _check_placeholder_preservation(self, source: str, translation: str, result: Dict[str, Any]):
         """プレースホルダーの保存をチェック"""
