@@ -258,20 +258,20 @@ class ProductionAPI:
         self.app = Flask(__name__)
         self.app.config.update(self.config)
 
+        # Initialize managers and authentication first: the setup
+        # methods below reference them (route decorators use
+        # self.auth / self.limiter, middleware uses the managers).
+        self.security_manager = get_security_manager()
+        self.performance_manager = get_performance_manager()
+        self.stability_manager = get_stability_manager()
+        self.monitoring_system = get_monitoring_system()
+        self.auth = APIAuthentication(self.app)
+
         # Initialize components
         self._setup_logging()
         self._setup_middleware()
         self._setup_error_handlers()
         self._setup_routes()
-
-        # Initialize managers
-        self.security_manager = get_security_manager()
-        self.performance_manager = get_performance_manager()
-        self.stability_manager = get_stability_manager()
-        self.monitoring_system = get_monitoring_system()
-
-        # Initialize authentication
-        self.auth = APIAuthentication(self.app)
 
     def _setup_logging(self):
         """Setup application logging"""
