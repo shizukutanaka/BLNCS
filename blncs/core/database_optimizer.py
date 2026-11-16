@@ -4,11 +4,11 @@ Database Optimization for SQLite and PostgreSQL
 Implements best practices from 2024-2025 research
 """
 
-import sqlite3
 import logging
-from pathlib import Path
-from typing import Optional, Dict, Any, List
+import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,53 +35,53 @@ class SQLiteOptimizer:
         Returns configuration applied
         """
         config = {
-            'journal_mode': 'WAL',
-            'synchronous': 'NORMAL',
-            'temp_store': 'MEMORY',
-            'cache_size': -64000,  # 64MB
-            'page_size': 4096,
-            'mmap_size': 30000000,  # 30MB memory-mapped I/O
-            'optimize_pragmas': True
+            "journal_mode": "WAL",
+            "synchronous": "NORMAL",
+            "temp_store": "MEMORY",
+            "cache_size": -64000,  # 64MB
+            "page_size": 4096,
+            "mmap_size": 30000000,  # 30MB memory-mapped I/O
+            "optimize_pragmas": True,
         }
 
         try:
             with self._get_connection() as conn:
                 # Write-Ahead Logging for concurrent reads during writes
-                conn.execute('PRAGMA journal_mode=WAL')
+                conn.execute("PRAGMA journal_mode=WAL")
 
                 # Balanced synchronous mode (not full, not off)
-                conn.execute('PRAGMA synchronous=NORMAL')
+                conn.execute("PRAGMA synchronous=NORMAL")
 
                 # Use memory for temporary tables
-                conn.execute('PRAGMA temp_store=MEMORY')
+                conn.execute("PRAGMA temp_store=MEMORY")
 
                 # Increase cache size (64MB)
-                conn.execute('PRAGMA cache_size=-64000')
+                conn.execute("PRAGMA cache_size=-64000")
 
                 # Keep page size at 4KB (default, optimal for most cases)
-                conn.execute('PRAGMA page_size=4096')
+                conn.execute("PRAGMA page_size=4096")
 
                 # Memory-mapped I/O for better performance
-                conn.execute('PRAGMA mmap_size=30000000')
+                conn.execute("PRAGMA mmap_size=30000000")
 
                 # Enable foreign keys
-                conn.execute('PRAGMA foreign_keys=ON')
+                conn.execute("PRAGMA foreign_keys=ON")
 
                 # Set automatic incremental vacuum
-                conn.execute('PRAGMA incremental_vacuum(10000)')
+                conn.execute("PRAGMA incremental_vacuum(10000)")
 
                 # Optimize on close
-                conn.execute('PRAGMA optimize')
+                conn.execute("PRAGMA optimize")
 
                 conn.commit()
                 logger.info("SQLite optimizations applied successfully")
 
         except Exception as e:
             logger.error(f"Failed to apply SQLite optimizations: {e}")
-            config['success'] = False
+            config["success"] = False
             return config
 
-        config['success'] = True
+        config["success"] = True
         return config
 
     def create_indexes(self, indexes: List[str]) -> None:
@@ -96,7 +96,7 @@ class SQLiteOptimizer:
                         conn.execute(index_sql)
                         logger.debug(f"Created index: {index_sql[:50]}...")
                     except sqlite3.OperationalError as e:
-                        if 'already exists' in str(e):
+                        if "already exists" in str(e):
                             logger.debug(f"Index already exists")
                         else:
                             logger.warning(f"Failed to create index: {e}")
@@ -114,14 +114,14 @@ class SQLiteOptimizer:
         """
         try:
             with self._get_connection() as conn:
-                conn.execute('ANALYZE')
+                conn.execute("ANALYZE")
                 conn.commit()
                 logger.info("Database analysis completed")
-                return {'success': True, 'message': 'Database analyzed successfully'}
+                return {"success": True, "message": "Database analyzed successfully"}
 
         except Exception as e:
             logger.error(f"Failed to analyze database: {e}")
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     def vacuum_database(self) -> Dict[str, Any]:
         """
@@ -130,14 +130,14 @@ class SQLiteOptimizer:
         """
         try:
             with self._get_connection() as conn:
-                conn.execute('VACUUM')
+                conn.execute("VACUUM")
                 conn.commit()
                 logger.info("Database vacuumed successfully")
-                return {'success': True, 'message': 'Database vacuumed successfully'}
+                return {"success": True, "message": "Database vacuumed successfully"}
 
         except Exception as e:
             logger.error(f"Failed to vacuum database: {e}")
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     def get_optimization_status(self) -> Dict[str, Any]:
         """Get current optimization status"""
@@ -146,36 +146,40 @@ class SQLiteOptimizer:
                 status = {}
 
                 # Check journal mode
-                result = conn.execute('PRAGMA journal_mode').fetchone()
-                status['journal_mode'] = result[0] if result else 'unknown'
+                result = conn.execute("PRAGMA journal_mode").fetchone()
+                status["journal_mode"] = result[0] if result else "unknown"
 
                 # Check synchronous
-                result = conn.execute('PRAGMA synchronous').fetchone()
-                sync_values = {0: 'OFF', 1: 'NORMAL', 2: 'FULL', 3: 'EXTRA'}
-                status['synchronous'] = sync_values.get(result[0], 'unknown') if result else 'unknown'
+                result = conn.execute("PRAGMA synchronous").fetchone()
+                sync_values = {0: "OFF", 1: "NORMAL", 2: "FULL", 3: "EXTRA"}
+                status["synchronous"] = (
+                    sync_values.get(result[0], "unknown") if result else "unknown"
+                )
 
                 # Check cache size
-                result = conn.execute('PRAGMA cache_size').fetchone()
-                status['cache_size'] = result[0] if result else 'unknown'
+                result = conn.execute("PRAGMA cache_size").fetchone()
+                status["cache_size"] = result[0] if result else "unknown"
 
                 # Check temp store
-                result = conn.execute('PRAGMA temp_store').fetchone()
-                temp_values = {0: 'DEFAULT', 1: 'FILE', 2: 'MEMORY'}
-                status['temp_store'] = temp_values.get(result[0], 'unknown') if result else 'unknown'
+                result = conn.execute("PRAGMA temp_store").fetchone()
+                temp_values = {0: "DEFAULT", 1: "FILE", 2: "MEMORY"}
+                status["temp_store"] = (
+                    temp_values.get(result[0], "unknown") if result else "unknown"
+                )
 
                 # Check mmap_size
-                result = conn.execute('PRAGMA mmap_size').fetchone()
-                status['mmap_size'] = result[0] if result else 'unknown'
+                result = conn.execute("PRAGMA mmap_size").fetchone()
+                status["mmap_size"] = result[0] if result else "unknown"
 
                 # Check foreign keys
-                result = conn.execute('PRAGMA foreign_keys').fetchone()
-                status['foreign_keys'] = 'ON' if (result and result[0]) else 'OFF'
+                result = conn.execute("PRAGMA foreign_keys").fetchone()
+                status["foreign_keys"] = "ON" if (result and result[0]) else "OFF"
 
-                return {'success': True, 'status': status}
+                return {"success": True, "status": status}
 
         except Exception as e:
             logger.error(f"Failed to get optimization status: {e}")
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     @contextmanager
     def _get_connection(self):
@@ -193,19 +197,19 @@ class IndexManager:
 
     # Recommended indexes for Lightning Network operations
     LIGHTNING_INDEXES = [
-        'CREATE INDEX IF NOT EXISTS idx_channels_peer ON channels(peer_id)',
-        'CREATE INDEX IF NOT EXISTS idx_channels_status ON channels(status)',
-        'CREATE INDEX IF NOT EXISTS idx_transactions_payment_hash ON transactions(payment_hash)',
-        'CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at)',
-        'CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status)',
-        'CREATE INDEX IF NOT EXISTS idx_payments_hash ON payments(payment_hash)',
-        'CREATE INDEX IF NOT EXISTS idx_payments_state ON payments(state)',
+        "CREATE INDEX IF NOT EXISTS idx_channels_peer ON channels(peer_id)",
+        "CREATE INDEX IF NOT EXISTS idx_channels_status ON channels(status)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_payment_hash ON transactions(payment_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status)",
+        "CREATE INDEX IF NOT EXISTS idx_payments_hash ON payments(payment_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_payments_state ON payments(state)",
     ]
 
     @staticmethod
-    def get_recommended_indexes(table_type: str = 'lightning') -> List[str]:
+    def get_recommended_indexes(table_type: str = "lightning") -> List[str]:
         """Get recommended indexes for the table type"""
-        if table_type == 'lightning':
+        if table_type == "lightning":
             return IndexManager.LIGHTNING_INDEXES
         return []
 
@@ -218,19 +222,19 @@ def optimize_database(db_path: str) -> Dict[str, Any]:
     optimizer = SQLiteOptimizer(db_path)
 
     results = {
-        'optimizations': optimizer.apply_optimizations(),
-        'indexes': {},
-        'analysis': optimizer.analyze_queries(),
+        "optimizations": optimizer.apply_optimizations(),
+        "indexes": {},
+        "analysis": optimizer.analyze_queries(),
     }
 
     # Create recommended indexes
-    indexes = IndexManager.get_recommended_indexes('lightning')
+    indexes = IndexManager.get_recommended_indexes("lightning")
     optimizer.create_indexes(indexes)
 
-    results['indexes']['created'] = len(indexes)
-    results['status'] = optimizer.get_optimization_status()
+    results["indexes"]["created"] = len(indexes)
+    results["status"] = optimizer.get_optimization_status()
 
     return results
 
 
-__all__ = ['SQLiteOptimizer', 'IndexManager', 'optimize_database']
+__all__ = ["SQLiteOptimizer", "IndexManager", "optimize_database"]

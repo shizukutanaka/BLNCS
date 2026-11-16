@@ -6,12 +6,13 @@ Test all implemented practical and necessary Lightning Network features
 
 import os
 import sys
-import time
 import tempfile
+import time
 from pathlib import Path
 
 # Add BLNCS to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "."))
+
 
 def test_lightning_watchtower():
     """Test Lightning Watchtower functionality"""
@@ -26,7 +27,9 @@ def test_lightning_watchtower():
         watchtower.add_channel_watch(
             "test_channel_watchtower_12345678901234567890123456789012345678901234567890",
             "0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
-            1000000, 800000, 100
+            1000000,
+            800000,
+            100,
         )
 
         # Start monitoring
@@ -35,13 +38,15 @@ def test_lightning_watchtower():
         # Simulate security event
         watchtower.simulate_breach_attempt(
             "test_channel_watchtower_12345678901234567890123456789012345678901234567890",
-            95
+            95,
         )
 
         # Update channel state
         watchtower.update_channel_state(
             "test_channel_watchtower_12345678901234567890123456789012345678901234567890",
-            700000, 300000, 101
+            700000,
+            300000,
+            101,
         )
 
         # Get stats and alerts
@@ -56,20 +61,25 @@ def test_lightning_watchtower():
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_data", ignore_errors=True)
 
-        return stats['monitored_channels'] >= 1 and stats['active_alerts'] >= 1
+        return stats["monitored_channels"] >= 1 and stats["active_alerts"] >= 1
 
     except Exception as e:
         print(f"  ❌ Watchtower test failed: {e}")
         return False
+
 
 def test_htlc_manager():
     """Test HTLC management functionality"""
     print("🔗 Testing HTLC Manager...")
 
     try:
-        from blncs.lightning.htlc_manager import create_htlc_manager, generate_payment_hash_and_preimage
+        from blncs.lightning.htlc_manager import (
+            create_htlc_manager,
+            generate_payment_hash_and_preimage,
+        )
 
         manager = create_htlc_manager("test_data")
 
@@ -81,7 +91,7 @@ def test_htlc_manager():
             payment_hash=payment_hash,
             amount_sats=100000,
             channel_id="test_channel_htlc",
-            direction="outgoing"
+            direction="outgoing",
         )
 
         # Test HTLC lifecycle
@@ -92,7 +102,9 @@ def test_htlc_manager():
 
             # Create failing HTLC
             payment_hash2, _ = generate_payment_hash_and_preimage()
-            htlc2 = manager.create_htlc(payment_hash2, 50000, "test_channel_htlc", "incoming")
+            htlc2 = manager.create_htlc(
+                payment_hash2, 50000, "test_channel_htlc", "incoming"
+            )
             if htlc2:
                 manager.fail_htlc(htlc2.htlc_id, "test_failure")
 
@@ -105,13 +117,15 @@ def test_htlc_manager():
 
             # Cleanup
             import shutil
+
             shutil.rmtree("test_data", ignore_errors=True)
 
-            return success_fulfill and stats['total_htlcs'] >= 2
+            return success_fulfill and stats["total_htlcs"] >= 2
 
     except Exception as e:
         print(f"  ❌ HTLC manager test failed: {e}")
         return False
+
 
 def test_unified_optimizer():
     """Test unified optimization system"""
@@ -140,12 +154,17 @@ def test_unified_optimizer():
         print(f"  ❌ Unified optimizer test failed: {e}")
         return False
 
+
 def test_enhanced_error_handler():
     """Test enhanced error handling system"""
     print("🛡️ Testing Enhanced Error Handler...")
 
     try:
-        from blncs.core.enhanced_error_handler import create_error_handler, ErrorSeverity, ErrorCategory
+        from blncs.core.enhanced_error_handler import (
+            ErrorCategory,
+            ErrorSeverity,
+            create_error_handler,
+        )
 
         error_handler = create_error_handler("test_data")
 
@@ -155,7 +174,7 @@ def test_enhanced_error_handler():
             ErrorSeverity.HIGH,
             ErrorCategory.PAYMENT_PROCESSING,
             "Test payment failure",
-            {"amount_sats": 100000}
+            {"amount_sats": 100000},
         )
 
         error_id2 = error_handler.handle_error(
@@ -163,7 +182,7 @@ def test_enhanced_error_handler():
             ErrorSeverity.CRITICAL,
             ErrorCategory.CHANNEL_MANAGEMENT,
             "Test channel closure",
-            {"channel_id": "test_channel"}
+            {"channel_id": "test_channel"},
         )
 
         error_id3 = error_handler.handle_error(
@@ -171,7 +190,7 @@ def test_enhanced_error_handler():
             ErrorSeverity.CRITICAL,
             ErrorCategory.SYSTEM_RESOURCE,
             "Test memory issue",
-            {"memory_usage_percent": 95}
+            {"memory_usage_percent": 95},
         )
 
         # Test manual resolution
@@ -182,17 +201,21 @@ def test_enhanced_error_handler():
 
         print(f"  📊 Total errors: {stats['total_errors']}")
         print(f"  ✅ Resolution rate: {stats['resolution_rate']:.1f}%")
-        print(f"  🔧 Recovery strategies: {len(stats.get('recovery_success_rates', {}))}")
+        print(
+            f"  🔧 Recovery strategies: {len(stats.get('recovery_success_rates', {}))}"
+        )
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_data", ignore_errors=True)
 
-        return stats['total_errors'] >= 3 and resolution_success
+        return stats["total_errors"] >= 3 and resolution_success
 
     except Exception as e:
         print(f"  ❌ Enhanced error handler test failed: {e}")
         return False
+
 
 def test_existing_lightning_features():
     """Test existing Lightning Network features"""
@@ -201,34 +224,41 @@ def test_existing_lightning_features():
     try:
         # Test invoice manager
         from blncs.lightning.invoice_manager import create_invoice_manager
+
         invoice_mgr = create_invoice_manager("test_data")
         invoice = invoice_mgr.create_invoice(50000, "Integration test")
         payment_success = invoice_mgr.pay_invoice(invoice.payment_hash)
 
         # Test channel manager
         from blncs.lightning.channel_manager import create_channel_manager
+
         channel_mgr = create_channel_manager("test_data")
         channel = channel_mgr.add_channel(
             "integration_channel_12345678901234567890123456789012345678901234567890",
             "0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
-            1000000, 500000, 500000
+            1000000,
+            500000,
+            500000,
         )
 
         # Test routing manager
         from blncs.lightning.routing_manager import create_routing_manager
+
         routing_mgr = create_routing_manager("test_data")
         node = routing_mgr.add_network_node(
             "0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
-            "TestNode"
+            "TestNode",
         )
 
         # Test practical monitor
         from blncs.monitoring.practical_monitor import create_practical_monitor
+
         monitor = create_practical_monitor("test_data")
         monitor.record_payment_attempt(50000, True, 500, 3000)
 
         # Test auto recovery
-        from blncs.core.auto_recovery import get_auto_recovery, RecoveryAction
+        from blncs.core.auto_recovery import RecoveryAction, get_auto_recovery
+
         recovery = get_auto_recovery()
         recovery_result = recovery.manual_recovery(RecoveryAction.CLEAR_CACHE)
 
@@ -241,6 +271,7 @@ def test_existing_lightning_features():
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_data", ignore_errors=True)
 
         return all([invoice, payment_success, channel, node, recovery_result.success])
@@ -249,20 +280,21 @@ def test_existing_lightning_features():
         print(f"  ❌ Existing features test failed: {e}")
         return False
 
+
 def test_comprehensive_integration():
     """Test comprehensive feature integration"""
     print("🔗 Testing Comprehensive Integration...")
 
     try:
         # Create all managers
-        from blncs.lightning.invoice_manager import create_invoice_manager
+        from blncs.core.enhanced_error_handler import create_error_handler
+        from blncs.core.unified_optimizer import create_unified_optimizer
         from blncs.lightning.channel_manager import create_channel_manager
+        from blncs.lightning.htlc_manager import create_htlc_manager
+        from blncs.lightning.invoice_manager import create_invoice_manager
         from blncs.lightning.routing_manager import create_routing_manager
         from blncs.lightning.watchtower import create_watchtower
-        from blncs.lightning.htlc_manager import create_htlc_manager
         from blncs.monitoring.practical_monitor import create_practical_monitor
-        from blncs.core.unified_optimizer import create_unified_optimizer
-        from blncs.core.enhanced_error_handler import create_error_handler
 
         # Initialize all systems
         invoice_mgr = create_invoice_manager("test_integration")
@@ -279,21 +311,28 @@ def test_comprehensive_integration():
         channel = channel_mgr.add_channel(
             "comprehensive_channel_12345678901234567890123456789012345678901234567890",
             "0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
-            1000000, 600000, 400000
+            1000000,
+            600000,
+            400000,
         )
 
         # 2. Add to watchtower
         watchtower.add_channel_watch(
-            channel.channel_id, channel.remote_pubkey,
-            channel.local_balance_sats, channel.remote_balance_sats
+            channel.channel_id,
+            channel.remote_pubkey,
+            channel.local_balance_sats,
+            channel.remote_balance_sats,
         )
 
         # 3. Create invoice and HTLC
         invoice = invoice_mgr.create_invoice(100000, "Comprehensive test payment")
 
         from blncs.lightning.htlc_manager import generate_payment_hash_and_preimage
+
         payment_hash, preimage = generate_payment_hash_and_preimage()
-        htlc = htlc_mgr.create_htlc(payment_hash, 100000, channel.channel_id, "outgoing")
+        htlc = htlc_mgr.create_htlc(
+            payment_hash, 100000, channel.channel_id, "outgoing"
+        )
 
         # 4. Record monitoring data
         monitor.record_payment_attempt(100000, True, 1000, 5000)
@@ -303,35 +342,41 @@ def test_comprehensive_integration():
         optimization_results = optimizer.run_all_optimizations()
 
         # 6. Test error handling
-        from blncs.core.enhanced_error_handler import ErrorSeverity, ErrorCategory
+        from blncs.core.enhanced_error_handler import ErrorCategory, ErrorSeverity
+
         error_id = error_handler.handle_error(
             "integration_test",
             ErrorSeverity.LOW,
             ErrorCategory.LIGHTNING_NETWORK,
             "Integration test error",
-            {"test": True}
+            {"test": True},
         )
 
         # Verify integration
-        integration_success = all([
-            channel is not None,
-            invoice is not None,
-            htlc is not None,
-            len(optimization_results) > 0,
-            error_id is not None
-        ])
+        integration_success = all(
+            [
+                channel is not None,
+                invoice is not None,
+                htlc is not None,
+                len(optimization_results) > 0,
+                error_id is not None,
+            ]
+        )
 
         print(f"  ⚡ Channel integration: {'✅' if channel else '❌'}")
         print(f"  📄 Invoice integration: {'✅' if invoice else '❌'}")
         print(f"  🔗 HTLC integration: {'✅' if htlc else '❌'}")
         print(f"  👁️ Watchtower integration: ✅")
         print(f"  📊 Monitoring integration: ✅")
-        print(f"  🚀 Optimization integration: {'✅' if optimization_results else '❌'}")
+        print(
+            f"  🚀 Optimization integration: {'✅' if optimization_results else '❌'}"
+        )
         print(f"  🛡️ Error handling integration: {'✅' if error_id else '❌'}")
         print(f"  🔗 Overall integration: {'✅' if integration_success else '❌'}")
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_integration", ignore_errors=True)
 
         return integration_success
@@ -339,6 +384,7 @@ def test_comprehensive_integration():
     except Exception as e:
         print(f"  ❌ Comprehensive integration test failed: {e}")
         return False
+
 
 def main():
     """Run comprehensive implementation test"""
@@ -378,37 +424,56 @@ def main():
 
         # Final implementation summary
         print("\n📋 Comprehensive Implementation Summary:")
-        print("  👁️ Lightning Watchtower - Channel security monitoring and breach detection")
+        print(
+            "  👁️ Lightning Watchtower - Channel security monitoring and breach detection"
+        )
         print("  🔗 HTLC Manager - Hash Time Locked Contract lifecycle management")
         print("  🚀 Unified Optimizer - Consolidated performance optimization system")
         print("  🛡️ Enhanced Error Handler - Comprehensive error handling and recovery")
-        print("  ⚡ Lightning Features - Invoice, channel, routing, monitoring, auto-recovery")
+        print(
+            "  ⚡ Lightning Features - Invoice, channel, routing, monitoring, auto-recovery"
+        )
         print("  🔗 System Integration - All components working together seamlessly")
 
         print("\n💡 Key Implementation Achievements:")
         print("  • Complete Lightning Network security with watchtower functionality")
         print("  • Advanced HTLC management with preimage verification")
-        print("  • Unified performance optimization combining all lightweight optimizations")
+        print(
+            "  • Unified performance optimization combining all lightweight optimizations"
+        )
         print("  • Comprehensive error handling with automatic recovery strategies")
         print("  • Seamless integration between all practical Lightning features")
         print("  • Real-world production-ready Lightning Network management system")
 
-        print("\n🎯 Implementation Status: COMPLETE - All practical features implemented ✅")
+        print(
+            "\n🎯 Implementation Status: COMPLETE - All practical features implemented ✅"
+        )
 
         return True
     else:
         print(f"⚠️ {len(tests) - passed_tests} tests failed")
         return False
 
+
 if __name__ == "__main__":
     success = main()
     sys.exit(0 if success else 1)
 
 
+import json
+import shutil
+import tempfile
+
 # Integrated Unit Tests from test_simple.py
 import unittest
-import tempfile
-import shutil
+
+from blncs.core.config import ConfigManager
+from blncs.core.database_manager import DatabaseManager
+from blncs.core.security_manager import SecurityManager
+from blncs.core.simple_cache import SimpleCache as CacheManager
+from blncs.core.unified_core import UnifiedCore
+from blncs.lightning.client import LightningClient, NodeType
+
 
 class TestUnifiedCore(unittest.TestCase):
     """Test unified core system"""
@@ -416,7 +481,19 @@ class TestUnifiedCore(unittest.TestCase):
     def setUp(self):
         """Set up test environment"""
         self.temp_dir = tempfile.mkdtemp()
-        self.config_file = os.path.join(self.temp_dir, 'test_config.json')
+        self.config_file = os.path.join(self.temp_dir, "test_config.json")
+        # The config file must actually exist with the values the tests
+        # below rely on (mainnet + a database path inside the temp dir).
+        with open(self.config_file, "w") as f:
+            json.dump(
+                {
+                    "version": "2.0.0",
+                    "environment": "test",
+                    "lightning": {"network": "mainnet"},
+                    "database": {"path": os.path.join(self.temp_dir, "test.db")},
+                },
+                f,
+            )
 
     def tearDown(self):
         """Clean up test environment"""
@@ -428,11 +505,11 @@ class TestUnifiedCore(unittest.TestCase):
 
         # Test default config
         self.assertIsNotNone(config.config)
-        self.assertEqual(config.get('lightning.network'), 'mainnet')
+        self.assertEqual(config.get("lightning.network"), "mainnet")
 
         # Test setting values
-        config.set('test.value', 123)
-        self.assertEqual(config.get('test.value'), 123)
+        config.set("test.value", 123)
+        self.assertEqual(config.get("test.value"), 123)
 
     def test_database_manager(self):
         """Test database manager"""
@@ -452,23 +529,23 @@ class TestUnifiedCore(unittest.TestCase):
         cache = CacheManager(max_size=10, ttl=1)
 
         # Test basic operations
-        cache.set('key1', 'value1')
-        self.assertEqual(cache.get('key1'), 'value1')
+        cache.set("key1", "value1")
+        self.assertEqual(cache.get("key1"), "value1")
 
         # Test TTL
         time.sleep(1.1)
-        self.assertIsNone(cache.get('key1'))
+        self.assertIsNone(cache.get("key1"))
 
     def test_security_manager(self):
         """Test security manager"""
         security = SecurityManager()
 
         # Test encryption
-        encrypted = security.encrypt('test_data')
-        self.assertNotEqual(encrypted, 'test_data')
+        encrypted = security.encrypt("test_data")
+        self.assertNotEqual(encrypted, "test_data")
 
         decrypted = security.decrypt(encrypted)
-        self.assertEqual(decrypted, 'test_data')
+        self.assertEqual(decrypted, "test_data")
 
 
 class TestLightningClient(unittest.TestCase):
@@ -482,7 +559,7 @@ class TestLightningClient(unittest.TestCase):
         """Test mock client info"""
         info = self.client.get_info()
         self.assertIsNotNone(info)
-        self.assertEqual(info['connected'], True)
+        self.assertEqual(info["connected"], True)
 
     def test_invoice_creation(self):
         """Test invoice creation"""

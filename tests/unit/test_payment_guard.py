@@ -59,6 +59,7 @@ def _make_invoice(hrp, data_words=None):
 
 # --- BOLT11 amount extraction ----------------------------------------------
 
+
 @pytest.mark.parametrize(
     "invoice,expected_msat",
     [
@@ -85,9 +86,9 @@ def test_extract_amount_sats():
 @pytest.mark.parametrize(
     "hrp,expected_msat",
     [
-        ("lnbc2m", 200_000_000),   # 2 milli-BTC = 10**8 msat per unit
-        ("lntb5u", 500_000),       # 5 micro-BTC = 10**5 msat per unit
-        ("lnbcrt30n", 3_000),      # 30 nano-BTC = 100 msat per unit
+        ("lnbc2m", 200_000_000),  # 2 milli-BTC = 10**8 msat per unit
+        ("lntb5u", 500_000),  # 5 micro-BTC = 10**5 msat per unit
+        ("lnbcrt30n", 3_000),  # 30 nano-BTC = 100 msat per unit
         ("lnbc3", 300_000_000_000),  # 3 whole BTC, no multiplier
     ],
 )
@@ -131,6 +132,7 @@ def test_extract_amount_rejects_garbage(bad):
 
 # --- Confirmation token store ----------------------------------------------
 
+
 def test_confirmation_happy_path():
     store = PaymentConfirmationStore(ttl_seconds=60)
     token, expires_at = store.issue("token-id-1", INVOICE_1000_SAT, 1_000_000)
@@ -149,9 +151,9 @@ def test_confirmation_is_single_use():
 @pytest.mark.parametrize(
     "identity,invoice,amount",
     [
-        ("other-id", INVOICE_1000_SAT, 1_000_000),   # wrong caller
-        ("id", INVOICE_100_SAT, 1_000_000),          # wrong invoice
-        ("id", INVOICE_1000_SAT, 999_999),           # wrong amount
+        ("other-id", INVOICE_1000_SAT, 1_000_000),  # wrong caller
+        ("id", INVOICE_100_SAT, 1_000_000),  # wrong invoice
+        ("id", INVOICE_1000_SAT, 999_999),  # wrong amount
     ],
 )
 def test_confirmation_binding_mismatch_burns_token(identity, invoice, amount):
@@ -177,6 +179,7 @@ def test_confirmation_unknown_token():
 
 
 # --- Guarded endpoint --------------------------------------------------------
+
 
 class FakeLightningClient:
     """Stand-in for SimpleLightningClient; records payments, never pays."""
@@ -255,10 +258,18 @@ def test_pay_confirmation_token_cannot_be_reused(api_env):
     ).get_json()["confirmation_token"]
 
     payload = {"payment_request": INVOICE_100_SAT, "confirmation_token": token}
-    assert client.post("/api/lightning/pay", json=payload,
-                       headers=_auth_header(write_key)).status_code == 200
-    assert client.post("/api/lightning/pay", json=payload,
-                       headers=_auth_header(write_key)).status_code == 403
+    assert (
+        client.post(
+            "/api/lightning/pay", json=payload, headers=_auth_header(write_key)
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/api/lightning/pay", json=payload, headers=_auth_header(write_key)
+        ).status_code
+        == 403
+    )
     assert fake.pay_calls == [INVOICE_100_SAT]
 
 

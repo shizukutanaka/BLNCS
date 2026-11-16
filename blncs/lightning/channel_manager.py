@@ -3,17 +3,18 @@ BLNCS Lightning Channel Manager
 Practical channel management for Lightning Network operations
 """
 
-import time
 import json
 import logging
-from typing import Dict, List, Any, Optional, Tuple
-from dataclasses import dataclass, asdict
+import time
+from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ChannelState(Enum):
     """Channel states"""
+
     OPENING = "opening"
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -25,6 +26,7 @@ class ChannelState(Enum):
 @dataclass
 class Channel:
     """Lightning channel data structure"""
+
     channel_id: str
     remote_pubkey: str
     capacity_sats: int
@@ -61,7 +63,7 @@ class Channel:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         data = asdict(self)
-        data['state'] = self.state.value
+        data["state"] = self.state.value
         return data
 
 
@@ -82,11 +84,11 @@ class ChannelManager:
         """Load channels from storage"""
         if self.channel_file.exists():
             try:
-                with open(self.channel_file, 'r') as f:
+                with open(self.channel_file, "r") as f:
                     data = json.load(f)
                     for channel_id, channel_data in data.items():
                         # Convert state back to enum
-                        channel_data['state'] = ChannelState(channel_data['state'])
+                        channel_data["state"] = ChannelState(channel_data["state"])
                         self.channels[channel_id] = Channel(**channel_data)
 
                 self.logger.info(f"Loaded {len(self.channels)} channels")
@@ -96,15 +98,24 @@ class ChannelManager:
     def _save_channels(self):
         """Save channels to storage"""
         try:
-            data = {channel_id: channel.to_dict() for channel_id, channel in self.channels.items()}
-            with open(self.channel_file, 'w') as f:
+            data = {
+                channel_id: channel.to_dict()
+                for channel_id, channel in self.channels.items()
+            }
+            with open(self.channel_file, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             self.logger.error(f"Failed to save channels: {e}")
 
-    def add_channel(self, channel_id: str, remote_pubkey: str, capacity_sats: int,
-                   local_balance_sats: int, remote_balance_sats: int,
-                   private: bool = False) -> Channel:
+    def add_channel(
+        self,
+        channel_id: str,
+        remote_pubkey: str,
+        capacity_sats: int,
+        local_balance_sats: int,
+        remote_balance_sats: int,
+        private: bool = False,
+    ) -> Channel:
         """Add a new channel"""
         current_time = time.time()
 
@@ -117,17 +128,20 @@ class ChannelManager:
             state=ChannelState.ACTIVE,
             private=private,
             created_at=current_time,
-            updated_at=current_time
+            updated_at=current_time,
         )
 
         self.channels[channel_id] = channel
         self._save_channels()
 
-        self.logger.info(f"Added channel: {channel_id[:16]}... capacity: {capacity_sats} sats")
+        self.logger.info(
+            f"Added channel: {channel_id[:16]}... capacity: {capacity_sats} sats"
+        )
         return channel
 
-    def update_channel_balance(self, channel_id: str, local_balance_sats: int,
-                              remote_balance_sats: int) -> bool:
+    def update_channel_balance(
+        self, channel_id: str, local_balance_sats: int, remote_balance_sats: int
+    ) -> bool:
         """Update channel balance"""
         channel = self.channels.get(channel_id)
         if not channel:
@@ -161,8 +175,9 @@ class ChannelManager:
         """Get channel by ID"""
         return self.channels.get(channel_id)
 
-    def list_channels(self, state: Optional[ChannelState] = None,
-                     active_only: bool = False) -> List[Channel]:
+    def list_channels(
+        self, state: Optional[ChannelState] = None, active_only: bool = False
+    ) -> List[Channel]:
         """List channels with optional filters"""
         channels = list(self.channels.values())
 
@@ -191,7 +206,7 @@ class ChannelManager:
             "remote_balance_sats": remote_balance,
             "outbound_capacity_sats": sum(ch.available_capacity() for ch in channels),
             "inbound_capacity_sats": sum(ch.inbound_capacity() for ch in channels),
-            "channel_count": len(channels)
+            "channel_count": len(channels),
         }
 
     def get_unbalanced_channels(self, threshold: float = 0.2) -> List[Channel]:
@@ -208,21 +223,29 @@ class ChannelManager:
             ratio = channel.balance_ratio()
 
             if ratio < 0.2:  # Too much remote balance
-                suggestions.append({
-                    "channel_id": channel.channel_id,
-                    "type": "receive",
-                    "reason": "Low local balance",
-                    "local_ratio": ratio,
-                    "suggested_amount_sats": int(channel.capacity_sats * 0.3 - channel.local_balance_sats)
-                })
+                suggestions.append(
+                    {
+                        "channel_id": channel.channel_id,
+                        "type": "receive",
+                        "reason": "Low local balance",
+                        "local_ratio": ratio,
+                        "suggested_amount_sats": int(
+                            channel.capacity_sats * 0.3 - channel.local_balance_sats
+                        ),
+                    }
+                )
             elif ratio > 0.8:  # Too much local balance
-                suggestions.append({
-                    "channel_id": channel.channel_id,
-                    "type": "send",
-                    "reason": "High local balance",
-                    "local_ratio": ratio,
-                    "suggested_amount_sats": int(channel.local_balance_sats - channel.capacity_sats * 0.7)
-                })
+                suggestions.append(
+                    {
+                        "channel_id": channel.channel_id,
+                        "type": "send",
+                        "reason": "High local balance",
+                        "local_ratio": ratio,
+                        "suggested_amount_sats": int(
+                            channel.local_balance_sats - channel.capacity_sats * 0.7
+                        ),
+                    }
+                )
 
         return suggestions
 
@@ -256,7 +279,11 @@ class ChannelManager:
 
         # Balance analysis
         balanced_channels = [ch for ch in active_channels if ch.is_balanced()]
-        avg_balance_ratio = sum(ch.balance_ratio() for ch in active_channels) / len(active_channels) if active_channels else 0
+        avg_balance_ratio = (
+            sum(ch.balance_ratio() for ch in active_channels) / len(active_channels)
+            if active_channels
+            else 0
+        )
 
         capacity_stats = self.get_total_capacity()
 
@@ -267,7 +294,7 @@ class ChannelManager:
             "balanced_channels": len(balanced_channels),
             "avg_balance_ratio": avg_balance_ratio,
             "capacity_stats": capacity_stats,
-            "rebalancing_needed": len(self.get_unbalanced_channels())
+            "rebalancing_needed": len(self.get_unbalanced_channels()),
         }
 
     def cleanup_closed_channels(self, older_than_days: int = 30) -> int:
@@ -276,7 +303,8 @@ class ChannelManager:
         removed_count = 0
 
         closed_channels = [
-            channel_id for channel_id, channel in self.channels.items()
+            channel_id
+            for channel_id, channel in self.channels.items()
             if channel.state == ChannelState.CLOSED and channel.updated_at < cutoff_time
         ]
 
@@ -308,7 +336,7 @@ if __name__ == "__main__":
         remote_pubkey="0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
         capacity_sats=1000000,  # 1M sats
         local_balance_sats=800000,  # 80% local
-        remote_balance_sats=200000  # 20% remote
+        remote_balance_sats=200000,  # 20% remote
     )
 
     channel2 = manager.add_channel(
@@ -316,7 +344,7 @@ if __name__ == "__main__":
         remote_pubkey="0567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234",
         capacity_sats=500000,  # 500k sats
         local_balance_sats=100000,  # 20% local
-        remote_balance_sats=400000  # 80% remote
+        remote_balance_sats=400000,  # 80% remote
     )
 
     print(f"✅ Created {len(manager.channels)} channels")
@@ -339,10 +367,13 @@ if __name__ == "__main__":
 
     # Get comprehensive stats
     stats = manager.get_channel_stats()
-    print(f"📈 Channel stats: {stats['total_channels']} total, {stats['active_channels']} active")
+    print(
+        f"📈 Channel stats: {stats['total_channels']} total, {stats['active_channels']} active"
+    )
 
     # Cleanup
     import shutil
+
     shutil.rmtree("test_data", ignore_errors=True)
 
     print("✅ Channel manager test completed!")

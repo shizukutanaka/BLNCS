@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -84,7 +85,9 @@ def test_auth_create_emits_audit_log(auth_file: Path, capsys, caplog):
         capsys,
     )
 
-    messages = [record.getMessage() for record in caplog.records if record.name == "blncs.auth"]
+    messages = [
+        record.getMessage() for record in caplog.records if record.name == "blncs.auth"
+    ]
     assert any("AUTH_KEY_CREATED" in msg and "token_id=ops" in msg for msg in messages)
 
 
@@ -93,15 +96,21 @@ def test_auth_revoke_removes_token(auth_file: Path, capsys):
         ["auth", "--auth-file", str(auth_file), "create", "ops"],
         capsys,
     )
-    api_key = [line for line in create_output.splitlines() if line.startswith("API Key:")][0].split(": ", 1)[1]
+    api_key = [
+        line for line in create_output.splitlines() if line.startswith("API Key:")
+    ][0].split(": ", 1)[1]
 
-    revoke_output = _run_cli(["auth", "--auth-file", str(auth_file), "revoke", "ops"], capsys)
+    revoke_output = _run_cli(
+        ["auth", "--auth-file", str(auth_file), "revoke", "ops"], capsys
+    )
     assert "revoked successfully" in revoke_output
 
     auth = SimpleAuth(str(auth_file))
     assert auth.validate_api_key(api_key) is None
 
-    missing_output = _run_cli(["auth", "--auth-file", str(auth_file), "revoke", "ops"], capsys)
+    missing_output = _run_cli(
+        ["auth", "--auth-file", str(auth_file), "revoke", "ops"], capsys
+    )
     assert "No matching API key found" in missing_output
 
 
@@ -118,7 +127,9 @@ def test_auth_rotate_by_token_id(auth_file: Path, capsys):
         ],
         capsys,
     )
-    original_key = [line for line in create_output.splitlines() if line.startswith("API Key:")][0].split(": ", 1)[1]
+    original_key = [
+        line for line in create_output.splitlines() if line.startswith("API Key:")
+    ][0].split(": ", 1)[1]
 
     rotate_output = _run_cli(
         [
@@ -135,7 +146,9 @@ def test_auth_rotate_by_token_id(auth_file: Path, capsys):
         ],
         capsys,
     )
-    new_key = [line for line in rotate_output.splitlines() if line.startswith("New API Key:")][0].split(": ", 1)[1]
+    new_key = [
+        line for line in rotate_output.splitlines() if line.startswith("New API Key:")
+    ][0].split(": ", 1)[1]
     assert new_key != original_key
 
     auth = SimpleAuth(str(auth_file))
@@ -150,7 +163,9 @@ def test_auth_rotate_by_api_key(auth_file: Path, capsys):
         ["auth", "--auth-file", str(auth_file), "create", "ops"],
         capsys,
     )
-    original_key = [line for line in create_output.splitlines() if line.startswith("API Key:")][0].split(": ", 1)[1]
+    original_key = [
+        line for line in create_output.splitlines() if line.startswith("API Key:")
+    ][0].split(": ", 1)[1]
 
     rotate_output = _run_cli(
         [
@@ -163,7 +178,9 @@ def test_auth_rotate_by_api_key(auth_file: Path, capsys):
         ],
         capsys,
     )
-    new_key = [line for line in rotate_output.splitlines() if line.startswith("New API Key:")][0].split(": ", 1)[1]
+    new_key = [
+        line for line in rotate_output.splitlines() if line.startswith("New API Key:")
+    ][0].split(": ", 1)[1]
     assert new_key != original_key
 
     auth = SimpleAuth(str(auth_file))
@@ -180,7 +197,9 @@ def test_auth_rotate_emits_audit_log(auth_file: Path, capsys, caplog):
         ["auth", "--auth-file", str(auth_file), "create", "ops"],
         capsys,
     )
-    original_key = [line for line in create_output.splitlines() if line.startswith("API Key:")][0].split(": ", 1)[1]
+    original_key = [
+        line for line in create_output.splitlines() if line.startswith("API Key:")
+    ][0].split(": ", 1)[1]
 
     _run_cli(
         [
@@ -194,21 +213,27 @@ def test_auth_rotate_emits_audit_log(auth_file: Path, capsys, caplog):
         capsys,
     )
 
-    messages = [record.getMessage() for record in caplog.records if record.name == "blncs.auth"]
+    messages = [
+        record.getMessage() for record in caplog.records if record.name == "blncs.auth"
+    ]
     assert any("AUTH_KEY_ROTATED" in msg and "token_id=ops" in msg for msg in messages)
 
 
 def test_auth_show_existing_token(auth_file: Path, capsys):
     _run_cli(["auth", "--auth-file", str(auth_file), "create", "ops"], capsys)
 
-    show_output = _run_cli(["auth", "--auth-file", str(auth_file), "show", "ops"], capsys)
+    show_output = _run_cli(
+        ["auth", "--auth-file", str(auth_file), "show", "ops"], capsys
+    )
     data = json.loads(show_output)
     assert data["token_id"] == "ops"
     assert "api_key_hash" not in data
 
 
 def test_auth_show_missing_token(auth_file: Path, capsys):
-    output = _run_cli(["auth", "--auth-file", str(auth_file), "show", "missing"], capsys)
+    output = _run_cli(
+        ["auth", "--auth-file", str(auth_file), "show", "missing"], capsys
+    )
     assert output.strip() == "Token not found."
 
 
@@ -255,24 +280,30 @@ def test_auth_audit_handles_missing_file(capsys):
 
 
 def test_auth_stats_outputs_inventory(auth_file: Path, capsys):
-    _run_cli([
-        "auth",
-        "--auth-file",
-        str(auth_file),
-        "create",
-        "ops",
-        "--expires-in",
-        "60",
-    ], capsys)
+    _run_cli(
+        [
+            "auth",
+            "--auth-file",
+            str(auth_file),
+            "create",
+            "ops",
+            "--expires-in",
+            "60",
+        ],
+        capsys,
+    )
 
-    output = _run_cli([
-        "auth",
-        "--auth-file",
-        str(auth_file),
-        "stats",
-        "--window-seconds",
-        "120",
-    ], capsys)
+    output = _run_cli(
+        [
+            "auth",
+            "--auth-file",
+            str(auth_file),
+            "stats",
+            "--window-seconds",
+            "120",
+        ],
+        capsys,
+    )
 
     data = json.loads(output)
     assert data["total_tokens"] == 1
@@ -282,37 +313,51 @@ def test_auth_stats_outputs_inventory(auth_file: Path, capsys):
 
 
 def test_auth_prune_removes_tokens(auth_file: Path, capsys):
-    create_output = _run_cli([
-        "auth",
-        "--auth-file",
-        str(auth_file),
-        "create",
-        "ops",
-        "--expires-in",
-        "1",
-    ], capsys)
+    create_output = _run_cli(
+        [
+            "auth",
+            "--auth-file",
+            str(auth_file),
+            "create",
+            "ops",
+            "--expires-in",
+            "1",
+        ],
+        capsys,
+    )
 
     lines = [line.strip() for line in create_output.splitlines() if line.strip()]
     assert any(line.startswith("API Key:") for line in lines)
 
-    result = _run_cli([
-        "auth",
-        "--auth-file",
-        str(auth_file),
-        "prune",
-        "--include-expired",
-        "--dry-run",
-    ], capsys)
+    result = _run_cli(
+        [
+            "auth",
+            "--auth-file",
+            str(auth_file),
+            "prune",
+            "--include-expired",
+            "--dry-run",
+        ],
+        capsys,
+    )
     dry = json.loads(result)
     assert dry["dry_run"] is True
 
-    result = _run_cli([
-        "auth",
-        "--auth-file",
-        str(auth_file),
-        "prune",
-        "--include-expired",
-    ], capsys)
+    # The token was created with --expires-in 1 (one second). Wait for
+    # it to actually expire before the real prune; pruning earlier is
+    # correctly a no-op because the token is still valid then.
+    time.sleep(1.1)
+
+    result = _run_cli(
+        [
+            "auth",
+            "--auth-file",
+            str(auth_file),
+            "prune",
+            "--include-expired",
+        ],
+        capsys,
+    )
     pruned = json.loads(result)
     assert pruned["dry_run"] is False
     assert pruned["pruned"] == ["ops"]

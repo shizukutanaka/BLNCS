@@ -4,12 +4,12 @@ Unit tests for BLNCS configuration system
 Tests configuration loading, caching, and validation
 """
 
-import unittest
-import tempfile
 import json
 import os
+import tempfile
+import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from blncs.core.config import ConfigManager, get_config, reset_config
 
@@ -30,18 +30,13 @@ class TestConfigManager(unittest.TestCase):
                 "network": "testnet",
                 "host": "localhost",
                 "port": 10009,
-                "mock_mode": True
+                "mock_mode": True,
             },
-            "database": {
-                "url": "sqlite:///test.db"
-            },
-            "api": {
-                "port": 3000,
-                "enabled": True
-            }
+            "database": {"url": "sqlite:///test.db"},
+            "api": {"port": 3000, "enabled": True},
         }
 
-        with open(self.config_path, 'w') as f:
+        with open(self.config_path, "w") as f:
             json.dump(self.test_config, f, indent=2)
 
     def tearDown(self):
@@ -52,6 +47,7 @@ class TestConfigManager(unittest.TestCase):
             self.config_path.unlink()
         if Path(self.temp_dir).exists():
             import shutil
+
             shutil.rmtree(self.temp_dir)
 
     def test_config_loading(self):
@@ -146,14 +142,14 @@ class TestConfigManager(unittest.TestCase):
         config_dict = config.to_dict()
 
         self.assertIsInstance(config_dict, dict)
-        self.assertIn('version', config_dict)
-        self.assertIn('environment', config_dict)
-        self.assertIn('lightning', config_dict)
-        self.assertIn('api', config_dict)
+        self.assertIn("version", config_dict)
+        self.assertIn("environment", config_dict)
+        self.assertIn("lightning", config_dict)
+        self.assertIn("api", config_dict)
 
         # Check specific values
-        self.assertEqual(config_dict['environment'], 'test')
-        self.assertEqual(config_dict['lightning']['network'], 'testnet')
+        self.assertEqual(config_dict["environment"], "test")
+        self.assertEqual(config_dict["lightning"]["network"], "testnet")
 
     def test_config_backup_restore(self):
         """Test configuration backup and restore"""
@@ -179,18 +175,20 @@ class TestConfigManager(unittest.TestCase):
 
     def test_config_environment_variables(self):
         """Test environment variable overrides"""
-        with patch.dict(os.environ, {'BLNCS_API_PORT': '9000', 'BLNCS_LIGHTNING_NETWORK': 'mainnet'}):
+        with patch.dict(
+            os.environ, {"BLNCS_API_PORT": "9000", "BLNCS_LIGHTNING_NETWORK": "mainnet"}
+        ):
             config = ConfigManager(config_path=str(self.config_path))
 
             # Should use environment overrides
             self.assertEqual(config.api.port, 9000)
-            self.assertEqual(config.lightning.network, 'mainnet')
+            self.assertEqual(config.lightning.network, "mainnet")
 
     def test_config_file_watching(self):
         """Test configuration file watching (basic test)"""
         config = ConfigManager(
             config_path=str(self.config_path),
-            enable_file_watching=False  # Disable for test
+            enable_file_watching=False,  # Disable for test
         )
 
         # Should not have watchers when disabled
@@ -223,6 +221,7 @@ class TestConfigValidation(unittest.TestCase):
             self.config_path.unlink()
         if Path(self.temp_dir).exists():
             import shutil
+
             shutil.rmtree(self.temp_dir)
 
     def test_config_integrity_check(self):
@@ -232,31 +231,31 @@ class TestConfigValidation(unittest.TestCase):
             "version": "2.0.0",
             "environment": "test",
             "lightning": {"network": "testnet", "host": "localhost", "port": 10009},
-            "api": {"enabled": True, "port": 3000}
+            "api": {"enabled": True, "port": 3000},
         }
 
-        with open(self.config_path, 'w') as f:
+        with open(self.config_path, "w") as f:
             json.dump(config_data, f)
 
         config = ConfigManager(config_path=str(self.config_path))
         result = config.validate_configuration_integrity()
 
-        self.assertTrue(result['valid'])
-        self.assertTrue(result['checks']['parseable'])
-        self.assertTrue(result['checks']['has_version'])
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["checks"]["parseable"])
+        self.assertTrue(result["checks"]["has_version"])
 
     def test_invalid_config_file(self):
         """Test handling of invalid config file"""
         # Create invalid JSON
-        with open(self.config_path, 'w') as f:
+        with open(self.config_path, "w") as f:
             f.write("invalid json content {")
 
         config = ConfigManager(config_path=str(self.config_path))
         result = config.validate_configuration_integrity()
 
-        self.assertFalse(result['valid'])
-        self.assertFalse(result['checks']['parseable'])
+        self.assertFalse(result["valid"])
+        self.assertFalse(result["checks"]["parseable"])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

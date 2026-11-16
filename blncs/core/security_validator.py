@@ -3,15 +3,15 @@ BLNCS Security Validator
 Production-grade security validation and sanitization
 """
 
-import re
 import hashlib
-import secrets
 import hmac
-from typing import Any, Dict, List, Optional, Set, Tuple
+import logging
+import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import logging
-from ipaddress import ip_address, ip_network, IPv4Address, IPv6Address
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ValidationResult:
     """Result of validation operation"""
+
     valid: bool
     sanitized_value: Any = None
     errors: List[str] = None
@@ -38,14 +39,17 @@ class SecurityValidator:
     """
 
     # Regex patterns for validation
-    PAYMENT_HASH_PATTERN = re.compile(r'^[0-9a-f]{64}$', re.IGNORECASE)
-    LIGHTNING_INVOICE_PATTERN = re.compile(r'^ln[a-z0-9]+$', re.IGNORECASE)
-    NODE_PUBKEY_PATTERN = re.compile(r'^[0-9a-f]{66}$', re.IGNORECASE)
-    CHANNEL_ID_PATTERN = re.compile(r'^[0-9]+:[0-9]+:[0-9]+$')
+    PAYMENT_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+    LIGHTNING_INVOICE_PATTERN = re.compile(r"^ln[a-z0-9]+$", re.IGNORECASE)
+    NODE_PUBKEY_PATTERN = re.compile(r"^[0-9a-f]{66}$", re.IGNORECASE)
+    CHANNEL_ID_PATTERN = re.compile(r"^[0-9]+:[0-9]+:[0-9]+$")
 
     # SQL injection patterns
     SQL_INJECTION_PATTERNS = [
-        re.compile(r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE)\b)", re.IGNORECASE),
+        re.compile(
+            r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE)\b)",
+            re.IGNORECASE,
+        ),
         re.compile(r"(--|\#|\/\*|\*\/)", re.IGNORECASE),
         re.compile(r"(\bOR\b.*=.*)", re.IGNORECASE),
         re.compile(r"(\bAND\b.*=.*)", re.IGNORECASE),
@@ -80,7 +84,9 @@ class SecurityValidator:
             return ValidationResult(valid=False, errors=["Payment hash required"])
 
         if len(payment_hash) != 64:
-            return ValidationResult(valid=False, errors=["Payment hash must be 64 characters"])
+            return ValidationResult(
+                valid=False, errors=["Payment hash must be 64 characters"]
+            )
 
         if not self.PAYMENT_HASH_PATTERN.match(payment_hash):
             return ValidationResult(valid=False, errors=["Invalid payment hash format"])
@@ -98,11 +104,15 @@ class SecurityValidator:
             return ValidationResult(valid=False, errors=["Invalid invoice length"])
 
         if not self.LIGHTNING_INVOICE_PATTERN.match(invoice):
-            return ValidationResult(valid=False, errors=["Invalid Lightning invoice format"])
+            return ValidationResult(
+                valid=False, errors=["Invalid Lightning invoice format"]
+            )
 
         return ValidationResult(valid=True, sanitized_value=invoice)
 
-    def validate_amount(self, amount: Any, min_value: int = 1, max_value: int = 21_000_000_000_000) -> ValidationResult:
+    def validate_amount(
+        self, amount: Any, min_value: int = 1, max_value: int = 21_000_000_000_000
+    ) -> ValidationResult:
         """Validate satoshi amount"""
         try:
             amount_int = int(amount)
@@ -110,10 +120,14 @@ class SecurityValidator:
             return ValidationResult(valid=False, errors=["Amount must be an integer"])
 
         if amount_int < min_value:
-            return ValidationResult(valid=False, errors=[f"Amount must be at least {min_value} sats"])
+            return ValidationResult(
+                valid=False, errors=[f"Amount must be at least {min_value} sats"]
+            )
 
         if amount_int > max_value:
-            return ValidationResult(valid=False, errors=[f"Amount cannot exceed {max_value} sats"])
+            return ValidationResult(
+                valid=False, errors=[f"Amount cannot exceed {max_value} sats"]
+            )
 
         return ValidationResult(valid=True, sanitized_value=amount_int)
 
@@ -128,7 +142,9 @@ class SecurityValidator:
         # Check for XSS attempts
         for pattern in self.XSS_PATTERNS:
             if pattern.search(memo):
-                return ValidationResult(valid=False, errors=["Memo contains forbidden content"])
+                return ValidationResult(
+                    valid=False, errors=["Memo contains forbidden content"]
+                )
 
         # Sanitize and truncate
         sanitized = memo.strip()[:max_length]
@@ -137,7 +153,9 @@ class SecurityValidator:
         if len(memo) > max_length:
             warnings.append(f"Memo truncated to {max_length} characters")
 
-        return ValidationResult(valid=True, sanitized_value=sanitized, warnings=warnings)
+        return ValidationResult(
+            valid=True, sanitized_value=sanitized, warnings=warnings
+        )
 
     def validate_node_pubkey(self, pubkey: str) -> ValidationResult:
         """Validate Lightning node public key"""
@@ -145,7 +163,9 @@ class SecurityValidator:
             return ValidationResult(valid=False, errors=["Node pubkey required"])
 
         if len(pubkey) != 66:
-            return ValidationResult(valid=False, errors=["Node pubkey must be 66 characters"])
+            return ValidationResult(
+                valid=False, errors=["Node pubkey must be 66 characters"]
+            )
 
         if not self.NODE_PUBKEY_PATTERN.match(pubkey):
             return ValidationResult(valid=False, errors=["Invalid node pubkey format"])
@@ -158,7 +178,10 @@ class SecurityValidator:
             return ValidationResult(valid=False, errors=["Channel ID required"])
 
         if not self.CHANNEL_ID_PATTERN.match(channel_id):
-            return ValidationResult(valid=False, errors=["Invalid channel ID format (expected block:tx:output)"])
+            return ValidationResult(
+                valid=False,
+                errors=["Invalid channel ID format (expected block:tx:output)"],
+            )
 
         return ValidationResult(valid=True, sanitized_value=channel_id)
 
@@ -169,7 +192,9 @@ class SecurityValidator:
 
         for pattern in self.SQL_INJECTION_PATTERNS:
             if pattern.search(text):
-                logger.warning("Potential SQL injection detected", extra={"text": text[:100]})
+                logger.warning(
+                    "Potential SQL injection detected", extra={"text": text[:100]}
+                )
                 return True
         return False
 
@@ -191,7 +216,9 @@ class SecurityValidator:
 
         for pattern in self.PATH_TRAVERSAL_PATTERNS:
             if pattern.search(text):
-                logger.warning("Potential path traversal detected", extra={"text": text[:100]})
+                logger.warning(
+                    "Potential path traversal detected", extra={"text": text[:100]}
+                )
                 return True
         return False
 
@@ -201,16 +228,16 @@ class SecurityValidator:
             return ""
 
         # Remove null bytes
-        text = text.replace('\x00', '')
+        text = text.replace("\x00", "")
 
         # Normalize whitespace
-        text = ' '.join(text.split())
+        text = " ".join(text.split())
 
         # Truncate if needed
         if max_length:
             text = text[:max_length]
         elif len(text) > self.max_string_length:
-            text = text[:self.max_string_length]
+            text = text[: self.max_string_length]
 
         return text.strip()
 
@@ -231,7 +258,9 @@ class SecurityValidator:
             if ip_obj.is_reserved:
                 warnings.append("IP address is reserved")
 
-            return ValidationResult(valid=True, sanitized_value=str(ip_obj), warnings=warnings)
+            return ValidationResult(
+                valid=True, sanitized_value=str(ip_obj), warnings=warnings
+            )
         except ValueError as e:
             return ValidationResult(valid=False, errors=[f"Invalid IP address: {e}"])
 
@@ -243,7 +272,9 @@ class SecurityValidator:
             return ValidationResult(valid=False, errors=["Port must be an integer"])
 
         if port_int < 1 or port_int > 65535:
-            return ValidationResult(valid=False, errors=["Port must be between 1 and 65535"])
+            return ValidationResult(
+                valid=False, errors=["Port must be between 1 and 65535"]
+            )
 
         warnings = []
         if port_int < 1024:
@@ -251,10 +282,14 @@ class SecurityValidator:
 
         return ValidationResult(valid=True, sanitized_value=port_int, warnings=warnings)
 
-    def validate_json_payload(self, data: Dict[str, Any], required_fields: Optional[Set[str]] = None) -> ValidationResult:
+    def validate_json_payload(
+        self, data: Dict[str, Any], required_fields: Optional[Set[str]] = None
+    ) -> ValidationResult:
         """Validate JSON payload structure"""
         if not isinstance(data, dict):
-            return ValidationResult(valid=False, errors=["Payload must be a JSON object"])
+            return ValidationResult(
+                valid=False, errors=["Payload must be a JSON object"]
+            )
 
         errors = []
 
@@ -280,17 +315,19 @@ class SecurityValidator:
         """Generate cryptographically secure token"""
         return secrets.token_urlsafe(length)
 
-    def hash_password(self, password: str, salt: Optional[str] = None) -> Tuple[str, str]:
+    def hash_password(
+        self, password: str, salt: Optional[str] = None
+    ) -> Tuple[str, str]:
         """Hash password with salt using PBKDF2"""
         if not salt:
             salt = secrets.token_hex(32)
 
         # Use PBKDF2 with SHA-256
         pwd_hash = hashlib.pbkdf2_hmac(
-            'sha256',
-            password.encode('utf-8'),
-            salt.encode('utf-8'),
-            100000  # iterations
+            "sha256",
+            password.encode("utf-8"),
+            salt.encode("utf-8"),
+            100000,  # iterations
         )
 
         return pwd_hash.hex(), salt
@@ -300,7 +337,9 @@ class SecurityValidator:
         computed_hash, _ = self.hash_password(password, salt)
         return hmac.compare_digest(computed_hash, password_hash)
 
-    def check_rate_limit(self, identifier: str, max_requests: int = 100, window_seconds: int = 60) -> bool:
+    def check_rate_limit(
+        self, identifier: str, max_requests: int = 100, window_seconds: int = 60
+    ) -> bool:
         """Simple rate limiting check"""
         now = datetime.utcnow()
         window_start = now - timedelta(seconds=window_seconds)
@@ -311,8 +350,7 @@ class SecurityValidator:
 
         # Clean old entries
         self._rate_limit_cache[identifier] = [
-            ts for ts in self._rate_limit_cache[identifier]
-            if ts > window_start
+            ts for ts in self._rate_limit_cache[identifier] if ts > window_start
         ]
 
         # Check limit
@@ -333,22 +371,25 @@ class SecurityValidator:
             return ValidationResult(valid=False, errors=["Hostname too long"])
 
         # Check for invalid characters
-        if not re.match(r'^[a-zA-Z0-9.-]+$', hostname):
+        if not re.match(r"^[a-zA-Z0-9.-]+$", hostname):
             return ValidationResult(valid=False, errors=["Invalid hostname characters"])
 
         # Check each label
-        labels = hostname.split('.')
+        labels = hostname.split(".")
         for label in labels:
             if len(label) > 63:
                 return ValidationResult(valid=False, errors=["Hostname label too long"])
-            if label.startswith('-') or label.endswith('-'):
-                return ValidationResult(valid=False, errors=["Hostname label cannot start/end with hyphen"])
+            if label.startswith("-") or label.endswith("-"):
+                return ValidationResult(
+                    valid=False, errors=["Hostname label cannot start/end with hyphen"]
+                )
 
         return ValidationResult(valid=True, sanitized_value=hostname.lower())
 
 
 # Singleton instance
 _security_validator: Optional[SecurityValidator] = None
+
 
 def get_security_validator() -> SecurityValidator:
     """Get or create security validator singleton"""
@@ -358,4 +399,4 @@ def get_security_validator() -> SecurityValidator:
     return _security_validator
 
 
-__all__ = ['SecurityValidator', 'ValidationResult', 'get_security_validator']
+__all__ = ["SecurityValidator", "ValidationResult", "get_security_validator"]

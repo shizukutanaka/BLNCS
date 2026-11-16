@@ -59,9 +59,13 @@ class PaymentConfirmationStore:
 
     @staticmethod
     def _digest(payment_request: str) -> str:
-        return hashlib.sha256(payment_request.strip().lower().encode("utf-8")).hexdigest()
+        return hashlib.sha256(
+            payment_request.strip().lower().encode("utf-8")
+        ).hexdigest()
 
-    def issue(self, identity: str, payment_request: str, amount_msat: int) -> Tuple[str, float]:
+    def issue(
+        self, identity: str, payment_request: str, amount_msat: int
+    ) -> Tuple[str, float]:
         """Create a token bound to (identity, invoice, amount).
 
         Returns ``(token, expires_at_epoch)``.
@@ -106,7 +110,9 @@ class PaymentConfirmationStore:
             return False
         if record.amount_msat != int(amount_msat):
             return False
-        if not hmac.compare_digest(record.invoice_digest, self._digest(payment_request)):
+        if not hmac.compare_digest(
+            record.invoice_digest, self._digest(payment_request)
+        ):
             return False
         return True
 

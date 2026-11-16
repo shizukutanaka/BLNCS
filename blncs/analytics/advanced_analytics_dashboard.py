@@ -3,33 +3,36 @@
 ビジネスインテリジェンスと予測分析ダッシュボード機能を提供
 """
 
-import time
 import json
-import sqlite3
-import threading
-from typing import Any, Dict, List, Optional, Callable, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
 import logging
+import sqlite3
+import statistics
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from collections import defaultdict, deque
-import statistics
 
 logger = logging.getLogger(__name__)
 
 
 class AnalysisType(Enum):
     """分析タイプ"""
-    DESCRIPTIVE = "descriptive"      # 記述統計
-    DIAGNOSTIC = "diagnostic"        # 診断分析
-    PREDICTIVE = "predictive"        # 予測分析
-    PRESCRIPTIVE = "prescriptive"    # 処方的分析
+
+    DESCRIPTIVE = "descriptive"  # 記述統計
+    DIAGNOSTIC = "diagnostic"  # 診断分析
+    PREDICTIVE = "predictive"  # 予測分析
+    PRESCRIPTIVE = "prescriptive"  # 処方的分析
 
 
 class MetricCategory(Enum):
     """メトリクスカテゴリ"""
+
     PERFORMANCE = "performance"
     BUSINESS = "business"
     SECURITY = "security"
@@ -41,6 +44,7 @@ class MetricCategory(Enum):
 @dataclass
 class AnalysisMetric:
     """分析メトリクス情報"""
+
     metric_id: str
     name: str
     category: MetricCategory
@@ -54,6 +58,7 @@ class AnalysisMetric:
 @dataclass
 class AnalysisResult:
     """分析結果情報"""
+
     analysis_id: str
     analysis_type: AnalysisType
     metric_id: str
@@ -127,15 +132,23 @@ class DataWarehouse:
         """
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO metric_definitions
                     (metric_id, name, category, data_type, unit, description, is_real_time, retention_days)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    metric.metric_id, metric.name, metric.category.value,
-                    metric.data_type, metric.unit, metric.description,
-                    1 if metric.is_real_time else 0, metric.retention_days
-                ))
+                """,
+                    (
+                        metric.metric_id,
+                        metric.name,
+                        metric.category.value,
+                        metric.data_type,
+                        metric.unit,
+                        metric.description,
+                        1 if metric.is_real_time else 0,
+                        metric.retention_days,
+                    ),
+                )
                 conn.commit()
 
             self.metrics[metric.metric_id] = metric
@@ -143,7 +156,13 @@ class DataWarehouse:
         except Exception as e:
             logger.error(f"メトリクス登録エラー: {e}")
 
-    def store_metric_data(self, metric_id: str, value: float, timestamp: Optional[float] = None, tags: Dict[str, str] = None):
+    def store_metric_data(
+        self,
+        metric_id: str,
+        value: float,
+        timestamp: Optional[float] = None,
+        tags: Dict[str, str] = None,
+    ):
         """
         メトリクスデータを保存
         Args:
@@ -158,20 +177,30 @@ class DataWarehouse:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO metric_data (metric_id, value, timestamp, tags)
                     VALUES (?, ?, ?, ?)
-                """, (
-                    metric_id, value, timestamp or time.time(),
-                    json.dumps(tags) if tags else None
-                ))
+                """,
+                    (
+                        metric_id,
+                        value,
+                        timestamp or time.time(),
+                        json.dumps(tags) if tags else None,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
             logger.error(f"メトリクスデータ保存エラー: {e}")
 
-    def get_metric_history(self, metric_id: str, start_time: Optional[float] = None,
-                          end_time: Optional[float] = None, limit: int = 10000) -> List[Dict[str, Any]]:
+    def get_metric_history(
+        self,
+        metric_id: str,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+        limit: int = 10000,
+    ) -> List[Dict[str, Any]]:
         """
         メトリクス履歴を取得
         Args:
@@ -184,7 +213,9 @@ class DataWarehouse:
         """
         try:
             with sqlite3.connect(self.db_path) as conn:
-                query = "SELECT value, timestamp, tags FROM metric_data WHERE metric_id = ?"
+                query = (
+                    "SELECT value, timestamp, tags FROM metric_data WHERE metric_id = ?"
+                )
                 params = [metric_id]
 
                 if start_time:
@@ -205,7 +236,7 @@ class DataWarehouse:
                     data_point = {
                         "value": row[0],
                         "timestamp": row[1],
-                        "tags": json.loads(row[2]) if row[2] else {}
+                        "tags": json.loads(row[2]) if row[2] else {},
                     }
                     data_points.append(data_point)
 
@@ -222,14 +253,16 @@ class DataWarehouse:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # 各メトリクスの保持期間を確認して削除
-                cursor = conn.execute("SELECT metric_id, retention_days FROM metric_definitions")
+                cursor = conn.execute(
+                    "SELECT metric_id, retention_days FROM metric_definitions"
+                )
                 for row in cursor.fetchall():
                     metric_id, retention_days = row
                     cutoff = time.time() - (retention_days * 24 * 3600)
 
                     conn.execute(
                         "DELETE FROM metric_data WHERE metric_id = ? AND timestamp < ?",
-                        (metric_id, cutoff)
+                        (metric_id, cutoff),
                     )
 
                 conn.commit()
@@ -250,7 +283,9 @@ class BusinessIntelligenceAnalyzer:
         self.data_warehouse = data_warehouse
         self.analysis_cache: Dict[str, AnalysisResult] = {}
 
-    def perform_descriptive_analysis(self, metric_id: str, days: int = 30) -> AnalysisResult:
+    def perform_descriptive_analysis(
+        self, metric_id: str, days: int = 30
+    ) -> AnalysisResult:
         """
         記述統計分析を実行
         Args:
@@ -267,7 +302,9 @@ class BusinessIntelligenceAnalyzer:
         end_time = time.time()
         start_time = end_time - (days * 24 * 3600)
 
-        data_points = self.data_warehouse.get_metric_history(metric_id, start_time, end_time)
+        data_points = self.data_warehouse.get_metric_history(
+            metric_id, start_time, end_time
+        )
 
         if not data_points:
             return AnalysisResult(
@@ -277,7 +314,7 @@ class BusinessIntelligenceAnalyzer:
                 period_start=start_time,
                 period_end=end_time,
                 results={},
-                insights=["データ不足のため分析できません"]
+                insights=["データ不足のため分析できません"],
             )
 
         values = [dp["value"] for dp in data_points]
@@ -286,16 +323,20 @@ class BusinessIntelligenceAnalyzer:
             "count": len(values),
             "mean": statistics.mean(values),
             "median": statistics.median(values),
-            "mode": statistics.mode(values) if len(set(values)) < len(values) * 0.1 else None,
+            "mode": (
+                statistics.mode(values)
+                if len(set(values)) < len(values) * 0.1
+                else None
+            ),
             "std_dev": statistics.stdev(values) if len(values) > 1 else 0,
             "min": min(values),
             "max": max(values),
             "range": max(values) - min(values),
             "quartiles": {
                 "q1": np.percentile(values, 25),
-                "q3": np.percentile(values, 75)
+                "q3": np.percentile(values, 75),
             },
-            "outliers": self._detect_outliers(values)
+            "outliers": self._detect_outliers(values),
         }
 
         insights = self._generate_descriptive_insights(results, metric_id)
@@ -308,7 +349,7 @@ class BusinessIntelligenceAnalyzer:
             period_end=end_time,
             results=results,
             insights=insights,
-            confidence_score=0.95
+            confidence_score=0.95,
         )
 
         self.analysis_cache[cache_key] = analysis_result
@@ -329,12 +370,16 @@ class BusinessIntelligenceAnalyzer:
         outliers = [v for v in values if v < lower_bound or v > upper_bound]
         return outliers
 
-    def _generate_descriptive_insights(self, results: Dict[str, Any], metric_id: str) -> List[str]:
+    def _generate_descriptive_insights(
+        self, results: Dict[str, Any], metric_id: str
+    ) -> List[str]:
         """記述的洞察を生成"""
         insights = []
 
         if results["std_dev"] > results["mean"] * 0.3:
-            insights.append(f"{metric_id}の変動が大きいです（標準偏差: {results['std_dev']:.2f}）")
+            insights.append(
+                f"{metric_id}の変動が大きいです（標準偏差: {results['std_dev']:.2f}）"
+            )
 
         outlier_count = len(results["outliers"])
         if outlier_count > 0:
@@ -370,7 +415,9 @@ class PredictiveAnalyzer:
         end_time = time.time()
         start_time = end_time - (days * 24 * 3600)
 
-        data_points = self.data_warehouse.get_metric_history(metric_id, start_time, end_time)
+        data_points = self.data_warehouse.get_metric_history(
+            metric_id, start_time, end_time
+        )
 
         if len(data_points) < 10:
             return {"error": "データ不足のためモデルを学習できません"}
@@ -400,13 +447,15 @@ class PredictiveAnalyzer:
             "trend_intercept": intercept,
             "seasonal_pattern": seasonal_pattern,
             "last_value": values[-1],
-            "mean_error": self._calculate_prediction_error(x, y, slope, intercept)
+            "mean_error": self._calculate_prediction_error(x, y, slope, intercept),
         }
 
         self.prediction_models[metric_id] = model_info
         return model_info
 
-    def predict_future_values(self, metric_id: str, future_hours: int = 24) -> Dict[str, Any]:
+    def predict_future_values(
+        self, metric_id: str, future_hours: int = 24
+    ) -> Dict[str, Any]:
         """
         未来値を予測
         Args:
@@ -426,24 +475,28 @@ class PredictiveAnalyzer:
             future_timestamp = current_time + (hour * 3600)
 
             # トレンドベース予測
-            trend_prediction = model["trend_slope"] * future_timestamp + model["trend_intercept"]
+            trend_prediction = (
+                model["trend_slope"] * future_timestamp + model["trend_intercept"]
+            )
 
             # 季節性調整（簡易版）
             if model["seasonal_pattern"]:
                 seasonal_adjustment = model["seasonal_pattern"].get(hour % 24, 0)
                 trend_prediction += seasonal_adjustment
 
-            predictions.append({
-                "timestamp": future_timestamp,
-                "predicted_value": trend_prediction,
-                "confidence": self._calculate_prediction_confidence(hour, model)
-            })
+            predictions.append(
+                {
+                    "timestamp": future_timestamp,
+                    "predicted_value": trend_prediction,
+                    "confidence": self._calculate_prediction_confidence(hour, model),
+                }
+            )
 
         return {
             "metric_id": metric_id,
             "predictions": predictions,
             "model_info": model,
-            "prediction_horizon": future_hours
+            "prediction_horizon": future_hours,
         }
 
     def _analyze_seasonality(self, values: List[float]) -> Dict[int, float]:
@@ -467,13 +520,17 @@ class PredictiveAnalyzer:
 
         return seasonal_pattern
 
-    def _calculate_prediction_error(self, x: np.ndarray, y: np.ndarray, slope: float, intercept: float) -> float:
+    def _calculate_prediction_error(
+        self, x: np.ndarray, y: np.ndarray, slope: float, intercept: float
+    ) -> float:
         """予測誤差を計算"""
         predictions = slope * x + intercept
         errors = np.abs(y - predictions)
         return np.mean(errors)
 
-    def _calculate_prediction_confidence(self, hour: int, model: Dict[str, Any]) -> float:
+    def _calculate_prediction_confidence(
+        self, hour: int, model: Dict[str, Any]
+    ) -> float:
         """予測信頼度を計算"""
         # 時間経過とともに信頼度が低下
         base_confidence = 0.9
@@ -502,7 +559,9 @@ class AnalyticsDashboard:
         self.predictive_analyzer = PredictiveAnalyzer(data_warehouse)
         self.dashboard_configs: Dict[str, Dict[str, Any]] = {}
 
-    def create_dashboard(self, dashboard_id: str, name: str, description: str = "") -> str:
+    def create_dashboard(
+        self, dashboard_id: str, name: str, description: str = ""
+    ) -> str:
         """
         ダッシュボードを作成
         Args:
@@ -518,7 +577,7 @@ class AnalyticsDashboard:
             "description": description,
             "widgets": [],
             "created_at": time.time(),
-            "updated_at": time.time()
+            "updated_at": time.time(),
         }
 
         return dashboard_id
@@ -531,7 +590,9 @@ class AnalyticsDashboard:
             widget_config: ウィジェット設定
         """
         if dashboard_id in self.dashboard_configs:
-            widget_id = f"widget_{len(self.dashboard_configs[dashboard_id]['widgets']) + 1}"
+            widget_id = (
+                f"widget_{len(self.dashboard_configs[dashboard_id]['widgets']) + 1}"
+            )
             widget_config["id"] = widget_id
             self.dashboard_configs[dashboard_id]["widgets"].append(widget_config)
             self.dashboard_configs[dashboard_id]["updated_at"] = time.time()
@@ -555,7 +616,9 @@ class AnalyticsDashboard:
             metric_id = widget.get("metric_id")
 
             if widget_type == "descriptive_chart" and metric_id:
-                analysis_result = self.bi_analyzer.perform_descriptive_analysis(metric_id)
+                analysis_result = self.bi_analyzer.perform_descriptive_analysis(
+                    metric_id
+                )
                 widget["data"] = analysis_result.results
                 widget["insights"] = analysis_result.insights
 
@@ -564,7 +627,9 @@ class AnalyticsDashboard:
                 if metric_id not in self.predictive_analyzer.prediction_models:
                     self.predictive_analyzer.train_prediction_model(metric_id)
 
-                prediction_result = self.predictive_analyzer.predict_future_values(metric_id, 24)
+                prediction_result = self.predictive_analyzer.predict_future_values(
+                    metric_id, 24
+                )
                 widget["data"] = prediction_result
 
         return dashboard
@@ -585,15 +650,19 @@ class AnalyticsDashboard:
                 metric = self.data_warehouse.metrics[metric_id]
 
                 # 記述分析を実行
-                analysis = self.bi_analyzer.perform_descriptive_analysis(metric_id, days)
+                analysis = self.bi_analyzer.perform_descriptive_analysis(
+                    metric_id, days
+                )
 
                 summary[metric_id] = {
                     "name": metric.name,
                     "category": metric.category.value,
                     "current_value": analysis.results.get("mean", 0),
-                    "trend": "up" if analysis.results.get("trend_slope", 0) > 0 else "down",
+                    "trend": (
+                        "up" if analysis.results.get("trend_slope", 0) > 0 else "down"
+                    ),
                     "change_percentage": 0,  # 実装は後で追加
-                    "status": "normal"  # 実装は後で追加
+                    "status": "normal",  # 実装は後で追加
                 }
 
         return summary
@@ -633,7 +702,7 @@ class AdvancedAnalyticsManager:
                 data_type="numeric",
                 unit="%",
                 description="システム全体のCPU使用率",
-                is_real_time=True
+                is_real_time=True,
             ),
             AnalysisMetric(
                 metric_id="system_memory_usage",
@@ -642,7 +711,7 @@ class AdvancedAnalyticsManager:
                 data_type="numeric",
                 unit="%",
                 description="システム全体のメモリ使用率",
-                is_real_time=True
+                is_real_time=True,
             ),
             AnalysisMetric(
                 metric_id="api_response_time",
@@ -651,14 +720,14 @@ class AdvancedAnalyticsManager:
                 data_type="numeric",
                 unit="ms",
                 description="APIエンドポイントの平均レスポンスタイム",
-                is_real_time=True
+                is_real_time=True,
             ),
             AnalysisMetric(
                 metric_id="user_active_sessions",
                 name="アクティブセッション数",
                 category=MetricCategory.BUSINESS,
                 data_type="numeric",
-                description="現在のアクティブユーザーセッション数"
+                description="現在のアクティブユーザーセッション数",
             ),
             AnalysisMetric(
                 metric_id="transaction_volume",
@@ -666,8 +735,8 @@ class AdvancedAnalyticsManager:
                 category=MetricCategory.BUSINESS,
                 data_type="numeric",
                 unit="件",
-                description="1日あたりのトランザクション処理件数"
-            )
+                description="1日あたりのトランザクション処理件数",
+            ),
         ]
 
         for metric in default_metrics:
@@ -679,42 +748,51 @@ class AdvancedAnalyticsManager:
         performance_dashboard = self.analytics_dashboard.create_dashboard(
             "performance_overview",
             "パフォーマンス概要",
-            "システム全体のパフォーマンスメトリクスを表示"
+            "システム全体のパフォーマンスメトリクスを表示",
         )
 
-        self.analytics_dashboard.add_widget_to_dashboard(performance_dashboard, {
-            "type": "descriptive_chart",
-            "title": "CPU使用率トレンド",
-            "metric_id": "system_cpu_usage",
-            "chart_type": "line"
-        })
+        self.analytics_dashboard.add_widget_to_dashboard(
+            performance_dashboard,
+            {
+                "type": "descriptive_chart",
+                "title": "CPU使用率トレンド",
+                "metric_id": "system_cpu_usage",
+                "chart_type": "line",
+            },
+        )
 
-        self.analytics_dashboard.add_widget_to_dashboard(performance_dashboard, {
-            "type": "descriptive_chart",
-            "title": "メモリ使用率トレンド",
-            "metric_id": "system_memory_usage",
-            "chart_type": "line"
-        })
+        self.analytics_dashboard.add_widget_to_dashboard(
+            performance_dashboard,
+            {
+                "type": "descriptive_chart",
+                "title": "メモリ使用率トレンド",
+                "metric_id": "system_memory_usage",
+                "chart_type": "line",
+            },
+        )
 
         # ビジネスダッシュボード
         business_dashboard = self.analytics_dashboard.create_dashboard(
-            "business_insights",
-            "ビジネス洞察",
-            "ビジネスメトリクスと予測分析を表示"
+            "business_insights", "ビジネス洞察", "ビジネスメトリクスと予測分析を表示"
         )
 
-        self.analytics_dashboard.add_widget_to_dashboard(business_dashboard, {
-            "type": "predictive_chart",
-            "title": "トランザクション量予測",
-            "metric_id": "transaction_volume",
-            "chart_type": "line"
-        })
+        self.analytics_dashboard.add_widget_to_dashboard(
+            business_dashboard,
+            {
+                "type": "predictive_chart",
+                "title": "トランザクション量予測",
+                "metric_id": "transaction_volume",
+                "chart_type": "line",
+            },
+        )
 
     def start_analytics_system(self):
         """分析システムを開始"""
         if not self.is_analytics_active:
             self.is_analytics_active = True
-            self.analytics_thread = threading.Thread(target=self._analytics_loop, daemon=True)
+            self.analytics_thread = threading.Thread(
+                target=self._analytics_loop, daemon=True
+            )
             self.analytics_thread.start()
 
     def stop_analytics_system(self):
@@ -743,10 +821,15 @@ class AdvancedAnalyticsManager:
 
     def get_kpi_summary(self) -> Dict[str, Any]:
         """KPIサマリーを取得"""
-        return self.analytics_dashboard.get_kpi_summary([
-            "system_cpu_usage", "system_memory_usage", "api_response_time",
-            "user_active_sessions", "transaction_volume"
-        ])
+        return self.analytics_dashboard.get_kpi_summary(
+            [
+                "system_cpu_usage",
+                "system_memory_usage",
+                "api_response_time",
+                "user_active_sessions",
+                "transaction_volume",
+            ]
+        )
 
     def _analytics_loop(self):
         """分析ループ"""
@@ -790,17 +873,23 @@ def example_usage():
 
     # パフォーマンスダッシュボード取得
     performance_data = manager.get_performance_dashboard()
-    print(f"パフォーマンスデータ: {len(performance_data.get('widgets', []))}個のウィジェット")
+    print(
+        f"パフォーマンスデータ: {len(performance_data.get('widgets', []))}個のウィジェット"
+    )
 
     # KPIサマリー取得
     kpi_summary = manager.get_kpi_summary()
     print(f"KPIサマリー: {len(kpi_summary)}個のメトリクス")
 
     # 予測モデル学習と予測実行
-    model_info = manager.analytics_dashboard.predictive_analyzer.train_prediction_model("transaction_volume")
+    model_info = manager.analytics_dashboard.predictive_analyzer.train_prediction_model(
+        "transaction_volume"
+    )
     print(f"予測モデル学習完了: {model_info.get('data_points', 0)}データポイント")
 
-    prediction = manager.analytics_dashboard.predictive_analyzer.predict_future_values("transaction_volume", 24)
+    prediction = manager.analytics_dashboard.predictive_analyzer.predict_future_values(
+        "transaction_volume", 24
+    )
     print(f"24時間予測完了: {len(prediction.get('predictions', []))}個の予測値")
 
     manager.stop_analytics_system()

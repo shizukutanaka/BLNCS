@@ -4,67 +4,87 @@ Comprehensive tests for advanced modules
 Tests all new enterprise-grade implementations
 """
 
-import pytest
 import asyncio
 from datetime import datetime, timedelta
 
-# Health Probes
-from blncs.core.health_probes import (
-    HealthProbeManager, ProbeConfig, ProbeType, ProbeStatus
-)
-
-# Idempotency
-from blncs.core.idempotency import (
-    IdempotencyManager, TransactionStatus, DistributedLock
-)
-
-# Dependency Injection
-from blncs.core.dependency_container import (
-    ServiceContainer, ServiceCollection, LifecycleScope
-)
-
-# DDD
-from blncs.core.ddd_foundation import (
-    ValueObject, Money, Entity, Aggregate
-)
-
-# Event Sourcing
-from blncs.core.event_sourcing_patterns import (
-    Event, InMemoryEventStore, InMemoryEventPublisher, EventSourcing
-)
-
-# Resilience
-from blncs.core.resilience_patterns import (
-    CircuitBreaker, Bulkhead, Retry
-)
-
-# Observability
-from blncs.core.observability import (
-    StructuredLogger, MetricsCollector, TracingManager
-)
-
-# Performance Acceleration
-from blncs.core.performance_acceleration import (
-    NumpyOptimizer, RustFFIBridge, WebAssemblyBridge, HybridExecutor,
-    OptimizationStrategy, AccelerationMethod
-)
+import pytest
 
 # Advanced Rate Limiting
 from blncs.core.advanced_rate_limiting import (
-    RateLimiter, RateLimitConfig, RateLimitStrategy, TokenBucketLimiter,
-    LeakyBucketLimiter, SlidingWindowLimiter, FixedWindowLimiter
-)
-
-# Distributed Caching
-from blncs.core.distributed_caching import (
-    InMemoryCache, DistributedCacheLayer, EvictionPolicy, CacheWarmer,
-    CacheInvalidator
+    FixedWindowLimiter,
+    LeakyBucketLimiter,
+    RateLimitConfig,
+    RateLimiter,
+    RateLimitStrategy,
+    SlidingWindowLimiter,
+    TokenBucketLimiter,
 )
 
 # Consensus Algorithms
 from blncs.core.consensus_algorithms import (
-    RaftConsensus, PaxosConsensus, ConsensusCluster, NodeState
+    ConsensusCluster,
+    NodeState,
+    PaxosConsensus,
+    RaftConsensus,
 )
+
+# DDD
+from blncs.core.ddd_foundation import Aggregate, Entity, Money, ValueObject
+
+# Dependency Injection
+from blncs.core.dependency_container import (
+    LifecycleScope,
+    ServiceCollection,
+    ServiceContainer,
+)
+
+# Distributed Caching
+from blncs.core.distributed_caching import (
+    CacheInvalidator,
+    CacheWarmer,
+    DistributedCacheLayer,
+    EvictionPolicy,
+    InMemoryCache,
+)
+
+# Event Sourcing
+from blncs.core.event_sourcing_patterns import (
+    Event,
+    EventSourcing,
+    InMemoryEventPublisher,
+    InMemoryEventStore,
+)
+
+# Health Probes
+from blncs.core.health_probes import (
+    HealthProbeManager,
+    ProbeConfig,
+    ProbeStatus,
+    ProbeType,
+)
+
+# Idempotency
+from blncs.core.idempotency import (
+    DistributedLock,
+    IdempotencyManager,
+    TransactionStatus,
+)
+
+# Observability
+from blncs.core.observability import MetricsCollector, StructuredLogger, TracingManager
+
+# Performance Acceleration
+from blncs.core.performance_acceleration import (
+    AccelerationMethod,
+    HybridExecutor,
+    NumpyOptimizer,
+    OptimizationStrategy,
+    RustFFIBridge,
+    WebAssemblyBridge,
+)
+
+# Resilience
+from blncs.core.resilience_patterns import Bulkhead, CircuitBreaker, Retry
 
 
 class TestHealthProbes:
@@ -79,9 +99,7 @@ class TestHealthProbes:
             return True
 
         config = ProbeConfig(
-            name="test_probe",
-            probe_type=ProbeType.READINESS,
-            check_func=mock_check
+            name="test_probe", probe_type=ProbeType.READINESS, check_func=mock_check
         )
 
         manager.register_probe(config)
@@ -103,7 +121,7 @@ class TestHealthProbes:
             name="liveness",
             probe_type=ProbeType.LIVENESS,
             check_func=liveness_check,
-            timeout_seconds=5
+            timeout_seconds=5,
         )
 
         manager.register_probe(config)
@@ -121,9 +139,7 @@ class TestHealthProbes:
             return True
 
         config = ProbeConfig(
-            name="ready",
-            probe_type=ProbeType.READINESS,
-            check_func=ready_check
+            name="ready", probe_type=ProbeType.READINESS, check_func=ready_check
         )
 
         manager.register_probe(config)
@@ -208,6 +224,7 @@ class TestDependencyInjection:
 
     def test_service_collection_builder(self):
         """Test service collection fluent builder"""
+
         class ServiceA:
             pass
 
@@ -215,10 +232,7 @@ class TestDependencyInjection:
             pass
 
         collection = ServiceCollection()
-        container = (collection
-                     .add_singleton(ServiceA)
-                     .add_transient(ServiceB)
-                     .build())
+        container = collection.add_singleton(ServiceA).add_transient(ServiceB).build()
 
         service_a = container.resolve(ServiceA)
         service_b = container.resolve(ServiceB)
@@ -273,7 +287,7 @@ class TestEventSourcing:
             event_id="evt_1",
             aggregate_id="agg_1",
             aggregate_type="TestAggregate",
-            event_type="Created"
+            event_type="Created",
         )
 
         await store.append_event(event)
@@ -292,7 +306,7 @@ class TestEventSourcing:
             event_id="evt_1",
             aggregate_id="agg_1",
             aggregate_type="TestAggregate",
-            event_type="TestEvent"
+            event_type="TestEvent",
         )
 
         event_sourcing = EventSourcing(store, publisher)
@@ -343,7 +357,7 @@ class TestResilience:
         tasks = [
             bulkhead.call(slow_operation),
             bulkhead.call(slow_operation),
-            bulkhead.call(slow_operation)
+            bulkhead.call(slow_operation),
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -432,7 +446,7 @@ class TestPerformanceAcceleration:
     def test_numpy_reduce_memory_usage(self):
         """Test memory reduction with float32"""
         data = [1.0, 2.0, 3.0, 4.0, 5.0]
-        result = NumpyOptimizer.reduce_memory_usage(data, dtype='float32')
+        result = NumpyOptimizer.reduce_memory_usage(data, dtype="float32")
 
         assert isinstance(result, bytes)
         assert len(result) > 0
@@ -468,7 +482,7 @@ class TestPerformanceAcceleration:
         serialized = WebAssemblyBridge.serialize_for_wasm(float_data)
 
         # Deserialize
-        result = WebAssemblyBridge.deserialize_from_wasm(serialized, 'float')
+        result = WebAssemblyBridge.deserialize_from_wasm(serialized, "float")
 
         assert len(result) == len(float_data)
         assert all(isinstance(x, float) for x in result)
@@ -487,9 +501,7 @@ class TestPerformanceAcceleration:
 
         # Small data -> native
         method = executor.select_acceleration_method(
-            data_size=100,
-            operation_type="simple",
-            available_libs={}
+            data_size=100, operation_type="simple", available_libs={}
         )
         assert method == AccelerationMethod.NATIVE_PYTHON
 
@@ -497,7 +509,7 @@ class TestPerformanceAcceleration:
         method = executor.select_acceleration_method(
             data_size=50000,
             operation_type="matrix_mult",
-            available_libs={'numpy': True}
+            available_libs={"numpy": True},
         )
         assert method == AccelerationMethod.NUMPY
 
@@ -510,9 +522,7 @@ class TestPerformanceAcceleration:
 
         data = [1, 2, 3, 4, 5]
         result, metrics = executor.execute_with_profiling(
-            simple_operation,
-            data,
-            AccelerationMethod.NATIVE_PYTHON
+            simple_operation, data, AccelerationMethod.NATIVE_PYTHON
         )
 
         assert result == 15
@@ -527,25 +537,19 @@ class TestPerformanceAcceleration:
             return sum(data)
 
         executor.execute_with_profiling(
-            test_op,
-            [1, 2, 3],
-            AccelerationMethod.NATIVE_PYTHON
+            test_op, [1, 2, 3], AccelerationMethod.NATIVE_PYTHON
         )
 
         report = executor.get_performance_report()
 
-        assert report['total_operations'] == 1
-        assert 'total_time_ms' in report
-        assert 'average_operation_time_ms' in report
+        assert report["total_operations"] == 1
+        assert "total_time_ms" in report
+        assert "average_operation_time_ms" in report
 
     def test_optimization_strategy_loop_fusion(self):
         """Test loop fusion optimization"""
         data = [1.0, 2.0, 3.0, 4.0, 5.0]
-        operations = [
-            lambda x: x * 2,
-            lambda x: x + 1,
-            lambda x: x / 2
-        ]
+        operations = [lambda x: x * 2, lambda x: x + 1, lambda x: x / 2]
 
         result = OptimizationStrategy.loop_fusion(operations, data)
 
@@ -556,28 +560,27 @@ class TestPerformanceAcceleration:
     def test_optimization_strategy_memory_pooling(self):
         """Test memory pooling calculation"""
         pool_info = OptimizationStrategy.memory_pooling(
-            operation_count=100,
-            data_size=1000
+            operation_count=100, data_size=1000
         )
 
-        assert 'pool_size_mb' in pool_info
-        assert 'chunk_size' in pool_info
-        assert 'pre_allocated_chunks' in pool_info
-        assert pool_info['pool_size_mb'] >= 0
+        assert "pool_size_mb" in pool_info
+        assert "chunk_size" in pool_info
+        assert "pre_allocated_chunks" in pool_info
+        assert pool_info["pool_size_mb"] >= 0
 
     def test_optimization_strategy_vectorization_analysis(self):
         """Test vectorization analysis"""
+
         def sample_op(x):
             return x * 2
 
         analysis = OptimizationStrategy.vectorization_analysis(
-            sample_op,
-            [1.0, 2.0, 3.0]
+            sample_op, [1.0, 2.0, 3.0]
         )
 
-        assert analysis['vectorizable'] is True
-        assert 'estimated_speedup' in analysis
-        assert 'memory_reduction' in analysis
+        assert analysis["vectorizable"] is True
+        assert "estimated_speedup" in analysis
+        assert "memory_reduction" in analysis
 
 
 class TestAdvancedRateLimiting:
@@ -621,7 +624,7 @@ class TestAdvancedRateLimiting:
         config = RateLimitConfig(
             requests_per_second=100.0,
             burst_capacity=500,
-            strategy=RateLimitStrategy.TOKEN_BUCKET
+            strategy=RateLimitStrategy.TOKEN_BUCKET,
         )
 
         limiter = RateLimiter(config)
@@ -670,15 +673,13 @@ class TestDistributedCaching:
 
         # Simulate expiration
         import time
+
         time.sleep(1.1)
         assert cache.get("key1") is None
 
     def test_cache_eviction_lru(self):
         """Test LRU eviction policy"""
-        cache = InMemoryCache(
-            max_size_bytes=80,
-            eviction_policy=EvictionPolicy.LRU
-        )
+        cache = InMemoryCache(max_size_bytes=80, eviction_policy=EvictionPolicy.LRU)
 
         cache.set("key1", "value1")
         cache.set("key2", "value2")
@@ -798,7 +799,7 @@ class TestConsensusAlgorithms:
 
         result, data = node.prepare(1)
         assert result is True
-        assert data['promised_number'] == 1
+        assert data["promised_number"] == 1
 
     def test_paxos_accept_phase(self):
         """Test Paxos accept phase"""
@@ -834,8 +835,8 @@ class TestConsensusAlgorithms:
         cluster.add_node("node2", {"node1"})
 
         metrics = cluster.get_metrics()
-        assert metrics['algorithm'] == "paxos"
-        assert metrics['node_count'] == 2
+        assert metrics["algorithm"] == "paxos"
+        assert metrics["node_count"] == 2
 
 
 if __name__ == "__main__":

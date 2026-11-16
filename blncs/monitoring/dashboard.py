@@ -4,15 +4,15 @@ Lightweight web dashboard with core functionality.
 """
 
 import json
+import threading
 import time
 from datetime import datetime
-from typing import Dict, Any
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
-import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, Dict
+from urllib.parse import parse_qs, urlparse
 
-from ..core.metrics import get_metrics
 from ..core.logger import get_logger
+from ..core.metrics import get_metrics
 from ..lightning.simple_client import get_lightning_client
 
 logger = get_logger(__name__)
@@ -25,13 +25,13 @@ class SimpleDashboardHandler(BaseHTTPRequestHandler):
         """Handle GET requests"""
         path = urlparse(self.path).path
 
-        if path == '/':
+        if path == "/":
             self._serve_dashboard()
-        elif path == '/api/status':
+        elif path == "/api/status":
             self._serve_status()
-        elif path == '/api/metrics':
+        elif path == "/api/metrics":
             self._serve_metrics()
-        elif path == '/api/channels':
+        elif path == "/api/channels":
             self._serve_channels()
         else:
             self._serve_404()
@@ -196,7 +196,7 @@ class SimpleDashboardHandler(BaseHTTPRequestHandler):
 </body>
 </html>
         """
-        self._send_response(200, html, 'text/html')
+        self._send_response(200, html, "text/html")
 
     def _serve_status(self):
         """Serve node status API"""
@@ -204,17 +204,17 @@ class SimpleDashboardHandler(BaseHTTPRequestHandler):
             client = get_lightning_client()
             info = client.get_info()
             status = {
-                'connected': client.is_connected(),
-                'alias': info.get('alias', 'Unknown'),
-                'pubkey': info.get('identity_pubkey', ''),
-                'version': info.get('version', ''),
-                'num_channels': info.get('num_channels', 0),
-                'num_peers': info.get('num_peers', 0),
-                'synced': info.get('synced_to_chain', False),
-                'timestamp': datetime.now().isoformat()
+                "connected": client.is_connected(),
+                "alias": info.get("alias", "Unknown"),
+                "pubkey": info.get("identity_pubkey", ""),
+                "version": info.get("version", ""),
+                "num_channels": info.get("num_channels", 0),
+                "num_peers": info.get("num_peers", 0),
+                "synced": info.get("synced_to_chain", False),
+                "timestamp": datetime.now().isoformat(),
             }
         except Exception as e:
-            status = {'error': str(e), 'connected': False}
+            status = {"error": str(e), "connected": False}
 
         self._send_json(status)
 
@@ -223,9 +223,9 @@ class SimpleDashboardHandler(BaseHTTPRequestHandler):
         try:
             metrics = get_metrics()
             data = metrics.get_summary()
-            data['timestamp'] = datetime.now().isoformat()
+            data["timestamp"] = datetime.now().isoformat()
         except Exception as e:
-            data = {'error': str(e)}
+            data = {"error": str(e)}
 
         self._send_json(data)
 
@@ -237,31 +237,33 @@ class SimpleDashboardHandler(BaseHTTPRequestHandler):
             # Convert dataclass to dict
             channels_data = []
             for channel in channels:
-                if hasattr(channel, '__dict__'):
+                if hasattr(channel, "__dict__"):
                     channels_data.append(channel.__dict__)
                 else:
                     channels_data.append(channel)
         except Exception as e:
-            channels_data = {'error': str(e)}
+            channels_data = {"error": str(e)}
 
         self._send_json(channels_data)
 
     def _serve_404(self):
         """Serve 404 response"""
-        self._send_response(404, '404 Not Found')
+        self._send_response(404, "404 Not Found")
 
-    def _send_response(self, status_code: int, content: str, content_type: str = 'text/plain'):
+    def _send_response(
+        self, status_code: int, content: str, content_type: str = "text/plain"
+    ):
         """Send HTTP response"""
         self.send_response(status_code)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header("Content-Type", content_type)
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(content.encode('utf-8'))
+        self.wfile.write(content.encode("utf-8"))
 
     def _send_json(self, data: Any):
         """Send JSON response"""
         content = json.dumps(data, indent=2)
-        self._send_response(200, content, 'application/json')
+        self._send_response(200, content, "application/json")
 
     def log_message(self, format, *args):
         """Override to suppress default logging"""
@@ -271,7 +273,7 @@ class SimpleDashboardHandler(BaseHTTPRequestHandler):
 class SimpleDashboard:
     """Simple web dashboard"""
 
-    def __init__(self, host: str = '127.0.0.1', port: int = 8080):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8080):
         self.host = host
         self.port = port
         self.server = None
@@ -285,7 +287,9 @@ class SimpleDashboard:
 
         try:
             self.server = HTTPServer((self.host, self.port), SimpleDashboardHandler)
-            self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+            self.thread = threading.Thread(
+                target=self.server.serve_forever, daemon=True
+            )
             self.thread.start()
             self.running = True
             logger.info(f"Dashboard started at http://{self.host}:{self.port}")
@@ -318,7 +322,7 @@ def get_dashboard() -> SimpleDashboard:
     return _dashboard
 
 
-def start_dashboard(host: str = '127.0.0.1', port: int = 8080):
+def start_dashboard(host: str = "127.0.0.1", port: int = 8080):
     """Start dashboard"""
     dashboard = get_dashboard()
     dashboard.host = host

@@ -7,23 +7,24 @@ based on competitor analysis and industry best practices
 import asyncio
 import json
 import logging
-import platform
-import sys
-import time
-from datetime import datetime
-from typing import Dict, List, Optional, Set, Tuple, Any, Callable, Union
-from dataclasses import dataclass, field
-from enum import Enum
-import threading
-import subprocess
 import os
+import platform
 import shutil
-from pathlib import Path
+import subprocess
+import sys
 import tempfile
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 
 class Platform(Enum):
     """Supported platforms"""
+
     IOS = "ios"
     ANDROID = "android"
     WINDOWS = "windows"
@@ -34,6 +35,7 @@ class Platform(Enum):
 
 class DeviceType(Enum):
     """Device types"""
+
     MOBILE = "mobile"
     TABLET = "tablet"
     DESKTOP = "desktop"
@@ -43,6 +45,7 @@ class DeviceType(Enum):
 @dataclass
 class PlatformConfig:
     """Platform-specific configuration"""
+
     platform: Platform
     device_type: DeviceType
     supported_versions: List[str]
@@ -54,6 +57,7 @@ class PlatformConfig:
 @dataclass
 class SDKConfig:
     """SDK configuration"""
+
     language: str
     platform: Platform
     version: str
@@ -65,6 +69,7 @@ class SDKConfig:
 @dataclass
 class CrossPlatformUI:
     """Cross-platform UI component"""
+
     component_id: str
     component_type: str
     platforms: List[Platform]
@@ -80,11 +85,11 @@ class PlatformDetector:
     def get_current_platform() -> Platform:
         """Detect current platform"""
         system = platform.system().lower()
-        if system == 'windows':
+        if system == "windows":
             return Platform.WINDOWS
-        elif system == 'darwin':
+        elif system == "darwin":
             return Platform.MACOS
-        elif system == 'linux':
+        elif system == "linux":
             return Platform.LINUX
         else:
             return Platform.LINUX  # Default fallback
@@ -93,7 +98,7 @@ class PlatformDetector:
     def get_device_type() -> DeviceType:
         """Detect device type"""
         system = platform.system().lower()
-        if system in ['windows', 'darwin', 'linux']:
+        if system in ["windows", "darwin", "linux"]:
             return DeviceType.DESKTOP
         else:
             return DeviceType.DESKTOP  # Default fallback
@@ -102,11 +107,11 @@ class PlatformDetector:
     def get_platform_info() -> Dict[str, Any]:
         """Get detailed platform information"""
         return {
-            'platform': platform.system(),
-            'platform_version': platform.version(),
-            'architecture': platform.machine(),
-            'python_version': sys.version,
-            'processor': platform.processor()
+            "platform": platform.system(),
+            "platform_version": platform.version(),
+            "architecture": platform.machine(),
+            "python_version": sys.version,
+            "processor": platform.processor(),
         }
 
 
@@ -132,65 +137,48 @@ class CrossPlatformSDK:
     def _initialize_sdk_configs(self) -> Dict[str, SDKConfig]:
         """Initialize SDK configurations for different languages/platforms"""
         return {
-            'python': SDKConfig(
-                language='python',
+            "python": SDKConfig(
+                language="python",
                 platform=Platform.LINUX,  # Cross-platform
-                version='1.0.0',
+                version="1.0.0",
                 dependencies=[
-                    'requests>=2.25.0',
-                    'websockets>=10.0',
-                    'cryptography>=3.4.0',
-                    'pydantic>=1.8.0'
+                    "requests>=2.25.0",
+                    "websockets>=10.0",
+                    "cryptography>=3.4.0",
+                    "pydantic>=1.8.0",
                 ],
-                build_commands=[
-                    'python setup.py build',
-                    'python setup.py sdist'
-                ],
+                build_commands=["python setup.py build", "python setup.py sdist"],
                 test_commands=[
-                    'python -m pytest tests/',
-                    'python -m flake8 blncs_sdk/'
-                ]
+                    "python -m pytest tests/",
+                    "python -m flake8 blncs_sdk/",
+                ],
             ),
-            'javascript': SDKConfig(
-                language='javascript',
+            "javascript": SDKConfig(
+                language="javascript",
                 platform=Platform.WEB,  # Cross-platform
-                version='1.0.0',
-                dependencies=[
-                    'axios',
-                    'ws',
-                    'crypto-js',
-                    'node>=14.0.0'
-                ],
-                build_commands=[
-                    'npm install',
-                    'npm run build'
-                ],
-                test_commands=[
-                    'npm test',
-                    'npm run lint'
-                ]
+                version="1.0.0",
+                dependencies=["axios", "ws", "crypto-js", "node>=14.0.0"],
+                build_commands=["npm install", "npm run build"],
+                test_commands=["npm test", "npm run lint"],
             ),
-            'react_native': SDKConfig(
-                language='react_native',
+            "react_native": SDKConfig(
+                language="react_native",
                 platform=Platform.WEB,  # Mobile platforms
-                version='1.0.0',
+                version="1.0.0",
                 dependencies=[
-                    'react-native>=0.64.0',
-                    '@react-native-async-storage/async-storage',
-                    'react-native-crypto',
-                    'axios'
+                    "react-native>=0.64.0",
+                    "@react-native-async-storage/async-storage",
+                    "react-native-crypto",
+                    "axios",
                 ],
                 build_commands=[
-                    'npm install',
-                    'cd ios && pod install',
-                    'npm run build:ios',
-                    'npm run build:android'
+                    "npm install",
+                    "cd ios && pod install",
+                    "npm run build:ios",
+                    "npm run build:android",
                 ],
-                test_commands=[
-                    'npm test',
-                    'npm run test:e2e'
-                ]
-            )
+                test_commands=["npm test", "npm run test:e2e"],
+            ),
         }
 
     def generate_sdk(self, language: str, output_dir: str) -> bool:
@@ -216,17 +204,19 @@ class CrossPlatformSDK:
             output_path.mkdir(parents=True, exist_ok=True)
 
             # Generate SDK files
-            if language == 'python':
+            if language == "python":
                 self._generate_python_sdk(output_path, sdk_config)
-            elif language == 'javascript':
+            elif language == "javascript":
                 self._generate_javascript_sdk(output_path, sdk_config)
-            elif language == 'react_native':
+            elif language == "react_native":
                 self._generate_react_native_sdk(output_path, sdk_config)
 
             # Generate common files
             self._generate_common_files(output_path, sdk_config)
 
-            self.logger.info(f"SDK generated successfully for {language} at {output_path}")
+            self.logger.info(
+                f"SDK generated successfully for {language} at {output_path}"
+            )
             return True
 
         except Exception as e:
@@ -236,8 +226,8 @@ class CrossPlatformSDK:
     def _generate_python_sdk(self, output_path: Path, config: SDKConfig):
         """Generate Python SDK"""
         # Create package structure
-        (output_path / 'blncs_sdk').mkdir(exist_ok=True)
-        (output_path / 'tests').mkdir(exist_ok=True)
+        (output_path / "blncs_sdk").mkdir(exist_ok=True)
+        (output_path / "tests").mkdir(exist_ok=True)
 
         # Generate __init__.py
         init_content = '''
@@ -261,7 +251,7 @@ __all__ = [
     'NetworkError'
 ]
 '''
-        (output_path / 'blncs_sdk' / '__init__.py').write_text(init_content.strip())
+        (output_path / "blncs_sdk" / "__init__.py").write_text(init_content.strip())
 
         # Generate client.py
         client_content = '''
@@ -353,7 +343,7 @@ class BLNCSClient:
         """Get channel information"""
         return await self._request('GET', '/channels')
 '''
-        (output_path / 'blncs_sdk' / 'client.py').write_text(client_content.strip())
+        (output_path / "blncs_sdk" / "client.py").write_text(client_content.strip())
 
         # Generate other files
         self._generate_python_support_files(output_path)
@@ -361,28 +351,28 @@ class BLNCSClient:
     def _generate_javascript_sdk(self, output_path: Path, config: SDKConfig):
         """Generate JavaScript SDK"""
         # Create package structure
-        (output_path / 'src').mkdir(exist_ok=True)
-        (output_path / 'tests').mkdir(exist_ok=True)
+        (output_path / "src").mkdir(exist_ok=True)
+        (output_path / "tests").mkdir(exist_ok=True)
 
         # Generate package.json
         package_json = {
-            'name': 'blncs-sdk-javascript',
-            'version': '1.0.0',
-            'description': 'BLNCS Lightning Network SDK for JavaScript',
-            'main': 'dist/index.js',
-            'scripts': {
-                'build': 'babel src -d dist',
-                'test': 'jest',
-                'lint': 'eslint src'
+            "name": "blncs-sdk-javascript",
+            "version": "1.0.0",
+            "description": "BLNCS Lightning Network SDK for JavaScript",
+            "main": "dist/index.js",
+            "scripts": {
+                "build": "babel src -d dist",
+                "test": "jest",
+                "lint": "eslint src",
             },
-            'dependencies': {dep: 'latest' for dep in config.dependencies}
+            "dependencies": {dep: "latest" for dep in config.dependencies},
         }
 
-        with open(output_path / 'package.json', 'w') as f:
+        with open(output_path / "package.json", "w") as f:
             json.dump(package_json, f, indent=2)
 
         # Generate main SDK file
-        sdk_content = '''
+        sdk_content = """
 /**
  * BLNCS Lightning Network SDK for JavaScript
  */
@@ -456,35 +446,35 @@ class BLNCSClient {
 }
 
 module.exports = { BLNCSClient };
-'''
-        (output_path / 'src' / 'index.js').write_text(sdk_content.strip())
+"""
+        (output_path / "src" / "index.js").write_text(sdk_content.strip())
 
     def _generate_react_native_sdk(self, output_path: Path, config: SDKConfig):
         """Generate React Native SDK"""
         # Create React Native project structure
-        (output_path / 'src').mkdir(exist_ok=True)
-        (output_path / 'ios').mkdir(exist_ok=True)
-        (output_path / 'android').mkdir(exist_ok=True)
+        (output_path / "src").mkdir(exist_ok=True)
+        (output_path / "ios").mkdir(exist_ok=True)
+        (output_path / "android").mkdir(exist_ok=True)
 
         # Generate package.json for React Native
         package_json = {
-            'name': 'blncs-sdk-react-native',
-            'version': '1.0.0',
-            'description': 'BLNCS Lightning Network SDK for React Native',
-            'main': 'src/index.js',
-            'scripts': {
-                'start': 'react-native start',
-                'test': 'jest',
-                'lint': 'eslint src'
+            "name": "blncs-sdk-react-native",
+            "version": "1.0.0",
+            "description": "BLNCS Lightning Network SDK for React Native",
+            "main": "src/index.js",
+            "scripts": {
+                "start": "react-native start",
+                "test": "jest",
+                "lint": "eslint src",
             },
-            'dependencies': {dep: 'latest' for dep in config.dependencies}
+            "dependencies": {dep: "latest" for dep in config.dependencies},
         }
 
-        with open(output_path / 'package.json', 'w') as f:
+        with open(output_path / "package.json", "w") as f:
             json.dump(package_json, f, indent=2)
 
         # Generate React Native SDK
-        rn_sdk_content = '''
+        rn_sdk_content = """
 /**
  * BLNCS Lightning Network SDK for React Native
  */
@@ -585,13 +575,13 @@ class BLNCSClient {
 }
 
 export default BLNCSClient;
-'''
-        (output_path / 'src' / 'index.js').write_text(rn_sdk_content.strip())
+"""
+        (output_path / "src" / "index.js").write_text(rn_sdk_content.strip())
 
     def _generate_python_support_files(self, output_path: Path):
         """Generate Python SDK support files"""
         # Generate setup.py
-        setup_content = '''
+        setup_content = """
 from setuptools import setup, find_packages
 
 with open("README.md", "r", encoding="utf-8") as fh:
@@ -625,8 +615,8 @@ setup(
         "pydantic>=1.8.0",
     ],
 )
-'''
-        (output_path / 'setup.py').write_text(setup_content.strip())
+"""
+        (output_path / "setup.py").write_text(setup_content.strip())
 
         # Generate exceptions.py
         exceptions_content = '''
@@ -654,10 +644,12 @@ class ValidationError(BLNCSException):
     """Data validation error"""
     pass
 '''
-        (output_path / 'blncs_sdk' / 'exceptions.py').write_text(exceptions_content.strip())
+        (output_path / "blncs_sdk" / "exceptions.py").write_text(
+            exceptions_content.strip()
+        )
 
         # Generate README.md
-        readme_content = '''
+        readme_content = """
 # BLNCS SDK for Python
 
 Official Python SDK for BLNCS Lightning Network operations.
@@ -703,13 +695,13 @@ asyncio.run(main())
 ## Documentation
 
 Full documentation available at [docs.blncs.example.com](https://docs.blncs.example.com)
-'''
-        (output_path / 'README.md').write_text(readme_content.strip())
+"""
+        (output_path / "README.md").write_text(readme_content.strip())
 
     def _generate_common_files(self, output_path: Path, config: SDKConfig):
         """Generate common SDK files"""
         # Generate LICENSE
-        license_content = '''
+        license_content = """
 MIT License
 
 Copyright (c) 2025 BLNCS Team
@@ -731,11 +723,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-'''
-        (output_path / 'LICENSE').write_text(license_content.strip())
+"""
+        (output_path / "LICENSE").write_text(license_content.strip())
 
         # Generate .gitignore
-        gitignore_content = '''
+        gitignore_content = """
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -856,8 +848,8 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
-'''
-        (output_path / '.gitignore').write_text(gitignore_content.strip())
+"""
+        (output_path / ".gitignore").write_text(gitignore_content.strip())
 
 
 class CrossPlatformBuilder:
@@ -879,61 +871,54 @@ class CrossPlatformBuilder:
     def _initialize_build_configs(self) -> Dict[str, Dict[str, Any]]:
         """Initialize build configurations for different platforms"""
         return {
-            'windows': {
-                'build_commands': [
-                    'python setup.py build_ext --inplace',
-                    'python setup.py bdist_wheel'
+            "windows": {
+                "build_commands": [
+                    "python setup.py build_ext --inplace",
+                    "python setup.py bdist_wheel",
                 ],
-                'test_commands': [
-                    'python -m pytest tests/ -v'
-                ],
-                'package_formats': ['wheel', 'exe']
+                "test_commands": ["python -m pytest tests/ -v"],
+                "package_formats": ["wheel", "exe"],
             },
-            'macos': {
-                'build_commands': [
-                    'python setup.py build_ext --inplace',
-                    'python setup.py bdist_wheel'
+            "macos": {
+                "build_commands": [
+                    "python setup.py build_ext --inplace",
+                    "python setup.py bdist_wheel",
                 ],
-                'test_commands': [
-                    'python -m pytest tests/ -v'
-                ],
-                'package_formats': ['wheel', 'dmg']
+                "test_commands": ["python -m pytest tests/ -v"],
+                "package_formats": ["wheel", "dmg"],
             },
-            'linux': {
-                'build_commands': [
-                    'python setup.py build_ext --inplace',
-                    'python setup.py bdist_wheel'
+            "linux": {
+                "build_commands": [
+                    "python setup.py build_ext --inplace",
+                    "python setup.py bdist_wheel",
                 ],
-                'test_commands': [
-                    'python -m pytest tests/ -v'
-                ],
-                'package_formats': ['wheel', 'deb', 'rpm']
+                "test_commands": ["python -m pytest tests/ -v"],
+                "package_formats": ["wheel", "deb", "rpm"],
             },
-            'android': {
-                'build_commands': [
-                    'npm install',
-                    'cd android && ./gradlew assembleRelease'
+            "android": {
+                "build_commands": [
+                    "npm install",
+                    "cd android && ./gradlew assembleRelease",
                 ],
-                'test_commands': [
-                    'npm test',
-                    './gradlew test'
-                ],
-                'package_formats': ['apk', 'aab']
+                "test_commands": ["npm test", "./gradlew test"],
+                "package_formats": ["apk", "aab"],
             },
-            'ios': {
-                'build_commands': [
-                    'npm install',
-                    'cd ios && pod install',
-                    'xcodebuild -workspace ios/BLNCS.xcworkspace -scheme BLNCS -configuration Release -sdk iphoneos -archivePath build/BLNCS.xcarchive archive'
+            "ios": {
+                "build_commands": [
+                    "npm install",
+                    "cd ios && pod install",
+                    "xcodebuild -workspace ios/BLNCS.xcworkspace -scheme BLNCS -configuration Release -sdk iphoneos -archivePath build/BLNCS.xcarchive archive",
                 ],
-                'test_commands': [
+                "test_commands": [
                     'xcodebuild test -workspace ios/BLNCS.xcworkspace -scheme BLNCS -destination "platform=iOS Simulator,name=iPhone 12"'
                 ],
-                'package_formats': ['ipa']
-            }
+                "package_formats": ["ipa"],
+            },
         }
 
-    def build_for_platform(self, platform: str, source_dir: str, output_dir: str) -> bool:
+    def build_for_platform(
+        self, platform: str, source_dir: str, output_dir: str
+    ) -> bool:
         """
         Build application for specific platform
 
@@ -957,14 +942,10 @@ class CrossPlatformBuilder:
             output_path.mkdir(parents=True, exist_ok=True)
 
             # Execute build commands
-            for command in config['build_commands']:
+            for command in config["build_commands"]:
                 self.logger.info(f"Executing: {command}")
                 result = subprocess.run(
-                    command,
-                    shell=True,
-                    cwd=source_dir,
-                    capture_output=True,
-                    text=True
+                    command, shell=True, cwd=source_dir, capture_output=True, text=True
                 )
 
                 if result.returncode != 0:
@@ -973,14 +954,10 @@ class CrossPlatformBuilder:
                     return False
 
             # Run tests
-            for command in config['test_commands']:
+            for command in config["test_commands"]:
                 self.logger.info(f"Testing: {command}")
                 result = subprocess.run(
-                    command,
-                    shell=True,
-                    cwd=source_dir,
-                    capture_output=True,
-                    text=True
+                    command, shell=True, cwd=source_dir, capture_output=True, text=True
                 )
 
                 if result.returncode != 0:
@@ -997,7 +974,9 @@ class CrossPlatformBuilder:
             self.logger.error(f"Build failed for {platform}: {e}")
             return False
 
-    def _package_application(self, platform: str, source_dir: str, output_path: Path, config: Dict[str, Any]):
+    def _package_application(
+        self, platform: str, source_dir: str, output_path: Path, config: Dict[str, Any]
+    ):
         """Package application for distribution"""
         # Implementation would depend on specific packaging tools
         # For now, just copy built artifacts
@@ -1017,7 +996,9 @@ class MobileUXOptimizer:
         self.config = config or {}
         self.logger = logging.getLogger(__name__)
 
-    def optimize_for_mobile(self, ui_components: List[CrossPlatformUI]) -> List[CrossPlatformUI]:
+    def optimize_for_mobile(
+        self, ui_components: List[CrossPlatformUI]
+    ) -> List[CrossPlatformUI]:
         """
         Optimize UI components for mobile platforms
 
@@ -1030,7 +1011,10 @@ class MobileUXOptimizer:
         optimized = []
 
         for component in ui_components:
-            if Platform.IOS in component.platforms or Platform.ANDROID in component.platforms:
+            if (
+                Platform.IOS in component.platforms
+                or Platform.ANDROID in component.platforms
+            ):
                 # Apply mobile optimizations
                 optimized_component = self._apply_mobile_optimizations(component)
                 optimized.append(optimized_component)
@@ -1039,62 +1023,65 @@ class MobileUXOptimizer:
 
         return optimized
 
-    def _apply_mobile_optimizations(self, component: CrossPlatformUI) -> CrossPlatformUI:
+    def _apply_mobile_optimizations(
+        self, component: CrossPlatformUI
+    ) -> CrossPlatformUI:
         """Apply mobile-specific optimizations"""
         # Increase touch target sizes
-        if 'button' in component.component_type.lower():
-            component.properties['minHeight'] = max(component.properties.get('minHeight', 44), 44)
-            component.properties['minWidth'] = max(component.properties.get('minWidth', 44), 44)
+        if "button" in component.component_type.lower():
+            component.properties["minHeight"] = max(
+                component.properties.get("minHeight", 44), 44
+            )
+            component.properties["minWidth"] = max(
+                component.properties.get("minWidth", 44), 44
+            )
 
         # Add mobile-specific responsive rules
-        component.responsive_rules.update({
-            'mobile': {
-                'fontSize': '16px',  # Prevent zoom on iOS
-                'padding': '12px'
-            },
-            'tablet': {
-                'fontSize': '18px',
-                'padding': '16px'
+        component.responsive_rules.update(
+            {
+                "mobile": {
+                    "fontSize": "16px",  # Prevent zoom on iOS
+                    "padding": "12px",
+                },
+                "tablet": {"fontSize": "18px", "padding": "16px"},
             }
-        })
+        )
 
         # Add mobile accessibility features
-        component.accessibility_features.extend([
-            'screen_reader_support',
-            'high_contrast_support',
-            'gesture_navigation'
-        ])
+        component.accessibility_features.extend(
+            ["screen_reader_support", "high_contrast_support", "gesture_navigation"]
+        )
 
         return component
 
     def generate_mobile_guidelines(self) -> Dict[str, Any]:
         """Generate mobile UI/UX guidelines"""
         return {
-            'touch_targets': {
-                'minimum_size': '44x44px',
-                'recommended_size': '48x48px',
-                'spacing': '8px minimum'
+            "touch_targets": {
+                "minimum_size": "44x44px",
+                "recommended_size": "48x48px",
+                "spacing": "8px minimum",
             },
-            'typography': {
-                'body_text': '16px minimum',
-                'headings': '18-24px',
-                'prevent_zoom': True
+            "typography": {
+                "body_text": "16px minimum",
+                "headings": "18-24px",
+                "prevent_zoom": True,
             },
-            'navigation': {
-                'bottom_tabs': '49px height',
-                'swipe_gestures': True,
-                'back_button': 'always visible'
+            "navigation": {
+                "bottom_tabs": "49px height",
+                "swipe_gestures": True,
+                "back_button": "always visible",
             },
-            'feedback': {
-                'haptic_feedback': True,
-                'loading_states': True,
-                'error_messages': 'user-friendly'
+            "feedback": {
+                "haptic_feedback": True,
+                "loading_states": True,
+                "error_messages": "user-friendly",
             },
-            'performance': {
-                'initial_load': '<3 seconds',
-                'scroll_fps': '60fps',
-                'memory_usage': '<100MB'
-            }
+            "performance": {
+                "initial_load": "<3 seconds",
+                "scroll_fps": "60fps",
+                "memory_usage": "<100MB",
+            },
         }
 
 
@@ -1104,12 +1091,14 @@ _cross_platform_sdk = None
 _cross_platform_builder = None
 _mobile_ux_optimizer = None
 
+
 def get_platform_detector() -> PlatformDetector:
     """Get platform detector instance"""
     global _platform_detector
     if _platform_detector is None:
         _platform_detector = PlatformDetector()
     return _platform_detector
+
 
 def get_cross_platform_sdk() -> CrossPlatformSDK:
     """Get cross-platform SDK instance"""
@@ -1118,12 +1107,14 @@ def get_cross_platform_sdk() -> CrossPlatformSDK:
         _cross_platform_sdk = CrossPlatformSDK()
     return _cross_platform_sdk
 
+
 def get_cross_platform_builder() -> CrossPlatformBuilder:
     """Get cross-platform builder instance"""
     global _cross_platform_builder
     if _cross_platform_builder is None:
         _cross_platform_builder = CrossPlatformBuilder()
     return _cross_platform_builder
+
 
 def get_mobile_ux_optimizer() -> MobileUXOptimizer:
     """Get mobile UX optimizer instance"""

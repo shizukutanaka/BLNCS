@@ -4,49 +4,59 @@ Auto-scaling, load balancing, and deployment orchestration
 """
 
 import asyncio
+import json
+import multiprocessing
 import os
+import subprocess
 import sys
+import threading
 import time
-import psutil
-import docker
-import kubernetes
-from typing import Dict, Any, Optional, List, Tuple, Callable
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, auto
-from collections import deque, defaultdict
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import psutil
 import yaml
-import json
-import subprocess
-import threading
-import multiprocessing
+
+import docker
+import kubernetes
+
 
 class DeploymentEnvironment(Enum):
     """Deployment environments"""
+
     DEVELOPMENT = "development"
     STAGING = "staging"
     PRODUCTION = "production"
     DISASTER_RECOVERY = "disaster_recovery"
 
+
 class ScalingStrategy(Enum):
     """Auto-scaling strategies"""
+
     CPU_BASED = "cpu_based"
     MEMORY_BASED = "memory_based"
     REQUEST_BASED = "request_based"
     CUSTOM_METRIC = "custom_metric"
     PREDICTIVE = "predictive"
 
+
 class LoadBalancingAlgorithm(Enum):
     """Load balancing algorithms"""
+
     ROUND_ROBIN = "round_robin"
     LEAST_CONNECTIONS = "least_connections"
     WEIGHTED = "weighted"
     IP_HASH = "ip_hash"
     RANDOM = "random"
 
+
 @dataclass
 class ServiceInstance:
     """Service instance information"""
+
     instance_id: str
     service_name: str
     host: str
@@ -61,9 +71,11 @@ class ServiceInstance:
     weight: float = 1.0
     last_health_check: Optional[datetime] = None
 
+
 @dataclass
 class DeploymentConfig:
     """Deployment configuration"""
+
     environment: DeploymentEnvironment
     min_instances: int = 1
     max_instances: int = 10
@@ -77,6 +89,7 @@ class DeploymentConfig:
     database_connection_pool_size: int = 20
     cache_size_mb: int = 500
     log_level: str = "INFO"
+
 
 class AutoScaler:
     """Intelligent auto-scaling manager"""
@@ -98,9 +111,9 @@ class AutoScaler:
             self.metrics_buffer[key].append(value)
 
         # Calculate average metrics
-        avg_cpu = self._calculate_average('cpu')
-        avg_memory = self._calculate_average('memory')
-        avg_requests = self._calculate_average('requests_per_second')
+        avg_cpu = self._calculate_average("cpu")
+        avg_memory = self._calculate_average("memory")
+        avg_requests = self._calculate_average("requests_per_second")
 
         # Determine scaling need
         scale_factor = 1.0
@@ -125,19 +138,23 @@ class AutoScaler:
         desired = int(current_count * scale_factor)
 
         # Apply constraints
-        desired = max(self.config.min_instances, min(self.config.max_instances, desired))
+        desired = max(
+            self.config.min_instances, min(self.config.max_instances, desired)
+        )
 
         # Record decision
-        self.scaling_decisions.append({
-            'timestamp': datetime.now(),
-            'current': current_count,
-            'desired': desired,
-            'metrics': {
-                'cpu': avg_cpu,
-                'memory': avg_memory,
-                'requests': avg_requests
+        self.scaling_decisions.append(
+            {
+                "timestamp": datetime.now(),
+                "current": current_count,
+                "desired": desired,
+                "metrics": {
+                    "cpu": avg_cpu,
+                    "memory": avg_memory,
+                    "requests": avg_requests,
+                },
             }
-        })
+        )
 
         return desired
 
@@ -157,11 +174,13 @@ class AutoScaler:
                 new_instances.append(instance)
                 self.instances[instance.instance_id] = instance
 
-        self.scaling_history.append({
-            'timestamp': datetime.now(),
-            'action': 'scale_up',
-            'count': len(new_instances)
-        })
+        self.scaling_history.append(
+            {
+                "timestamp": datetime.now(),
+                "action": "scale_up",
+                "count": len(new_instances),
+            }
+        )
 
         return new_instances
 
@@ -172,7 +191,7 @@ class AutoScaler:
         # Select instances to terminate (prefer unhealthy or low-traffic)
         candidates = sorted(
             self.instances.values(),
-            key=lambda x: (x.status != 'healthy', x.request_count)
+            key=lambda x: (x.status != "healthy", x.request_count),
         )
 
         for instance in candidates[:count]:
@@ -183,11 +202,13 @@ class AutoScaler:
             if len(terminated) >= count:
                 break
 
-        self.scaling_history.append({
-            'timestamp': datetime.now(),
-            'action': 'scale_down',
-            'count': len(terminated)
-        })
+        self.scaling_history.append(
+            {
+                "timestamp": datetime.now(),
+                "action": "scale_down",
+                "count": len(terminated),
+            }
+        )
 
         return terminated
 
@@ -202,7 +223,7 @@ class AutoScaler:
             host=f"10.0.0.{len(self.instances) + 1}",
             port=8000 + len(self.instances),
             status="starting",
-            health_check_url="/health"
+            health_check_url="/health",
         )
 
         # Simulate instance startup
@@ -221,35 +242,47 @@ class AutoScaler:
 
         return True
 
+
 class LoadBalancer:
     """Intelligent load balancer"""
 
-    def __init__(self, algorithm: LoadBalancingAlgorithm = LoadBalancingAlgorithm.LEAST_CONNECTIONS):
+    def __init__(
+        self,
+        algorithm: LoadBalancingAlgorithm = LoadBalancingAlgorithm.LEAST_CONNECTIONS,
+    ):
         self.algorithm = algorithm
         self.instances: List[ServiceInstance] = []
         self.current_index = 0
         self.connection_count = defaultdict(int)
         self.lock = threading.Lock()
 
-    def select_instance(self, client_ip: Optional[str] = None) -> Optional[ServiceInstance]:
+    def select_instance(
+        self, client_ip: Optional[str] = None
+    ) -> Optional[ServiceInstance]:
         """Select instance based on load balancing algorithm"""
         with self.lock:
-            healthy_instances = [i for i in self.instances if i.status == 'healthy']
+            healthy_instances = [i for i in self.instances if i.status == "healthy"]
 
             if not healthy_instances:
                 return None
 
             if self.algorithm == LoadBalancingAlgorithm.ROUND_ROBIN:
-                instance = healthy_instances[self.current_index % len(healthy_instances)]
+                instance = healthy_instances[
+                    self.current_index % len(healthy_instances)
+                ]
                 self.current_index += 1
                 return instance
 
             elif self.algorithm == LoadBalancingAlgorithm.LEAST_CONNECTIONS:
-                return min(healthy_instances, key=lambda x: self.connection_count[x.instance_id])
+                return min(
+                    healthy_instances,
+                    key=lambda x: self.connection_count[x.instance_id],
+                )
 
             elif self.algorithm == LoadBalancingAlgorithm.WEIGHTED:
                 # Select based on weight
                 import random
+
                 weights = [i.weight for i in healthy_instances]
                 return random.choices(healthy_instances, weights=weights, k=1)[0]
 
@@ -261,6 +294,7 @@ class LoadBalancer:
 
             elif self.algorithm == LoadBalancingAlgorithm.RANDOM:
                 import random
+
                 return random.choice(healthy_instances)
 
     def update_instances(self, instances: List[ServiceInstance]):
@@ -274,7 +308,10 @@ class LoadBalancer:
 
     def record_request_end(self, instance_id: str):
         """Record request end"""
-        self.connection_count[instance_id] = max(0, self.connection_count[instance_id] - 1)
+        self.connection_count[instance_id] = max(
+            0, self.connection_count[instance_id] - 1
+        )
+
 
 class HealthChecker:
     """Service health monitoring"""
@@ -289,8 +326,11 @@ class HealthChecker:
         try:
             # Simulate health check (would make HTTP request in production)
             import aiohttp
+
             async with aiohttp.ClientSession() as session:
-                url = f"http://{instance.host}:{instance.port}{instance.health_check_url}"
+                url = (
+                    f"http://{instance.host}:{instance.port}{instance.health_check_url}"
+                )
                 async with session.get(url, timeout=5) as response:
                     healthy = response.status == 200
 
@@ -300,12 +340,14 @@ class HealthChecker:
             instance.last_health_check = datetime.now()
 
             # Record history
-            self.check_history[instance.instance_id].append({
-                'timestamp': datetime.now(),
-                'healthy': healthy,
-                'cpu': instance.cpu_usage,
-                'memory': instance.memory_usage
-            })
+            self.check_history[instance.instance_id].append(
+                {
+                    "timestamp": datetime.now(),
+                    "healthy": healthy,
+                    "cpu": instance.cpu_usage,
+                    "memory": instance.memory_usage,
+                }
+            )
 
             return healthy
 
@@ -321,6 +363,7 @@ class HealthChecker:
 
             await asyncio.sleep(self.check_interval)
 
+
 class ConfigurationManager:
     """Dynamic configuration management"""
 
@@ -332,15 +375,15 @@ class ConfigurationManager:
 
     def load_configuration(self, config_file: str) -> Dict[str, Any]:
         """Load configuration from file"""
-        with open(config_file, 'r') as f:
-            if config_file.endswith('.yaml'):
+        with open(config_file, "r") as f:
+            if config_file.endswith(".yaml"):
                 config = yaml.safe_load(f)
             else:
                 config = json.load(f)
 
         # Apply environment-specific overrides
-        env_config = config.get('environments', {}).get(self.environment.value, {})
-        base_config = config.get('base', {})
+        env_config = config.get("environments", {}).get(self.environment.value, {})
+        base_config = config.get("base", {})
 
         # Merge configurations
         final_config = {**base_config, **env_config}
@@ -363,69 +406,63 @@ class ConfigurationManager:
             self.config_cache[key] = value
             self.config_version += 1
 
-    def generate_deployment_manifest(self, service_name: str, replicas: int) -> Dict[str, Any]:
+    def generate_deployment_manifest(
+        self, service_name: str, replicas: int
+    ) -> Dict[str, Any]:
         """Generate Kubernetes deployment manifest"""
         return {
-            'apiVersion': 'apps/v1',
-            'kind': 'Deployment',
-            'metadata': {
-                'name': service_name,
-                'labels': {'app': service_name}
-            },
-            'spec': {
-                'replicas': replicas,
-                'selector': {
-                    'matchLabels': {'app': service_name}
-                },
-                'template': {
-                    'metadata': {
-                        'labels': {'app': service_name}
-                    },
-                    'spec': {
-                        'containers': [{
-                            'name': service_name,
-                            'image': f'{service_name}:latest',
-                            'ports': [{'containerPort': 8000}],
-                            'env': [
-                                {'name': 'ENVIRONMENT', 'value': self.environment.value},
-                                {'name': 'CONFIG_VERSION', 'value': str(self.config_version)}
-                            ],
-                            'resources': {
-                                'requests': {
-                                    'memory': '256Mi',
-                                    'cpu': '250m'
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": service_name, "labels": {"app": service_name}},
+            "spec": {
+                "replicas": replicas,
+                "selector": {"matchLabels": {"app": service_name}},
+                "template": {
+                    "metadata": {"labels": {"app": service_name}},
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": service_name,
+                                "image": f"{service_name}:latest",
+                                "ports": [{"containerPort": 8000}],
+                                "env": [
+                                    {
+                                        "name": "ENVIRONMENT",
+                                        "value": self.environment.value,
+                                    },
+                                    {
+                                        "name": "CONFIG_VERSION",
+                                        "value": str(self.config_version),
+                                    },
+                                ],
+                                "resources": {
+                                    "requests": {"memory": "256Mi", "cpu": "250m"},
+                                    "limits": {"memory": "512Mi", "cpu": "500m"},
                                 },
-                                'limits': {
-                                    'memory': '512Mi',
-                                    'cpu': '500m'
-                                }
-                            },
-                            'livenessProbe': {
-                                'httpGet': {
-                                    'path': '/health',
-                                    'port': 8000
+                                "livenessProbe": {
+                                    "httpGet": {"path": "/health", "port": 8000},
+                                    "initialDelaySeconds": 30,
+                                    "periodSeconds": 10,
                                 },
-                                'initialDelaySeconds': 30,
-                                'periodSeconds': 10
-                            },
-                            'readinessProbe': {
-                                'httpGet': {
-                                    'path': '/ready',
-                                    'port': 8000
+                                "readinessProbe": {
+                                    "httpGet": {"path": "/ready", "port": 8000},
+                                    "initialDelaySeconds": 5,
+                                    "periodSeconds": 5,
                                 },
-                                'initialDelaySeconds': 5,
-                                'periodSeconds': 5
                             }
-                        }]
-                    }
-                }
-            }
+                        ]
+                    },
+                },
+            },
         }
+
 
 class DeploymentOrchestrator:
     """Main deployment orchestration system"""
 
-    def __init__(self, environment: DeploymentEnvironment, config_file: Optional[str] = None):
+    def __init__(
+        self, environment: DeploymentEnvironment, config_file: Optional[str] = None
+    ):
         self.environment = environment
         self.config_manager = ConfigurationManager(environment)
 
@@ -434,10 +471,7 @@ class DeploymentOrchestrator:
         else:
             config_data = {}
 
-        self.config = DeploymentConfig(
-            environment=environment,
-            **config_data
-        )
+        self.config = DeploymentConfig(environment=environment, **config_data)
 
         self.auto_scaler = AutoScaler(self.config)
         self.load_balancer = LoadBalancer()
@@ -478,8 +512,7 @@ class DeploymentOrchestrator:
 
             # Generate deployment configuration
             manifest = self.config_manager.generate_deployment_manifest(
-                service_name,
-                self.config.min_instances
+                service_name, self.config.min_instances
             )
 
             # Deploy using appropriate orchestrator
@@ -492,12 +525,14 @@ class DeploymentOrchestrator:
 
             if success:
                 self.deployment_status = "deployed"
-                self.deployment_history.append({
-                    'timestamp': datetime.now(),
-                    'service': service_name,
-                    'version': version,
-                    'status': 'success'
-                })
+                self.deployment_history.append(
+                    {
+                        "timestamp": datetime.now(),
+                        "service": service_name,
+                        "version": version,
+                        "status": "success",
+                    }
+                )
             else:
                 self.deployment_status = "failed"
 
@@ -512,10 +547,7 @@ class DeploymentOrchestrator:
         """Deploy using Kubernetes"""
         try:
             apps_v1 = kubernetes.client.AppsV1Api()
-            apps_v1.create_namespaced_deployment(
-                namespace="default",
-                body=manifest
-            )
+            apps_v1.create_namespaced_deployment(namespace="default", body=manifest)
             return True
         except Exception as e:
             print(f"Kubernetes deployment error: {e}")
@@ -532,14 +564,12 @@ class DeploymentOrchestrator:
             container = self.docker_client.containers.run(
                 image,
                 detach=True,
-                ports={'8000/tcp': 8000},
-                environment={
-                    'ENVIRONMENT': self.environment.value
-                },
-                restart_policy={'Name': 'always'}
+                ports={"8000/tcp": 8000},
+                environment={"ENVIRONMENT": self.environment.value},
+                restart_policy={"Name": "always"},
             )
 
-            return container.status == 'running'
+            return container.status == "running"
 
         except Exception as e:
             print(f"Docker deployment error: {e}")
@@ -551,7 +581,7 @@ class DeploymentOrchestrator:
             # Start service process
             process = subprocess.Popen(
                 [sys.executable, f"{service_name}.py"],
-                env={**os.environ, 'ENVIRONMENT': self.environment.value}
+                env={**os.environ, "ENVIRONMENT": self.environment.value},
             )
 
             # Wait for startup
@@ -569,7 +599,7 @@ class DeploymentOrchestrator:
         batch_size = self.config.rolling_update_batch_size
 
         for i in range(0, len(instances), batch_size):
-            batch = instances[i:i+batch_size]
+            batch = instances[i : i + batch_size]
 
             # Update batch
             for instance in batch:
@@ -615,7 +645,9 @@ class DeploymentOrchestrator:
                     await self.auto_scaler.scale_down(current - desired)
 
                 # Update load balancer
-                self.load_balancer.update_instances(list(self.auto_scaler.instances.values()))
+                self.load_balancer.update_instances(
+                    list(self.auto_scaler.instances.values())
+                )
 
                 await asyncio.sleep(30)
 
@@ -629,36 +661,35 @@ class DeploymentOrchestrator:
         memory_percent = psutil.virtual_memory().percent
 
         # Calculate requests per second (would get from actual metrics)
-        requests_per_second = sum(
-            i.request_count for i in self.auto_scaler.instances.values()
-        ) / 60.0  # Assuming counts are per minute
+        requests_per_second = (
+            sum(i.request_count for i in self.auto_scaler.instances.values()) / 60.0
+        )  # Assuming counts are per minute
 
         return {
-            'cpu': cpu_percent,
-            'memory': memory_percent,
-            'requests_per_second': requests_per_second
+            "cpu": cpu_percent,
+            "memory": memory_percent,
+            "requests_per_second": requests_per_second,
         }
 
     def get_deployment_status(self) -> Dict[str, Any]:
         """Get comprehensive deployment status"""
         return {
-            'environment': self.environment.value,
-            'status': self.deployment_status,
-            'instances': len(self.auto_scaler.instances),
-            'healthy_instances': sum(
-                1 for i in self.auto_scaler.instances.values()
-                if i.status == 'healthy'
+            "environment": self.environment.value,
+            "status": self.deployment_status,
+            "instances": len(self.auto_scaler.instances),
+            "healthy_instances": sum(
+                1 for i in self.auto_scaler.instances.values() if i.status == "healthy"
             ),
-            'load_balancer': {
-                'algorithm': self.load_balancer.algorithm.value,
-                'total_connections': sum(self.load_balancer.connection_count.values())
+            "load_balancer": {
+                "algorithm": self.load_balancer.algorithm.value,
+                "total_connections": sum(self.load_balancer.connection_count.values()),
             },
-            'auto_scaling': {
-                'min_instances': self.config.min_instances,
-                'max_instances': self.config.max_instances,
-                'recent_decisions': list(self.auto_scaler.scaling_decisions)[-5:]
+            "auto_scaling": {
+                "min_instances": self.config.min_instances,
+                "max_instances": self.config.max_instances,
+                "recent_decisions": list(self.auto_scaler.scaling_decisions)[-5:],
             },
-            'deployment_history': list(self.deployment_history)[-10:]
+            "deployment_history": list(self.deployment_history)[-10:],
         }
 
     async def graceful_shutdown(self):
@@ -675,10 +706,14 @@ class DeploymentOrchestrator:
 
         self.deployment_status = "shutdown"
 
+
 # Singleton instance
 _orchestrator = None
 
-def get_orchestrator(environment: DeploymentEnvironment = DeploymentEnvironment.PRODUCTION) -> DeploymentOrchestrator:
+
+def get_orchestrator(
+    environment: DeploymentEnvironment = DeploymentEnvironment.PRODUCTION,
+) -> DeploymentOrchestrator:
     """Get or create singleton orchestrator"""
     global _orchestrator
     if _orchestrator is None:

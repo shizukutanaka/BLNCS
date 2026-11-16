@@ -6,15 +6,15 @@ Lightweight database schema migration and version management.
 """
 
 import asyncio
-import json
 import hashlib
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable
+import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-import logging
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
-from ..core.exceptions import ValidationError, DatabaseError
+from ..core.exceptions import DatabaseError, ValidationError
 from ..core.unified_database import UnifiedDatabase
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Migration:
     """Database migration definition"""
+
     version: str
     name: str
     up_sql: str
@@ -36,6 +37,7 @@ class Migration:
 @dataclass
 class MigrationResult:
     """Migration operation result"""
+
     success: bool
     migration: Optional[Migration] = None
     error_message: Optional[str] = None
@@ -46,7 +48,11 @@ class MigrationResult:
 class MigrationManager:
     """Lightweight database migration manager"""
 
-    def __init__(self, migrations_dir: str = "migrations", db_connection_string: Optional[str] = None):
+    def __init__(
+        self,
+        migrations_dir: str = "migrations",
+        db_connection_string: Optional[str] = None,
+    ):
         self.migrations_dir = Path(migrations_dir)
         self.migrations_dir.mkdir(exist_ok=True)
         self.db_connection_string = db_connection_string
@@ -83,7 +89,9 @@ class MigrationManager:
             logger.error(f"Failed to create migrations table: {e}")
             raise DatabaseError(f"Migration table creation failed: {e}")
 
-    def create_migration(self, name: str, up_sql: str, down_sql: Optional[str] = None) -> Migration:
+    def create_migration(
+        self, name: str, up_sql: str, down_sql: Optional[str] = None
+    ) -> Migration:
         """Create a new migration file"""
         # Generate version (timestamp + hash)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
@@ -95,21 +103,21 @@ class MigrationManager:
             name=name,
             up_sql=up_sql,
             down_sql=down_sql,
-            checksum=self._calculate_checksum(up_sql, down_sql)
+            checksum=self._calculate_checksum(up_sql, down_sql),
         )
 
         # Write migration file
         migration_file = self.migrations_dir / f"{version}_{name}.json"
         migration_data = {
-            'version': migration.version,
-            'name': migration.name,
-            'up_sql': migration.up_sql,
-            'down_sql': migration.down_sql,
-            'dependencies': migration.dependencies,
-            'checksum': migration.checksum
+            "version": migration.version,
+            "name": migration.name,
+            "up_sql": migration.up_sql,
+            "down_sql": migration.down_sql,
+            "dependencies": migration.dependencies,
+            "checksum": migration.checksum,
         }
 
-        with open(migration_file, 'w') as f:
+        with open(migration_file, "w") as f:
             json.dump(migration_data, f, indent=2)
 
         logger.info(f"Created migration: {migration_file}")
@@ -128,16 +136,16 @@ class MigrationManager:
 
         for migration_file in self.migrations_dir.glob("*.json"):
             try:
-                with open(migration_file, 'r') as f:
+                with open(migration_file, "r") as f:
                     data = json.load(f)
 
                 migration = Migration(
-                    version=data['version'],
-                    name=data['name'],
-                    up_sql=data['up_sql'],
-                    down_sql=data.get('down_sql'),
-                    dependencies=data.get('dependencies', []),
-                    checksum=data.get('checksum')
+                    version=data["version"],
+                    name=data["name"],
+                    up_sql=data["up_sql"],
+                    down_sql=data.get("down_sql"),
+                    dependencies=data.get("dependencies", []),
+                    checksum=data.get("checksum"),
                 )
                 migrations.append(migration)
 
@@ -156,12 +164,14 @@ class MigrationManager:
             result = await self.db.fetch_all(
                 f"SELECT version FROM {self.migrations_table} ORDER BY version"
             )
-            return [row['version'] for row in result]
+            return [row["version"] for row in result]
         except Exception as e:
             logger.error(f"Failed to get applied migrations: {e}")
             return []
 
-    async def migrate(self, target_version: Optional[str] = None) -> List[MigrationResult]:
+    async def migrate(
+        self, target_version: Optional[str] = None
+    ) -> List[MigrationResult]:
         """Run migrations up to target version"""
         await self.initialize()
 
@@ -187,7 +197,9 @@ class MigrationManager:
 
         return results
 
-    async def rollback(self, target_version: Optional[str] = None) -> List[MigrationResult]:
+    async def rollback(
+        self, target_version: Optional[str] = None
+    ) -> List[MigrationResult]:
         """Rollback migrations to target version"""
         await self.initialize()
 
@@ -216,15 +228,18 @@ class MigrationManager:
     async def _apply_migration(self, migration: Migration) -> MigrationResult:
         """Apply a single migration"""
         import time
+
         start_time = time.time()
 
         try:
             # Verify checksum
-            if migration.checksum != self._calculate_checksum(migration.up_sql, migration.down_sql):
+            if migration.checksum != self._calculate_checksum(
+                migration.up_sql, migration.down_sql
+            ):
                 return MigrationResult(
                     success=False,
                     migration=migration,
-                    error_message="Checksum verification failed"
+                    error_message="Checksum verification failed",
                 )
 
             # Execute migration
@@ -237,9 +252,7 @@ class MigrationManager:
             logger.info(f"Applied migration: {migration.name} ({migration.version})")
 
             return MigrationResult(
-                success=True,
-                migration=migration,
-                execution_time=execution_time
+                success=True, migration=migration, execution_time=execution_time
             )
 
         except Exception as e:
@@ -250,12 +263,13 @@ class MigrationManager:
                 success=False,
                 migration=migration,
                 error_message=str(e),
-                execution_time=execution_time
+                execution_time=execution_time,
             )
 
     async def _rollback_migration(self, migration: Migration) -> MigrationResult:
         """Rollback a single migration"""
         import time
+
         start_time = time.time()
 
         try:
@@ -263,7 +277,7 @@ class MigrationManager:
                 return MigrationResult(
                     success=False,
                     migration=migration,
-                    error_message="No rollback SQL provided"
+                    error_message="No rollback SQL provided",
                 )
 
             # Execute rollback
@@ -273,13 +287,15 @@ class MigrationManager:
             await self._remove_migration_record(migration)
 
             execution_time = time.time() - start_time
-            logger.info(f"Rolled back migration: {migration.name} ({migration.version})")
+            logger.info(
+                f"Rolled back migration: {migration.name} ({migration.version})"
+            )
 
             return MigrationResult(
                 success=True,
                 migration=migration,
                 execution_time=execution_time,
-                rollback_performed=True
+                rollback_performed=True,
             )
 
         except Exception as e:
@@ -291,7 +307,7 @@ class MigrationManager:
                 migration=migration,
                 error_message=str(e),
                 execution_time=execution_time,
-                rollback_performed=True
+                rollback_performed=True,
             )
 
     async def _record_migration(self, migration: Migration):
@@ -302,14 +318,17 @@ class MigrationManager:
         VALUES (?, ?, ?, ?, ?, ?)
         """
 
-        await self.db.execute(insert_sql, (
-            migration.version,
-            migration.name,
-            migration.checksum,
-            datetime.now(timezone.utc),
-            "system",  # Could be enhanced to track user
-            json.dumps(migration.dependencies)
-        ))
+        await self.db.execute(
+            insert_sql,
+            (
+                migration.version,
+                migration.name,
+                migration.checksum,
+                datetime.now(timezone.utc),
+                "system",  # Could be enhanced to track user
+                json.dumps(migration.dependencies),
+            ),
+        )
 
     async def _remove_migration_record(self, migration: Migration):
         """Remove migration record"""
@@ -321,28 +340,28 @@ class MigrationManager:
         migrations = self.load_migrations()
 
         status = {
-            'total_migrations': len(migrations),
-            'applied_count': 0,
-            'pending_count': 0,
-            'migrations': []
+            "total_migrations": len(migrations),
+            "applied_count": 0,
+            "pending_count": 0,
+            "migrations": [],
         }
 
         # This would need async context in real usage
         # For now, return basic info
         for migration in migrations:
             migration_info = {
-                'version': migration.version,
-                'name': migration.name,
-                'applied': False,  # Would check database
-                'checksum': migration.checksum
+                "version": migration.version,
+                "name": migration.name,
+                "applied": False,  # Would check database
+                "checksum": migration.checksum,
             }
-            status['migrations'].append(migration_info)
+            status["migrations"].append(migration_info)
 
         return status
 
     def generate_migration_template(self, name: str) -> str:
         """Generate a migration template"""
-        return f'''-- Migration: {name}
+        return f"""-- Migration: {name}
 -- Generated: {datetime.now(timezone.utc).isoformat()}
 
 -- Up migration (apply changes)
@@ -350,12 +369,12 @@ class MigrationManager:
 
 -- Down migration (rollback changes)
 -- Write your DOWN migration SQL here
-'''
+"""
 
 
 # Migration templates for common operations
 MIGRATION_TEMPLATES = {
-    'create_table': '''-- Create new table: {table_name}
+    "create_table": """-- Create new table: {table_name}
 CREATE TABLE {table_name} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -364,29 +383,26 @@ CREATE TABLE {table_name} (
 
 -- Down migration
 DROP TABLE IF EXISTS {table_name};
-''',
-
-    'add_column': '''-- Add column: {column_name} to table: {table_name}
+""",
+    "add_column": """-- Add column: {column_name} to table: {table_name}
 ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type};
 
 -- Down migration
 ALTER TABLE {table_name} DROP COLUMN IF EXISTS {column_name};
-''',
-
-    'create_index': '''-- Create index: {index_name} on table: {table_name}
+""",
+    "create_index": """-- Create index: {index_name} on table: {table_name}
 CREATE INDEX {index_name} ON {table_name} ({columns});
 
 -- Down migration
 DROP INDEX IF EXISTS {index_name};
-''',
-
-    'add_foreign_key': '''-- Add foreign key: {fk_name}
+""",
+    "add_foreign_key": """-- Add foreign key: {fk_name}
 ALTER TABLE {table_name} ADD CONSTRAINT {fk_name}
 FOREIGN KEY ({column}) REFERENCES {ref_table} ({ref_column});
 
 -- Down migration
 ALTER TABLE {table_name} DROP CONSTRAINT IF EXISTS {fk_name};
-'''
+""",
 }
 
 
@@ -413,8 +429,8 @@ class MigrationCLI:
         print(f"Applied: {status['applied_count']}")
         print(f"Pending: {status['pending_count']}")
 
-        for migration in status['migrations']:
-            status_icon = "✓" if migration['applied'] else "○"
+        for migration in status["migrations"]:
+            status_icon = "✓" if migration["applied"] else "○"
             print(f"  {status_icon} {migration['version']}: {migration['name']}")
 
     async def migrate_cmd(self, target_version: Optional[str] = None):
@@ -438,12 +454,15 @@ class MigrationCLI:
             if result.success:
                 print(f"✓ Rolled back: {result.migration.name}")
             else:
-                print(f"✗ Rollback failed: {result.migration.name} - {result.error_message}")
+                print(
+                    f"✗ Rollback failed: {result.migration.name} - {result.error_message}"
+                )
                 break
 
 
 # Global migration manager
 _migration_manager = None
+
 
 def get_migration_manager() -> MigrationManager:
     """Get global migration manager instance"""

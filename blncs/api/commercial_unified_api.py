@@ -12,27 +12,32 @@ Enterprise-grade REST API with advanced features
    and an explicit confirmation step before paying.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Security, BackgroundTasks
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import asyncio
+import json
+import logging
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Union
+
+import uvicorn
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
-import asyncio
-import uvicorn
-from typing import Any, Dict, List, Optional, Union
-from datetime import datetime, timedelta
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, validator
-import logging
-import time
-import json
-from contextlib import asynccontextmanager
+
+from blncs.core.commercial_cache import cache_manager
+from blncs.core.commercial_logging import LogCategory, LogLevel, enterprise_logger
+from blncs.core.commercial_monitoring import monitoring_service
+from blncs.core.commercial_performance_engine import (
+    optimize_for_production,
+    performance_profiler,
+)
 
 # Commercial components
 from blncs.core.commercial_security import security_manager
-from blncs.core.commercial_cache import cache_manager
-from blncs.core.commercial_monitoring import monitoring_service
-from blncs.core.commercial_logging import enterprise_logger, LogLevel, LogCategory
-from blncs.core.commercial_performance_engine import performance_profiler, optimize_for_production
 from blncs.core.human_interface_system import conversational_interface
 from blncs.core.market_intelligence import market_intelligence
 
@@ -43,6 +48,7 @@ security = HTTPBearer()
 # Pydantic models for API
 class APIResponse(BaseModel):
     """Standard API response format"""
+
     success: bool
     data: Optional[Any] = None
     message: Optional[str] = None
@@ -52,6 +58,7 @@ class APIResponse(BaseModel):
 
 class PaymentRequest(BaseModel):
     """Payment request model"""
+
     payment_request: str = Field(..., description="Lightning payment request")
     amount: Optional[int] = Field(None, description="Amount in satoshis")
     fee_limit: Optional[int] = Field(100, description="Maximum fee in satoshis")
@@ -60,14 +67,18 @@ class PaymentRequest(BaseModel):
 
 class InvoiceRequest(BaseModel):
     """Invoice creation request"""
+
     amount: int = Field(..., gt=0, description="Amount in satoshis")
-    description: Optional[str] = Field("Lightning payment", description="Payment description")
+    description: Optional[str] = Field(
+        "Lightning payment", description="Payment description"
+    )
     expiry: Optional[int] = Field(3600, description="Invoice expiry in seconds")
     private: Optional[bool] = Field(False, description="Private invoice")
 
 
 class ChatMessage(BaseModel):
     """Chat message for conversational interface"""
+
     message: str = Field(..., min_length=1, max_length=1000)
     user_id: str = Field(..., description="User identifier")
     session_id: Optional[str] = Field(None, description="Session identifier")
@@ -75,20 +86,31 @@ class ChatMessage(BaseModel):
 
 class PerformanceProfile(BaseModel):
     """Performance profile configuration"""
-    profile: str = Field(..., description="Performance profile (latency, throughput, memory, battery, balanced)")
+
+    profile: str = Field(
+        ...,
+        description="Performance profile (latency, throughput, memory, battery, balanced)",
+    )
 
 
 class MarketAnalysisRequest(BaseModel):
     """Market analysis request"""
-    segment: str = Field(..., description="Market segment (enterprise, smb, developer, consumer)")
-    analysis_type: str = Field("opportunity", description="Analysis type (opportunity, competitive, revenue)")
+
+    segment: str = Field(
+        ..., description="Market segment (enterprise, smb, developer, consumer)"
+    )
+    analysis_type: str = Field(
+        "opportunity", description="Analysis type (opportunity, competitive, revenue)"
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
-    enterprise_logger.info("Starting commercial API server", category=LogCategory.SYSTEM)
+    enterprise_logger.info(
+        "Starting commercial API server", category=LogCategory.SYSTEM
+    )
 
     # Initialize commercial systems
     optimize_for_production()
@@ -102,7 +124,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    enterprise_logger.info("Shutting down commercial API server", category=LogCategory.SYSTEM)
+    enterprise_logger.info(
+        "Shutting down commercial API server", category=LogCategory.SYSTEM
+    )
 
     if monitoring_service:
         await monitoring_service.stop()
@@ -115,7 +139,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add middleware
@@ -131,7 +155,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # Authentication dependency
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)):
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+):
     """Validate JWT token and return user context"""
     try:
         token = credentials.credentials
@@ -154,6 +180,7 @@ async def log_requests(request, call_next):
 
     # Create correlation ID
     import uuid
+
     correlation_id = str(uuid.uuid4())
 
     # Log request
@@ -161,11 +188,11 @@ async def log_requests(request, call_next):
         f"API Request: {request.method} {request.url.path}",
         category=LogCategory.ACCESS,
         data={
-            'method': request.method,
-            'path': request.url.path,
-            'client_ip': request.client.host,
-            'correlation_id': correlation_id
-        }
+            "method": request.method,
+            "path": request.url.path,
+            "client_ip": request.client.host,
+            "correlation_id": correlation_id,
+        },
     )
 
     # Execute request
@@ -179,10 +206,10 @@ async def log_requests(request, call_next):
         f"API Response: {response.status_code} ({response_time:.3f}s)",
         category=LogCategory.ACCESS,
         data={
-            'status_code': response.status_code,
-            'response_time': response_time,
-            'correlation_id': correlation_id
-        }
+            "status_code": response.status_code,
+            "response_time": response_time,
+            "correlation_id": correlation_id,
+        },
     )
 
     # Add headers
@@ -196,6 +223,7 @@ async def log_requests(request, call_next):
 request_counts = {}
 RATE_LIMIT = 1000  # requests per hour
 
+
 @app.middleware("http")
 async def rate_limit_middleware(request, call_next):
     """Simple rate limiting"""
@@ -205,16 +233,14 @@ async def rate_limit_middleware(request, call_next):
     # Clean old entries
     cutoff_time = current_time - 3600  # 1 hour ago
     request_counts[client_ip] = [
-        timestamp for timestamp in request_counts.get(client_ip, [])
+        timestamp
+        for timestamp in request_counts.get(client_ip, [])
         if timestamp > cutoff_time
     ]
 
     # Check rate limit
     if len(request_counts.get(client_ip, [])) >= RATE_LIMIT:
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Rate limit exceeded"}
-        )
+        return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
     # Record request
     if client_ip not in request_counts:
@@ -238,8 +264,8 @@ async def health_check():
                 "api": "healthy",
                 "security": "healthy" if security_manager else "unavailable",
                 "cache": "healthy" if cache_manager else "unavailable",
-                "monitoring": "healthy" if monitoring_service else "unavailable"
-            }
+                "monitoring": "healthy" if monitoring_service else "unavailable",
+            },
         }
 
         return APIResponse(success=True, data=health_data)
@@ -255,16 +281,16 @@ async def login(username: str, password: str, mfa_token: Optional[str] = None):
     """Authenticate user and return JWT tokens"""
     try:
         result = await security_manager.authenticate(
-            username=username,
-            password=password,
-            mfa_token=mfa_token
+            username=username, password=password, mfa_token=mfa_token
         )
 
         if not result:
             enterprise_logger.warning(f"Login failed for user: {username}")
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
-        enterprise_logger.info(f"User logged in: {username}", category=LogCategory.AUDIT)
+        enterprise_logger.info(
+            f"User logged in: {username}", category=LogCategory.AUDIT
+        )
 
         return APIResponse(success=True, data=result)
 
@@ -290,7 +316,7 @@ async def get_lightning_info(current_user: dict = Depends(get_current_user)):
             "synced": True,
             "num_peers": 25,
             "num_channels": 12,
-            "num_active_channels": 10
+            "num_active_channels": 10,
         }
 
         return APIResponse(success=True, data=info)
@@ -309,10 +335,7 @@ async def get_lightning_balance(current_user: dict = Depends(get_current_user)):
             "total_balance": 1500000,  # 1.5M sats
             "confirmed_balance": 1450000,
             "unconfirmed_balance": 50000,
-            "channel_balance": {
-                "local_balance": 800000,
-                "remote_balance": 700000
-            }
+            "channel_balance": {"local_balance": 800000, "remote_balance": 700000},
         }
 
         return APIResponse(success=True, data=balance)
@@ -326,7 +349,7 @@ async def get_lightning_balance(current_user: dict = Depends(get_current_user)):
 async def send_payment(
     payment: PaymentRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     """Simulate a Lightning payment (mock -- never pays a real invoice).
 
@@ -344,8 +367,8 @@ async def send_payment(
             user_id=current_user.get("sub"),
             metadata={
                 "amount": payment.amount,
-                "payment_request": payment.payment_request[:20] + "..."
-            }
+                "payment_request": payment.payment_request[:20] + "...",
+            },
         )
 
         # Simulate payment processing -- no real payment is executed.
@@ -359,7 +382,7 @@ async def send_payment(
             "status": "pending",
             "simulated": True,
             "amount": payment.amount,
-            "fee": 10  # 10 sats fee
+            "fee": 10,  # 10 sats fee
         }
 
         return APIResponse(
@@ -375,13 +398,13 @@ async def send_payment(
 
 @app.post("/lightning/invoice")
 async def create_invoice(
-    invoice: InvoiceRequest,
-    current_user: dict = Depends(get_current_user)
+    invoice: InvoiceRequest, current_user: dict = Depends(get_current_user)
 ):
     """Create Lightning invoice"""
     try:
         # Generate mock invoice
         import secrets
+
         r_hash = secrets.token_hex(32)
         payment_request = f"lnbc{invoice.amount}u1p{secrets.token_hex(20)}..."
 
@@ -392,10 +415,7 @@ async def create_invoice(
             resource="lightning_network",
             result="success",
             user_id=current_user.get("sub"),
-            metadata={
-                "amount": invoice.amount,
-                "description": invoice.description
-            }
+            metadata={"amount": invoice.amount, "description": invoice.description},
         )
 
         result = {
@@ -404,7 +424,7 @@ async def create_invoice(
             "amount": invoice.amount,
             "description": invoice.description,
             "expiry": invoice.expiry,
-            "created_at": datetime.now()
+            "created_at": datetime.now(),
         }
 
         return APIResponse(success=True, data=result, message="Invoice created")
@@ -417,14 +437,12 @@ async def create_invoice(
 # Conversational AI endpoints
 @app.post("/chat")
 async def chat_with_ai(
-    message: ChatMessage,
-    current_user: dict = Depends(get_current_user)
+    message: ChatMessage, current_user: dict = Depends(get_current_user)
 ):
     """Chat with conversational AI interface"""
     try:
         response = await conversational_interface.process_message(
-            user_id=message.user_id,
-            message=message.message
+            user_id=message.user_id, message=message.message
         )
 
         return APIResponse(success=True, data=response)
@@ -437,19 +455,20 @@ async def chat_with_ai(
 # Performance optimization endpoints
 @app.post("/system/performance/profile")
 async def set_performance_profile(
-    profile: PerformanceProfile,
-    current_user: dict = Depends(get_current_user)
+    profile: PerformanceProfile, current_user: dict = Depends(get_current_user)
 ):
     """Set system performance profile"""
     try:
-        from blncs.core.commercial_performance_engine import PerformanceProfile as PerfProfile
+        from blncs.core.commercial_performance_engine import (
+            PerformanceProfile as PerfProfile,
+        )
 
         profile_map = {
             "latency": PerfProfile.LATENCY_OPTIMIZED,
             "throughput": PerfProfile.THROUGHPUT_OPTIMIZED,
             "memory": PerfProfile.MEMORY_OPTIMIZED,
             "battery": PerfProfile.BATTERY_OPTIMIZED,
-            "balanced": PerfProfile.BALANCED
+            "balanced": PerfProfile.BALANCED,
         }
 
         if profile.profile not in profile_map:
@@ -458,8 +477,7 @@ async def set_performance_profile(
         performance_profiler.set_performance_profile(profile_map[profile.profile])
 
         return APIResponse(
-            success=True,
-            message=f"Performance profile set to {profile.profile}"
+            success=True, message=f"Performance profile set to {profile.profile}"
         )
 
     except Exception as e:
@@ -482,8 +500,7 @@ async def get_performance_metrics(current_user: dict = Depends(get_current_user)
 # Market intelligence endpoints
 @app.post("/market/analysis")
 async def get_market_analysis(
-    request: MarketAnalysisRequest,
-    current_user: dict = Depends(get_current_user)
+    request: MarketAnalysisRequest, current_user: dict = Depends(get_current_user)
 ):
     """Get market intelligence analysis"""
     try:
@@ -493,7 +510,7 @@ async def get_market_analysis(
             "enterprise": MarketSegment.ENTERPRISE,
             "smb": MarketSegment.SMB,
             "developer": MarketSegment.DEVELOPER,
-            "consumer": MarketSegment.CONSUMER
+            "consumer": MarketSegment.CONSUMER,
         }
 
         if request.segment not in segment_map:
@@ -591,11 +608,7 @@ async def websocket_updates(websocket):
             update = {
                 "timestamp": datetime.now().isoformat(),
                 "type": "status_update",
-                "data": {
-                    "online": True,
-                    "channels": 10,
-                    "balance": 1500000
-                }
+                "data": {"online": True, "channels": 10, "balance": 1500000},
             }
 
             await websocket.send_json(update)
@@ -621,7 +634,7 @@ async def process_payment_async(payment_hash: str, user: dict):
             resource="lightning_network",
             result="success",
             user_id=user.get("sub"),
-            metadata={"payment_hash": payment_hash}
+            metadata={"payment_hash": payment_hash},
         )
 
     except Exception as e:
@@ -639,9 +652,9 @@ async def http_exception_handler(request, exc):
             "error": {
                 "code": exc.status_code,
                 "message": exc.detail,
-                "timestamp": datetime.now().isoformat()
-            }
-        }
+                "timestamp": datetime.now().isoformat(),
+            },
+        },
     )
 
 
@@ -657,9 +670,9 @@ async def general_exception_handler(request, exc):
             "error": {
                 "code": 500,
                 "message": "Internal server error",
-                "timestamp": datetime.now().isoformat()
-            }
-        }
+                "timestamp": datetime.now().isoformat(),
+            },
+        },
     )
 
 
@@ -676,7 +689,7 @@ def run_commercial_api_server(host: str = "0.0.0.0", port: int = 8080):
         port=port,
         reload=False,
         workers=1,
-        log_level="info"
+        log_level="info",
     )
 
 

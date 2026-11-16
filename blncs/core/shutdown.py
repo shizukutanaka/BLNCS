@@ -3,15 +3,16 @@ Graceful Shutdown Handler for BLNCS
 Simple and reliable shutdown management
 """
 
+import atexit
+import logging
 import signal
 import sys
 import threading
 import time
-import atexit
-from typing import Callable, List, Any
-import logging
+from typing import Any, Callable, List
 
 logger = logging.getLogger(__name__)
+
 
 class ShutdownHandler:
     """Manages graceful shutdown of the system"""
@@ -92,8 +93,10 @@ class ShutdownHandler:
             time.sleep(0.1)
         return True
 
+
 # Global instance
 _shutdown_handler = None
+
 
 def get_shutdown_handler() -> ShutdownHandler:
     """Get global shutdown handler instance"""
@@ -102,12 +105,20 @@ def get_shutdown_handler() -> ShutdownHandler:
         _shutdown_handler = ShutdownHandler()
     return _shutdown_handler
 
+
 def register_shutdown_hook(hook: Callable[[], None]) -> None:
     """Convenience function to register a shutdown hook"""
     get_shutdown_handler().register_hook(hook)
+
 
 def graceful_shutdown(exit_code: int = 0) -> None:
     """Convenience function to initiate graceful shutdown"""
     get_shutdown_handler().shutdown(exit_code)
 
-__all__ = ['ShutdownHandler', 'get_shutdown_handler', 'register_shutdown_hook', 'graceful_shutdown']
+
+__all__ = [
+    "ShutdownHandler",
+    "get_shutdown_handler",
+    "register_shutdown_hook",
+    "graceful_shutdown",
+]

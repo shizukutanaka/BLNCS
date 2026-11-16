@@ -3,23 +3,24 @@
 ビジネスプロセス自動化とタスク管理機能を提供
 """
 
-import time
+import asyncio
 import json
+import logging
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-import logging
+import time
 import uuid
 from collections import defaultdict, deque
-import asyncio
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class TaskStatus(Enum):
     """タスクステータス"""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -30,6 +31,7 @@ class TaskStatus(Enum):
 
 class TaskPriority(Enum):
     """タスク優先度"""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
@@ -38,6 +40,7 @@ class TaskPriority(Enum):
 
 class WorkflowStatus(Enum):
     """ワークフローステータス"""
+
     DRAFT = "draft"
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -47,6 +50,7 @@ class WorkflowStatus(Enum):
 @dataclass
 class WorkflowTask:
     """ワークフロータスク情報"""
+
     task_id: str
     name: str
     description: str
@@ -66,6 +70,7 @@ class WorkflowTask:
 @dataclass
 class WorkflowDefinition:
     """ワークフロー定義情報"""
+
     workflow_id: str
     name: str
     description: str
@@ -80,6 +85,7 @@ class WorkflowDefinition:
 @dataclass
 class WorkflowExecution:
     """ワークフロー実行情報"""
+
     execution_id: str
     workflow_id: str
     status: str = "running"
@@ -144,7 +150,9 @@ class TaskScheduler:
             # タスク完了処理
             task.status = TaskStatus.COMPLETED
             task.completed_at = time.time()
-            task.actual_duration = task.completed_at - (task.started_at or task.created_at)
+            task.actual_duration = task.completed_at - (
+                task.started_at or task.created_at
+            )
 
             logger.info(f"タスク実行完了: {task.name}")
 
@@ -161,7 +169,7 @@ class TaskScheduler:
                 # 完了情報を記録
                 self.completed_tasks[task.task_id] = {
                     "task": task,
-                    "completed_at": task.completed_at
+                    "completed_at": task.completed_at,
                 }
 
                 # キューから次のタスクを実行
@@ -201,7 +209,7 @@ class TaskScheduler:
                 "running_tasks": len(self.running_tasks),
                 "queued_tasks": len(self.task_queue),
                 "completed_tasks": len(self.completed_tasks),
-                "max_concurrent": self.max_concurrent_tasks
+                "max_concurrent": self.max_concurrent_tasks,
             }
 
 
@@ -269,16 +277,24 @@ class WorkflowEngine:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO workflows
                     (workflow_id, name, description, tasks, triggers, status, created_at, updated_at, version)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    workflow.workflow_id, workflow.name, workflow.description,
-                    json.dumps([task.__dict__ for task in workflow.tasks]),
-                    json.dumps(workflow.triggers), workflow.status.value,
-                    workflow.created_at, workflow.updated_at, workflow.version
-                ))
+                """,
+                    (
+                        workflow.workflow_id,
+                        workflow.name,
+                        workflow.description,
+                        json.dumps([task.__dict__ for task in workflow.tasks]),
+                        json.dumps(workflow.triggers),
+                        workflow.status.value,
+                        workflow.created_at,
+                        workflow.updated_at,
+                        workflow.version,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -286,7 +302,9 @@ class WorkflowEngine:
 
         return workflow.workflow_id
 
-    def start_workflow_execution(self, workflow_id: str, trigger_data: Dict[str, Any] = None) -> str:
+    def start_workflow_execution(
+        self, workflow_id: str, trigger_data: Dict[str, Any] = None
+    ) -> str:
         """
         ワークフロー実行を開始
         Args:
@@ -300,8 +318,7 @@ class WorkflowEngine:
 
         execution_id = str(uuid.uuid4())
         execution = WorkflowExecution(
-            execution_id=execution_id,
-            workflow_id=workflow_id
+            execution_id=execution_id, workflow_id=workflow_id
         )
 
         self.executions[execution_id] = execution
@@ -309,11 +326,14 @@ class WorkflowEngine:
         # データベースに記録
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO workflow_executions
                     (execution_id, workflow_id, status, started_at)
                     VALUES (?, ?, ?, ?)
-                """, (execution_id, workflow_id, "running", time.time()))
+                """,
+                    (execution_id, workflow_id, "running", time.time()),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -324,7 +344,9 @@ class WorkflowEngine:
 
         return execution_id
 
-    async def _execute_workflow(self, execution: WorkflowExecution, trigger_data: Dict[str, Any] = None):
+    async def _execute_workflow(
+        self, execution: WorkflowExecution, trigger_data: Dict[str, Any] = None
+    ):
         """ワークフローを実行"""
         try:
             workflow = self.workflows[execution.workflow_id]
@@ -345,9 +367,13 @@ class WorkflowEngine:
 
                 if not executable_tasks:
                     # デッドロック検知
-                    logger.error(f"ワークフローデッドロック検知: {execution.workflow_id}")
+                    logger.error(
+                        f"ワークフローデッドロック検知: {execution.workflow_id}"
+                    )
                     execution.status = "failed"
-                    execution.error_message = "タスクの依存関係でデッドロックが発生しました"
+                    execution.error_message = (
+                        "タスクの依存関係でデッドロックが発生しました"
+                    )
                     break
 
                 # タスクを実行
@@ -366,7 +392,7 @@ class WorkflowEngine:
                             "status": task.status.value,
                             "started_at": task.started_at,
                             "completed_at": task.completed_at,
-                            "duration": task.actual_duration
+                            "duration": task.actual_duration,
                         }
 
                 # 実行完了を待機（簡易版）
@@ -419,7 +445,7 @@ class WorkflowEngine:
             "started_at": execution.started_at,
             "completed_at": execution.completed_at,
             "results": execution.results,
-            "error_message": execution.error_message
+            "error_message": execution.error_message,
         }
 
     def start_engine(self):
@@ -489,26 +515,26 @@ class WorkflowAutomationManager:
                 "name": "データバックアップ",
                 "task_type": "automated",
                 "estimated_duration": 300,
-                "metadata": {"backup_type": "full"}
+                "metadata": {"backup_type": "full"},
             },
             "report_generation": {
                 "name": "レポート生成",
                 "task_type": "automated",
                 "estimated_duration": 120,
-                "metadata": {"report_type": "daily"}
+                "metadata": {"report_type": "daily"},
             },
             "user_approval": {
                 "name": "ユーザ承認",
                 "task_type": "approval",
                 "estimated_duration": 3600,
-                "metadata": {"approval_type": "critical"}
+                "metadata": {"approval_type": "critical"},
             },
             "email_notification": {
                 "name": "メール通知",
                 "task_type": "automated",
                 "estimated_duration": 30,
-                "metadata": {"notification_type": "status_update"}
-            }
+                "metadata": {"notification_type": "status_update"},
+            },
         }
 
     def _create_default_workflows(self):
@@ -524,7 +550,7 @@ class WorkflowAutomationManager:
                     name="データベースバックアップ",
                     task_type="automated",
                     priority=TaskPriority.HIGH,
-                    estimated_duration=300
+                    estimated_duration=300,
                 ),
                 WorkflowTask(
                     task_id="backup_task_2",
@@ -532,7 +558,7 @@ class WorkflowAutomationManager:
                     task_type="automated",
                     priority=TaskPriority.NORMAL,
                     estimated_duration=60,
-                    dependencies=["backup_task_1"]
+                    dependencies=["backup_task_1"],
                 ),
                 WorkflowTask(
                     task_id="backup_task_3",
@@ -540,15 +566,17 @@ class WorkflowAutomationManager:
                     task_type="automated",
                     priority=TaskPriority.LOW,
                     estimated_duration=30,
-                    dependencies=["backup_task_2"]
-                )
+                    dependencies=["backup_task_2"],
+                ),
             ],
-            triggers=[{
-                "type": "schedule",
-                "cron": "0 2 * * *",  # 毎日午前2時
-                "enabled": True
-            }],
-            status=WorkflowStatus.ACTIVE
+            triggers=[
+                {
+                    "type": "schedule",
+                    "cron": "0 2 * * *",  # 毎日午前2時
+                    "enabled": True,
+                }
+            ],
+            status=WorkflowStatus.ACTIVE,
         )
 
         self.workflow_engine.create_workflow(backup_workflow)
@@ -564,8 +592,13 @@ class WorkflowAutomationManager:
         self.is_automation_active = False
         self.workflow_engine.stop_engine()
 
-    def create_custom_workflow(self, name: str, description: str,
-                             tasks: List[Dict[str, Any]], triggers: List[Dict[str, Any]] = None) -> str:
+    def create_custom_workflow(
+        self,
+        name: str,
+        description: str,
+        tasks: List[Dict[str, Any]],
+        triggers: List[Dict[str, Any]] = None,
+    ) -> str:
         """
         カスタムワークフローを作成
         Args:
@@ -589,7 +622,7 @@ class WorkflowAutomationManager:
                 priority=TaskPriority(task_data.get("priority", "normal")),
                 assignee=task_data.get("assignee"),
                 dependencies=task_data.get("dependencies", []),
-                estimated_duration=task_data.get("estimated_duration")
+                estimated_duration=task_data.get("estimated_duration"),
             )
             workflow_tasks.append(task)
 
@@ -598,12 +631,14 @@ class WorkflowAutomationManager:
             name=name,
             description=description,
             tasks=workflow_tasks,
-            triggers=triggers or []
+            triggers=triggers or [],
         )
 
         return self.workflow_engine.create_workflow(workflow)
 
-    def execute_workflow(self, workflow_id: str, trigger_data: Dict[str, Any] = None) -> str:
+    def execute_workflow(
+        self, workflow_id: str, trigger_data: Dict[str, Any] = None
+    ) -> str:
         """
         ワークフローを実行
         Args:
@@ -629,8 +664,14 @@ class WorkflowAutomationManager:
         return {
             "is_active": self.is_automation_active,
             "total_workflows": len(self.workflow_engine.workflows),
-            "active_executions": len([e for e in self.workflow_engine.executions.values() if e.status == "running"]),
-            "scheduler_status": self.workflow_engine.scheduler.get_scheduler_status()
+            "active_executions": len(
+                [
+                    e
+                    for e in self.workflow_engine.executions.values()
+                    if e.status == "running"
+                ]
+            ),
+            "scheduler_status": self.workflow_engine.scheduler.get_scheduler_status(),
         }
 
 
@@ -653,7 +694,7 @@ def example_usage():
                 "name": "アカウント作成",
                 "task_type": "automated",
                 "priority": "high",
-                "estimated_duration": 60
+                "estimated_duration": 60,
             },
             {
                 "name": "初期設定",
@@ -661,22 +702,24 @@ def example_usage():
                 "priority": "normal",
                 "estimated_duration": 300,
                 "assignee": "admin",
-                "dependencies": ["アカウント作成"]
+                "dependencies": ["アカウント作成"],
             },
             {
                 "name": "ウェルカムメール送信",
                 "task_type": "automated",
                 "priority": "low",
                 "estimated_duration": 30,
-                "dependencies": ["初期設定"]
-            }
-        ]
+                "dependencies": ["初期設定"],
+            },
+        ],
     )
 
     print(f"ワークフロー作成: {workflow_id}")
 
     # ワークフロー実行
-    execution_id = manager.execute_workflow(workflow_id, {"user_id": "new_customer_123"})
+    execution_id = manager.execute_workflow(
+        workflow_id, {"user_id": "new_customer_123"}
+    )
     print(f"ワークフロー実行開始: {execution_id}")
 
     # ステータス確認

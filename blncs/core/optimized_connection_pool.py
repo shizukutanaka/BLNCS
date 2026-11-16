@@ -3,19 +3,20 @@ BLNCS Optimized Connection Pool
 High-performance connection pooling for Lightning Network operations
 """
 
-import time
-import threading
+import logging
 import queue
 import socket
-import logging
-from typing import Dict, Any, List, Optional, Callable, Union
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from enum import Enum
-from collections import deque
+from typing import Any, Callable, Dict, List, Optional, Union
 
 
 class ConnectionState(Enum):
     """Connection state enumeration"""
+
     IDLE = "idle"
     ACTIVE = "active"
     BROKEN = "broken"
@@ -25,6 +26,7 @@ class ConnectionState(Enum):
 @dataclass
 class PooledConnection:
     """Pooled connection wrapper"""
+
     connection: Any
     created_at: float
     last_used: float
@@ -43,11 +45,11 @@ class ConnectionHealthChecker:
         """Check if connection is healthy"""
         try:
             # Basic health check - attempt to get connection info
-            if hasattr(connection, 'ping'):
+            if hasattr(connection, "ping"):
                 return connection.ping()
-            elif hasattr(connection, 'is_connected'):
+            elif hasattr(connection, "is_connected"):
                 return connection.is_connected()
-            elif hasattr(connection, 'fileno'):
+            elif hasattr(connection, "fileno"):
                 # Socket-based connection
                 return connection.fileno() != -1
             else:
@@ -68,12 +70,15 @@ class ConnectionHealthChecker:
 class OptimizedConnectionPool:
     """High-performance connection pool"""
 
-    def __init__(self, create_connection: Callable,
-                 min_connections: int = 2,
-                 max_connections: int = 10,
-                 max_idle_time: float = 300.0,
-                 test_on_borrow: bool = True,
-                 test_on_return: bool = False):
+    def __init__(
+        self,
+        create_connection: Callable,
+        min_connections: int = 2,
+        max_connections: int = 10,
+        max_idle_time: float = 300.0,
+        test_on_borrow: bool = True,
+        test_on_return: bool = False,
+    ):
 
         self.create_connection = create_connection
         self.min_connections = min_connections
@@ -90,12 +95,12 @@ class OptimizedConnectionPool:
 
         # Statistics
         self.stats = {
-            'created': 0,
-            'borrowed': 0,
-            'returned': 0,
-            'destroyed': 0,
-            'health_checks': 0,
-            'health_failures': 0
+            "created": 0,
+            "borrowed": 0,
+            "returned": 0,
+            "destroyed": 0,
+            "health_checks": 0,
+            "health_failures": 0,
         }
 
         # Health checker
@@ -128,11 +133,11 @@ class OptimizedConnectionPool:
                 last_used=time.time(),
                 use_count=0,
                 state=ConnectionState.IDLE,
-                pool_id=f"conn_{self.stats['created']}"
+                pool_id=f"conn_{self.stats['created']}",
             )
 
             with self.pool_lock:
-                self.stats['created'] += 1
+                self.stats["created"] += 1
                 self.total_connections += 1
 
             self.logger.debug(f"Created new connection {pooled.pool_id}")
@@ -164,7 +169,7 @@ class OptimizedConnectionPool:
 
                 with self.pool_lock:
                     self.active_connections[id(pooled_conn.connection)] = pooled_conn
-                    self.stats['borrowed'] += 1
+                    self.stats["borrowed"] += 1
 
                 self.logger.debug(f"Borrowed connection {pooled_conn.pool_id}")
                 return pooled_conn.connection
@@ -178,8 +183,10 @@ class OptimizedConnectionPool:
                         pooled_conn.use_count += 1
 
                         with self.pool_lock:
-                            self.active_connections[id(pooled_conn.connection)] = pooled_conn
-                            self.stats['borrowed'] += 1
+                            self.active_connections[id(pooled_conn.connection)] = (
+                                pooled_conn
+                            )
+                            self.stats["borrowed"] += 1
 
                         return pooled_conn.connection
 
@@ -212,7 +219,7 @@ class OptimizedConnectionPool:
         try:
             self.idle_connections.put_nowait(pooled_conn)
             with self.pool_lock:
-                self.stats['returned'] += 1
+                self.stats["returned"] += 1
             self.logger.debug(f"Returned connection {pooled_conn.pool_id}")
         except queue.Full:
             # Pool full, destroy connection
@@ -223,36 +230,34 @@ class OptimizedConnectionPool:
         pooled_conn.state = ConnectionState.TESTING
 
         with self.pool_lock:
-            self.stats['health_checks'] += 1
+            self.stats["health_checks"] += 1
 
         healthy = self.health_checker.is_connection_healthy(pooled_conn.connection)
 
         if not healthy:
             with self.pool_lock:
-                self.stats['health_failures'] += 1
+                self.stats["health_failures"] += 1
 
         return healthy
 
     def _destroy_connection(self, pooled_conn: PooledConnection):
         """Destroy a pooled connection"""
         try:
-            if hasattr(pooled_conn.connection, 'close'):
+            if hasattr(pooled_conn.connection, "close"):
                 pooled_conn.connection.close()
         except Exception:
             pass
 
         with self.pool_lock:
             self.total_connections -= 1
-            self.stats['destroyed'] += 1
+            self.stats["destroyed"] += 1
 
         self.logger.debug(f"Destroyed connection {pooled_conn.pool_id}")
 
     def _start_maintenance(self):
         """Start background maintenance thread"""
         self.maintenance_thread = threading.Thread(
-            target=self._maintenance_loop,
-            daemon=True,
-            name="ConnectionPoolMaintenance"
+            target=self._maintenance_loop, daemon=True, name="ConnectionPoolMaintenance"
         )
         self.maintenance_thread.start()
 
@@ -297,7 +302,9 @@ class OptimizedConnectionPool:
             self._destroy_connection(pooled_conn)
 
         if connections_to_remove:
-            self.logger.info(f"Cleaned up {len(connections_to_remove)} idle connections")
+            self.logger.info(
+                f"Cleaned up {len(connections_to_remove)} idle connections"
+            )
 
     def _ensure_minimum_connections(self):
         """Ensure minimum number of connections"""
@@ -318,17 +325,17 @@ class OptimizedConnectionPool:
         """Get pool statistics"""
         with self.pool_lock:
             return {
-                'total_connections': self.total_connections,
-                'idle_connections': self.idle_connections.qsize(),
-                'active_connections': len(self.active_connections),
-                'statistics': self.stats.copy(),
-                'configuration': {
-                    'min_connections': self.min_connections,
-                    'max_connections': self.max_connections,
-                    'max_idle_time': self.max_idle_time,
-                    'test_on_borrow': self.test_on_borrow,
-                    'test_on_return': self.test_on_return
-                }
+                "total_connections": self.total_connections,
+                "idle_connections": self.idle_connections.qsize(),
+                "active_connections": len(self.active_connections),
+                "statistics": self.stats.copy(),
+                "configuration": {
+                    "min_connections": self.min_connections,
+                    "max_connections": self.max_connections,
+                    "max_idle_time": self.max_idle_time,
+                    "test_on_borrow": self.test_on_borrow,
+                    "test_on_return": self.test_on_return,
+                },
             }
 
     def close_pool(self):
@@ -365,9 +372,14 @@ class PoolManager:
         self.lock = threading.RLock()
         self.logger = logging.getLogger("BLNCS_PoolManager")
 
-    def create_pool(self, name: str, create_connection: Callable,
-                   min_connections: int = 2, max_connections: int = 10,
-                   **kwargs) -> OptimizedConnectionPool:
+    def create_pool(
+        self,
+        name: str,
+        create_connection: Callable,
+        min_connections: int = 2,
+        max_connections: int = 10,
+        **kwargs,
+    ) -> OptimizedConnectionPool:
         """Create a named connection pool"""
         with self.lock:
             if name in self.pools:
@@ -377,7 +389,7 @@ class PoolManager:
                 create_connection=create_connection,
                 min_connections=min_connections,
                 max_connections=max_connections,
-                **kwargs
+                **kwargs,
             )
 
             self.pools[name] = pool
@@ -405,8 +417,7 @@ class PoolManager:
         """Get statistics for all pools"""
         with self.lock:
             return {
-                name: pool.get_pool_statistics()
-                for name, pool in self.pools.items()
+                name: pool.get_pool_statistics() for name, pool in self.pools.items()
             }
 
     def close_all_pools(self):
@@ -439,9 +450,7 @@ if __name__ == "__main__":
 
     # Create pool
     pool = OptimizedConnectionPool(
-        create_connection=create_test_connection,
-        min_connections=2,
-        max_connections=5
+        create_connection=create_test_connection, min_connections=2, max_connections=5
     )
 
     # Test getting connections

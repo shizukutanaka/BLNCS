@@ -8,18 +8,19 @@ Implements patterns from 2025 best practices for distributed systems
 import hashlib
 import logging
 import uuid
-from typing import Dict, Optional, Callable, Any, TypeVar, Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class TransactionStatus(Enum):
     """Status of an idempotent transaction"""
+
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -30,6 +31,7 @@ class TransactionStatus(Enum):
 @dataclass
 class TransactionRecord:
     """Record of an idempotent transaction"""
+
     transaction_id: str
     status: TransactionStatus
     created_at: datetime = field(default_factory=datetime.utcnow)
@@ -56,7 +58,9 @@ class IdempotencyManager:
             retention_hours: How long to keep transaction records
         """
         self.transactions: Dict[str, TransactionRecord] = {}
-        self.idempotency_keys: Dict[str, str] = {}  # Maps idempotency key to transaction ID
+        self.idempotency_keys: Dict[str, str] = (
+            {}
+        )  # Maps idempotency key to transaction ID
         self.retention_hours = retention_hours
 
     def generate_transaction_id(self) -> str:
@@ -81,7 +85,7 @@ class IdempotencyManager:
         self,
         transaction_id: Optional[str] = None,
         idempotency_key: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> TransactionRecord:
         """
         Create a new transaction record
@@ -97,7 +101,9 @@ class IdempotencyManager:
         # Check for duplicate based on idempotency key
         if idempotency_key and idempotency_key in self.idempotency_keys:
             existing_id = self.idempotency_keys[idempotency_key]
-            logger.info(f"Found existing transaction for idempotency key: {existing_id}")
+            logger.info(
+                f"Found existing transaction for idempotency key: {existing_id}"
+            )
             return self.transactions[existing_id]
 
         # Create new transaction
@@ -107,7 +113,7 @@ class IdempotencyManager:
             transaction_id=tid,
             status=TransactionStatus.PENDING,
             idempotency_key=idempotency_key,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
 
         self.transactions[tid] = record
@@ -136,9 +142,7 @@ class IdempotencyManager:
         return record
 
     def complete_transaction(
-        self,
-        transaction_id: str,
-        result: Any
+        self, transaction_id: str, result: Any
     ) -> TransactionRecord:
         """Mark a transaction as completed with result"""
         if transaction_id not in self.transactions:
@@ -153,10 +157,7 @@ class IdempotencyManager:
         return record
 
     def fail_transaction(
-        self,
-        transaction_id: str,
-        error: str,
-        retry: bool = True
+        self, transaction_id: str, error: str, retry: bool = True
     ) -> TransactionRecord:
         """Mark a transaction as failed"""
         if transaction_id not in self.transactions:
@@ -174,9 +175,7 @@ class IdempotencyManager:
             )
         else:
             record.status = TransactionStatus.FAILED
-            logger.error(
-                f"Transaction {transaction_id} failed permanently: {error}"
-            )
+            logger.error(f"Transaction {transaction_id} failed permanently: {error}")
 
         return record
 
@@ -195,7 +194,8 @@ class IdempotencyManager:
         """Remove old transaction records beyond retention period"""
         cutoff_time = datetime.utcnow() - timedelta(hours=self.retention_hours)
         to_delete = [
-            tid for tid, record in self.transactions.items()
+            tid
+            for tid, record in self.transactions.items()
             if record.updated_at < cutoff_time
         ]
 
@@ -213,7 +213,7 @@ async def idempotent_execute(
     operation: Callable[[], Awaitable[T]],
     transaction_id: str,
     max_retries: int = 3,
-    retry_delay: float = 0.1
+    retry_delay: float = 0.1,
 ) -> T:
     """
     Execute an operation with idempotent guarantees
@@ -240,7 +240,9 @@ async def idempotent_execute(
 
     # If already failed, don't retry
     if record and record.status == TransactionStatus.FAILED:
-        raise RuntimeError(f"Transaction {transaction_id} already failed: {record.error}")
+        raise RuntimeError(
+            f"Transaction {transaction_id} already failed: {record.error}"
+        )
 
     # Create or get transaction record
     if not record:
@@ -257,14 +259,13 @@ async def idempotent_execute(
 
         except Exception as e:
             manager.fail_transaction(
-                transaction_id,
-                str(e),
-                retry=attempt < max_retries - 1
+                transaction_id, str(e), retry=attempt < max_retries - 1
             )
 
             if attempt < max_retries - 1:
                 import asyncio
-                await asyncio.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+
+                await asyncio.sleep(retry_delay * (2**attempt))  # Exponential backoff
             else:
                 raise
 
@@ -350,10 +351,10 @@ class DistributedLock:
 
 
 __all__ = [
-    'TransactionStatus',
-    'TransactionRecord',
-    'IdempotencyManager',
-    'idempotent_execute',
-    'UniqueConstraintValidator',
-    'DistributedLock',
+    "TransactionStatus",
+    "TransactionRecord",
+    "IdempotencyManager",
+    "idempotent_execute",
+    "UniqueConstraintValidator",
+    "DistributedLock",
 ]

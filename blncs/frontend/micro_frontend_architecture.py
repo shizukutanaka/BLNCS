@@ -3,24 +3,26 @@
 コンポーネント分離と動的ロードシステムを提供
 """
 
-import time
+import asyncio
 import json
+import logging
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-import logging
-import asyncio
-import aiohttp
+import time
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
 
 class ComponentType(Enum):
     """コンポーネントタイプ"""
+
     HEADER = "header"
     NAVIGATION = "navigation"
     CONTENT = "content"
@@ -35,15 +37,17 @@ class ComponentType(Enum):
 
 class LoadingStrategy(Enum):
     """ロード戦略"""
-    LAZY = "lazy"           # 遅延ロード
-    EAGER = "eager"         # 即時ロード
-    PREFETCH = "prefetch"   # プリフェッチ
-    ON_DEMAND = "on_demand" # オンデマンド
+
+    LAZY = "lazy"  # 遅延ロード
+    EAGER = "eager"  # 即時ロード
+    PREFETCH = "prefetch"  # プリフェッチ
+    ON_DEMAND = "on_demand"  # オンデマンド
 
 
 @dataclass
 class MicroFrontend:
     """マイクロフロントエンド情報"""
+
     component_id: str
     name: str
     component_type: ComponentType
@@ -60,6 +64,7 @@ class MicroFrontend:
 @dataclass
 class ComponentInstance:
     """コンポーネントインスタンス情報"""
+
     instance_id: str
     component_id: str
     container_id: str  # DOMコンテナID
@@ -72,11 +77,12 @@ class ComponentInstance:
 @dataclass
 class ModuleFederation:
     """モジュールフェデレーション情報"""
+
     federation_id: str
     name: str
     exposes: Dict[str, str] = field(default_factory=dict)  # 公開モジュール
     remotes: Dict[str, str] = field(default_factory=dict)  # リモートモジュール
-    shared: Dict[str, str] = field(default_factory=dict)   # 共有依存関係
+    shared: Dict[str, str] = field(default_factory=dict)  # 共有依存関係
     version: str = "1.0.0"
 
 
@@ -138,24 +144,35 @@ class ComponentRegistry:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO micro_frontends
                     (component_id, name, component_type, remote_url, version, dependencies,
                      loading_strategy, fallback_component, is_critical, metadata, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    component.component_id, component.name, component.component_type.value,
-                    component.remote_url, component.version, json.dumps(component.dependencies),
-                    component.loading_strategy.value, component.fallback_component,
-                    1 if component.is_critical else 0, json.dumps(component.metadata),
-                    component.created_at
-                ))
+                """,
+                    (
+                        component.component_id,
+                        component.name,
+                        component.component_type.value,
+                        component.remote_url,
+                        component.version,
+                        json.dumps(component.dependencies),
+                        component.loading_strategy.value,
+                        component.fallback_component,
+                        1 if component.is_critical else 0,
+                        json.dumps(component.metadata),
+                        component.created_at,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
             logger.error(f"コンポーネント登録エラー: {e}")
 
-    def create_component_instance(self, component_id: str, container_id: str, props: Dict[str, Any] = None) -> str:
+    def create_component_instance(
+        self, component_id: str, container_id: str, props: Dict[str, Any] = None
+    ) -> str:
         """
         コンポーネントインスタンスを作成
         Args:
@@ -174,21 +191,29 @@ class ComponentRegistry:
             instance_id=instance_id,
             component_id=component_id,
             container_id=container_id,
-            props=props or {}
+            props=props or {},
         )
 
         self.component_instances[instance_id] = instance
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO component_instances
                     (instance_id, component_id, container_id, props, is_loaded, load_error, loaded_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    instance_id, component_id, container_id, json.dumps(props or {}),
-                    0, None, None
-                ))
+                """,
+                    (
+                        instance_id,
+                        component_id,
+                        container_id,
+                        json.dumps(props or {}),
+                        0,
+                        None,
+                        None,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -223,11 +248,14 @@ class ComponentRegistry:
             # データベースを更新
             try:
                 with sqlite3.connect(self.db_path) as conn:
-                    conn.execute("""
+                    conn.execute(
+                        """
                         UPDATE component_instances
                         SET is_loaded = 1, loaded_at = ?
                         WHERE instance_id = ?
-                    """, (instance.loaded_at, instance_id))
+                    """,
+                        (instance.loaded_at, instance_id),
+                    )
                     conn.commit()
 
             except Exception as e:
@@ -241,7 +269,9 @@ class ComponentRegistry:
             logger.error(f"コンポーネントロードエラー: {instance_id} - {e}")
             return False
 
-    async def _load_remote_component(self, component: MicroFrontend, instance: ComponentInstance):
+    async def _load_remote_component(
+        self, component: MicroFrontend, instance: ComponentInstance
+    ):
         """リモートコンポーネントをロード"""
         # 実際の実装ではモジュールフェデレーションや動的インポートを使用
         # ここではシミュレーション
@@ -254,7 +284,9 @@ class ComponentRegistry:
         await asyncio.sleep(0.5)  # ロード時間をシミュレーション
 
         # コンポーネントをコンテナにマウント（シミュレーション）
-        logger.info(f"コンポーネントマウント: {component.name} in {instance.container_id}")
+        logger.info(
+            f"コンポーネントマウント: {component.name} in {instance.container_id}"
+        )
 
     async def _load_dependency(self, dependency: str):
         """依存関係をロード"""
@@ -284,7 +316,9 @@ class DynamicLoader:
         """
         self.loaded_modules[federation.federation_id] = federation
 
-    async def load_component_dynamically(self, component_id: str, container_id: str, props: Dict[str, Any] = None) -> str:
+    async def load_component_dynamically(
+        self, component_id: str, container_id: str, props: Dict[str, Any] = None
+    ) -> str:
         """
         コンポーネントを動的にロード
         Args:
@@ -295,7 +329,9 @@ class DynamicLoader:
             インスタンスID
         """
         # インスタンスを作成
-        instance_id = self.component_registry.create_component_instance(component_id, container_id, props)
+        instance_id = self.component_registry.create_component_instance(
+            component_id, container_id, props
+        )
 
         # ロード戦略に基づいてロード
         component = self.component_registry.components.get(component_id)
@@ -341,14 +377,16 @@ class DynamicLoader:
             "component_id": instance.component_id,
             "is_loaded": instance.is_loaded,
             "load_error": instance.load_error,
-            "loaded_at": instance.loaded_at
+            "loaded_at": instance.loaded_at,
         }
 
 
 class ShellApplication:
     """シェルアプリケーション"""
 
-    def __init__(self, component_registry: ComponentRegistry, dynamic_loader: DynamicLoader):
+    def __init__(
+        self, component_registry: ComponentRegistry, dynamic_loader: DynamicLoader
+    ):
         """
         初期化
         Args:
@@ -377,7 +415,9 @@ class ShellApplication:
         """
         self.layout_config = layout_config
 
-    async def render_page(self, path: str, user_context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def render_page(
+        self, path: str, user_context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
         """
         ページをレンダリング
         Args:
@@ -404,17 +444,19 @@ class ShellApplication:
                 component_id, container_id, component_config.get("props")
             )
 
-            loaded_components.append({
-                "instance_id": instance_id,
-                "container_id": container_id,
-                "status": self.dynamic_loader.get_loading_status(instance_id)
-            })
+            loaded_components.append(
+                {
+                    "instance_id": instance_id,
+                    "container_id": container_id,
+                    "status": self.dynamic_loader.get_loading_status(instance_id),
+                }
+            )
 
         return {
             "path": path,
             "layout": self.layout_config,
             "components": loaded_components,
-            "user_context": user_context or {}
+            "user_context": user_context or {},
         }
 
 
@@ -431,7 +473,9 @@ class MicroFrontendManager:
         self.component_registry = ComponentRegistry(db_path)
         self.dynamic_loader = DynamicLoader(self.component_registry)
         self.shell_app = ShellApplication(self.component_registry, self.dynamic_loader)
-        self.module_federation = ModuleFederation(federation_id="main", name="Main Application")
+        self.module_federation = ModuleFederation(
+            federation_id="main", name="Main Application"
+        )
 
         self.is_mfe_active = False
 
@@ -456,7 +500,7 @@ class MicroFrontendManager:
                 remote_url="http://localhost:3001/assets/header.js",
                 version="1.0.0",
                 loading_strategy=LoadingStrategy.EAGER,
-                is_critical=True
+                is_critical=True,
             ),
             MicroFrontend(
                 component_id="navigation_component",
@@ -464,7 +508,7 @@ class MicroFrontendManager:
                 component_type=ComponentType.NAVIGATION,
                 remote_url="http://localhost:3002/assets/navigation.js",
                 version="1.0.0",
-                loading_strategy=LoadingStrategy.LAZY
+                loading_strategy=LoadingStrategy.LAZY,
             ),
             MicroFrontend(
                 component_id="dashboard_component",
@@ -473,7 +517,7 @@ class MicroFrontendManager:
                 remote_url="http://localhost:3003/assets/dashboard.js",
                 version="1.0.0",
                 loading_strategy=LoadingStrategy.LAZY,
-                dependencies=["chart_component", "table_component"]
+                dependencies=["chart_component", "table_component"],
             ),
             MicroFrontend(
                 component_id="chart_component",
@@ -481,7 +525,7 @@ class MicroFrontendManager:
                 component_type=ComponentType.CHART,
                 remote_url="http://localhost:3004/assets/chart.js",
                 version="1.0.0",
-                loading_strategy=LoadingStrategy.ON_DEMAND
+                loading_strategy=LoadingStrategy.ON_DEMAND,
             ),
             MicroFrontend(
                 component_id="table_component",
@@ -489,8 +533,8 @@ class MicroFrontendManager:
                 component_type=ComponentType.TABLE,
                 remote_url="http://localhost:3005/assets/table.js",
                 version="1.0.0",
-                loading_strategy=LoadingStrategy.ON_DEMAND
-            )
+                loading_strategy=LoadingStrategy.ON_DEMAND,
+            ),
         ]
 
         for component in components:
@@ -502,24 +546,39 @@ class MicroFrontendManager:
             "/": {
                 "components": [
                     {"component_id": "header_component", "container_id": "header"},
-                    {"component_id": "navigation_component", "container_id": "navigation"},
-                    {"component_id": "dashboard_component", "container_id": "main-content"}
+                    {
+                        "component_id": "navigation_component",
+                        "container_id": "navigation",
+                    },
+                    {
+                        "component_id": "dashboard_component",
+                        "container_id": "main-content",
+                    },
                 ]
             },
             "/analytics": {
                 "components": [
                     {"component_id": "header_component", "container_id": "header"},
-                    {"component_id": "navigation_component", "container_id": "navigation"},
-                    {"component_id": "chart_component", "container_id": "analytics-content"}
+                    {
+                        "component_id": "navigation_component",
+                        "container_id": "navigation",
+                    },
+                    {
+                        "component_id": "chart_component",
+                        "container_id": "analytics-content",
+                    },
                 ]
             },
             "/data": {
                 "components": [
                     {"component_id": "header_component", "container_id": "header"},
-                    {"component_id": "navigation_component", "container_id": "navigation"},
-                    {"component_id": "table_component", "container_id": "data-content"}
+                    {
+                        "component_id": "navigation_component",
+                        "container_id": "navigation",
+                    },
+                    {"component_id": "table_component", "container_id": "data-content"},
                 ]
-            }
+            },
         }
 
         for path, config in routes.items():
@@ -529,18 +588,18 @@ class MicroFrontendManager:
         """モジュールフェデレーションを設定"""
         self.module_federation.exposes = {
             "Header": "http://localhost:3001/assets/header.js",
-            "Navigation": "http://localhost:3002/assets/navigation.js"
+            "Navigation": "http://localhost:3002/assets/navigation.js",
         }
 
         self.module_federation.remotes = {
             "DashboardModule": "Dashboard@http://localhost:3003/assets/remoteEntry.js",
-            "AnalyticsModule": "Analytics@http://localhost:3004/assets/remoteEntry.js"
+            "AnalyticsModule": "Analytics@http://localhost:3004/assets/remoteEntry.js",
         }
 
         self.module_federation.shared = {
             "react": "^17.0.0",
             "react-dom": "^17.0.0",
-            "lodash": "^4.17.0"
+            "lodash": "^4.17.0",
         }
 
     def start_micro_frontend_system(self):
@@ -554,7 +613,9 @@ class MicroFrontendManager:
         self.is_mfe_active = False
         logger.info("マイクロフロントエンドシステムを停止しました")
 
-    async def render_application(self, path: str, user_context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def render_application(
+        self, path: str, user_context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
         """
         アプリケーションをレンダリング
         Args:
@@ -565,7 +626,9 @@ class MicroFrontendManager:
         """
         return await self.shell_app.render_page(path, user_context)
 
-    def load_component_on_demand(self, component_id: str, container_id: str, props: Dict[str, Any] = None) -> str:
+    def load_component_on_demand(
+        self, component_id: str, container_id: str, props: Dict[str, Any] = None
+    ) -> str:
         """
         コンポーネントをオンデマンドでロード
         Args:
@@ -576,13 +639,19 @@ class MicroFrontendManager:
             インスタンスID
         """
         # オンデマンドロード用のタスクを作成
-        asyncio.create_task(self._load_component_async(component_id, container_id, props))
+        asyncio.create_task(
+            self._load_component_async(component_id, container_id, props)
+        )
         return f"loading_{component_id}_{container_id}"
 
-    async def _load_component_async(self, component_id: str, container_id: str, props: Dict[str, Any] = None):
+    async def _load_component_async(
+        self, component_id: str, container_id: str, props: Dict[str, Any] = None
+    ):
         """コンポーネントを非同期でロード"""
         try:
-            await self.dynamic_loader.load_component_dynamically(component_id, container_id, props)
+            await self.dynamic_loader.load_component_dynamically(
+                component_id, container_id, props
+            )
         except Exception as e:
             logger.error(f"オンデマンドロードエラー: {component_id} - {e}")
 
@@ -591,9 +660,15 @@ class MicroFrontendManager:
         return {
             "is_active": self.is_mfe_active,
             "total_components": len(self.component_registry.components),
-            "loaded_instances": len([i for i in self.component_registry.component_instances.values() if i.is_loaded]),
+            "loaded_instances": len(
+                [
+                    i
+                    for i in self.component_registry.component_instances.values()
+                    if i.is_loaded
+                ]
+            ),
             "routes": len(self.shell_app.routes),
-            "federation_modules": len(self.loaded_modules)
+            "federation_modules": len(self.loaded_modules),
         }
 
 
@@ -609,14 +684,18 @@ async def example_usage():
 
     # アプリケーションをレンダリング
     render_result = await manager.render_application("/", {"user_id": "user_123"})
-    print(f"アプリケーションレンダリング完了: {len(render_result['components'])}コンポーネント")
+    print(
+        f"アプリケーションレンダリング完了: {len(render_result['components'])}コンポーネント"
+    )
 
     # オンデマンドでコンポーネントをロード
     instance_id = manager.load_component_on_demand("chart_component", "chart-container")
     print(f"オンデマンドロード開始: {instance_id}")
 
     # 特定のコンポーネントのロードステータスを確認
-    status = manager.dynamic_loader.get_loading_status(instance_id.replace("loading_", ""))
+    status = manager.dynamic_loader.get_loading_status(
+        instance_id.replace("loading_", "")
+    )
     print(f"コンポーネントステータス: {status}")
 
     # システムステータス

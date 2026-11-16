@@ -6,13 +6,14 @@ Implements 2024 FastAPI patterns for production use
 
 import asyncio
 import logging
-from typing import Callable, Any, Optional, Type, List
-from functools import wraps
 from contextlib import asynccontextmanager
+from functools import wraps
+from typing import Any, Callable, List, Optional, Type
 
 try:
-    from fastapi import FastAPI, Depends, Request, Response
+    from fastapi import Depends, FastAPI, Request, Response
     from fastapi.dependencies.utils import get_dependant
+
     HAS_FASTAPI = True
 except ImportError:
     HAS_FASTAPI = False
@@ -47,9 +48,7 @@ class AsyncDependencyCache:
 
 
 async def async_dependency_with_cache(
-    cache_key: str,
-    dependency_func: Callable,
-    cache: AsyncDependencyCache
+    cache_key: str, dependency_func: Callable, cache: AsyncDependencyCache
 ) -> Any:
     """
     Execute async dependency with caching
@@ -68,12 +67,14 @@ def create_async_session_dependency(get_session_func: Callable):
     Create a dependency for async database sessions
     Follows FastAPI best practices for resource management
     """
+
     async def get_session():
         async with get_session_func() as session:
             try:
                 yield session
             finally:
                 await session.close()
+
     return get_session
 
 
@@ -93,9 +94,7 @@ class ConcurrentTaskRunner:
 
     @staticmethod
     async def run_with_timeout(
-        coro,
-        timeout_seconds: float,
-        on_timeout: Optional[Callable] = None
+        coro, timeout_seconds: float, on_timeout: Optional[Callable] = None
     ) -> Any:
         """
         Run async operation with timeout
@@ -115,7 +114,7 @@ class RequestLogger:
     Middleware for logging and monitoring requests
     """
 
-    def __init__(self, app: 'FastAPI'):
+    def __init__(self, app: "FastAPI"):
         self.app = app
 
     async def log_request(self, request: Request, call_next) -> Response:
@@ -132,9 +131,7 @@ class RequestLogger:
         response = await call_next(request)
         process_time = time.time() - start_time
 
-        logger.info(
-            f"{method} {path} - {response.status_code} - {process_time:.3f}s"
-        )
+        logger.info(f"{method} {path} - {response.status_code} - {process_time:.3f}s")
 
         # Add timing header
         response.headers["X-Process-Time"] = str(process_time)
@@ -148,12 +145,18 @@ class AsyncContextManager:
 
     @staticmethod
     @asynccontextmanager
-    async def managed_resource(resource_factory: Callable, cleanup: Optional[Callable] = None):
+    async def managed_resource(
+        resource_factory: Callable, cleanup: Optional[Callable] = None
+    ):
         """
         Acquire and manage resource with automatic cleanup
         Ensures cleanup even if exception occurs
         """
-        resource = await resource_factory() if asyncio.iscoroutinefunction(resource_factory) else resource_factory()
+        resource = (
+            await resource_factory()
+            if asyncio.iscoroutinefunction(resource_factory)
+            else resource_factory()
+        )
 
         try:
             yield resource
@@ -176,9 +179,7 @@ class ParallelBatchProcessor:
         self.max_concurrent = max_concurrent
 
     async def process_batch(
-        self,
-        items: List[Any],
-        processor_func: Callable
+        self, items: List[Any], processor_func: Callable
     ) -> List[Any]:
         """
         Process items in concurrent batches
@@ -192,7 +193,7 @@ class ParallelBatchProcessor:
 
         # Split into batches
         batches = [
-            items[i:i + self.batch_size]
+            items[i : i + self.batch_size]
             for i in range(0, len(items), self.batch_size)
         ]
 
@@ -216,6 +217,7 @@ class DependendencyInjectionOptimizer:
         Decorator to cache dependency results
         lifetime_seconds: if None, cache for request lifetime
         """
+
         def decorator(func: Callable) -> Callable:
             cached_value = None
             cached_time = None
@@ -228,17 +230,23 @@ class DependendencyInjectionOptimizer:
                 now = time.time()
 
                 # Check if cached and not expired
-                if (cached_value is not None and
-                    (lifetime_seconds is None or (now - cached_time) < lifetime_seconds)):
+                if cached_value is not None and (
+                    lifetime_seconds is None or (now - cached_time) < lifetime_seconds
+                ):
                     return cached_value
 
                 # Call original function
-                result = await func(*args, **kwargs) if asyncio.iscoroutinefunction(func) else func(*args, **kwargs)
+                result = (
+                    await func(*args, **kwargs)
+                    if asyncio.iscoroutinefunction(func)
+                    else func(*args, **kwargs)
+                )
                 cached_value = result
                 cached_time = now
                 return result
 
             return wrapper
+
         return decorator
 
 
@@ -289,7 +297,7 @@ class FastAPIOptimizationConfig:
         enable_request_logging: bool = True,
         enable_cors: bool = True,
         cors_origins: List[str] = None,
-        gzip_min_size: int = 1000
+        gzip_min_size: int = 1000,
     ):
         self.enable_compression = enable_compression
         self.compression_level = compression_level
@@ -298,7 +306,7 @@ class FastAPIOptimizationConfig:
         self.cors_origins = cors_origins or ["*"]
         self.gzip_min_size = gzip_min_size
 
-    def apply_to_app(self, app: 'FastAPI') -> None:
+    def apply_to_app(self, app: "FastAPI") -> None:
         """Apply configurations to FastAPI app"""
         if not HAS_FASTAPI:
             logger.warning("FastAPI not installed, skipping optimization")
@@ -308,10 +316,8 @@ class FastAPIOptimizationConfig:
         if self.enable_compression:
             try:
                 from fastapi.middleware.gzip import GZIPMiddleware
-                app.add_middleware(
-                    GZIPMiddleware,
-                    minimum_size=self.gzip_min_size
-                )
+
+                app.add_middleware(GZIPMiddleware, minimum_size=self.gzip_min_size)
                 logger.info("Added GZIP compression middleware")
             except Exception as e:
                 logger.warning(f"Failed to add GZIP middleware: {e}")
@@ -320,6 +326,7 @@ class FastAPIOptimizationConfig:
         if self.enable_cors:
             try:
                 from fastapi.middleware.cors import CORSMiddleware
+
                 app.add_middleware(
                     CORSMiddleware,
                     allow_origins=self.cors_origins,
@@ -335,22 +342,25 @@ class FastAPIOptimizationConfig:
         if self.enable_request_logging:
             try:
                 from fastapi.middleware.base import BaseHTTPMiddleware
+
                 request_logger = RequestLogger(app)
-                app.add_middleware(BaseHTTPMiddleware, dispatch=request_logger.log_request)
+                app.add_middleware(
+                    BaseHTTPMiddleware, dispatch=request_logger.log_request
+                )
                 logger.info("Added request logging middleware")
             except Exception as e:
                 logger.warning(f"Failed to add logging middleware: {e}")
 
 
 __all__ = [
-    'AsyncDependencyCache',
-    'async_dependency_with_cache',
-    'create_async_session_dependency',
-    'ConcurrentTaskRunner',
-    'RequestLogger',
-    'AsyncContextManager',
-    'ParallelBatchProcessor',
-    'DependendencyInjectionOptimizer',
-    'RateLimitingHelper',
-    'FastAPIOptimizationConfig',
+    "AsyncDependencyCache",
+    "async_dependency_with_cache",
+    "create_async_session_dependency",
+    "ConcurrentTaskRunner",
+    "RequestLogger",
+    "AsyncContextManager",
+    "ParallelBatchProcessor",
+    "DependendencyInjectionOptimizer",
+    "RateLimitingHelper",
+    "FastAPIOptimizationConfig",
 ]

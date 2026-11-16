@@ -137,10 +137,6 @@ setup(
             "blncs-setup=blncs.setup.main:main"
         ]
     },
-    scripts=[
-        "scripts/blncs-install.sh",
-        "scripts/blncs-health-check.sh"
-    ],
     zip_safe=False,  # Required for package data access
     platforms=["any"],
     

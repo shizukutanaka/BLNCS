@@ -3,12 +3,12 @@
 すべてのコンポーネントの軽量テスト
 """
 
-import unittest
-import sys
+import json
 import os
+import sys
 import tempfile
 import time
-import json
+import unittest
 from pathlib import Path
 
 # プロジェクトルートをパスに追加
@@ -17,12 +17,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 統合システムのインポート
 try:
     from blncs.core.config import get_config
+    from blncs.core.lightweight_auth import LightweightAuth
+    from blncs.core.simple_cache import get_simple_cache
     from blncs.core.unified_database import get_database
     from blncs.core.unified_logging import get_logger
-    from blncs.core.simple_cache import get_simple_cache
     from blncs.core.unified_performance import get_performance_optimizer
     from blncs.core.unified_security import get_security_manager
     from blncs.lightning.simple_client import get_lightning_client
+    from blncs.utils.simple_backup_recovery import SimpleBackup
+
     IMPORTS_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Some imports failed: {e}")
@@ -51,19 +54,19 @@ class TestUnifiedConfig(unittest.TestCase):
             self.skipTest("Required modules not available")
 
         config = get_config()
-        self.assertIsNotNone(config.get('lightning.network'))
-        self.assertIsNotNone(config.get('api.port'))
-        self.assertEqual(self.config.get('test.value'), 'hello')
+        self.assertIsNotNone(config.get("lightning.network"))
+        self.assertIsNotNone(config.get("api.port"))
+        self.assertEqual(self.config.get("test.value"), "hello")
 
         # ドット記法テスト
-        self.config.set('api.custom.setting', True)
-        self.assertTrue(self.config.get('api.custom.setting'))
+        self.config.set("api.custom.setting", True)
+        self.assertTrue(self.config.get("api.custom.setting"))
 
     def test_section_retrieval(self):
         """セクション取得テスト"""
-        api_config = self.config.get_section('api')
-        self.assertIn('host', api_config)
-        self.assertIn('port', api_config)
+        api_config = self.config.get_section("api")
+        self.assertIn("host", api_config)
+        self.assertIn("port", api_config)
 
     def test_validation(self):
         """設定検証テスト"""
@@ -138,6 +141,7 @@ class TestSimpleBackup(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_backup_creation(self):
@@ -148,11 +152,11 @@ class TestSimpleBackup(unittest.TestCase):
 
         try:
             result = self.backup.create_backup("test_backup")
-            self.assertTrue(result['success'])
-            self.assertIn('backup_path', result)
+            self.assertTrue(result["success"])
+            self.assertIn("backup_path", result)
 
             # バックアップファイルが存在することを確認
-            backup_path = Path(result['backup_path'])
+            backup_path = Path(result["backup_path"])
             self.assertTrue(backup_path.exists())
 
         finally:
@@ -166,8 +170,8 @@ class TestSimpleBackup(unittest.TestCase):
     def test_backup_stats(self):
         """バックアップ統計テスト"""
         stats = self.backup.get_backup_stats()
-        self.assertIn('total_backups', stats)
-        self.assertIn('backup_dir', stats)
+        self.assertIn("total_backups", stats)
+        self.assertIn("backup_dir", stats)
 
 
 class TestLightweightAuth(unittest.TestCase):
@@ -188,8 +192,8 @@ class TestLightweightAuth(unittest.TestCase):
         # 正しい認証
         result = self.auth.authenticate("testuser", "password123")
         self.assertIsNotNone(result)
-        self.assertEqual(result['username'], "testuser")
-        self.assertIn('token', result)
+        self.assertEqual(result["username"], "testuser")
+        self.assertIn("token", result)
 
         # 間違った認証
         result = self.auth.authenticate("testuser", "wrongpassword")
@@ -199,12 +203,12 @@ class TestLightweightAuth(unittest.TestCase):
         """トークン検証テスト"""
         self.auth.create_user("testuser", "password123", ["user"])
         auth_result = self.auth.authenticate("testuser", "password123")
-        token = auth_result['token']
+        token = auth_result["token"]
 
         # トークン検証
         payload = self.auth.verify_token(token)
         self.assertIsNotNone(payload)
-        self.assertEqual(payload['username'], "testuser")
+        self.assertEqual(payload["username"], "testuser")
 
     def test_api_key_creation(self):
         """APIキー作成テスト"""
@@ -215,7 +219,7 @@ class TestLightweightAuth(unittest.TestCase):
         # APIキー検証
         result = self.auth.verify_api_key(api_key)
         self.assertIsNotNone(result)
-        self.assertEqual(result['username'], "testuser")
+        self.assertEqual(result["username"], "testuser")
 
 
 class TestSimpleLightning(unittest.TestCase):
@@ -346,11 +350,11 @@ class TestRunner:
 
         # 個別コンポーネントのテスト実行
         component_tests = [
-            ('Config', self._run_config_tests),
-            ('Database', self._run_database_tests),
-            ('Logging', self._run_logging_tests),
-            ('Lightning', self._run_lightning_tests),
-            ('Security', self._run_security_tests),
+            ("Config", self._run_config_tests),
+            ("Database", self._run_database_tests),
+            ("Logging", self._run_logging_tests),
+            ("Lightning", self._run_lightning_tests),
+            ("Security", self._run_security_tests),
         ]
 
         all_passed = True
@@ -415,7 +419,7 @@ class TestRunner:
             TestUnifiedLogging,
             TestSimpleLightning,
             TestLightweightSecurity,
-            TestIntegration
+            TestIntegration,
         ]
 
         for test_class in test_classes:
@@ -431,11 +435,15 @@ class TestRunner:
     def generate_report(self):
         """テストレポート生成"""
         report = {
-            'timestamp': time.time(),
-            'total_tests': len(self.test_results),
-            'passed_tests': len([r for r in self.test_results.values() if r == "PASSED"]),
-            'failed_tests': len([r for r in self.test_results.values() if r.startswith("FAILED")]),
-            'results': self.test_results
+            "timestamp": time.time(),
+            "total_tests": len(self.test_results),
+            "passed_tests": len(
+                [r for r in self.test_results.values() if r == "PASSED"]
+            ),
+            "failed_tests": len(
+                [r for r in self.test_results.values() if r.startswith("FAILED")]
+            ),
+            "results": self.test_results,
         }
 
         return report
@@ -469,9 +477,9 @@ def run_all_tests():
     print(f"成功: {report['passed_tests']}")
     print(f"失敗: {report['failed_tests']}")
 
-    if report['failed_tests'] > 0:
+    if report["failed_tests"] > 0:
         print("\n失敗したテスト:")
-        for name, result in report['results'].items():
+        for name, result in report["results"].items():
             if result.startswith("FAILED"):
                 print(f"  - {name}: {result}")
 

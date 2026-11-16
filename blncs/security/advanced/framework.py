@@ -42,11 +42,16 @@ class KeyRotationManager:
             self._previous_keys.appendleft(self._active_key)
             self._active_key = self._generate_key()
             self._last_rotation = time.time()
-            logger.info("Rotated HMAC signing key", extra={"extra_fields": {"previous_keys": len(self._previous_keys)}})
+            logger.info(
+                "Rotated HMAC signing key",
+                extra={"extra_fields": {"previous_keys": len(self._previous_keys)}},
+            )
 
     def sign(self, payload: Dict[str, Any]) -> str:
         self._rotate_if_needed()
-        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
         signature = hmac.new(self._active_key, body, hashlib.sha256).digest()
         return base64.urlsafe_b64encode(signature).decode("ascii")
 
@@ -56,7 +61,9 @@ class KeyRotationManager:
         except (ValueError, binascii.Error):
             return False
 
-        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
 
         def _compare(candidate_key: bytes) -> bool:
             expected = hmac.new(candidate_key, body, hashlib.sha256).digest()
@@ -85,14 +92,16 @@ class ZeroTrustManager:
             self.identity_store[user_id] = {
                 "attributes": attributes,
                 "trust_score": 0.5,
-                "last_seen": time.time()
+                "last_seen": time.time(),
             }
 
     def upsert_policy(self, resource: str, policy: Dict[str, Any]) -> None:
         with self.lock:
             self.policies[resource] = policy
 
-    def evaluate(self, user_id: str, resource: str, action: str, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def evaluate(
+        self, user_id: str, resource: str, action: str, context: Dict[str, Any]
+    ) -> Tuple[bool, str]:
         with self.lock:
             identity = self.identity_store.get(user_id)
             if not identity:
@@ -102,7 +111,9 @@ class ZeroTrustManager:
 
             required_scopes: Iterable[str] = policy.get("required_scopes", [])
             user_scopes = identity["attributes"].get("scopes", [])
-            missing_scopes = [scope for scope in required_scopes if scope not in user_scopes]
+            missing_scopes = [
+                scope for scope in required_scopes if scope not in user_scopes
+            ]
             if missing_scopes:
                 return False, f"Missing scopes: {', '.join(missing_scopes)}"
 
@@ -133,7 +144,9 @@ class AdaptiveAnomalyDetector:
 
     def __init__(self, history: int = 200):
         self.history = max(20, history)
-        self.metric_windows: Dict[str, Deque[float]] = {metric: deque(maxlen=self.history) for metric in self.METRICS}
+        self.metric_windows: Dict[str, Deque[float]] = {
+            metric: deque(maxlen=self.history) for metric in self.METRICS
+        }
         self.lock = threading.Lock()
 
     def score_event(self, event: Dict[str, Any]) -> Tuple[float, List[str]]:
@@ -187,7 +200,9 @@ class AdvancedSecurityManager:
 
         rotation = int(config.get("key_rotation_seconds", 86400))
         history = int(config.get("key_history", 5))
-        self.key_manager = KeyRotationManager(rotation_interval=rotation, history_size=history)
+        self.key_manager = KeyRotationManager(
+            rotation_interval=rotation, history_size=history
+        )
 
         for identity in config.get("bootstrap_identities", []):
             user_id = identity.get("user_id")
@@ -201,7 +216,15 @@ class AdvancedSecurityManager:
             if resource:
                 self.zero_trust.upsert_policy(resource, rules)
 
-        logger.info("Advanced security controls initialised", extra={"extra_fields": {"identities": len(self.zero_trust.identity_store), "policies": len(self.zero_trust.policies)}})
+        logger.info(
+            "Advanced security controls initialised",
+            extra={
+                "extra_fields": {
+                    "identities": len(self.zero_trust.identity_store),
+                    "policies": len(self.zero_trust.policies),
+                }
+            },
+        )
 
     def process_security_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         event = dict(event)
@@ -216,8 +239,12 @@ class AdvancedSecurityManager:
                 event["user_id"], event["resource"], event["action"], event
             )
 
-        risk_score = self._calculate_risk_score(event, anomaly_score, anomaly_metrics, access_granted)
-        recommendations = self._generate_recommendations(event, anomaly_score, anomaly_metrics, access_granted)
+        risk_score = self._calculate_risk_score(
+            event, anomaly_score, anomaly_metrics, access_granted
+        )
+        recommendations = self._generate_recommendations(
+            event, anomaly_score, anomaly_metrics, access_granted
+        )
 
         assessment = {
             "event_id": f"sec_{int(time.time())}_{secrets.token_hex(4)}",
@@ -236,7 +263,13 @@ class AdvancedSecurityManager:
         if risk_score >= 0.7:
             logger.warning(
                 "High risk event detected",
-                extra={"extra_fields": {"event_id": assessment["event_id"], "metrics": anomaly_metrics, "risk_score": risk_score}}
+                extra={
+                    "extra_fields": {
+                        "event_id": assessment["event_id"],
+                        "metrics": anomaly_metrics,
+                        "risk_score": risk_score,
+                    }
+                },
             )
 
         return assessment
@@ -252,8 +285,12 @@ class AdvancedSecurityManager:
             recent_events = list(self.security_events)[-200:]
 
         total_events = len(recent_events)
-        high_risk_events = sum(1 for e in recent_events if e.get("risk_score", 0.0) >= 0.7)
-        denied_events = sum(1 for e in recent_events if not e.get("access_granted", True))
+        high_risk_events = sum(
+            1 for e in recent_events if e.get("risk_score", 0.0) >= 0.7
+        )
+        denied_events = sum(
+            1 for e in recent_events if not e.get("access_granted", True)
+        )
 
         metric_counts: Dict[str, int] = defaultdict(int)
         for event in recent_events:
@@ -266,7 +303,9 @@ class AdvancedSecurityManager:
                 "high_risk_events": high_risk_events,
                 "denied_events": denied_events,
             },
-            "frequent_anomalies": dict(sorted(metric_counts.items(), key=lambda item: item[1], reverse=True)),
+            "frequent_anomalies": dict(
+                sorted(metric_counts.items(), key=lambda item: item[1], reverse=True)
+            ),
             "recent_events": recent_events[-10:],
         }
 
@@ -316,7 +355,10 @@ class AdvancedSecurityManager:
         elif anomaly_score >= 0.4:
             recommendations.append("Increase monitoring for source identity")
 
-        if "authentication_failures" in anomaly_metrics or event.get("authentication_failures", 0) >= 5:
+        if (
+            "authentication_failures" in anomaly_metrics
+            or event.get("authentication_failures", 0) >= 5
+        ):
             recommendations.append("Evaluate account lockout policies")
 
         if "request_frequency" in anomaly_metrics:

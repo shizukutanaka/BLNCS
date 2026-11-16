@@ -3,19 +3,22 @@ Performance Optimization Module for BLNCS Enterprise
 Provides advanced caching, query optimization, and resource pooling
 """
 
-import time
-import threading
-from typing import Dict, List, Optional, Any, Callable
 import functools
-import sqlite3
+import hashlib
 import json
-from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import psutil
-import os
 import logging
+import os
+import sqlite3
+import threading
+import time
+from collections import OrderedDict, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Dict, List, Optional
+
+import psutil
 
 logger = logging.getLogger(__name__)
+
 
 class LRUCache:
     """Thread-safe LRU Cache with TTL support"""
@@ -63,6 +66,7 @@ class LRUCache:
             self.cache.clear()
             self.timestamps.clear()
 
+
 class QueryOptimizer:
     """Database query optimization utilities"""
 
@@ -86,9 +90,9 @@ class QueryOptimizer:
             # Record statistics
             with self.lock:
                 if query not in self.query_stats:
-                    self.query_stats[query] = {'count': 0, 'total_time': 0}
-                self.query_stats[query]['count'] += 1
-                self.query_stats[query]['total_time'] += execution_time
+                    self.query_stats[query] = {"count": 0, "total_time": 0}
+                self.query_stats[query]["count"] += 1
+                self.query_stats[query]["total_time"] += execution_time
 
             return cursor
 
@@ -101,8 +105,8 @@ class QueryOptimizer:
         with self.lock:
             return {
                 query: {
-                    'avg_time': stats['total_time'] / stats['count'],
-                    'count': stats['count']
+                    "avg_time": stats["total_time"] / stats["count"],
+                    "count": stats["count"],
                 }
                 for query, stats in self.query_stats.items()
             }
@@ -111,18 +115,24 @@ class QueryOptimizer:
         """Create database index if beneficial"""
         try:
             # Check if index already exists
-            cursor = self.db.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name LIKE ?", (table, f"%{column}%"))
+            cursor = self.db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name LIKE ?",
+                (table, f"%{column}%"),
+            )
             if cursor.fetchone():
                 return
 
             # Create index
             index_name = f"idx_{table}_{column}"
-            self.db.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table}({column})")
+            self.db.execute(
+                f"CREATE INDEX IF NOT EXISTS {index_name} ON {table}({column})"
+            )
             self.db.commit()
             logger.info(f"Created index {index_name}")
 
         except Exception as e:
             logger.error(f"Error creating index: {e}")
+
 
 class ConnectionPool:
     """Database connection pooling"""
@@ -180,6 +190,7 @@ class ConnectionPool:
             self.pool.clear()
             self.in_use.clear()
 
+
 class AsyncTaskManager:
     """Asynchronous task execution with resource management"""
 
@@ -193,9 +204,9 @@ class AsyncTaskManager:
         """Submit asynchronous task"""
         future = self.executor.submit(func, *args, **kwargs)
         self.tasks[task_id] = {
-            'future': future,
-            'start_time': time.time(),
-            'status': 'running'
+            "future": future,
+            "start_time": time.time(),
+            "status": "running",
         }
         return task_id
 
@@ -205,43 +216,40 @@ class AsyncTaskManager:
             raise ValueError(f"Task {task_id} not found")
 
         task_info = self.tasks[task_id]
-        future = task_info['future']
+        future = task_info["future"]
 
         try:
             result = future.result(timeout=timeout)
-            task_info['status'] = 'completed'
-            task_info['end_time'] = time.time()
+            task_info["status"] = "completed"
+            task_info["end_time"] = time.time()
             return result
         except Exception as e:
-            task_info['status'] = 'failed'
-            task_info['error'] = str(e)
+            task_info["status"] = "failed"
+            task_info["error"] = str(e)
             raise
 
     def get_task_status(self, task_id: str) -> Dict[str, Any]:
         """Get task status"""
         if task_id not in self.tasks:
-            return {'status': 'not_found'}
+            return {"status": "not_found"}
 
         task_info = self.tasks[task_id]
-        future = task_info['future']
+        future = task_info["future"]
 
-        status = {
-            'status': task_info['status'],
-            'start_time': task_info['start_time']
-        }
+        status = {"status": task_info["status"], "start_time": task_info["start_time"]}
 
-        if 'end_time' in task_info:
-            status['end_time'] = task_info['end_time']
-            status['duration'] = task_info['end_time'] - task_info['start_time']
+        if "end_time" in task_info:
+            status["end_time"] = task_info["end_time"]
+            status["duration"] = task_info["end_time"] - task_info["start_time"]
 
         if future.done():
             if future.cancelled():
-                status['status'] = 'cancelled'
+                status["status"] = "cancelled"
             elif future.exception():
-                status['status'] = 'failed'
-                status['error'] = str(future.exception())
+                status["status"] = "failed"
+                status["error"] = str(future.exception())
             else:
-                status['status'] = 'completed'
+                status["status"] = "completed"
 
         return status
 
@@ -251,11 +259,12 @@ class AsyncTaskManager:
             return False
 
         task_info = self.tasks[task_id]
-        return task_info['future'].cancel()
+        return task_info["future"].cancel()
 
     def shutdown(self, wait: bool = True):
         """Shutdown task manager"""
         self.executor.shutdown(wait=wait)
+
 
 class MemoryManager:
     """System memory monitoring and management"""
@@ -270,23 +279,26 @@ class MemoryManager:
         system_memory = psutil.virtual_memory()
 
         return {
-            'rss_mb': memory_info.rss / 1024 / 1024,  # Resident Set Size
-            'vms_mb': memory_info.vms / 1024 / 1024,  # Virtual Memory Size
-            'system_percent': system_memory.percent,
-            'system_available_mb': system_memory.available / 1024 / 1024
+            "rss_mb": memory_info.rss / 1024 / 1024,  # Resident Set Size
+            "vms_mb": memory_info.vms / 1024 / 1024,  # Virtual Memory Size
+            "system_percent": system_memory.percent,
+            "system_available_mb": system_memory.available / 1024 / 1024,
         }
 
     def log_memory_usage(self, context: str = "general"):
         """Log current memory usage"""
         memory = self.get_memory_usage()
-        logger.info(f"Memory usage ({context}): RSS={memory['rss_mb']:.1f}MB, "
-                   f"VMS={memory['vms_mb']:.1f}MB, "
-                   f"System={memory['system_percent']:.1f}%")
+        logger.info(
+            f"Memory usage ({context}): RSS={memory['rss_mb']:.1f}MB, "
+            f"VMS={memory['vms_mb']:.1f}MB, "
+            f"System={memory['system_percent']:.1f}%"
+        )
 
     def check_memory_threshold(self, threshold_mb: float = 1000) -> bool:
         """Check if memory usage exceeds threshold"""
         memory = self.get_memory_usage()
-        return memory['rss_mb'] > threshold_mb
+        return memory["rss_mb"] > threshold_mb
+
 
 class PerformanceMonitor:
     """Comprehensive performance monitoring"""
@@ -299,11 +311,9 @@ class PerformanceMonitor:
     def record_metric(self, name: str, value: float, unit: str = "ms"):
         """Record performance metric"""
         with self.lock:
-            self.metrics[name].append({
-                'value': value,
-                'unit': unit,
-                'timestamp': time.time()
-            })
+            self.metrics[name].append(
+                {"value": value, "unit": unit, "timestamp": time.time()}
+            )
 
             # Keep only last 1000 records per metric
             if len(self.metrics[name]) > 1000:
@@ -318,13 +328,13 @@ class PerformanceMonitor:
                 if not records:
                     continue
 
-                values = [r['value'] for r in records]
+                values = [r["value"] for r in records]
                 summary[name] = {
-                    'count': len(values),
-                    'avg': sum(values) / len(values),
-                    'min': min(values),
-                    'max': max(values),
-                    'latest': values[-1]
+                    "count": len(values),
+                    "avg": sum(values) / len(values),
+                    "min": min(values),
+                    "max": max(values),
+                    "latest": values[-1],
                 }
 
         return summary
@@ -333,6 +343,7 @@ class PerformanceMonitor:
         """Get system uptime in seconds"""
         return time.time() - self.start_time
 
+
 # Global performance instances
 cache_manager = LRUCache()
 query_optimizer = None
@@ -340,6 +351,7 @@ connection_pool = None
 task_manager = AsyncTaskManager()
 memory_manager = MemoryManager()
 performance_monitor = PerformanceMonitor()
+
 
 def init_performance_system(db_path: str = None):
     """Initialize performance optimization systems"""
@@ -351,8 +363,10 @@ def init_performance_system(db_path: str = None):
         query_optimizer = QueryOptimizer(conn)
         connection_pool = ConnectionPool(db_path)
 
+
 def cached(ttl_seconds: int = 3600):
     """Decorator for caching function results"""
+
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -365,11 +379,11 @@ def cached(ttl_seconds: int = 3600):
             # Try to get from cache
             result = cache_manager.get(cache_key)
             if result is not None:
-                performance_monitor.record_metric('cache_hit', 1, 'count')
+                performance_monitor.record_metric("cache_hit", 1, "count")
                 return result
 
             # Execute function and cache result
-            performance_monitor.record_metric('cache_miss', 1, 'count')
+            performance_monitor.record_metric("cache_miss", 1, "count")
             start_time = time.time()
 
             try:
@@ -377,7 +391,9 @@ def cached(ttl_seconds: int = 3600):
                 cache_manager.put(cache_key, result)
 
                 execution_time = (time.time() - start_time) * 1000
-                performance_monitor.record_metric('function_execution', execution_time, 'ms')
+                performance_monitor.record_metric(
+                    "function_execution", execution_time, "ms"
+                )
 
                 return result
             except Exception as e:
@@ -385,16 +401,22 @@ def cached(ttl_seconds: int = 3600):
                 raise e
 
         return wrapper
+
     return decorator
+
 
 def async_task(task_id: str = None):
     """Decorator for async task execution"""
+
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
+            nonlocal task_id
             if task_id is None:
                 task_id = f"{func.__name__}_{int(time.time())}"
 
             return task_manager.submit_task(task_id, func, *args, **kwargs)
+
         return wrapper
+
     return decorator

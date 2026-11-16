@@ -3,19 +3,20 @@
 言語検出、翻訳、国際化対応検索機能
 """
 
-import re
 import json
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class Language(Enum):
     """対応言語"""
+
     AUTO = "auto"
     JA = "ja"  # 日本語
     EN = "en"  # 英語
@@ -36,6 +37,7 @@ class Language(Enum):
 @dataclass
 class LanguageInfo:
     """言語情報"""
+
     code: str
     name: str
     native_name: str
@@ -54,7 +56,9 @@ class LanguageDetector:
     def _load_language_profiles(self) -> Dict[str, LanguageInfo]:
         """言語プロファイルを読み込み"""
         return {
-            "ja": LanguageInfo("ja", "Japanese", "日本語", "Han,Hiragana,Katakana", "ltr"),
+            "ja": LanguageInfo(
+                "ja", "Japanese", "日本語", "Han,Hiragana,Katakana", "ltr"
+            ),
             "en": LanguageInfo("en", "English", "English", "Latin", "ltr"),
             "zh": LanguageInfo("zh", "Chinese", "中文", "Han", "ltr"),
             "ko": LanguageInfo("ko", "Korean", "한국어", "Hangul", "ltr"),
@@ -67,7 +71,7 @@ class LanguageDetector:
             "hi": LanguageInfo("hi", "Hindi", "हिन्दी", "Devanagari", "ltr"),
             "th": LanguageInfo("th", "Thai", "ไทย", "Thai", "ltr"),
             "vi": LanguageInfo("vi", "Vietnamese", "Tiếng Việt", "Latin", "ltr"),
-            "id": LanguageInfo("id", "Indonesian", "Bahasa Indonesia", "Latin", "ltr")
+            "id": LanguageInfo("id", "Indonesian", "Bahasa Indonesia", "Latin", "ltr"),
         }
 
     def _load_character_ranges(self) -> Dict[str, List[Tuple[int, int]]]:
@@ -110,7 +114,7 @@ class LanguageDetector:
             ],
             "th": [
                 (0x0E00, 0x0E7F),  # タイ文字
-            ]
+            ],
         }
 
     def detect_language(self, text: str) -> Language:
@@ -153,31 +157,31 @@ class LanguageDetector:
     def _detect_by_patterns(self, text: str) -> Language:
         """パターンによる言語検出"""
         # 日本語のパターン
-        if re.search(r'[\u3040-\u309f\u30a0-\u30ff]', text):
+        if re.search(r"[\u3040-\u309f\u30a0-\u30ff]", text):
             return Language.JA
 
         # 中国語のパターン
-        if re.search(r'[\u4e00-\u9faf]', text):
+        if re.search(r"[\u4e00-\u9faf]", text):
             return Language.ZH
 
         # 韓国語のパターン
-        if re.search(r'[\uac00-\ud7af]', text):
+        if re.search(r"[\uac00-\ud7af]", text):
             return Language.KO
 
         # ロシア語のパターン
-        if re.search(r'[\u0400-\u04ff]', text):
+        if re.search(r"[\u0400-\u04ff]", text):
             return Language.RU
 
         # アラビア語のパターン
-        if re.search(r'[\u0600-\u06ff]', text):
+        if re.search(r"[\u0600-\u06ff]", text):
             return Language.AR
 
         # ヒンディー語のパターン
-        if re.search(r'[\u0900-\u097f]', text):
+        if re.search(r"[\u0900-\u097f]", text):
             return Language.HI
 
         # タイ語のパターン
-        if re.search(r'[\u0e00-\u0e7f]', text):
+        if re.search(r"[\u0e00-\u0e7f]", text):
             return Language.TH
 
         # 英語がデフォルト
@@ -209,7 +213,7 @@ class TranslationService:
 
         if dict_file.exists():
             try:
-                with open(dict_file, 'r', encoding='utf-8') as f:
+                with open(dict_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             except:
                 pass
@@ -220,35 +224,32 @@ class TranslationService:
                 "ja": "技術",
                 "en": "technology",
                 "zh": "技术",
-                "ko": "기술"
+                "ko": "기술",
             },
-            "search": {
-                "ja": "検索",
-                "en": "search",
-                "zh": "搜索",
-                "ko": "검색"
-            },
+            "search": {"ja": "検索", "en": "search", "zh": "搜索", "ko": "검색"},
             "artificial intelligence": {
                 "ja": "人工知能",
                 "en": "artificial intelligence",
                 "zh": "人工智能",
-                "ko": "인공 지능"
+                "ko": "인공 지능",
             },
             "machine learning": {
                 "ja": "機械学習",
                 "en": "machine learning",
                 "zh": "机器学习",
-                "ko": "기계 학습"
+                "ko": "기계 학습",
             },
             "blockchain": {
                 "ja": "ブロックチェーン",
                 "en": "blockchain",
                 "zh": "区块链",
-                "ko": "블록체인"
-            }
+                "ko": "블록체인",
+            },
         }
 
-    def translate_text(self, text: str, target_lang: Language, source_lang: Language = Language.AUTO) -> str:
+    def translate_text(
+        self, text: str, target_lang: Language, source_lang: Language = Language.AUTO
+    ) -> str:
         """
         テキストを翻訳
         Args:
@@ -274,7 +275,9 @@ class TranslationService:
 
         return translated
 
-    def _simple_translate(self, text: str, source_lang: Language, target_lang: Language) -> str:
+    def _simple_translate(
+        self, text: str, source_lang: Language, target_lang: Language
+    ) -> str:
         """簡易翻訳"""
         if source_lang == Language.AUTO:
             source_lang = LanguageDetector().detect_language(text)
@@ -292,7 +295,7 @@ class TranslationService:
         for word in words:
             # 句読点などを保持
             punctuation = ""
-            if word.endswith(('.', ',', '!', '?', ':', ';')):
+            if word.endswith((".", ",", "!", "?", ":", ";")):
                 punctuation = word[-1]
                 word = word[:-1]
 
@@ -314,7 +317,7 @@ class TranslationService:
             cache_dir = self.cache_file.parent
             cache_dir.mkdir(exist_ok=True)
 
-            with open(self.cache_file, 'w', encoding='utf-8') as f:
+            with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self.translation_cache, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Error saving translation cache: {e}")
@@ -323,7 +326,7 @@ class TranslationService:
         """キャッシュを読み込み"""
         if self.cache_file.exists():
             try:
-                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                with open(self.cache_file, "r", encoding="utf-8") as f:
                     self.translation_cache = json.load(f)
             except Exception as e:
                 logger.error(f"Error loading translation cache: {e}")
@@ -346,17 +349,82 @@ class MultilingualSearchEngine:
 
         if stopwords_file.exists():
             try:
-                with open(stopwords_file, 'r', encoding='utf-8') as f:
+                with open(stopwords_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             except:
                 pass
 
         # デフォルトのストップワード
         return {
-            "en": {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were"},
-            "ja": {"の", "は", "を", "が", "で", "に", "と", "から", "まで", "も", "か", "だ", "です", "ます"},
-            "zh": {"的", "一", "是", "在", "不", "了", "有", "和", "人", "这", "中", "大", "为", "上", "个", "国"},
-            "ko": {"의", "가", "이", "은", "를", "는", "에", "와", "과", "도", "다", "하다", "이다"}
+            "en": {
+                "the",
+                "a",
+                "an",
+                "and",
+                "or",
+                "but",
+                "in",
+                "on",
+                "at",
+                "to",
+                "for",
+                "of",
+                "with",
+                "by",
+                "is",
+                "are",
+                "was",
+                "were",
+            },
+            "ja": {
+                "の",
+                "は",
+                "を",
+                "が",
+                "で",
+                "に",
+                "と",
+                "から",
+                "まで",
+                "も",
+                "か",
+                "だ",
+                "です",
+                "ます",
+            },
+            "zh": {
+                "的",
+                "一",
+                "是",
+                "在",
+                "不",
+                "了",
+                "有",
+                "和",
+                "人",
+                "这",
+                "中",
+                "大",
+                "为",
+                "上",
+                "个",
+                "国",
+            },
+            "ko": {
+                "의",
+                "가",
+                "이",
+                "은",
+                "를",
+                "는",
+                "에",
+                "와",
+                "과",
+                "도",
+                "다",
+                "하다",
+                "이다",
+            },
         }
 
     def preprocess_text(self, text: str, language: Language) -> str:
@@ -376,17 +444,20 @@ class MultilingualSearchEngine:
         if language.value in self.stopwords:
             words = text.split()
             filtered_words = [
-                word for word in words
-                if word not in self.stopwords[language.value]
+                word for word in words if word not in self.stopwords[language.value]
             ]
             text = " ".join(filtered_words)
 
         # 特殊文字の正規化
-        text = re.sub(r'[^\w\s\u4e00-\u9faf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', ' ', text)
+        text = re.sub(
+            r"[^\w\s\u4e00-\u9faf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]", " ", text
+        )
 
         return text.strip()
 
-    def translate_search_terms(self, terms: List[str], target_language: Language) -> List[str]:
+    def translate_search_terms(
+        self, terms: List[str], target_language: Language
+    ) -> List[str]:
         """
         検索語を翻訳
         Args:
@@ -423,7 +494,9 @@ class MultilingualSearchEngine:
 
         return languages
 
-    def normalize_query(self, query: str, target_languages: List[Language]) -> Dict[Language, str]:
+    def normalize_query(
+        self, query: str, target_languages: List[Language]
+    ) -> Dict[Language, str]:
         """
         クエリを正規化
         Args:
@@ -482,7 +555,9 @@ def detect_text_language(text: str) -> Language:
     return get_language_detector().detect_language(text)
 
 
-def translate_text(text: str, target_lang: Language, source_lang: Language = Language.AUTO) -> str:
+def translate_text(
+    text: str, target_lang: Language, source_lang: Language = Language.AUTO
+) -> str:
     """テキストを翻訳（簡易関数）"""
     return get_translation_service().translate_text(text, target_lang, source_lang)
 
@@ -499,7 +574,7 @@ if __name__ == "__main__":
         "こんにちは世界",
         "你好世界",
         "안녕하세요 세계",
-        "Привет мир"
+        "Привет мир",
     ]
 
     print("Language Detection Test:")

@@ -8,22 +8,26 @@ This module provides enhanced API integration including:
 - API versioning and compatibility management
 """
 
-import json
-import time
-import logging
-from typing import Dict, List, Optional, Any, Callable, Union
-from dataclasses import dataclass, asdict
-from flask import Flask, request, jsonify, Blueprint
-import threading
-import re
-from functools import wraps
 import inspect
+import json
+import logging
+import re
+import threading
+import time
+from dataclasses import asdict, dataclass
+from functools import wraps
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
+
+from flask import Blueprint, Flask, jsonify, request
+
 
 class APIVersion:
     """API version management."""
 
-    def __init__(self, version: str, deprecated: bool = False, sunset_date: Optional[str] = None):
+    def __init__(
+        self, version: str, deprecated: bool = False, sunset_date: Optional[str] = None
+    ):
         self.version = version
         self.deprecated = deprecated
         self.sunset_date = sunset_date
@@ -31,44 +35,44 @@ class APIVersion:
 
     def add_endpoint(self, path: str, handler: Callable, methods: List[str] = None):
         """Add endpoint to this version."""
-        self.endpoints[path] = {
-            'handler': handler,
-            'methods': methods or ['GET']
-        }
+        self.endpoints[path] = {"handler": handler, "methods": methods or ["GET"]}
 
     def is_deprecated(self) -> bool:
         """Check if this version is deprecated."""
         return self.deprecated
 
+
 class APIClientLibrary:
     """Base class for API client libraries."""
 
-    def __init__(self, base_url: str, api_key: str, version: str = 'v1'):
-        self.base_url = base_url.rstrip('/')
+    def __init__(self, base_url: str, api_key: str, version: str = "v1"):
+        self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.version = version
         self.session = None
         self.logger = logging.getLogger(f"{__name__}.APIClientLibrary")
 
-    def _make_request(self, endpoint: str, method: str = 'GET', **kwargs) -> Dict[str, Any]:
+    def _make_request(
+        self, endpoint: str, method: str = "GET", **kwargs
+    ) -> Dict[str, Any]:
         """Make HTTP request with error handling."""
         import requests
 
         url = f"{self.base_url}/{self.version}{endpoint}"
         headers = {
-            'Authorization': f'Bearer {self.api_key}',
-            'Content-Type': 'application/json',
-            'User-Agent': f'BLNCS-API-Client/{self.version}'
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": f"BLNCS-API-Client/{self.version}",
         }
 
         try:
-            if method.upper() == 'GET':
+            if method.upper() == "GET":
                 response = requests.get(url, headers=headers, **kwargs)
-            elif method.upper() == 'POST':
+            elif method.upper() == "POST":
                 response = requests.post(url, headers=headers, **kwargs)
-            elif method.upper() == 'PUT':
+            elif method.upper() == "PUT":
                 response = requests.put(url, headers=headers, **kwargs)
-            elif method.upper() == 'DELETE':
+            elif method.upper() == "DELETE":
                 response = requests.delete(url, headers=headers, **kwargs)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
@@ -80,37 +84,35 @@ class APIClientLibrary:
             self.logger.error(f"API request failed: {e}")
             raise
 
+
 class BLNCSAPIClient(APIClientLibrary):
     """BLNCS API client with enhanced features."""
 
     def get_system_status(self) -> Dict[str, Any]:
         """Get system status."""
-        return self._make_request('/system/status')
+        return self._make_request("/system/status")
 
     def get_lightning_info(self) -> Dict[str, Any]:
         """Get Lightning Network information."""
-        return self._make_request('/lightning/info')
+        return self._make_request("/lightning/info")
 
     def get_performance_metrics(self) -> Dict[str, Any]:
         """Get performance metrics."""
-        return self._make_request('/performance/metrics')
+        return self._make_request("/performance/metrics")
 
     def get_security_status(self) -> Dict[str, Any]:
         """Get security status."""
-        return self._make_request('/security/status')
+        return self._make_request("/security/status")
 
     def create_channel(self, node_id: str, capacity: int, **kwargs) -> Dict[str, Any]:
         """Create a Lightning Network channel."""
-        data = {
-            'node_id': node_id,
-            'capacity': capacity,
-            **kwargs
-        }
-        return self._make_request('/lightning/channels', method='POST', json=data)
+        data = {"node_id": node_id, "capacity": capacity, **kwargs}
+        return self._make_request("/lightning/channels", method="POST", json=data)
 
     def get_channel_info(self, channel_id: str) -> Dict[str, Any]:
         """Get channel information."""
-        return self._make_request(f'/lightning/channels/{channel_id}')
+        return self._make_request(f"/lightning/channels/{channel_id}")
+
 
 class APIGateway:
     """Advanced API Gateway with routing and security."""
@@ -124,7 +126,7 @@ class APIGateway:
 
         # Default API key for demo (in production, use secure key management)
         self.api_keys = {
-            'demo_key_123': {'permissions': ['read', 'write'], 'rate_limit': 1000}
+            "demo_key_123": {"permissions": ["read", "write"], "rate_limit": 1000}
         }
 
     def add_version(self, version: APIVersion):
@@ -148,13 +150,14 @@ class APIGateway:
 
         # Simple rate limiting implementation
         user_info = self.api_keys[api_key]
-        rate_limit = user_info.get('rate_limit', 100)
+        rate_limit = user_info.get("rate_limit", 100)
 
         # In a real implementation, use Redis or similar for distributed rate limiting
         return True  # Simplified for demo
 
     def _apply_middleware(self, func: Callable) -> Callable:
         """Apply middleware to endpoint function."""
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Apply middleware in reverse order (last added first)
@@ -164,25 +167,27 @@ class APIGateway:
                     return result
 
             return func(*args, **kwargs)
+
         return wrapper
 
     def register_routes(self):
         """Register all API routes."""
         for version_name, version in self.versions.items():
             for path, endpoint_info in version.endpoints.items():
-                handler = endpoint_info['handler']
-                methods = endpoint_info['methods']
+                handler = endpoint_info["handler"]
+                methods = endpoint_info["methods"]
 
                 # Wrap handler with middleware and security
                 secured_handler = self._apply_middleware(handler)
 
                 # Register route
                 self.app.add_url_rule(
-                    f'/{version_name}{path}',
+                    f"/{version_name}{path}",
                     f'{version_name}_{path.replace("/", "_").replace("<", "").replace(">", "")}',
                     secured_handler,
-                    methods=methods
+                    methods=methods,
                 )
+
 
 class DocumentationGenerator:
     """Automatic API documentation generator."""
@@ -194,13 +199,13 @@ class DocumentationGenerator:
     def analyze_endpoint(self, path: str, handler: Callable, methods: List[str]):
         """Analyze endpoint for documentation."""
         endpoint_info = {
-            'path': path,
-            'methods': methods,
-            'handler': handler,
-            'summary': handler.__doc__ or 'No description available',
-            'parameters': self._extract_parameters(handler),
-            'responses': self._extract_responses(handler),
-            'examples': self._generate_examples(handler)
+            "path": path,
+            "methods": methods,
+            "handler": handler,
+            "summary": handler.__doc__ or "No description available",
+            "parameters": self._extract_parameters(handler),
+            "responses": self._extract_responses(handler),
+            "examples": self._generate_examples(handler),
         }
 
         self.endpoints.append(endpoint_info)
@@ -211,12 +216,16 @@ class DocumentationGenerator:
         parameters = []
 
         for param_name, param in sig.parameters.items():
-            if param_name != 'self':
+            if param_name != "self":
                 param_info = {
-                    'name': param_name,
-                    'type': str(param.annotation) if param.annotation != param.empty else 'Any',
-                    'required': param.default == param.empty,
-                    'description': 'Parameter description'  # Would be extracted from docstring
+                    "name": param_name,
+                    "type": (
+                        str(param.annotation)
+                        if param.annotation != param.empty
+                        else "Any"
+                    ),
+                    "required": param.default == param.empty,
+                    "description": "Parameter description",  # Would be extracted from docstring
                 }
                 parameters.append(param_info)
 
@@ -226,91 +235,86 @@ class DocumentationGenerator:
         """Extract response information."""
         # Simplified response extraction
         return {
-            '200': {
-                'description': 'Successful response',
-                'schema': {'type': 'object'}
-            }
+            "200": {"description": "Successful response", "schema": {"type": "object"}}
         }
 
     def _generate_examples(self, handler: Callable) -> Dict[str, Any]:
         """Generate request/response examples."""
         return {
-            'request': {'example': 'Request example'},
-            'response': {'example': 'Response example'}
+            "request": {"example": "Request example"},
+            "response": {"example": "Response example"},
         }
 
     def generate_openapi_spec(self) -> Dict[str, Any]:
         """Generate OpenAPI specification."""
         spec = {
-            'openapi': '3.0.0',
-            'info': {
-                'title': 'BLNCS API',
-                'version': '1.0.0',
-                'description': 'Bitcoin Lightning Network Control System API'
+            "openapi": "3.0.0",
+            "info": {
+                "title": "BLNCS API",
+                "version": "1.0.0",
+                "description": "Bitcoin Lightning Network Control System API",
             },
-            'paths': {},
-            'components': {
-                'schemas': self.schemas,
-                'securitySchemes': {
-                    'ApiKeyAuth': {
-                        'type': 'apiKey',
-                        'in': 'header',
-                        'name': 'Authorization'
+            "paths": {},
+            "components": {
+                "schemas": self.schemas,
+                "securitySchemes": {
+                    "ApiKeyAuth": {
+                        "type": "apiKey",
+                        "in": "header",
+                        "name": "Authorization",
                     }
-                }
-            }
+                },
+            },
         }
 
         for endpoint in self.endpoints:
             path_spec = {}
-            for method in endpoint['methods']:
+            for method in endpoint["methods"]:
                 path_spec[method.lower()] = {
-                    'summary': endpoint['summary'],
-                    'parameters': endpoint['parameters'],
-                    'responses': endpoint['responses'],
-                    'security': [{'ApiKeyAuth': []}]
+                    "summary": endpoint["summary"],
+                    "parameters": endpoint["parameters"],
+                    "responses": endpoint["responses"],
+                    "security": [{"ApiKeyAuth": []}],
                 }
 
-            spec['paths'][endpoint['path']] = path_spec
+            spec["paths"][endpoint["path"]] = path_spec
 
         return spec
 
-    def export_documentation(self, format: str = 'json') -> str:
+    def export_documentation(self, format: str = "json") -> str:
         """Export documentation in specified format."""
-        if format.lower() == 'json':
+        if format.lower() == "json":
             return json.dumps(self.generate_openapi_spec(), indent=2)
-        elif format.lower() == 'yaml':
+        elif format.lower() == "yaml":
             import yaml
+
             return yaml.dump(self.generate_openapi_spec(), default_flow_style=False)
         else:
             raise ValueError(f"Unsupported format: {format}")
 
-# API Gateway Blueprint
-api_gateway_bp = Blueprint('api_gateway', __name__)
 
-@api_gateway_bp.route('/docs')
+# API Gateway Blueprint
+api_gateway_bp = Blueprint("api_gateway", __name__)
+
+
+@api_gateway_bp.route("/docs")
 def get_api_documentation():
     """Get API documentation."""
     # This would be generated dynamically in a real implementation
-    return jsonify({'message': 'API documentation endpoint'})
+    return jsonify({"message": "API documentation endpoint"})
 
-@api_gateway_bp.route('/health')
+
+@api_gateway_bp.route("/health")
 def get_api_health():
     """Get API health status."""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': time.time(),
-        'version': '1.0.0'
-    })
+    return jsonify({"status": "healthy", "timestamp": time.time(), "version": "1.0.0"})
 
-@api_gateway_bp.route('/metrics')
+
+@api_gateway_bp.route("/metrics")
 def get_api_metrics():
     """Get API usage metrics."""
-    return jsonify({
-        'requests_total': 0,
-        'response_time_avg': 0,
-        'error_rate': 0
-    })
+    return jsonify({"requests_total": 0, "response_time_avg": 0, "error_rate": 0})
+
 
 # Client library generators for different languages
 class ClientLibraryGenerator:
@@ -318,14 +322,16 @@ class ClientLibraryGenerator:
 
     def __init__(self):
         self.templates = {
-            'python': self._python_template,
-            'javascript': self._javascript_template,
-            'java': self._java_template,
-            'go': self._go_template,
-            'rust': self._rust_template
+            "python": self._python_template,
+            "javascript": self._javascript_template,
+            "java": self._java_template,
+            "go": self._go_template,
+            "rust": self._rust_template,
         }
 
-    def generate_client_library(self, language: str, endpoints: List[Dict[str, Any]], output_dir: str):
+    def generate_client_library(
+        self, language: str, endpoints: List[Dict[str, Any]], output_dir: str
+    ):
         """Generate client library for specified language."""
         if language.lower() not in self.templates:
             raise ValueError(f"Unsupported language: {language}")
@@ -333,7 +339,9 @@ class ClientLibraryGenerator:
         template_func = self.templates[language.lower()]
         library_code = template_func(endpoints)
 
-        output_path = Path(output_dir) / f'blncs_client.{self._get_file_extension(language)}'
+        output_path = (
+            Path(output_dir) / f"blncs_client.{self._get_file_extension(language)}"
+        )
         output_path.write_text(library_code)
 
         self.logger.info(f"Generated {language} client library: {output_path}")
@@ -341,13 +349,13 @@ class ClientLibraryGenerator:
     def _get_file_extension(self, language: str) -> str:
         """Get file extension for language."""
         extensions = {
-            'python': 'py',
-            'javascript': 'js',
-            'java': 'java',
-            'go': 'go',
-            'rust': 'rs'
+            "python": "py",
+            "javascript": "js",
+            "java": "java",
+            "go": "go",
+            "rust": "rs",
         }
-        return extensions.get(language.lower(), 'txt')
+        return extensions.get(language.lower(), "txt")
 
     def _python_template(self, endpoints: List[Dict[str, Any]]) -> str:
         """Generate Python client library."""
@@ -395,7 +403,7 @@ class BLNCSClient:
     def _javascript_template(self, endpoints: List[Dict[str, Any]]) -> str:
         """Generate JavaScript client library."""
         # Simplified JavaScript template
-        return '''
+        return """
 // BLNCS API Client Library for JavaScript
 
 class BLNCSClient {
@@ -425,12 +433,12 @@ class BLNCSClient {
 
 // Export for use
 module.exports = BLNCSClient;
-'''
+"""
 
     def _java_template(self, endpoints: List[Dict[str, Any]]) -> str:
         """Generate Java client library."""
         # Simplified Java template
-        return '''
+        return """
 // BLNCS API Client Library for Java
 
 public class BLNCSClient {
@@ -444,12 +452,12 @@ public class BLNCSClient {
 
     // Implementation would include HTTP client and methods
 }
-'''
+"""
 
     def _go_template(self, endpoints: List[Dict[str, Any]]) -> str:
         """Generate Go client library."""
         # Simplified Go template
-        return '''
+        return """
 // BLNCS API Client Library for Go
 
 package main
@@ -466,12 +474,12 @@ type BLNCSClient struct {
 }
 
 // Implementation would include HTTP client and methods
-'''
+"""
 
     def _rust_template(self, endpoints: List[Dict[str, Any]]) -> str:
         """Generate Rust client library."""
         # Simplified Rust template
-        return '''
+        return """
 // BLNCS API Client Library for Rust
 
 use reqwest::Client;
@@ -483,16 +491,19 @@ pub struct BLNCSClient {
 }
 
 // Implementation would include HTTP client and methods
-'''
+"""
+
 
 def create_api_gateway(app: Flask) -> APIGateway:
     """Create and configure API gateway."""
     gateway = APIGateway(app)
 
     # Add API versions
-    v1 = APIVersion('v1')
-    v1.add_endpoint('/system/status', get_api_health, ['GET'])
-    v1.add_endpoint('/lightning/info', lambda: jsonify({'info': 'Lightning info'}), ['GET'])
+    v1 = APIVersion("v1")
+    v1.add_endpoint("/system/status", get_api_health, ["GET"])
+    v1.add_endpoint(
+        "/lightning/info", lambda: jsonify({"info": "Lightning info"}), ["GET"]
+    )
 
     gateway.add_version(v1)
 
@@ -501,15 +512,17 @@ def create_api_gateway(app: Flask) -> APIGateway:
 
     return gateway
 
+
 def generate_client_libraries(endpoints: List[Dict[str, Any]], output_dir: str):
     """Generate client libraries for multiple languages."""
     generator = ClientLibraryGenerator()
 
-    for language in ['python', 'javascript', 'java', 'go', 'rust']:
+    for language in ["python", "javascript", "java", "go", "rust"]:
         try:
             generator.generate_client_library(language, endpoints, output_dir)
         except Exception as e:
             print(f"Failed to generate {language} client: {e}")
+
 
 def setup_api_documentation(app: Flask):
     """Set up automatic API documentation."""
@@ -517,24 +530,25 @@ def setup_api_documentation(app: Flask):
 
     # Analyze existing endpoints
     for rule in app.url_map.iter_rules():
-        if rule.endpoint != 'static':
+        if rule.endpoint != "static":
             doc_generator.analyze_endpoint(
                 rule.rule,
                 app.view_functions[rule.endpoint],
-                [method for method in rule.methods if method != 'HEAD']
+                [method for method in rule.methods if method != "HEAD"],
             )
 
     # Add documentation route
-    @app.route('/api/docs')
+    @app.route("/api/docs")
     def get_docs():
         return jsonify(doc_generator.generate_openapi_spec())
 
     # Export documentation
-    docs_dir = Path('docs/api')
+    docs_dir = Path("docs/api")
     docs_dir.mkdir(exist_ok=True)
-    (docs_dir / 'openapi.json').write_text(doc_generator.export_documentation('json'))
+    (docs_dir / "openapi.json").write_text(doc_generator.export_documentation("json"))
 
     return doc_generator
+
 
 # Example usage and integration
 if __name__ == "__main__":
@@ -550,20 +564,20 @@ if __name__ == "__main__":
     # Generate client libraries
     endpoints = [
         {
-            'path': '/system/status',
-            'function_name': 'get_system_status',
-            'method': 'GET',
-            'description': 'Get system status'
+            "path": "/system/status",
+            "function_name": "get_system_status",
+            "method": "GET",
+            "description": "Get system status",
         },
         {
-            'path': '/lightning/info',
-            'function_name': 'get_lightning_info',
-            'method': 'GET',
-            'description': 'Get Lightning Network information'
-        }
+            "path": "/lightning/info",
+            "function_name": "get_lightning_info",
+            "method": "GET",
+            "description": "Get Lightning Network information",
+        },
     ]
 
-    generate_client_libraries(endpoints, 'client_libraries')
+    generate_client_libraries(endpoints, "client_libraries")
 
     print("API Gateway and client libraries setup complete!")
     print("Documentation available at: /api/docs")

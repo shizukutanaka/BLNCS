@@ -5,20 +5,21 @@ Implements Token Bucket, Leaky Bucket, and Sliding Window algorithms
 Based on 2025 research on distributed rate limiting strategies
 """
 
+import asyncio
 import logging
 import time
-import asyncio
-from typing import Dict, Optional, List, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
 from collections import defaultdict, deque
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from enum import Enum
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class RateLimitStrategy(Enum):
     """Rate limiting algorithm strategies"""
+
     TOKEN_BUCKET = "token_bucket"
     LEAKY_BUCKET = "leaky_bucket"
     SLIDING_WINDOW = "sliding_window"
@@ -28,6 +29,7 @@ class RateLimitStrategy(Enum):
 @dataclass
 class RateLimitConfig:
     """Configuration for rate limiting"""
+
     requests_per_second: float = 10.0
     burst_capacity: int = 100
     window_size_seconds: int = 60
@@ -38,6 +40,7 @@ class RateLimitConfig:
 @dataclass
 class RateLimitMetrics:
     """Metrics for rate limiting"""
+
     total_requests: int = 0
     allowed_requests: int = 0
     rejected_requests: int = 0
@@ -49,12 +52,12 @@ class RateLimitMetrics:
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
         return {
-            'total_requests': self.total_requests,
-            'allowed_requests': self.allowed_requests,
-            'rejected_requests': self.rejected_requests,
-            'current_rate': self.current_rate,
-            'rejection_rate': self.rejection_rate,
-            'avg_wait_time_ms': self.avg_wait_time_ms
+            "total_requests": self.total_requests,
+            "allowed_requests": self.allowed_requests,
+            "rejected_requests": self.rejected_requests,
+            "current_rate": self.current_rate,
+            "rejection_rate": self.rejection_rate,
+            "avg_wait_time_ms": self.avg_wait_time_ms,
         }
 
 
@@ -365,7 +368,9 @@ class RateLimiter:
             metrics.current_rate = metrics.allowed_requests / total
 
         if self.wait_times:
-            metrics.avg_wait_time_ms = (sum(self.wait_times) / len(self.wait_times)) * 1000
+            metrics.avg_wait_time_ms = (
+                sum(self.wait_times) / len(self.wait_times)
+            ) * 1000
 
     def get_metrics(self, client_id: str) -> Optional[RateLimitMetrics]:
         """Get metrics for specific client"""
@@ -398,12 +403,12 @@ class RateLimiter:
 
 
 __all__ = [
-    'RateLimitStrategy',
-    'RateLimitConfig',
-    'RateLimitMetrics',
-    'TokenBucketLimiter',
-    'LeakyBucketLimiter',
-    'SlidingWindowLimiter',
-    'FixedWindowLimiter',
-    'RateLimiter',
+    "RateLimitStrategy",
+    "RateLimitConfig",
+    "RateLimitMetrics",
+    "TokenBucketLimiter",
+    "LeakyBucketLimiter",
+    "SlidingWindowLimiter",
+    "FixedWindowLimiter",
+    "RateLimiter",
 ]

@@ -5,10 +5,15 @@ This module provides accessibility management and keyboard navigation
 for the BLNCS dashboard GUI.
 """
 
+import logging
 import tkinter as tk
 from tkinter import ttk
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
+
 from .gui_theme import AtlassianTheme
+
+logger = logging.getLogger(__name__)
+
 
 class AccessibilityManager:
     """
@@ -31,19 +36,45 @@ class AccessibilityManager:
     def _setup_global_shortcuts(self):
         """Set up global keyboard shortcuts."""
         self.shortcuts = {
-            '<Control-n>': ('New connection', None),
-            '<Control-r>': ('Refresh data', lambda: self._refresh_data()),
-            '<Control-,>': ('Open settings', self._show_settings),
-            '<F1>': ('Show help', self._show_help),
-            '<Control-q>': ('Quit application', lambda: self.root.quit()),
-            '<Control-Tab>': ('Next section', self._focus_next_section),
-            '<Control-Shift-Tab>': ('Previous section', self._focus_prev_section),
-            '<Alt-h>': ('Go to system overview', lambda: self._navigate_to_section("System Overview", self._show_system_overview)),
-            '<Alt-l>': ('Go to lightning network', lambda: self._navigate_to_section("Lightning Network", self._show_lightning_network)),
-            '<Alt-p>': ('Go to performance', lambda: self._navigate_to_section("Performance", self._show_performance)),
-            '<Alt-s>': ('Go to security', lambda: self._navigate_to_section("Security", self._show_security)),
-            '<Alt-g>': ('Go to logs', lambda: self._navigate_to_section("Logs", self._show_logs)),
-            '<Alt-d>': ('Go to diagnostics', lambda: self._navigate_to_section("Diagnostics", self._show_diagnostics)),
+            "<Control-n>": ("New connection", None),
+            "<Control-r>": ("Refresh data", lambda: self._refresh_data()),
+            "<Control-,>": ("Open settings", self._show_settings),
+            "<F1>": ("Show help", self._show_help),
+            "<Control-q>": ("Quit application", lambda: self.root.quit()),
+            "<Control-Tab>": ("Next section", self._focus_next_section),
+            "<Control-Shift-Tab>": ("Previous section", self._focus_prev_section),
+            "<Alt-h>": (
+                "Go to system overview",
+                lambda: self._navigate_to_section(
+                    "System Overview", self._show_system_overview
+                ),
+            ),
+            "<Alt-l>": (
+                "Go to lightning network",
+                lambda: self._navigate_to_section(
+                    "Lightning Network", self._show_lightning_network
+                ),
+            ),
+            "<Alt-p>": (
+                "Go to performance",
+                lambda: self._navigate_to_section(
+                    "Performance", self._show_performance
+                ),
+            ),
+            "<Alt-s>": (
+                "Go to security",
+                lambda: self._navigate_to_section("Security", self._show_security),
+            ),
+            "<Alt-g>": (
+                "Go to logs",
+                lambda: self._navigate_to_section("Logs", self._show_logs),
+            ),
+            "<Alt-d>": (
+                "Go to diagnostics",
+                lambda: self._navigate_to_section(
+                    "Diagnostics", self._show_diagnostics
+                ),
+            ),
         }
 
         # Bind global shortcuts
@@ -57,20 +88,11 @@ class AccessibilityManager:
         style = ttk.Style()
 
         # Focus indicator for buttons
-        style.map('TButton',
-            relief=[('focus', 'solid')],
-            borderwidth=[('focus', 2)]
-        )
+        style.map("TButton", relief=[("focus", "solid")], borderwidth=[("focus", 2)])
 
         # Focus indicator for entries
-        style.configure('TEntry',
-            borderwidth=1,
-            relief='solid'
-        )
-        style.map('TEntry',
-            borderwidth=[('focus', 2)],
-            relief=[('focus', 'solid')]
-        )
+        style.configure("TEntry", borderwidth=1, relief="solid")
+        style.map("TEntry", borderwidth=[("focus", 2)], relief=[("focus", "solid")])
 
     def _focus_next_section(self, event=None):
         """Move focus to next major section."""
@@ -94,7 +116,7 @@ class AccessibilityManager:
                 pass  # Widget may not support text attribute
 
         # Add to focus history when focused
-        widget.bind('<FocusIn>', lambda e: self._on_widget_focus(widget))
+        widget.bind("<FocusIn>", lambda e: self._on_widget_focus(widget))
 
     def _on_widget_focus(self, widget):
         """Handle widget focus events."""
@@ -109,7 +131,7 @@ class AccessibilityManager:
         """Get the focus history for debugging."""
         return self.focus_history
 
-    def announce_to_screen_reader(self, message, priority='polite'):
+    def announce_to_screen_reader(self, message, priority="polite"):
         """
         Announce message to screen readers and voice assistants.
 
@@ -122,7 +144,7 @@ class AccessibilityManager:
 
         # Try to use platform-specific accessibility features if available
         try:
-            if hasattr(self, '_voice_engine'):
+            if hasattr(self, "_voice_engine"):
                 self._voice_engine.say(message)
         except:
             pass
@@ -132,9 +154,10 @@ class AccessibilityManager:
         try:
             # Try to initialize voice support (e.g., pyttsx3 or similar)
             import pyttsx3
+
             self._voice_engine = pyttsx3.init()
-            self._voice_engine.setProperty('rate', 150)  # Speaking rate
-            self._voice_engine.setProperty('volume', 0.9)  # Volume
+            self._voice_engine.setProperty("rate", 150)  # Speaking rate
+            self._voice_engine.setProperty("volume", 0.9)  # Volume
             logger.info("Voice support initialized for accessibility")
         except ImportError:
             logger.warning("Voice support not available (pyttsx3 not installed)")
@@ -147,23 +170,14 @@ class AccessibilityManager:
         style = ttk.Style()
 
         # Focus indicator for buttons
-        style.map('TButton',
-            relief=[('focus', 'solid')],
-            borderwidth=[('focus', 2)]
-        )
+        style.map("TButton", relief=[("focus", "solid")], borderwidth=[("focus", 2)])
 
         # Focus indicator for entries
-        style.configure('TEntry',
-            borderwidth=1,
-            relief='solid'
-        )
-        style.map('TEntry',
-            borderwidth=[('focus', 2)],
-            relief=[('focus', 'solid')]
-        )
+        style.configure("TEntry", borderwidth=1, relief="solid")
+        style.map("TEntry", borderwidth=[("focus", 2)], relief=[("focus", "solid")])
 
         # Enhanced focus ring for better visibility
-        self._focus_ring_color = '#FFD700'  # Gold color for focus rings
+        self._focus_ring_color = "#FFD700"  # Gold color for focus rings
 
 
 class FocusRing(tk.Frame):
@@ -177,24 +191,27 @@ class FocusRing(tk.Frame):
         super().__init__(parent, **kwargs)
 
         self.focused = False
-        self.configure(bg=parent.cget('bg'), relief='flat', borderwidth=0)
+        self.configure(bg=parent.cget("bg"), relief="flat", borderwidth=0)
 
         # Bind focus events
-        self.bind('<FocusIn>', self._on_focus_in)
-        self.bind('<FocusOut>', self._on_focus_out)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
 
     def _on_focus_in(self, event):
         """Handle focus in event."""
         self.focused = True
-        self.configure(relief='solid', borderwidth=2,
-                      highlightbackground=AtlassianTheme.COLORS['primary'],
-                      highlightcolor=AtlassianTheme.COLORS['primary'])
+        self.configure(
+            relief="solid",
+            borderwidth=2,
+            highlightbackground=AtlassianTheme.COLORS["primary"],
+            highlightcolor=AtlassianTheme.COLORS["primary"],
+        )
         self._redraw_focus_ring()
 
     def _on_focus_out(self, event):
         """Handle focus out event."""
         self.focused = False
-        self.configure(relief='flat', borderwidth=0)
+        self.configure(relief="flat", borderwidth=0)
         self._redraw_focus_ring()
 
     def _redraw_focus_ring(self):
@@ -211,18 +228,18 @@ class AccessibleButton(tk.Button):
     def __init__(self, parent, accessible_name=None, shortcut=None, **kwargs):
         super().__init__(parent, **kwargs)
 
-        self.accessible_name = accessible_name or self.cget('text')
+        self.accessible_name = accessible_name or self.cget("text")
         self.shortcut = shortcut
 
         # Set accessibility attributes
         self.configure(takefocus=True)
 
         # Bind keyboard activation
-        self.bind('<Return>', lambda e: self.invoke())
-        self.bind('<space>', lambda e: self.invoke())
+        self.bind("<Return>", lambda e: self.invoke())
+        self.bind("<space>", lambda e: self.invoke())
 
         # Add shortcut hint if provided
-        if shortcut and self.cget('text'):
+        if shortcut and self.cget("text"):
             # Could add visual shortcut hint here
             pass
 
@@ -235,7 +252,7 @@ class AccessibleLabel(tk.Label):
     def __init__(self, parent, accessible_name=None, **kwargs):
         super().__init__(parent, **kwargs)
 
-        self.accessible_name = accessible_name or self.cget('text')
+        self.accessible_name = accessible_name or self.cget("text")
 
         # Labels are typically not focusable but should be associated with controls
         self.configure(takefocus=False)
@@ -256,8 +273,8 @@ class AccessibleEntry(tk.Entry):
         self.configure(takefocus=True)
 
         # Bind keyboard navigation
-        self.bind('<Tab>', self._on_tab)
-        self.bind('<Shift-Tab>', self._on_shift_tab)
+        self.bind("<Tab>", self._on_tab)
+        self.bind("<Shift-Tab>", self._on_shift_tab)
 
     def _on_tab(self, event):
         """Handle Tab key navigation."""
@@ -278,14 +295,14 @@ class KeyboardNavigationMixin:
     def setup_keyboard_navigation(self):
         """Set up keyboard navigation for the widget."""
         # Bind arrow key navigation
-        self.bind('<Up>', self._navigate_up)
-        self.bind('<Down>', self._navigate_down)
-        self.bind('<Left>', self._navigate_left)
-        self.bind('<Right>', self._navigate_right)
+        self.bind("<Up>", self._navigate_up)
+        self.bind("<Down>", self._navigate_down)
+        self.bind("<Left>", self._navigate_left)
+        self.bind("<Right>", self._navigate_right)
 
         # Bind home/end navigation
-        self.bind('<Home>', self._navigate_home)
-        self.bind('<End>', self._navigate_end)
+        self.bind("<Home>", self._navigate_home)
+        self.bind("<End>", self._navigate_end)
 
     def _navigate_up(self, event):
         """Navigate up (to be overridden by subclasses)."""
@@ -332,20 +349,24 @@ class AccessibleSidebar(tk.Frame, KeyboardNavigationMixin):
         super().setup_keyboard_navigation()
 
         # Bind additional navigation keys
-        self.bind('<Return>', self._activate_current)
-        self.bind('<space>', self._activate_current)
+        self.bind("<Return>", self._activate_current)
+        self.bind("<space>", self._activate_current)
 
     def _navigate_down(self, event):
         """Navigate to next navigation item."""
         if self.nav_buttons:
-            self.current_focus_index = (self.current_focus_index + 1) % len(self.nav_buttons)
+            self.current_focus_index = (self.current_focus_index + 1) % len(
+                self.nav_buttons
+            )
             self._focus_current_button()
         return "break"
 
     def _navigate_up(self, event):
         """Navigate to previous navigation item."""
         if self.nav_buttons:
-            self.current_focus_index = (self.current_focus_index - 1) % len(self.nav_buttons)
+            self.current_focus_index = (self.current_focus_index - 1) % len(
+                self.nav_buttons
+            )
             self._focus_current_button()
         return "break"
 

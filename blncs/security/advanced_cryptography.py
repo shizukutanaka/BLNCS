@@ -9,31 +9,35 @@ This module provides advanced cryptographic capabilities including:
 - Secure multi-party computation
 """
 
-import time
+import hashlib
 import json
 import logging
-import threading
-import secrets
-import hashlib
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, asdict
-from collections import defaultdict
 import os
+import secrets
+import threading
+import time
+from collections import defaultdict
+from dataclasses import asdict, dataclass
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class HomomorphicKey:
     """Homomorphic encryption key."""
+
     key_id: str
     key_type: str  # public, private
     scheme: str  # paillier, elgamal, etc.
     key_data: bytes
     generated_at: float
 
+
 @dataclass
 class ZeroKnowledgeProof:
     """Zero-knowledge proof."""
+
     proof_id: str
     statement: str
     proof_data: bytes
@@ -41,9 +45,11 @@ class ZeroKnowledgeProof:
     generated_at: float
     valid_until: float
 
+
 @dataclass
 class MFAChallenge:
     """Multi-factor authentication challenge."""
+
     challenge_id: str
     user_id: str
     challenge_type: str  # totp, sms, biometric, hardware_token
@@ -51,6 +57,7 @@ class MFAChallenge:
     issued_at: float
     expires_at: float
     completed: bool = False
+
 
 class HomomorphicEncryptionEngine:
     """Homomorphic encryption for privacy-preserving computation."""
@@ -60,7 +67,7 @@ class HomomorphicEncryptionEngine:
         self.keys: Dict[str, HomomorphicKey] = {}
         self.encryption_cache = {}
 
-    def generate_keypair(self, scheme: str = 'paillier', key_size: int = 2048) -> str:
+    def generate_keypair(self, scheme: str = "paillier", key_size: int = 2048) -> str:
         """Generate homomorphic encryption keypair."""
         key_id = f"he_key_{scheme}_{int(time.time())}"
 
@@ -70,18 +77,18 @@ class HomomorphicEncryptionEngine:
 
         public_key_obj = HomomorphicKey(
             key_id=f"{key_id}_public",
-            key_type='public',
+            key_type="public",
             scheme=scheme,
             key_data=public_key,
-            generated_at=time.time()
+            generated_at=time.time(),
         )
 
         private_key_obj = HomomorphicKey(
             key_id=f"{key_id}_private",
-            key_type='private',
+            key_type="private",
             scheme=scheme,
             key_data=private_key,
-            generated_at=time.time()
+            generated_at=time.time(),
         )
 
         self.keys[public_key_obj.key_id] = public_key_obj
@@ -102,7 +109,9 @@ class HomomorphicEncryptionEngine:
         self.logger.info(f"Encrypted number with key: {public_key_id}")
         return encrypted
 
-    def add_encrypted(self, public_key_id: str, encrypted1: bytes, encrypted2: bytes) -> bytes:
+    def add_encrypted(
+        self, public_key_id: str, encrypted1: bytes, encrypted2: bytes
+    ) -> bytes:
         """Add two encrypted numbers homomorphically."""
         # Simulate homomorphic addition
         combined = hashlib.sha256(encrypted1 + encrypted2).digest()
@@ -123,6 +132,7 @@ class HomomorphicEncryptionEngine:
         # Simple mock: return a number based on hash
         return int(decrypted_hash[:8], 16) % 1000000
 
+
 class ZeroKnowledgeProofSystem:
     """Zero-knowledge proof system."""
 
@@ -131,7 +141,9 @@ class ZeroKnowledgeProofSystem:
         self.proofs: Dict[str, ZeroKnowledgeProof] = {}
         self.verification_cache = {}
 
-    def generate_proof(self, statement: str, secret_data: Dict[str, Any], validity_period: int = 3600) -> str:
+    def generate_proof(
+        self, statement: str, secret_data: Dict[str, Any], validity_period: int = 3600
+    ) -> str:
         """Generate zero-knowledge proof."""
         proof_id = f"zkp_{int(time.time())}_{secrets.token_hex(4)}"
 
@@ -145,7 +157,7 @@ class ZeroKnowledgeProofSystem:
             proof_data=proof_data,
             verifier_data=verifier_data,
             generated_at=time.time(),
-            valid_until=time.time() + validity_period
+            valid_until=time.time() + validity_period,
         )
 
         self.proofs[proof_id] = proof
@@ -166,16 +178,20 @@ class ZeroKnowledgeProofSystem:
         # Simulate verification (in real implementation, use actual ZKP verification)
         # For demo, assume 90% success rate
         import random
+
         is_valid = random.random() > 0.1
 
         if is_valid:
             self.verification_cache[proof_id] = {
-                'verified_at': time.time(),
-                'verification_data': verification_data
+                "verified_at": time.time(),
+                "verification_data": verification_data,
             }
 
-        self.logger.info(f"Proof verification result for {proof_id}: {'valid' if is_valid else 'invalid'}")
+        self.logger.info(
+            f"Proof verification result for {proof_id}: {'valid' if is_valid else 'invalid'}"
+        )
         return is_valid
+
 
 class MultiFactorAuthentication:
     """Multi-factor authentication with biometric integration."""
@@ -184,7 +200,7 @@ class MultiFactorAuthentication:
         self.logger = logging.getLogger(f"{__name__}.MultiFactorAuthentication")
         self.active_challenges: Dict[str, MFAChallenge] = {}
         self.mfa_sessions = defaultdict(list)
-        self.supported_factors = ['totp', 'sms', 'biometric', 'hardware_token', 'email']
+        self.supported_factors = ["totp", "sms", "biometric", "hardware_token", "email"]
 
     def initiate_mfa_challenge(self, user_id: str, factors: List[str]) -> List[str]:
         """Initiate MFA challenges."""
@@ -202,25 +218,36 @@ class MultiFactorAuthentication:
                 challenge_type=factor,
                 challenge_data=self._generate_challenge_data(factor),
                 issued_at=time.time(),
-                expires_at=time.time() + 300  # 5 minutes
+                expires_at=time.time() + 300,  # 5 minutes
             )
 
             self.active_challenges[challenge_id] = challenge
             challenge_ids.append(challenge_id)
 
-        self.logger.info(f"Initiated MFA challenges for {user_id}: {len(challenge_ids)} factors")
+        self.logger.info(
+            f"Initiated MFA challenges for {user_id}: {len(challenge_ids)} factors"
+        )
         return challenge_ids
 
     def _generate_challenge_data(self, factor_type: str) -> Dict[str, Any]:
         """Generate challenge data for factor type."""
-        if factor_type == 'totp':
-            return {'secret': secrets.token_hex(16), 'counter': 0}
-        elif factor_type == 'sms':
-            return {'phone_number': '+1234567890', 'verification_code': secrets.token_hex(3)}
-        elif factor_type == 'biometric':
-            return {'biometric_type': 'fingerprint', 'template_hash': secrets.token_hex(32)}
-        elif factor_type == 'hardware_token':
-            return {'token_id': secrets.token_hex(8), 'challenge': secrets.token_hex(16)}
+        if factor_type == "totp":
+            return {"secret": secrets.token_hex(16), "counter": 0}
+        elif factor_type == "sms":
+            return {
+                "phone_number": "+1234567890",
+                "verification_code": secrets.token_hex(3),
+            }
+        elif factor_type == "biometric":
+            return {
+                "biometric_type": "fingerprint",
+                "template_hash": secrets.token_hex(32),
+            }
+        elif factor_type == "hardware_token":
+            return {
+                "token_id": secrets.token_hex(8),
+                "challenge": secrets.token_hex(16),
+            }
         else:
             return {}
 
@@ -239,28 +266,35 @@ class MultiFactorAuthentication:
 
         if is_valid:
             challenge.completed = True
-            self.mfa_sessions[challenge.user_id].append({
-                'challenge_id': challenge_id,
-                'completed_at': time.time(),
-                'factor_type': challenge.challenge_type
-            })
+            self.mfa_sessions[challenge.user_id].append(
+                {
+                    "challenge_id": challenge_id,
+                    "completed_at": time.time(),
+                    "factor_type": challenge.challenge_type,
+                }
+            )
 
-        self.logger.info(f"MFA verification result for {challenge_id}: {'valid' if is_valid else 'invalid'}")
+        self.logger.info(
+            f"MFA verification result for {challenge_id}: {'valid' if is_valid else 'invalid'}"
+        )
         return is_valid
 
-    def _verify_factor_response(self, factor_type: str, response: Dict[str, Any]) -> bool:
+    def _verify_factor_response(
+        self, factor_type: str, response: Dict[str, Any]
+    ) -> bool:
         """Verify response for specific factor."""
         # Simplified verification (in real implementation, use actual MFA verification)
-        if factor_type == 'totp':
-            return response.get('code') == '123456'
-        elif factor_type == 'sms':
-            return response.get('code') == '789'
-        elif factor_type == 'biometric':
-            return response.get('match_score', 0) > 0.8
-        elif factor_type == 'hardware_token':
-            return response.get('signature') is not None
+        if factor_type == "totp":
+            return response.get("code") == "123456"
+        elif factor_type == "sms":
+            return response.get("code") == "789"
+        elif factor_type == "biometric":
+            return response.get("match_score", 0) > 0.8
+        elif factor_type == "hardware_token":
+            return response.get("signature") is not None
         else:
             return False
+
 
 class SecureMultiPartyComputation:
     """Secure multi-party computation."""
@@ -270,18 +304,20 @@ class SecureMultiPartyComputation:
         self.computation_sessions = {}
         self.participant_shares = defaultdict(dict)
 
-    def initiate_computation(self, computation_type: str, participants: List[str], input_data: Dict[str, Any]) -> str:
+    def initiate_computation(
+        self, computation_type: str, participants: List[str], input_data: Dict[str, Any]
+    ) -> str:
         """Initiate secure multi-party computation."""
         session_id = f"smpc_{int(time.time())}_{secrets.token_hex(4)}"
 
         session = {
-            'session_id': session_id,
-            'computation_type': computation_type,
-            'participants': participants,
-            'status': 'initializing',
-            'input_data': input_data,
-            'started_at': time.time(),
-            'results': None
+            "session_id": session_id,
+            "computation_type": computation_type,
+            "participants": participants,
+            "status": "initializing",
+            "input_data": input_data,
+            "started_at": time.time(),
+            "results": None,
         }
 
         self.computation_sessions[session_id] = session
@@ -291,7 +327,7 @@ class SecureMultiPartyComputation:
             share = self._generate_secret_share(input_data)
             self.participant_shares[session_id][participant] = share
 
-        session['status'] = 'shares_distributed'
+        session["status"] = "shares_distributed"
 
         self.logger.info(f"Initiated SMPC session: {session_id}")
         return session_id
@@ -303,35 +339,46 @@ class SecureMultiPartyComputation:
         for key, value in data.items():
             # Simple XOR-based sharing (not secure, for demo only)
             share_key = secrets.token_bytes(16)
-            share_value = bytes(a ^ b for a, b in zip(str(value).encode(), share_key[:len(str(value).encode())]))
-            share[key] = {'key': share_key, 'value': share_value}
+            share_value = bytes(
+                a ^ b
+                for a, b in zip(
+                    str(value).encode(), share_key[: len(str(value).encode())]
+                )
+            )
+            share[key] = {"key": share_key, "value": share_value}
 
         return share
 
-    def submit_computation_share(self, session_id: str, participant_id: str, computation_result: Dict[str, Any]) -> bool:
+    def submit_computation_share(
+        self, session_id: str, participant_id: str, computation_result: Dict[str, Any]
+    ) -> bool:
         """Submit computation share from participant."""
         if session_id not in self.computation_sessions:
             return False
 
         session = self.computation_sessions[session_id]
 
-        if participant_id not in session['participants']:
+        if participant_id not in session["participants"]:
             return False
 
         # Store participant result
-        if 'participant_results' not in session:
-            session['participant_results'] = {}
+        if "participant_results" not in session:
+            session["participant_results"] = {}
 
-        session['participant_results'][participant_id] = computation_result
+        session["participant_results"][participant_id] = computation_result
 
         # Check if all participants have submitted
-        if len(session['participant_results']) == len(session['participants']):
-            session['status'] = 'computing_final_result'
-            session['results'] = self._combine_computation_results(session['participant_results'])
+        if len(session["participant_results"]) == len(session["participants"]):
+            session["status"] = "computing_final_result"
+            session["results"] = self._combine_computation_results(
+                session["participant_results"]
+            )
 
         return True
 
-    def _combine_computation_results(self, participant_results: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def _combine_computation_results(
+        self, participant_results: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """Combine results from all participants."""
         # Simulate result combination (in real implementation, use actual MPC protocols)
         combined = {}
@@ -352,6 +399,7 @@ class SecureMultiPartyComputation:
 
         return final_results
 
+
 class AdvancedCryptographyManager:
     """Main advanced cryptography management system."""
 
@@ -371,7 +419,9 @@ class AdvancedCryptographyManager:
             return
 
         self.crypto_operations_active = True
-        self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
+        self.monitoring_thread = threading.Thread(
+            target=self._monitoring_loop, daemon=True
+        )
         self.monitoring_thread.start()
         self.logger.info("Advanced cryptography monitoring started")
 
@@ -390,7 +440,8 @@ class AdvancedCryptographyManager:
                 current_time = time.time()
 
                 expired_keys = [
-                    key_id for key_id, key in self.homomorphic_engine.keys.items()
+                    key_id
+                    for key_id, key in self.homomorphic_engine.keys.items()
                     if key.generated_at + 3600 < current_time  # 1 hour expiry
                 ]
 
@@ -400,7 +451,8 @@ class AdvancedCryptographyManager:
 
                 # Monitor proof expiration
                 expired_proofs = [
-                    proof_id for proof_id, proof in self.zkp_system.proofs.items()
+                    proof_id
+                    for proof_id, proof in self.zkp_system.proofs.items()
                     if proof.valid_until < current_time
                 ]
 
@@ -414,30 +466,41 @@ class AdvancedCryptographyManager:
                 self.logger.error(f"Cryptography monitoring error: {e}")
                 time.sleep(300)
 
-    def generate_homomorphic_keypair(self, scheme: str = 'paillier') -> str:
+    def generate_homomorphic_keypair(self, scheme: str = "paillier") -> str:
         """Generate homomorphic encryption keypair."""
         return self.homomorphic_engine.generate_keypair(scheme)
 
-    def perform_homomorphic_computation(self, public_key_id: str, numbers: List[int]) -> bytes:
+    def perform_homomorphic_computation(
+        self, public_key_id: str, numbers: List[int]
+    ) -> bytes:
         """Perform homomorphic computation on encrypted numbers."""
         if not numbers:
             raise ValueError("No numbers provided for computation")
 
         # Encrypt all numbers
-        encrypted_numbers = [self.homomorphic_engine.encrypt_number(public_key_id, num) for num in numbers]
+        encrypted_numbers = [
+            self.homomorphic_engine.encrypt_number(public_key_id, num)
+            for num in numbers
+        ]
 
         # Perform addition (as an example)
         result = encrypted_numbers[0]
         for enc_num in encrypted_numbers[1:]:
-            result = self.homomorphic_engine.add_encrypted(public_key_id, result, enc_num)
+            result = self.homomorphic_engine.add_encrypted(
+                public_key_id, result, enc_num
+            )
 
         return result
 
-    def generate_zero_knowledge_proof(self, statement: str, secret_data: Dict[str, Any]) -> str:
+    def generate_zero_knowledge_proof(
+        self, statement: str, secret_data: Dict[str, Any]
+    ) -> str:
         """Generate zero-knowledge proof."""
         return self.zkp_system.generate_proof(statement, secret_data)
 
-    def verify_zero_knowledge_proof(self, proof_id: str, verification_data: Dict[str, Any]) -> bool:
+    def verify_zero_knowledge_proof(
+        self, proof_id: str, verification_data: Dict[str, Any]
+    ) -> bool:
         """Verify zero-knowledge proof."""
         return self.zkp_system.verify_proof(proof_id, verification_data)
 
@@ -449,24 +512,30 @@ class AdvancedCryptographyManager:
         """Verify MFA response."""
         return self.mfa_system.verify_mfa_response(challenge_id, response)
 
-    def initiate_secure_computation(self, computation_type: str, participants: List[str], input_data: Dict[str, Any]) -> str:
+    def initiate_secure_computation(
+        self, computation_type: str, participants: List[str], input_data: Dict[str, Any]
+    ) -> str:
         """Initiate secure multi-party computation."""
-        return self.smpc_engine.initiate_computation(computation_type, participants, input_data)
+        return self.smpc_engine.initiate_computation(
+            computation_type, participants, input_data
+        )
 
     def get_crypto_status(self) -> Dict[str, Any]:
         """Get advanced cryptography status."""
         return {
-            'monitoring_active': self.crypto_operations_active,
-            'homomorphic_keys': len(self.homomorphic_engine.keys),
-            'zkp_proofs': len(self.zkp_system.proofs),
-            'active_mfa_challenges': len(self.mfa_system.active_challenges),
-            'smpc_sessions': len(self.smpc_engine.computation_sessions),
-            'supported_mfa_factors': self.mfa_system.supported_factors
+            "monitoring_active": self.crypto_operations_active,
+            "homomorphic_keys": len(self.homomorphic_engine.keys),
+            "zkp_proofs": len(self.zkp_system.proofs),
+            "active_mfa_challenges": len(self.mfa_system.active_challenges),
+            "smpc_sessions": len(self.smpc_engine.computation_sessions),
+            "supported_mfa_factors": self.mfa_system.supported_factors,
         }
+
 
 def create_advanced_cryptography_manager() -> AdvancedCryptographyManager:
     """Factory function to create advanced cryptography manager."""
     return AdvancedCryptographyManager()
+
 
 # Example usage
 if __name__ == "__main__":
@@ -477,27 +546,32 @@ if __name__ == "__main__":
     crypto_manager.start_crypto_monitoring()
 
     # Generate homomorphic keypair
-    keypair_id = crypto_manager.generate_homomorphic_keypair('paillier')
+    keypair_id = crypto_manager.generate_homomorphic_keypair("paillier")
     print(f"Generated homomorphic keypair: {keypair_id}")
 
     # Perform homomorphic computation
     numbers = [10, 20, 30, 40]
-    encrypted_result = crypto_manager.perform_homomorphic_computation(f"{keypair_id}_public", numbers)
+    encrypted_result = crypto_manager.perform_homomorphic_computation(
+        f"{keypair_id}_public", numbers
+    )
     print(f"Homomorphic computation result: {len(encrypted_result)} bytes")
 
     # Decrypt result (simplified for demo)
-    decrypted = crypto_manager.homomorphic_engine.decrypt_number(f"{keypair_id}_private", encrypted_result)
+    decrypted = crypto_manager.homomorphic_engine.decrypt_number(
+        f"{keypair_id}_private", encrypted_result
+    )
     print(f"Decrypted result: {decrypted}")
 
     # Generate zero-knowledge proof
     proof_id = crypto_manager.generate_zero_knowledge_proof(
-        "I know a value greater than 100",
-        {"secret_value": 150}
+        "I know a value greater than 100", {"secret_value": 150}
     )
     print(f"Generated ZKP: {proof_id}")
 
     # Verify proof
-    is_valid = crypto_manager.verify_zero_knowledge_proof(proof_id, {"verification_context": "test"})
+    is_valid = crypto_manager.verify_zero_knowledge_proof(
+        proof_id, {"verification_context": "test"}
+    )
     print(f"Proof verification: {'valid' if is_valid else 'invalid'}")
 
     # Initiate MFA
@@ -513,7 +587,7 @@ if __name__ == "__main__":
     smpc_session = crypto_manager.initiate_secure_computation(
         "average_calculation",
         ["participant_1", "participant_2", "participant_3"],
-        {"values": [10, 20, 30]}
+        {"values": [10, 20, 30]},
     )
     print(f"Initiated SMPC session: {smpc_session}")
 

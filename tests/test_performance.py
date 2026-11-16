@@ -2,15 +2,15 @@
 Performance and Integration Tests for BLNCS
 """
 
-import unittest
-import time
-import threading
-from concurrent.futures import ThreadPoolExecutor
-import tempfile
 import os
 import sys
+import tempfile
+import threading
+import time
+import unittest
+from concurrent.futures import ThreadPoolExecutor
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
 class TestPerformance(unittest.TestCase):
@@ -37,15 +37,16 @@ class TestPerformance(unittest.TestCase):
 
             # Check statistics
             stats = pool.get_stats()
-            self.assertGreater(stats['total_requests'], 0)
-            self.assertGreaterEqual(stats['cache_hit_rate'], 0)
+            self.assertGreater(stats["total_requests"], 0)
+            self.assertGreaterEqual(stats["cache_hit_rate"], 0)
 
             pool.close_all()
 
     def test_transaction_manager(self):
         """Test transaction support"""
-        from blncs.core.transaction import TransactionManager
         import sqlite3
+
+        from blncs.core.transaction import TransactionManager
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
@@ -75,19 +76,17 @@ class TestPerformance(unittest.TestCase):
 
             # Check statistics
             stats = manager.get_stats()
-            self.assertEqual(stats['committed'], 1)
-            self.assertEqual(stats['rolled_back'], 1)
+            self.assertEqual(stats["committed"], 1)
+            self.assertEqual(stats["rolled_back"], 1)
 
             conn.close()
 
     def test_rate_limiter(self):
         """Test rate limiting"""
-        from blncs.core.rate_limit import RateLimiter, RateLimitConfig
+        from blncs.core.rate_limit import RateLimitConfig, RateLimiter
 
         config = RateLimitConfig(
-            requests_per_second=5,
-            requests_per_minute=100,
-            burst_size=10
+            requests_per_second=5, requests_per_minute=100, burst_size=10
         )
         limiter = RateLimiter(config)
 
@@ -102,15 +101,15 @@ class TestPerformance(unittest.TestCase):
         # Test per-client limiting
         client_allowed = 0
         for _ in range(10):
-            if limiter.check_rate_limit('client1'):
+            if limiter.check_rate_limit("client1"):
                 client_allowed += 1
 
         self.assertGreater(client_allowed, 0)
 
         # Check statistics
         stats = limiter.get_stats()
-        self.assertIn('total_allowed', stats)
-        self.assertIn('total_blocked', stats)
+        self.assertIn("total_allowed", stats)
+        self.assertIn("total_blocked", stats)
 
     def test_cache_performance(self):
         """Test cache performance with concurrent access"""
@@ -135,8 +134,9 @@ class TestPerformance(unittest.TestCase):
 
     def test_batch_operations(self):
         """Test batch database operations"""
-        from blncs.core.transaction import batch_execute
         import sqlite3
+
+        from blncs.core.transaction import batch_execute
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
@@ -159,5 +159,5 @@ class TestPerformance(unittest.TestCase):
             conn.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -3,23 +3,24 @@
 イベントストアとCQRSパターン機能を提供
 """
 
-import time
+import asyncio
 import json
+import logging
+import queue
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable, Generator
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
-import asyncio
-import queue
-from collections import defaultdict, deque
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class EventType(Enum):
     """イベントタイプ"""
+
     USER_CREATED = "user_created"
     USER_UPDATED = "user_updated"
     USER_DELETED = "user_deleted"
@@ -33,6 +34,7 @@ class EventType(Enum):
 
 class AggregateType(Enum):
     """集約タイプ"""
+
     USER = "user"
     ORDER = "order"
     PRODUCT = "product"
@@ -43,6 +45,7 @@ class AggregateType(Enum):
 @dataclass
 class DomainEvent:
     """ドメインイベント情報"""
+
     event_id: str
     event_type: EventType
     aggregate_id: str
@@ -58,6 +61,7 @@ class DomainEvent:
 @dataclass
 class EventStream:
     """イベントストリーム情報"""
+
     stream_id: str
     aggregate_id: str
     aggregate_type: AggregateType
@@ -70,6 +74,7 @@ class EventStream:
 @dataclass
 class ReadModel:
     """読み取りモデル情報"""
+
     model_id: str
     model_type: str
     aggregate_id: str
@@ -144,16 +149,26 @@ class EventStore:
         try:
             # イベントをデータベースに保存
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO events
                     (event_id, event_type, aggregate_id, aggregate_type, event_data, timestamp,
                      version, metadata, correlation_id, causation_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    event.event_id, event.event_type.value, event.aggregate_id,
-                    event.aggregate_type.value, json.dumps(event.event_data), event.timestamp,
-                    event.version, json.dumps(event.metadata), event.correlation_id, event.causation_id
-                ))
+                """,
+                    (
+                        event.event_id,
+                        event.event_type.value,
+                        event.aggregate_id,
+                        event.aggregate_type.value,
+                        json.dumps(event.event_data),
+                        event.timestamp,
+                        event.version,
+                        json.dumps(event.metadata),
+                        event.correlation_id,
+                        event.causation_id,
+                    ),
+                )
                 conn.commit()
 
             # イベントストリームを更新または作成
@@ -163,7 +178,7 @@ class EventStore:
                 self.event_streams[stream_id] = EventStream(
                     stream_id=stream_id,
                     aggregate_id=event.aggregate_id,
-                    aggregate_type=event.aggregate_type
+                    aggregate_type=event.aggregate_type,
                 )
 
             stream = self.event_streams[stream_id]
@@ -173,14 +188,21 @@ class EventStore:
 
             # イベントストリーム情報を更新
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO event_streams
                     (stream_id, aggregate_id, aggregate_type, current_version, created_at, last_updated)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    stream_id, event.aggregate_id, event.aggregate_type.value,
-                    event.version, stream.created_at, stream.last_updated
-                ))
+                """,
+                    (
+                        stream_id,
+                        event.aggregate_id,
+                        event.aggregate_type.value,
+                        event.version,
+                        stream.created_at,
+                        stream.last_updated,
+                    ),
+                )
                 conn.commit()
 
             # イベントハンドラを実行
@@ -190,15 +212,18 @@ class EventStore:
                 except Exception as e:
                     logger.error(f"イベントハンドラエラー: {e}")
 
-            logger.info(f"イベント追加: {event.event_type.value} - {event.aggregate_id}")
+            logger.info(
+                f"イベント追加: {event.event_type.value} - {event.aggregate_id}"
+            )
             return True
 
         except Exception as e:
             logger.error(f"イベント追加エラー: {e}")
             return False
 
-    def get_events_for_aggregate(self, aggregate_id: str, aggregate_type: AggregateType,
-                               from_version: int = 0) -> List[DomainEvent]:
+    def get_events_for_aggregate(
+        self, aggregate_id: str, aggregate_type: AggregateType, from_version: int = 0
+    ) -> List[DomainEvent]:
         """
         集約のイベントを取得
         Args:
@@ -210,13 +235,16 @@ class EventStore:
         """
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT event_id, event_type, aggregate_id, aggregate_type, event_data,
                            timestamp, version, metadata, correlation_id, causation_id
                     FROM events
                     WHERE aggregate_id = ? AND aggregate_type = ? AND version > ?
                     ORDER BY version ASC
-                """, (aggregate_id, aggregate_type.value, from_version))
+                """,
+                    (aggregate_id, aggregate_type.value, from_version),
+                )
 
                 events = []
                 for row in cursor.fetchall():
@@ -230,7 +258,7 @@ class EventStore:
                         version=row[6],
                         metadata=json.loads(row[7]) if row[7] else {},
                         correlation_id=row[8],
-                        causation_id=row[9]
+                        causation_id=row[9],
                     )
                     events.append(event)
 
@@ -240,7 +268,9 @@ class EventStore:
             logger.error(f"イベント取得エラー: {e}")
             return []
 
-    def get_event_stream(self, aggregate_id: str, aggregate_type: AggregateType) -> Optional[EventStream]:
+    def get_event_stream(
+        self, aggregate_id: str, aggregate_type: AggregateType
+    ) -> Optional[EventStream]:
         """
         イベントストリームを取得
         Args:
@@ -257,11 +287,14 @@ class EventStore:
         # データベースから読み込み
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT stream_id, aggregate_id, aggregate_type, current_version, created_at, last_updated
                     FROM event_streams
                     WHERE aggregate_id = ? AND aggregate_type = ?
-                """, (aggregate_id, aggregate_type.value))
+                """,
+                    (aggregate_id, aggregate_type.value),
+                )
 
                 row = cursor.fetchone()
                 if row:
@@ -271,11 +304,13 @@ class EventStore:
                         aggregate_type=AggregateType(row[2]),
                         current_version=row[3],
                         created_at=row[4],
-                        last_updated=row[5]
+                        last_updated=row[5],
                     )
 
                     # イベントを読み込み
-                    stream.events = self.get_events_for_aggregate(aggregate_id, aggregate_type)
+                    stream.events = self.get_events_for_aggregate(
+                        aggregate_id, aggregate_type
+                    )
 
                     self.event_streams[stream_id] = stream
                     return stream
@@ -294,8 +329,9 @@ class EventStore:
         """
         self.event_handlers[event_type].append(handler)
 
-    def replay_events_for_aggregate(self, aggregate_id: str, aggregate_type: AggregateType,
-                                  handler: Callable) -> int:
+    def replay_events_for_aggregate(
+        self, aggregate_id: str, aggregate_type: AggregateType, handler: Callable
+    ) -> int:
         """
         集約のイベントをリプレイ
         Args:
@@ -362,7 +398,9 @@ class CQRSManager:
         """
         self.projection_handlers[event_type] = handler
 
-    def create_read_model(self, model_type: str, aggregate_id: str, initial_data: Dict[str, Any] = None) -> str:
+    def create_read_model(
+        self, model_type: str, aggregate_id: str, initial_data: Dict[str, Any] = None
+    ) -> str:
         """
         読み取りモデルを作成
         Args:
@@ -378,21 +416,28 @@ class CQRSManager:
             model_id=model_id,
             model_type=model_type,
             aggregate_id=aggregate_id,
-            data=initial_data or {}
+            data=initial_data or {},
         )
 
         self.read_models[model_id] = read_model
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO read_models
                     (model_id, model_type, aggregate_id, data, last_updated, version)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    model_id, model_type, aggregate_id, json.dumps(read_model.data),
-                    read_model.last_updated, read_model.version
-                ))
+                """,
+                    (
+                        model_id,
+                        model_type,
+                        aggregate_id,
+                        json.dumps(read_model.data),
+                        read_model.last_updated,
+                        read_model.version,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -417,17 +462,27 @@ class CQRSManager:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE read_models
                     SET data = ?, last_updated = ?, version = ?
                     WHERE model_id = ?
-                """, (json.dumps(read_model.data), read_model.last_updated, read_model.version, model_id))
+                """,
+                    (
+                        json.dumps(read_model.data),
+                        read_model.last_updated,
+                        read_model.version,
+                        model_id,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
             logger.error(f"読み取りモデル更新エラー: {e}")
 
-    def get_read_model(self, model_type: str, aggregate_id: str) -> Optional[Dict[str, Any]]:
+    def get_read_model(
+        self, model_type: str, aggregate_id: str
+    ) -> Optional[Dict[str, Any]]:
         """
         読み取りモデルを取得
         Args:
@@ -438,16 +493,22 @@ class CQRSManager:
         """
         # メモリから検索
         for read_model in self.read_models.values():
-            if read_model.model_type == model_type and read_model.aggregate_id == aggregate_id:
+            if (
+                read_model.model_type == model_type
+                and read_model.aggregate_id == aggregate_id
+            ):
                 return read_model.data
 
         # データベースから検索
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT data FROM read_models
                     WHERE model_type = ? AND aggregate_id = ?
-                """, (model_type, aggregate_id))
+                """,
+                    (model_type, aggregate_id),
+                )
 
                 row = cursor.fetchone()
                 if row:
@@ -458,7 +519,9 @@ class CQRSManager:
 
         return None
 
-    def project_events_to_read_model(self, aggregate_id: str, aggregate_type: AggregateType, model_type: str):
+    def project_events_to_read_model(
+        self, aggregate_id: str, aggregate_type: AggregateType, model_type: str
+    ):
         """
         イベントを読み取りモデルに投影
         Args:
@@ -481,7 +544,9 @@ class CQRSManager:
                     except Exception as e:
                         logger.error(f"投影ハンドラエラー: {e}")
 
-        self.event_store.replay_events_for_aggregate(aggregate_id, aggregate_type, replay_handler)
+        self.event_store.replay_events_for_aggregate(
+            aggregate_id, aggregate_type, replay_handler
+        )
 
 
 class EventSourcingManager:
@@ -509,13 +574,16 @@ class EventSourcingManager:
 
     def _register_default_projection_handlers(self):
         """デフォルトの投影ハンドラを登録"""
+
         # ユーザー集約の投影ハンドラ
         def user_created_handler(event: DomainEvent, read_model: ReadModel):
-            read_model.data.update({
-                "user_id": event.aggregate_id,
-                "created_at": event.timestamp,
-                "status": "active"
-            })
+            read_model.data.update(
+                {
+                    "user_id": event.aggregate_id,
+                    "created_at": event.timestamp,
+                    "status": "active",
+                }
+            )
             read_model.data.update(event.event_data)
 
         def user_updated_handler(event: DomainEvent, read_model: ReadModel):
@@ -526,14 +594,26 @@ class EventSourcingManager:
             read_model.data["deleted_at"] = event.timestamp
 
         # CQRSマネージャーにハンドラを登録
-        self.cqrs_manager.register_projection_handler(EventType.USER_CREATED, user_created_handler)
-        self.cqrs_manager.register_projection_handler(EventType.USER_UPDATED, user_updated_handler)
-        self.cqrs_manager.register_projection_handler(EventType.USER_DELETED, user_deleted_handler)
+        self.cqrs_manager.register_projection_handler(
+            EventType.USER_CREATED, user_created_handler
+        )
+        self.cqrs_manager.register_projection_handler(
+            EventType.USER_UPDATED, user_updated_handler
+        )
+        self.cqrs_manager.register_projection_handler(
+            EventType.USER_DELETED, user_deleted_handler
+        )
 
         # イベントストアのイベントハンドラとして登録
-        self.event_store.register_event_handler(EventType.USER_CREATED, lambda e: self._handle_event_for_cqrs(e))
-        self.event_store.register_event_handler(EventType.USER_UPDATED, lambda e: self._handle_event_for_cqrs(e))
-        self.event_store.register_event_handler(EventType.USER_DELETED, lambda e: self._handle_event_for_cqrs(e))
+        self.event_store.register_event_handler(
+            EventType.USER_CREATED, lambda e: self._handle_event_for_cqrs(e)
+        )
+        self.event_store.register_event_handler(
+            EventType.USER_UPDATED, lambda e: self._handle_event_for_cqrs(e)
+        )
+        self.event_store.register_event_handler(
+            EventType.USER_DELETED, lambda e: self._handle_event_for_cqrs(e)
+        )
 
     def _handle_event_for_cqrs(self, event: DomainEvent):
         """CQRSのためのイベント処理"""
@@ -554,9 +634,9 @@ class EventSourcingManager:
                 event_data={
                     "username": "testuser",
                     "email": "test@example.com",
-                    "role": "user"
+                    "role": "user",
                 },
-                version=i+1
+                version=i + 1,
             )
             for i in range(3)  # 3つのイベントを作成
         ]
@@ -575,9 +655,14 @@ class EventSourcingManager:
         self.is_event_sourcing_active = False
         logger.info("イベントソーシングシステムを停止しました")
 
-    def emit_domain_event(self, event_type: EventType, aggregate_id: str,
-                         aggregate_type: AggregateType, event_data: Dict[str, Any],
-                         correlation_id: Optional[str] = None) -> str:
+    def emit_domain_event(
+        self,
+        event_type: EventType,
+        aggregate_id: str,
+        aggregate_type: AggregateType,
+        event_data: Dict[str, Any],
+        correlation_id: Optional[str] = None,
+    ) -> str:
         """
         ドメインイベントを発行
         Args:
@@ -600,13 +685,15 @@ class EventSourcingManager:
             aggregate_type=aggregate_type,
             event_data=event_data,
             version=current_version,
-            correlation_id=correlation_id
+            correlation_id=correlation_id,
         )
 
         success = self.event_store.append_event(event)
         return event.event_id if success else None
 
-    def get_aggregate_state(self, aggregate_id: str, aggregate_type: AggregateType) -> Dict[str, Any]:
+    def get_aggregate_state(
+        self, aggregate_id: str, aggregate_type: AggregateType
+    ) -> Dict[str, Any]:
         """
         集約の状態を取得
         Args:
@@ -625,7 +712,9 @@ class EventSourcingManager:
 
         return state
 
-    def get_read_model(self, model_type: str, aggregate_id: str) -> Optional[Dict[str, Any]]:
+    def get_read_model(
+        self, model_type: str, aggregate_id: str
+    ) -> Optional[Dict[str, Any]]:
         """
         読み取りモデルを取得
         Args:
@@ -640,10 +729,16 @@ class EventSourcingManager:
         """イベントソーシングシステムステータスを取得"""
         return {
             "is_active": self.is_event_sourcing_active,
-            "total_events": len([e for stream in self.event_store.event_streams.values() for e in stream.events]),
+            "total_events": len(
+                [
+                    e
+                    for stream in self.event_store.event_streams.values()
+                    for e in stream.events
+                ]
+            ),
             "total_streams": len(self.event_store.event_streams),
             "total_read_models": len(self.cqrs_manager.read_models),
-            "event_handlers": len(self.event_store.event_handlers)
+            "event_handlers": len(self.event_store.event_handlers),
         }
 
 
@@ -662,11 +757,7 @@ def example_usage():
         EventType.USER_CREATED,
         "user_456",
         AggregateType.USER,
-        {
-            "username": "newuser",
-            "email": "newuser@example.com",
-            "role": "premium"
-        }
+        {"username": "newuser", "email": "newuser@example.com", "role": "premium"},
     )
 
     print(f"イベント発行: {event_id}")

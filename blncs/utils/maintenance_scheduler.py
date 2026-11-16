@@ -12,36 +12,44 @@ This module provides comprehensive maintenance automation:
 - Automated security updates and patches
 """
 
-import os
-import sys
-import time
+import gc
+import glob
+import gzip
 import json
 import logging
-import threading
-import subprocess
+import os
+
 # import schedule  # Optional dependency
 import shutil
-import gzip
-from typing import Dict, List, Any, Optional, Callable, Set
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from enum import Enum
 import sqlite3
-import glob
+import subprocess
+import sys
 import tempfile
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set
 
-
-DEFAULT_LOG_DIR = os.environ.get("BLNCS_MAINTENANCE_LOG_DIR", "/var/log/blncs/maintenance")
-DEFAULT_DB_PATH = os.environ.get("BLNCS_MAINTENANCE_DB", "/var/lib/blncs/maintenance.db")
+DEFAULT_LOG_DIR = os.environ.get(
+    "BLNCS_MAINTENANCE_LOG_DIR", "/var/log/blncs/maintenance"
+)
+DEFAULT_DB_PATH = os.environ.get(
+    "BLNCS_MAINTENANCE_DB", "/var/lib/blncs/maintenance.db"
+)
 
 try:
     import psutil
+
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
 
+
 class MaintenanceType(Enum):
     """Types of maintenance tasks"""
+
     SYSTEM_CLEANUP = "system_cleanup"
     DATABASE_OPTIMIZATION = "database_optimization"
     LOG_ROTATION = "log_rotation"
@@ -51,24 +59,30 @@ class MaintenanceType(Enum):
     HEALTH_CHECK = "health_check"
     CACHE_CLEANUP = "cache_cleanup"
 
+
 class MaintenancePriority(Enum):
     """Maintenance task priority levels"""
+
     LOW = 1
     NORMAL = 2
     HIGH = 3
     CRITICAL = 4
 
+
 class TaskStatus(Enum):
     """Maintenance task status"""
+
     SCHEDULED = "scheduled"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
 
+
 @dataclass
 class MaintenanceTask:
     """Maintenance task definition"""
+
     task_id: str
     name: str
     description: str
@@ -84,9 +98,11 @@ class MaintenanceTask:
     last_status: TaskStatus = TaskStatus.SCHEDULED
     last_error: str = ""
 
+
 @dataclass
 class MaintenanceWindow:
     """Maintenance window configuration"""
+
     window_id: str
     name: str
     start_time: str  # HH:MM format
@@ -95,9 +111,11 @@ class MaintenanceWindow:
     timezone: str = "UTC"
     allow_critical_only: bool = False
 
+
 @dataclass
 class MaintenanceReport:
     """Maintenance execution report"""
+
     report_id: str
     start_time: datetime
     end_time: datetime
@@ -108,6 +126,7 @@ class MaintenanceReport:
     system_impact: str
     issues_found: List[str]
     recommendations: List[str]
+
 
 class MaintenanceScheduler:
     """
@@ -158,12 +177,12 @@ class MaintenanceScheduler:
         os.makedirs(log_dir, mode=0o755, exist_ok=True)
 
         # File handler
-        handler = logging.FileHandler(f"{log_dir}/maintenance.log", mode='a')
+        handler = logging.FileHandler(f"{log_dir}/maintenance.log", mode="a")
         handler.setLevel(logging.INFO)
 
         formatter = logging.Formatter(
-            '%(asctime)s|%(levelname)s|%(name)s|%(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S UTC'
+            "%(asctime)s|%(levelname)s|%(name)s|%(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S UTC",
         )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
@@ -177,7 +196,7 @@ class MaintenanceScheduler:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS maintenance_tasks (
                     task_id TEXT PRIMARY KEY,
                     name TEXT,
@@ -193,9 +212,9 @@ class MaintenanceScheduler:
                     last_status TEXT,
                     last_error TEXT
                 )
-            ''')
+            """)
 
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS maintenance_reports (
                     report_id TEXT PRIMARY KEY,
                     start_time TEXT,
@@ -208,9 +227,9 @@ class MaintenanceScheduler:
                     issues_found TEXT,
                     recommendations TEXT
                 )
-            ''')
+            """)
 
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS maintenance_windows (
                     window_id TEXT PRIMARY KEY,
                     name TEXT,
@@ -220,7 +239,7 @@ class MaintenanceScheduler:
                     timezone TEXT,
                     allow_critical_only INTEGER
                 )
-            ''')
+            """)
 
             conn.commit()
             conn.close()
@@ -234,26 +253,94 @@ class MaintenanceScheduler:
         """Load maintenance configuration"""
         if config_path and os.path.exists(config_path):
             try:
-                with open(config_path, 'r') as f:
+                with open(config_path, "r") as f:
                     config = json.load(f)
 
                 # Load maintenance windows
-                for window_data in config.get('maintenance_windows', []):
+                for window_data in config.get("maintenance_windows", []):
                     window = MaintenanceWindow(
-                        window_id=window_data['window_id'],
-                        name=window_data['name'],
-                        start_time=window_data['start_time'],
-                        end_time=window_data['end_time'],
-                        days_of_week=window_data['days_of_week'],
-                        timezone=window_data.get('timezone', 'UTC'),
-                        allow_critical_only=window_data.get('allow_critical_only', False)
+                        window_id=window_data["window_id"],
+                        name=window_data["name"],
+                        start_time=window_data["start_time"],
+                        end_time=window_data["end_time"],
+                        days_of_week=window_data["days_of_week"],
+                        timezone=window_data.get("timezone", "UTC"),
+                        allow_critical_only=window_data.get(
+                            "allow_critical_only", False
+                        ),
                     )
                     self.maintenance_windows[window.window_id] = window
 
-                self.logger.info(f"Loaded {len(self.maintenance_windows)} maintenance windows")
+                self.logger.info(
+                    f"Loaded {len(self.maintenance_windows)} maintenance windows"
+                )
 
             except Exception as e:
                 self.logger.error(f"Failed to load maintenance configuration: {e}")
+
+    def _save_task_to_database(self, task: MaintenanceTask):
+        """Persist a task definition/state to the maintenance database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO maintenance_tasks (
+                    task_id, name, description, task_type, priority,
+                    schedule_expression, estimated_duration, max_runtime,
+                    requires_downtime, dependencies, last_run, last_status,
+                    last_error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    task.task_id,
+                    task.name,
+                    task.description,
+                    task.task_type.value,
+                    task.priority.value,
+                    task.schedule_expression,
+                    task.estimated_duration,
+                    task.max_runtime,
+                    int(task.requires_downtime),
+                    json.dumps(task.dependencies),
+                    task.last_run.isoformat() if task.last_run else None,
+                    task.last_status.value if task.last_status else None,
+                    task.last_error,
+                ),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            self.logger.error(f"Failed to save task {task.task_id} to database: {e}")
+
+    def _save_window_to_database(self, window: MaintenanceWindow):
+        """Persist a maintenance window to the maintenance database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO maintenance_windows (
+                    window_id, name, start_time, end_time, days_of_week,
+                    timezone, allow_critical_only
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    window.window_id,
+                    window.name,
+                    window.start_time,
+                    window.end_time,
+                    json.dumps(window.days_of_week),
+                    window.timezone,
+                    int(window.allow_critical_only),
+                ),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            self.logger.error(
+                f"Failed to save window {window.window_id} to database: {e}"
+            )
 
     def _register_default_tasks(self):
         """Register default maintenance tasks"""
@@ -267,7 +354,7 @@ class MaintenanceScheduler:
                 schedule_expression="0 2 * * *",  # 2 AM daily
                 estimated_duration=15,
                 max_runtime=30,
-                handler_function=self._system_cleanup_handler
+                handler_function=self._system_cleanup_handler,
             ),
             MaintenanceTask(
                 task_id="weekly_database_optimization",
@@ -278,7 +365,7 @@ class MaintenanceScheduler:
                 schedule_expression="0 3 * * 0",  # 3 AM every Sunday
                 estimated_duration=45,
                 max_runtime=120,
-                handler_function=self._database_optimization_handler
+                handler_function=self._database_optimization_handler,
             ),
             MaintenanceTask(
                 task_id="daily_log_rotation",
@@ -289,7 +376,7 @@ class MaintenanceScheduler:
                 schedule_expression="0 1 * * *",  # 1 AM daily
                 estimated_duration=10,
                 max_runtime=20,
-                handler_function=self._log_rotation_handler
+                handler_function=self._log_rotation_handler,
             ),
             MaintenanceTask(
                 task_id="weekly_security_update",
@@ -300,7 +387,7 @@ class MaintenanceScheduler:
                 schedule_expression="0 4 * * 0",  # 4 AM every Sunday
                 estimated_duration=30,
                 max_runtime=60,
-                handler_function=self._security_update_handler
+                handler_function=self._security_update_handler,
             ),
             MaintenanceTask(
                 task_id="hourly_health_check",
@@ -311,7 +398,7 @@ class MaintenanceScheduler:
                 schedule_expression="0 * * * *",  # Every hour
                 estimated_duration=5,
                 max_runtime=10,
-                handler_function=self._health_check_handler
+                handler_function=self._health_check_handler,
             ),
             MaintenanceTask(
                 task_id="daily_performance_tuning",
@@ -322,8 +409,8 @@ class MaintenanceScheduler:
                 schedule_expression="0 5 * * *",  # 5 AM daily
                 estimated_duration=20,
                 max_runtime=40,
-                handler_function=self._performance_tuning_handler
-            )
+                handler_function=self._performance_tuning_handler,
+            ),
         ]
 
         for task in default_tasks:
@@ -339,7 +426,7 @@ class MaintenanceScheduler:
                 start_time="02:00",
                 end_time="06:00",
                 days_of_week=[0, 1, 2, 3, 4, 5, 6],  # Every day
-                timezone="UTC"
+                timezone="UTC",
             ),
             MaintenanceWindow(
                 window_id="weekend_maintenance",
@@ -348,8 +435,8 @@ class MaintenanceScheduler:
                 end_time="07:00",
                 days_of_week=[5, 6],  # Saturday and Sunday
                 timezone="UTC",
-                allow_critical_only=False
-            )
+                allow_critical_only=False,
+            ),
         ]
 
         for window in default_windows:
@@ -363,7 +450,9 @@ class MaintenanceScheduler:
             return
 
         self.scheduler_active = True
-        self.scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
+        self.scheduler_thread = threading.Thread(
+            target=self._scheduler_loop, daemon=True
+        )
         self.scheduler_thread.start()
 
         self.logger.info("Maintenance scheduler started")
@@ -422,8 +511,16 @@ class MaintenanceScheduler:
 
         return True
 
-    def _can_run_in_maintenance_window(self, task: MaintenanceTask, current_time: datetime) -> bool:
+    def _can_run_in_maintenance_window(
+        self, task: MaintenanceTask, current_time: datetime
+    ) -> bool:
         """Check if task can run in current maintenance window"""
+        # Maintenance windows exist to protect service hours from
+        # disruptive work. Tasks that do not require downtime (health
+        # checks, monitoring, ...) are not gated by them.
+        if not task.requires_downtime:
+            return True
+
         current_time_str = current_time.strftime("%H:%M")
         current_weekday = current_time.weekday()
 
@@ -435,7 +532,10 @@ class MaintenanceScheduler:
             # Check if current time is in window
             if window.start_time <= current_time_str <= window.end_time:
                 # Check if task priority is allowed
-                if window.allow_critical_only and task.priority != MaintenancePriority.CRITICAL:
+                if (
+                    window.allow_critical_only
+                    and task.priority != MaintenancePriority.CRITICAL
+                ):
                     continue
 
                 return True
@@ -451,9 +551,7 @@ class MaintenanceScheduler:
 
             # Create and start task thread
             task_thread = threading.Thread(
-                target=self._execute_task,
-                args=(task,),
-                daemon=True
+                target=self._execute_task, args=(task,), daemon=True
             )
 
             self.current_tasks[task.task_id] = task_thread
@@ -470,32 +568,40 @@ class MaintenanceScheduler:
             if task.task_id in self.current_tasks:
                 del self.current_tasks[task.task_id]
 
-        if result['status'] == TaskStatus.COMPLETED.value:
-            self.logger.info(f"Maintenance task completed: {task.name} ({result['status']})")
-        elif result['status'] == TaskStatus.SKIPPED.value:
-            self.logger.warning(f"Maintenance task skipped: {task.name} ({result['reason']})")
+        if result["status"] == TaskStatus.COMPLETED.value:
+            self.logger.info(
+                f"Maintenance task completed: {task.name} ({result['status']})"
+            )
+        elif result["status"] == TaskStatus.SKIPPED.value:
+            self.logger.warning(
+                f"Maintenance task skipped: {task.name} ({result['reason']})"
+            )
         else:
-            self.logger.error(f"Maintenance task failed: {task.name}: {task.last_error}")
+            self.logger.error(
+                f"Maintenance task failed: {task.name}: {task.last_error}"
+            )
 
     def _run_task_internal(
         self,
         task: MaintenanceTask,
         *,
         invoked_by: str = "manual",
-        respect_windows: bool = False
+        respect_windows: bool = False,
     ) -> Dict[str, Any]:
         """Execute a maintenance task synchronously and return structured result."""
 
         now = datetime.utcnow()
         if respect_windows and not self._can_run_in_maintenance_window(task, now):
             return {
-                'task_id': task.task_id,
-                'name': task.name,
-                'status': TaskStatus.SKIPPED.value,
-                'reason': 'outside_maintenance_window'
+                "task_id": task.task_id,
+                "name": task.name,
+                "status": TaskStatus.SKIPPED.value,
+                "reason": "outside_maintenance_window",
             }
 
-        self.logger.info(f"Starting maintenance task: {task.name} (invoked_by={invoked_by})")
+        self.logger.info(
+            f"Starting maintenance task: {task.name} (invoked_by={invoked_by})"
+        )
 
         task.last_run = now
         task.last_status = TaskStatus.RUNNING
@@ -509,25 +615,27 @@ class MaintenanceScheduler:
             if not task.handler_function:
                 task.last_status = TaskStatus.FAILED
                 task.last_error = "No handler function defined"
-                handler_result = {'success': False, 'error': task.last_error}
+                handler_result = {"success": False, "error": task.last_error}
             else:
                 handler_result = task.handler_function(task) or {}
                 execution_time = time.time() - start_time
 
                 if execution_time > timeout:
                     task.last_status = TaskStatus.FAILED
-                    task.last_error = f"Task exceeded maximum runtime ({task.max_runtime} minutes)"
-                elif handler_result.get('success', False):
+                    task.last_error = (
+                        f"Task exceeded maximum runtime ({task.max_runtime} minutes)"
+                    )
+                elif handler_result.get("success", False):
                     task.last_status = TaskStatus.COMPLETED
                     task.last_error = ""
                 else:
                     task.last_status = TaskStatus.FAILED
-                    task.last_error = handler_result.get('error', 'Unknown error')
+                    task.last_error = handler_result.get("error", "Unknown error")
 
         except Exception as exc:  # pylint: disable=broad-except
             task.last_status = TaskStatus.FAILED
             task.last_error = str(exc)
-            handler_result = {'success': False, 'error': task.last_error}
+            handler_result = {"success": False, "error": task.last_error}
             self.logger.exception("Maintenance task raised an exception: %s", task.name)
 
         finally:
@@ -536,18 +644,17 @@ class MaintenanceScheduler:
         duration = time.time() - start_time
 
         return {
-            'task_id': task.task_id,
-            'name': task.name,
-            'status': task.last_status.value,
-            'duration_seconds': round(duration, 3),
-            'details': handler_result,
-            'invoked_by': invoked_by,
-            'last_error': task.last_error
+            "task_id": task.task_id,
+            "name": task.name,
+            "status": task.last_status.value,
+            "duration_seconds": round(duration, 3),
+            "details": handler_result,
+            "invoked_by": invoked_by,
+            "last_error": task.last_error,
         }
 
     def list_tasks_summary(
-        self,
-        minimum_priority: Optional[MaintenancePriority] = None
+        self, minimum_priority: Optional[MaintenancePriority] = None
     ) -> List[Dict[str, Any]]:
         """Return summaries for registered maintenance tasks."""
 
@@ -555,25 +662,24 @@ class MaintenanceScheduler:
         for task in self.tasks.values():
             if minimum_priority and task.priority.value < minimum_priority.value:
                 continue
-            summaries.append({
-                'task_id': task.task_id,
-                'name': task.name,
-                'type': task.task_type.value,
-                'priority': task.priority.name,
-                'priority_value': task.priority.value,
-                'schedule': task.schedule_expression,
-                'requires_downtime': task.requires_downtime,
-                'last_run': task.last_run.isoformat() if task.last_run else None,
-                'last_status': task.last_status.value,
-                'estimated_duration_minutes': task.estimated_duration
-            })
-        return sorted(summaries, key=lambda item: item['priority_value'], reverse=True)
+            summaries.append(
+                {
+                    "task_id": task.task_id,
+                    "name": task.name,
+                    "type": task.task_type.value,
+                    "priority": task.priority.name,
+                    "priority_value": task.priority.value,
+                    "schedule": task.schedule_expression,
+                    "requires_downtime": task.requires_downtime,
+                    "last_run": task.last_run.isoformat() if task.last_run else None,
+                    "last_status": task.last_status.value,
+                    "estimated_duration_minutes": task.estimated_duration,
+                }
+            )
+        return sorted(summaries, key=lambda item: item["priority_value"], reverse=True)
 
     def run_tasks_now(
-        self,
-        task_ids: Optional[List[str]] = None,
-        *,
-        respect_windows: bool = False
+        self, task_ids: Optional[List[str]] = None, *, respect_windows: bool = False
     ) -> List[Dict[str, Any]]:
         """Execute one or more maintenance tasks synchronously."""
 
@@ -585,10 +691,16 @@ class MaintenanceScheduler:
         results: List[Dict[str, Any]] = []
         for task in selected:
             if task is None:
-                results.append({'status': TaskStatus.SKIPPED.value, 'reason': 'unknown_task'})
+                results.append(
+                    {"status": TaskStatus.SKIPPED.value, "reason": "unknown_task"}
+                )
                 continue
             with self.task_lock:
-                results.append(self._run_task_internal(task, invoked_by="manual", respect_windows=respect_windows))
+                results.append(
+                    self._run_task_internal(
+                        task, invoked_by="manual", respect_windows=respect_windows
+                    )
+                )
 
         return results
 
@@ -596,11 +708,18 @@ class MaintenanceScheduler:
         self,
         minimum_priority: MaintenancePriority = MaintenancePriority.HIGH,
         *,
-        respect_windows: bool = False
+        respect_windows: bool = False,
     ) -> List[Dict[str, Any]]:
         """Execute all tasks meeting the minimum priority threshold."""
 
-        task_ids = [task.task_id for task in self.tasks.values() if task.priority.value >= minimum_priority.value]
+        selected = [
+            task
+            for task in self.tasks.values()
+            if task.priority.value >= minimum_priority.value
+        ]
+        # Priority bundles run highest priority first.
+        selected.sort(key=lambda task: task.priority.value, reverse=True)
+        task_ids = [task.task_id for task in selected]
         return self.run_tasks_now(task_ids, respect_windows=respect_windows)
 
     def _system_cleanup_handler(self, task: MaintenanceTask) -> Dict[str, Any]:
@@ -618,7 +737,9 @@ class MaintenanceScheduler:
                             file_path = os.path.join(root, file)
                             try:
                                 # Delete files older than 7 days
-                                if os.path.getmtime(file_path) < time.time() - (7 * 24 * 3600):
+                                if os.path.getmtime(file_path) < time.time() - (
+                                    7 * 24 * 3600
+                                ):
                                     size = os.path.getsize(file_path)
                                     os.remove(file_path)
                                     cleaned_files += 1
@@ -637,14 +758,14 @@ class MaintenanceScheduler:
                         pass
 
             return {
-                'success': True,
-                'cleaned_files': cleaned_files,
-                'freed_space_mb': freed_space / (1024 * 1024),
-                'details': f'Cleaned {cleaned_files} files, freed {freed_space / (1024 * 1024):.1f} MB'
+                "success": True,
+                "cleaned_files": cleaned_files,
+                "freed_space_mb": freed_space / (1024 * 1024),
+                "details": f"Cleaned {cleaned_files} files, freed {freed_space / (1024 * 1024):.1f} MB",
             }
 
         except Exception as e:
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     def _database_optimization_handler(self, task: MaintenanceTask) -> Dict[str, Any]:
         """Handle database optimization maintenance"""
@@ -652,7 +773,9 @@ class MaintenanceScheduler:
             optimized_tables = 0
 
             # Find all SQLite databases
-            db_files = glob.glob("/var/lib/blncs/*.db") + glob.glob("/opt/blncs/data/*.db")
+            db_files = glob.glob("/var/lib/blncs/*.db") + glob.glob(
+                "/opt/blncs/data/*.db"
+            )
 
             for db_file in db_files:
                 try:
@@ -672,13 +795,13 @@ class MaintenanceScheduler:
                     self.logger.warning(f"Failed to optimize database {db_file}: {e}")
 
             return {
-                'success': True,
-                'optimized_databases': optimized_tables,
-                'details': f'Optimized {optimized_tables} database files'
+                "success": True,
+                "optimized_databases": optimized_tables,
+                "details": f"Optimized {optimized_tables} database files",
             }
 
         except Exception as e:
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     def _log_rotation_handler(self, task: MaintenanceTask) -> Dict[str, Any]:
         """Handle log rotation maintenance"""
@@ -696,14 +819,16 @@ class MaintenanceScheduler:
                 for log_file in glob.glob(os.path.join(log_dir, "*.log")):
                     if os.path.getmtime(log_file) < time.time() - (24 * 3600):
                         # Compress the log file
-                        compressed_name = f"{log_file}.{datetime.now().strftime('%Y%m%d')}.gz"
+                        compressed_name = (
+                            f"{log_file}.{datetime.now().strftime('%Y%m%d')}.gz"
+                        )
 
-                        with open(log_file, 'rb') as f_in:
-                            with gzip.open(compressed_name, 'wb') as f_out:
+                        with open(log_file, "rb") as f_in:
+                            with gzip.open(compressed_name, "wb") as f_out:
                                 shutil.copyfileobj(f_in, f_out)
 
                         # Truncate original log file
-                        with open(log_file, 'w') as f:
+                        with open(log_file, "w") as f:
                             pass
 
                         rotated_logs += 1
@@ -711,18 +836,20 @@ class MaintenanceScheduler:
 
                 # Clean up old compressed logs (older than 30 days)
                 for compressed_log in glob.glob(os.path.join(log_dir, "*.gz")):
-                    if os.path.getmtime(compressed_log) < time.time() - (30 * 24 * 3600):
+                    if os.path.getmtime(compressed_log) < time.time() - (
+                        30 * 24 * 3600
+                    ):
                         os.remove(compressed_log)
 
             return {
-                'success': True,
-                'rotated_logs': rotated_logs,
-                'compressed_logs': compressed_logs,
-                'details': f'Rotated {rotated_logs} logs, compressed {compressed_logs} files'
+                "success": True,
+                "rotated_logs": rotated_logs,
+                "compressed_logs": compressed_logs,
+                "details": f"Rotated {rotated_logs} logs, compressed {compressed_logs} files",
             }
 
         except Exception as e:
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     def _health_check_handler(self, task: MaintenanceTask) -> Dict[str, Any]:
         """Handle system health check maintenance"""
@@ -732,7 +859,7 @@ class MaintenanceScheduler:
 
             # Check disk space
             if PSUTIL_AVAILABLE:
-                disk_usage = psutil.disk_usage('/')
+                disk_usage = psutil.disk_usage("/")
                 disk_percent = (disk_usage.used / disk_usage.total) * 100
 
                 if disk_percent > 90:
@@ -745,7 +872,9 @@ class MaintenanceScheduler:
                 # Check memory usage
                 memory = psutil.virtual_memory()
                 if memory.percent > 90:
-                    health_issues.append(f"Memory usage critical: {memory.percent:.1f}%")
+                    health_issues.append(
+                        f"Memory usage critical: {memory.percent:.1f}%"
+                    )
                     health_score -= 15
                 elif memory.percent > 80:
                     health_issues.append(f"Memory usage high: {memory.percent:.1f}%")
@@ -760,7 +889,7 @@ class MaintenanceScheduler:
             # Check critical services
             critical_files = [
                 "/opt/blncs/blncs_main.py",
-                "/opt/blncs/config/blncs.json"
+                "/opt/blncs/config/blncs.json",
             ]
 
             for file_path in critical_files:
@@ -769,34 +898,104 @@ class MaintenanceScheduler:
                     health_score -= 25
 
             return {
-                'success': True,
-                'health_score': health_score,
-                'issues_found': len(health_issues),
-                'health_issues': health_issues,
-                'details': f'Health score: {health_score}/100, {len(health_issues)} issues found'
+                "success": True,
+                "health_score": health_score,
+                "issues_found": len(health_issues),
+                "health_issues": health_issues,
+                "details": f"Health score: {health_score}/100, {len(health_issues)} issues found",
             }
 
         except Exception as e:
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
+
+    def _security_update_handler(self, task: MaintenanceTask) -> Dict[str, Any]:
+        """Handle weekly security update check
+
+        This is a check-only task: it audits the local security posture
+        of the BLNCS installation (permissions of sensitive files and
+        directories) and reports what it finds. It never modifies the
+        operating system or installs packages.
+        """
+        try:
+            issues = []
+            checked = 0
+
+            # Sensitive paths must not be group/world writable, and key
+            # material must not be readable by group/others at all.
+            sensitive_paths = [
+                ("/opt/blncs/config", 0o022),
+                ("/opt/blncs/data", 0o022),
+                ("/var/lib/blncs", 0o022),
+                ("config/encryption.key", 0o077),
+                ("config/master.key", 0o077),
+            ]
+
+            for path, forbidden_bits in sensitive_paths:
+                if not os.path.exists(path):
+                    continue
+                checked += 1
+                mode = os.stat(path).st_mode
+                if mode & forbidden_bits:
+                    issues.append(f"{path} has permissive mode {oct(mode & 0o777)}")
+
+            return {
+                "success": True,
+                "checked_paths": checked,
+                "issues_found": len(issues),
+                "security_issues": issues,
+                "details": f"Checked {checked} sensitive paths, {len(issues)} issues found",
+            }
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _performance_tuning_handler(self, task: MaintenanceTask) -> Dict[str, Any]:
+        """Handle daily performance tuning maintenance"""
+        try:
+            # Reclaim memory held by cyclic garbage; this is the safe,
+            # reversible tuning action available without touching the
+            # host system configuration.
+            collected = gc.collect()
+
+            cpu_percent = None
+            memory_percent = None
+            if PSUTIL_AVAILABLE:
+                cpu_percent = psutil.cpu_percent(interval=0.1)
+                memory_percent = psutil.virtual_memory().percent
+
+            return {
+                "success": True,
+                "objects_collected": collected,
+                "cpu_percent": cpu_percent,
+                "memory_percent": memory_percent,
+                "details": f"Collected {collected} garbage objects; CPU {cpu_percent}%, memory {memory_percent}%",
+            }
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     def get_maintenance_status(self) -> Dict[str, Any]:
         """Get comprehensive maintenance status"""
         total_tasks = len(self.tasks)
         running_tasks = len(self.current_tasks)
-        completed_tasks = len([t for t in self.tasks.values() if t.last_status == TaskStatus.COMPLETED])
-        failed_tasks = len([t for t in self.tasks.values() if t.last_status == TaskStatus.FAILED])
+        completed_tasks = len(
+            [t for t in self.tasks.values() if t.last_status == TaskStatus.COMPLETED]
+        )
+        failed_tasks = len(
+            [t for t in self.tasks.values() if t.last_status == TaskStatus.FAILED]
+        )
 
         return {
-            'scheduler_active': self.scheduler_active,
-            'total_tasks': total_tasks,
-            'running_tasks': running_tasks,
-            'completed_tasks': completed_tasks,
-            'failed_tasks': failed_tasks,
-            'success_rate': (completed_tasks / max(total_tasks, 1)) * 100,
-            'maintenance_windows': len(self.maintenance_windows),
-            'last_maintenance_report': self._get_last_report_summary(),
-            'next_scheduled_tasks': self._get_next_scheduled_tasks(),
-            'system_impact': self._calculate_system_impact()
+            "scheduler_active": self.scheduler_active,
+            "total_tasks": total_tasks,
+            "running_tasks": running_tasks,
+            "completed_tasks": completed_tasks,
+            "failed_tasks": failed_tasks,
+            "success_rate": (completed_tasks / max(total_tasks, 1)) * 100,
+            "maintenance_windows": len(self.maintenance_windows),
+            "last_maintenance_report": self._get_last_report_summary(),
+            "next_scheduled_tasks": self._get_next_scheduled_tasks(),
+            "system_impact": self._calculate_system_impact(),
         }
 
     def get_maintenance_report(self, days: int = 7) -> Dict[str, Any]:
@@ -804,20 +1003,103 @@ class MaintenanceScheduler:
         cutoff_date = datetime.utcnow() - timedelta(days=days)
 
         recent_tasks = [
-            task for task in self.tasks.values()
+            task
+            for task in self.tasks.values()
             if task.last_run and task.last_run > cutoff_date
         ]
 
         return {
-            'report_period_days': days,
-            'total_tasks_executed': len(recent_tasks),
-            'successful_tasks': len([t for t in recent_tasks if t.last_status == TaskStatus.COMPLETED]),
-            'failed_tasks': len([t for t in recent_tasks if t.last_status == TaskStatus.FAILED]),
-            'maintenance_by_type': self._group_tasks_by_type(recent_tasks),
-            'average_execution_time': self._calculate_average_execution_time(recent_tasks),
-            'system_improvements': self._calculate_system_improvements(),
-            'recommendations': self._generate_maintenance_recommendations()
+            "report_period_days": days,
+            "total_tasks_executed": len(recent_tasks),
+            "successful_tasks": len(
+                [t for t in recent_tasks if t.last_status == TaskStatus.COMPLETED]
+            ),
+            "failed_tasks": len(
+                [t for t in recent_tasks if t.last_status == TaskStatus.FAILED]
+            ),
+            "maintenance_by_type": self._group_tasks_by_type(recent_tasks),
+            "average_execution_time": self._calculate_average_execution_time(
+                recent_tasks
+            ),
+            "system_improvements": self._calculate_system_improvements(),
+            "recommendations": self._generate_maintenance_recommendations(),
         }
+
+    def _get_last_report_summary(self) -> Optional[Dict[str, Any]]:
+        """Summarize the most recent maintenance report, if any"""
+        if not self.execution_history:
+            return None
+        report = self.execution_history[-1]
+        return {
+            "report_id": report.report_id,
+            "start_time": report.start_time.isoformat(),
+            "end_time": report.end_time.isoformat(),
+            "tasks_executed": report.tasks_executed,
+            "tasks_successful": report.tasks_successful,
+            "tasks_failed": report.tasks_failed,
+        }
+
+    def _get_next_scheduled_tasks(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """List upcoming tasks, highest priority first"""
+        ordered = sorted(
+            self.tasks.values(),
+            key=lambda t: (-t.priority.value, t.name),
+        )
+        return [
+            {
+                "task_id": task.task_id,
+                "name": task.name,
+                "priority": task.priority.value,
+                "schedule_expression": task.schedule_expression,
+                "last_status": task.last_status.value if task.last_status else None,
+            }
+            for task in ordered[:limit]
+        ]
+
+    def _calculate_system_impact(self) -> str:
+        """System impact of the most recent maintenance run"""
+        if not self.execution_history:
+            return "none"
+        return self.execution_history[-1].system_impact
+
+    def _group_tasks_by_type(self, tasks: List[MaintenanceTask]) -> Dict[str, int]:
+        """Count tasks grouped by maintenance type"""
+        grouped: Dict[str, int] = {}
+        for task in tasks:
+            key = task.task_type.value
+            grouped[key] = grouped.get(key, 0) + 1
+        return grouped
+
+    def _calculate_average_execution_time(self, tasks: List[MaintenanceTask]) -> float:
+        """Average estimated duration (minutes) across the given tasks"""
+        if not tasks:
+            return 0.0
+        return sum(task.estimated_duration for task in tasks) / len(tasks)
+
+    def _calculate_system_improvements(self) -> List[str]:
+        """Describe improvements from the most recent maintenance run"""
+        if not self.execution_history:
+            return []
+        report = self.execution_history[-1]
+        improvements = []
+        if report.tasks_successful:
+            improvements.append(
+                f"{report.tasks_successful} maintenance tasks completed successfully in the last run"
+            )
+        return improvements
+
+    def _generate_maintenance_recommendations(self) -> List[str]:
+        """Generate recommendations from the current task state"""
+        recommendations = []
+        for task in self.tasks.values():
+            if task.last_status == TaskStatus.FAILED:
+                recommendations.append(
+                    f"Investigate failed task '{task.name}'"
+                    + (f": {task.last_error}" if task.last_error else "")
+                )
+            elif task.last_run is None:
+                recommendations.append(f"Task '{task.name}' has never been executed")
+        return recommendations
 
     def shutdown(self):
         """Shutdown the maintenance scheduler"""
@@ -837,9 +1119,13 @@ class MaintenanceScheduler:
 
         self.logger.info("Maintenance scheduler shutdown completed")
 
-def initialize_maintenance_scheduler(config_path: Optional[str] = None) -> MaintenanceScheduler:
+
+def initialize_maintenance_scheduler(
+    config_path: Optional[str] = None,
+) -> MaintenanceScheduler:
     """Initialize maintenance scheduler"""
     return MaintenanceScheduler(config_path)
+
 
 if __name__ == "__main__":
     # Test maintenance scheduler

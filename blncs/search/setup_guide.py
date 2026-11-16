@@ -29,86 +29,71 @@ EXAMPLE_CONFIG = {
         "google_search_engine_id": os.getenv("GOOGLE_SEARCH_ENGINE_ID", ""),
         "bing_api_key": os.getenv("BING_API_KEY", ""),
         "github_token": os.getenv("GITHUB_TOKEN", ""),
-        "semantic_scholar_api_key": os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
+        "semantic_scholar_api_key": os.getenv("SEMANTIC_SCHOLAR_API_KEY", ""),
     },
-
     "rate_limits": {
         "requests_per_minute": 60,
         "requests_per_hour": 1000,
-        "requests_per_day": 10000
+        "requests_per_day": 10000,
     },
-
-    "cache_settings": {
-        "enabled": True,
-        "ttl_minutes": 60,
-        "max_cache_size": 1000
-    },
-
+    "cache_settings": {"enabled": True, "ttl_minutes": 60, "max_cache_size": 1000},
     "search_settings": {
         "default_max_results": 10,
         "default_language": "auto",
         "safe_search": True,
-        "timeout_seconds": 30
+        "timeout_seconds": 30,
     },
-
     "providers": {
         "youtube": {
             "enabled": True,
             "max_results": 20,
             "region_code": "JP",
-            "safe_search": "strict"
+            "safe_search": "strict",
         },
-
         "google_scholar": {
             "enabled": True,
             "max_results": 20,
             "language": "en",
-            "sort_by": "relevance"
+            "sort_by": "relevance",
         },
-
         "arxiv": {
             "enabled": True,
             "max_results": 20,
             "sort_by": "relevance",
-            "categories": ["cs.AI", "cs.LG", "cs.CL"]
+            "categories": ["cs.AI", "cs.LG", "cs.CL"],
         },
-
         "semantic_scholar": {
             "enabled": True,
             "max_results": 20,
-            "fields": ["title", "abstract", "authors", "year", "venue"]
+            "fields": ["title", "abstract", "authors", "year", "venue"],
         },
-
         "google_web": {
             "enabled": True,
             "max_results": 10,
             "country": "jp",
             "language": "ja",
-            "safe_search": "active"
+            "safe_search": "active",
         },
-
         "bing_web": {
             "enabled": True,
             "max_results": 10,
             "market": "ja-JP",
-            "safe_search": "strict"
+            "safe_search": "strict",
         },
-
         "github": {
             "enabled": True,
             "max_results": 20,
             "sort_by": "best-match",
             "language": "python",
-            "stars": ">100"
+            "stars": ">100",
         },
-
         "stack_overflow": {
             "enabled": True,
             "max_results": 20,
             "sort_by": "relevance",
-            "tags": ["python", "machine-learning", "blockchain"]
-        }
-    }
+            "tags": ["python", "machine-learning", "blockchain"],
+        },
+    },
 }
 
 # APIキー取得方法の説明
@@ -120,59 +105,55 @@ API_KEY_GUIDE = {
             "Google Cloud Consoleでプロジェクトを作成",
             "YouTube Data API v3を有効化",
             "APIキーを生成",
-            "制限を設定（オプション）"
-        ]
+            "制限を設定（オプション）",
+        ],
     },
-
     "google_api_key": {
         "description": "Google Custom Search API",
         "url": "https://console.developers.google.com/",
         "steps": [
             "Google Cloud Consoleでプロジェクトを作成",
             "Custom Search JSON APIを有効化",
-            "APIキーを生成"
-        ]
+            "APIキーを生成",
+        ],
     },
-
     "google_search_engine_id": {
         "description": "Google Custom Search Engine ID",
         "url": "https://cse.google.com/",
         "steps": [
             "Google Custom Search Engineを作成",
             "検索対象サイトを設定（またはウェブ全体）",
-            "Search Engine IDを取得"
-        ]
+            "Search Engine IDを取得",
+        ],
     },
-
     "bing_api_key": {
         "description": "Bing Search API",
         "url": "https://portal.azure.com/",
         "steps": [
             "Azure Portalでアカウントを作成",
             "Bing Search APIリソースを作成",
-            "APIキーを取得"
-        ]
+            "APIキーを取得",
+        ],
     },
-
     "github_token": {
         "description": "GitHub Personal Access Token",
         "url": "https://github.com/settings/tokens",
         "steps": [
             "GitHubアカウントでログイン",
             "Personal Access Tokensページにアクセス",
-            "新しいトークンを作成（repo権限が必要）"
-        ]
+            "新しいトークンを作成（repo権限が必要）",
+        ],
     },
-
     "semantic_scholar_api_key": {
         "description": "Semantic Scholar API Key",
         "url": "https://www.semanticscholar.org/",
         "steps": [
             "Semantic Scholar APIドキュメントを確認",
-            "APIキーを取得（研究目的の場合）"
-        ]
-    }
+            "APIキーを取得（研究目的の場合）",
+        ],
+    },
 }
+
 
 def print_setup_instructions():
     """セットアップ手順を表示"""
@@ -191,15 +172,19 @@ def print_setup_instructions():
         print(f"      説明: {info['description']}")
         print(f"      URL: {info['url']}")
         print("      セットアップ手順:")
-        for step in info['steps']:
+        for step in info["steps"]:
             print(f"        - {step}")
 
     print("\n3. 設定を検証:")
-    print("   python -c 'from blncs.search.search_config_manager import get_search_config_manager; print(get_search_config_manager().get_config_summary())'")
+    print(
+        "   python -c 'from blncs.search.search_config_manager import get_search_config_manager; print(get_search_config_manager().get_config_summary())'"
+    )
 
     print("\n4. 検索機能をテスト:")
     print("   # CLIからテスト")
-    print("   python -m blncs.cli.enhanced_cli search 'machine learning' --provider all --limit 5")
+    print(
+        "   python -m blncs.cli.enhanced_cli search 'machine learning' --provider all --limit 5"
+    )
     print("")
     print("   # Pythonからテスト")
     print("   from blncs.search.advanced_search_engine import SearchManager")

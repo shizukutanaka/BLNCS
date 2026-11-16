@@ -4,21 +4,22 @@ Ultra-intuitive Lightning Network operations for end users
 """
 
 import asyncio
+import difflib
+import json
 import logging
 import re
-import difflib
-from typing import Any, Dict, List, Optional, Tuple, Callable, Union
-from datetime import datetime
-from dataclasses import dataclass, field
-from enum import Enum
-import json
 import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
 
 class IntentType(Enum):
     """User intent categories"""
+
     BALANCE_INQUIRY = "balance"
     PAYMENT_SEND = "payment"
     INVOICE_CREATE = "invoice"
@@ -32,15 +33,17 @@ class IntentType(Enum):
 
 class UXLevel(Enum):
     """User experience levels"""
-    BEGINNER = "beginner"      # First-time users
+
+    BEGINNER = "beginner"  # First-time users
     INTERMEDIATE = "intermediate"  # Some crypto experience
-    ADVANCED = "advanced"      # Technical users
-    EXPERT = "expert"         # Lightning developers
+    ADVANCED = "advanced"  # Technical users
+    EXPERT = "expert"  # Lightning developers
 
 
 @dataclass
 class UserContext:
     """User context and preferences"""
+
     user_id: str
     ux_level: UXLevel = UXLevel.BEGINNER
     preferred_language: str = "en"
@@ -54,6 +57,7 @@ class UserContext:
 @dataclass
 class ParsedCommand:
     """Parsed user command"""
+
     original_text: str
     intent: IntentType
     confidence: float
@@ -71,44 +75,44 @@ class NaturalLanguageProcessor:
                 r"\b(balance|funds|money|sats|bitcoin|btc)\b",
                 r"\bhow much\b",
                 r"\bcheck.*balance\b",
-                r"\bshow.*balance\b"
+                r"\bshow.*balance\b",
             ],
             IntentType.PAYMENT_SEND: [
                 r"\b(send|pay|transfer|give)\b",
                 r"\bpay\s+\d+",
                 r"\bsend.*sats?\b",
-                r"\btransfer.*to\b"
+                r"\btransfer.*to\b",
             ],
             IntentType.INVOICE_CREATE: [
                 r"\b(invoice|bill|charge|request)\b",
                 r"\bcreate.*invoice\b",
                 r"\brequest.*payment\b",
-                r"\bcharge.*for\b"
+                r"\bcharge.*for\b",
             ],
             IntentType.STATUS_CHECK: [
                 r"\b(status|health|state|condition)\b",
                 r"\bhow.*doing\b",
                 r"\bcheck.*system\b",
-                r"\bnode.*status\b"
+                r"\bnode.*status\b",
             ],
             IntentType.HELP_REQUEST: [
                 r"\b(help|assist|guide|how|what|explain)\b",
                 r"\bdon't know\b",
                 r"\bconfused\b",
-                r"\bwhat.*do\b"
+                r"\bwhat.*do\b",
             ],
             IntentType.CHANNEL_MANAGE: [
                 r"\b(channel|connection|peer|node)\b",
                 r"\bopen.*channel\b",
                 r"\bclose.*channel\b",
-                r"\bconnect.*to\b"
+                r"\bconnect.*to\b",
             ],
             IntentType.TRANSACTION_HISTORY: [
                 r"\b(history|transactions|payments|past|previous)\b",
                 r"\bshow.*payments\b",
                 r"\blist.*transactions\b",
-                r"\bpayment.*history\b"
-            ]
+                r"\bpayment.*history\b",
+            ],
         }
 
         self.amount_patterns = [
@@ -116,7 +120,7 @@ class NaturalLanguageProcessor:
             r"(\d+(?:\.\d+)?)\s*(btc|bitcoin)",
             r"(\d+(?:\.\d+)?)\s*(msat|millisat)",
             r"\$(\d+(?:\.\d+)?)",
-            r"(\d+(?:\.\d+)?)\s*dollars?"
+            r"(\d+(?:\.\d+)?)\s*dollars?",
         ]
 
         self.common_typos = {
@@ -127,7 +131,7 @@ class NaturalLanguageProcessor:
             "statis": "status",
             "chanels": "channels",
             "lightening": "lightning",
-            "transferr": "transfer"
+            "transferr": "transfer",
         }
 
     def parse_command(self, text: str, context: UserContext) -> ParsedCommand:
@@ -159,7 +163,7 @@ class NaturalLanguageProcessor:
             confidence=confidence,
             parameters=parameters,
             suggestions=suggestions,
-            ambiguities=ambiguities
+            ambiguities=ambiguities,
         )
 
     def _detect_intent(self, text: str) -> Tuple[IntentType, float]:
@@ -194,19 +198,19 @@ class NaturalLanguageProcessor:
         # Extract amounts
         amount = self._extract_amount(text)
         if amount:
-            parameters['amount'] = amount
+            parameters["amount"] = amount
 
         # Extract addresses/invoice
         if intent == IntentType.PAYMENT_SEND:
             invoice = self._extract_invoice(text)
             if invoice:
-                parameters['invoice'] = invoice
+                parameters["invoice"] = invoice
 
         # Extract descriptors
         if intent == IntentType.INVOICE_CREATE:
             description = self._extract_description(text)
             if description:
-                parameters['description'] = description
+                parameters["description"] = description
 
         return parameters
 
@@ -221,11 +225,11 @@ class NaturalLanguageProcessor:
                         amount = float(amount_str)
 
                         # Convert to satoshis
-                        if unit.lower() in ['btc', 'bitcoin']:
+                        if unit.lower() in ["btc", "bitcoin"]:
                             return int(amount * 100_000_000)
-                        elif unit.lower() in ['sats', 'sat', 'satoshi', 'satoshis']:
+                        elif unit.lower() in ["sats", "sat", "satoshi", "satoshis"]:
                             return int(amount)
-                        elif unit.lower() in ['msat', 'millisat']:
+                        elif unit.lower() in ["msat", "millisat"]:
                             return int(amount / 1000)
                     else:
                         # Dollar amount (assume $1 = 2000 sats for demo)
@@ -240,7 +244,7 @@ class NaturalLanguageProcessor:
     def _extract_invoice(self, text: str) -> Optional[str]:
         """Extract Lightning invoice from text"""
         # Look for Lightning invoice pattern
-        invoice_pattern = r'\b(lnbc\w+)\b'
+        invoice_pattern = r"\b(lnbc\w+)\b"
         match = re.search(invoice_pattern, text, re.IGNORECASE)
         if match:
             return match.group(1)
@@ -252,8 +256,8 @@ class NaturalLanguageProcessor:
         patterns = [
             r'"([^"]+)"',
             r"'([^']+)'",
-            r'\bfor\s+(.+?)(?:\s+\d+|\s*$)',
-            r'\bdescription[:\s]+(.+?)(?:\s+\d+|\s*$)'
+            r"\bfor\s+(.+?)(?:\s+\d+|\s*$)",
+            r"\bdescription[:\s]+(.+?)(?:\s+\d+|\s*$)",
         ]
 
         for pattern in patterns:
@@ -269,21 +273,30 @@ class NaturalLanguageProcessor:
 
         # Find closest matching commands
         common_commands = [
-            "check balance", "send payment", "create invoice",
-            "show status", "help", "list channels", "payment history"
+            "check balance",
+            "send payment",
+            "create invoice",
+            "show status",
+            "help",
+            "list channels",
+            "payment history",
         ]
 
         # Use fuzzy matching
-        close_matches = difflib.get_close_matches(text, common_commands, n=3, cutoff=0.3)
+        close_matches = difflib.get_close_matches(
+            text, common_commands, n=3, cutoff=0.3
+        )
         suggestions.extend(close_matches)
 
         # Add contextual suggestions based on UX level
         if context.ux_level == UXLevel.BEGINNER:
-            suggestions.extend([
-                "Type 'help' for guidance",
-                "Try 'check balance' to see your funds",
-                "Say 'what can I do?' for options"
-            ])
+            suggestions.extend(
+                [
+                    "Type 'help' for guidance",
+                    "Try 'check balance' to see your funds",
+                    "Say 'what can I do?' for options",
+                ]
+            )
 
         return suggestions[:5]  # Limit to 5 suggestions
 
@@ -301,7 +314,10 @@ class NaturalLanguageProcessor:
             ambiguities.append("Multiple amounts found - which one did you mean?")
 
         # Check for ambiguous pronouns
-        if re.search(r'\b(it|that|this|them)\b', text) and intent != IntentType.HELP_REQUEST:
+        if (
+            re.search(r"\b(it|that|this|them)\b", text)
+            and intent != IntentType.HELP_REQUEST
+        ):
             ambiguities.append("What does 'it' refer to?")
 
         return ambiguities
@@ -332,26 +348,30 @@ class ConversationalInterface:
         if user_id not in self.conversation_history:
             self.conversation_history[user_id] = []
 
-        self.conversation_history[user_id].append({
-            'timestamp': datetime.now(),
-            'user_message': message,
-            'parsed_intent': parsed.intent.value,
-            'confidence': parsed.confidence
-        })
+        self.conversation_history[user_id].append(
+            {
+                "timestamp": datetime.now(),
+                "user_message": message,
+                "parsed_intent": parsed.intent.value,
+                "confidence": parsed.confidence,
+            }
+        )
 
         # Execute command
         response = await self._execute_command(parsed, context)
 
         # Update user context
         context.last_commands.append(message)
-        if response.get('success', False):
+        if response.get("success", False):
             context.success_count += 1
         else:
             context.error_count += 1
 
         return response
 
-    async def _execute_command(self, parsed: ParsedCommand, context: UserContext) -> Dict[str, Any]:
+    async def _execute_command(
+        self, parsed: ParsedCommand, context: UserContext
+    ) -> Dict[str, Any]:
         """Execute parsed command"""
         try:
             if parsed.intent == IntentType.BALANCE_INQUIRY:
@@ -374,12 +394,14 @@ class ConversationalInterface:
         except Exception as e:
             logger.error(f"Error executing command: {e}")
             return {
-                'success': False,
-                'message': self._format_error_message(str(e), context),
-                'error': str(e)
+                "success": False,
+                "message": self._format_error_message(str(e), context),
+                "error": str(e),
             }
 
-    async def _handle_balance_inquiry(self, parsed: ParsedCommand, context: UserContext) -> Dict[str, Any]:
+    async def _handle_balance_inquiry(
+        self, parsed: ParsedCommand, context: UserContext
+    ) -> Dict[str, Any]:
         """Handle balance inquiry"""
         # Simulate balance check
         balance_sats = 150000  # Demo balance
@@ -391,26 +413,28 @@ class ConversationalInterface:
             message = f"Balance: {balance_sats:,} sats"
 
         return {
-            'success': True,
-            'message': message,
-            'data': {'balance_sats': balance_sats}
+            "success": True,
+            "message": message,
+            "data": {"balance_sats": balance_sats},
         }
 
-    async def _handle_payment_send(self, parsed: ParsedCommand, context: UserContext) -> Dict[str, Any]:
+    async def _handle_payment_send(
+        self, parsed: ParsedCommand, context: UserContext
+    ) -> Dict[str, Any]:
         """Handle payment sending"""
-        amount = parsed.parameters.get('amount')
-        invoice = parsed.parameters.get('invoice')
+        amount = parsed.parameters.get("amount")
+        invoice = parsed.parameters.get("invoice")
 
         if not amount and not invoice:
             return {
-                'success': False,
-                'message': "💡 I need either an amount or a Lightning invoice to send a payment. Try: 'send 1000 sats' or paste a Lightning invoice."
+                "success": False,
+                "message": "💡 I need either an amount or a Lightning invoice to send a payment. Try: 'send 1000 sats' or paste a Lightning invoice.",
             }
 
         if amount and not invoice:
             return {
-                'success': False,
-                'message': f"💡 I see you want to send {amount} sats! Please provide a Lightning invoice or destination."
+                "success": False,
+                "message": f"💡 I see you want to send {amount} sats! Please provide a Lightning invoice or destination.",
             }
 
         # Simulate payment
@@ -424,15 +448,17 @@ class ConversationalInterface:
             message = f"Payment successful: {payment_hash}"
 
         return {
-            'success': True,
-            'message': message,
-            'data': {'payment_hash': payment_hash, 'amount': amount}
+            "success": True,
+            "message": message,
+            "data": {"payment_hash": payment_hash, "amount": amount},
         }
 
-    async def _handle_invoice_create(self, parsed: ParsedCommand, context: UserContext) -> Dict[str, Any]:
+    async def _handle_invoice_create(
+        self, parsed: ParsedCommand, context: UserContext
+    ) -> Dict[str, Any]:
         """Handle invoice creation"""
-        amount = parsed.parameters.get('amount', 1000)
-        description = parsed.parameters.get('description', 'Lightning payment')
+        amount = parsed.parameters.get("amount", 1000)
+        description = parsed.parameters.get("description", "Lightning payment")
 
         # Generate mock invoice
         invoice = f"lnbc{amount}u1p..."
@@ -447,19 +473,21 @@ class ConversationalInterface:
             message = f"Invoice: {invoice}"
 
         return {
-            'success': True,
-            'message': message,
-            'data': {'invoice': invoice, 'amount': amount, 'description': description}
+            "success": True,
+            "message": message,
+            "data": {"invoice": invoice, "amount": amount, "description": description},
         }
 
-    async def _handle_status_check(self, parsed: ParsedCommand, context: UserContext) -> Dict[str, Any]:
+    async def _handle_status_check(
+        self, parsed: ParsedCommand, context: UserContext
+    ) -> Dict[str, Any]:
         """Handle status check"""
         # Simulate status check
         status = {
-            'node_online': True,
-            'channels_active': 5,
-            'channels_total': 6,
-            'sync_status': 'synced'
+            "node_online": True,
+            "channels_active": 5,
+            "channels_total": 6,
+            "sync_status": "synced",
         }
 
         if context.ux_level == UXLevel.BEGINNER:
@@ -470,13 +498,11 @@ class ConversationalInterface:
         else:
             message = f"Status: Online | Channels: {status['channels_active']}/{status['channels_total']} | Sync: {status['sync_status']}"
 
-        return {
-            'success': True,
-            'message': message,
-            'data': status
-        }
+        return {"success": True, "message": message, "data": status}
 
-    async def _handle_help_request(self, parsed: ParsedCommand, context: UserContext) -> Dict[str, Any]:
+    async def _handle_help_request(
+        self, parsed: ParsedCommand, context: UserContext
+    ) -> Dict[str, Any]:
         """Handle help request"""
         if context.ux_level == UXLevel.BEGINNER:
             message = "🤖 Welcome to Lightning! Here's what you can do:\n\n"
@@ -487,68 +513,75 @@ class ConversationalInterface:
             message += "📜 See history: 'show my payments'\n\n"
             message += "💡 Just type naturally - I understand plain English!"
         else:
-            message = "Available commands: balance, send, invoice, status, channels, history"
+            message = (
+                "Available commands: balance, send, invoice, status, channels, history"
+            )
 
-        return {
-            'success': True,
-            'message': message
-        }
+        return {"success": True, "message": message}
 
-    async def _handle_channel_manage(self, parsed: ParsedCommand, context: UserContext) -> Dict[str, Any]:
+    async def _handle_channel_manage(
+        self, parsed: ParsedCommand, context: UserContext
+    ) -> Dict[str, Any]:
         """Handle channel management"""
         # Simulate channel list
         channels = [
-            {'id': 'chan_1', 'capacity': 1000000, 'status': 'active'},
-            {'id': 'chan_2', 'capacity': 500000, 'status': 'active'},
-            {'id': 'chan_3', 'capacity': 2000000, 'status': 'pending'}
+            {"id": "chan_1", "capacity": 1000000, "status": "active"},
+            {"id": "chan_2", "capacity": 500000, "status": "active"},
+            {"id": "chan_3", "capacity": 2000000, "status": "pending"},
         ]
 
         if context.ux_level == UXLevel.BEGINNER:
             message = "⚡ Your Lightning Channels:\n\n"
             for i, channel in enumerate(channels, 1):
-                status_emoji = "🟢" if channel['status'] == 'active' else "🟡"
-                capacity_btc = channel['capacity'] / 100_000_000
-                message += f"{status_emoji} Channel {i}: {capacity_btc:.3f} BTC capacity\n"
+                status_emoji = "🟢" if channel["status"] == "active" else "🟡"
+                capacity_btc = channel["capacity"] / 100_000_000
+                message += (
+                    f"{status_emoji} Channel {i}: {capacity_btc:.3f} BTC capacity\n"
+                )
         else:
-            message = "Channels:\n" + "\n".join([
-                f"ID: {c['id']}, Capacity: {c['capacity']}, Status: {c['status']}"
-                for c in channels
-            ])
+            message = "Channels:\n" + "\n".join(
+                [
+                    f"ID: {c['id']}, Capacity: {c['capacity']}, Status: {c['status']}"
+                    for c in channels
+                ]
+            )
 
-        return {
-            'success': True,
-            'message': message,
-            'data': {'channels': channels}
-        }
+        return {"success": True, "message": message, "data": {"channels": channels}}
 
-    async def _handle_transaction_history(self, parsed: ParsedCommand, context: UserContext) -> Dict[str, Any]:
+    async def _handle_transaction_history(
+        self, parsed: ParsedCommand, context: UserContext
+    ) -> Dict[str, Any]:
         """Handle transaction history"""
         # Simulate transaction history
         transactions = [
-            {'type': 'sent', 'amount': 5000, 'time': '2 hours ago'},
-            {'type': 'received', 'amount': 10000, 'time': '1 day ago'},
-            {'type': 'sent', 'amount': 2500, 'time': '3 days ago'}
+            {"type": "sent", "amount": 5000, "time": "2 hours ago"},
+            {"type": "received", "amount": 10000, "time": "1 day ago"},
+            {"type": "sent", "amount": 2500, "time": "3 days ago"},
         ]
 
         if context.ux_level == UXLevel.BEGINNER:
             message = "📜 Your Recent Payments:\n\n"
             for tx in transactions:
-                emoji = "📤" if tx['type'] == 'sent' else "📥"
-                action = "Sent" if tx['type'] == 'sent' else "Received"
+                emoji = "📤" if tx["type"] == "sent" else "📥"
+                action = "Sent" if tx["type"] == "sent" else "Received"
                 message += f"{emoji} {action} {tx['amount']:,} sats - {tx['time']}\n"
         else:
-            message = "Transaction History:\n" + "\n".join([
-                f"{tx['type'].upper()}: {tx['amount']} sats ({tx['time']})"
-                for tx in transactions
-            ])
+            message = "Transaction History:\n" + "\n".join(
+                [
+                    f"{tx['type'].upper()}: {tx['amount']} sats ({tx['time']})"
+                    for tx in transactions
+                ]
+            )
 
         return {
-            'success': True,
-            'message': message,
-            'data': {'transactions': transactions}
+            "success": True,
+            "message": message,
+            "data": {"transactions": transactions},
         }
 
-    async def _handle_unknown_command(self, parsed: ParsedCommand, context: UserContext) -> Dict[str, Any]:
+    async def _handle_unknown_command(
+        self, parsed: ParsedCommand, context: UserContext
+    ) -> Dict[str, Any]:
         """Handle unknown command"""
         message = "🤔 I'm not sure what you want to do. "
 
@@ -561,11 +594,7 @@ class ConversationalInterface:
             message += "• 'create an invoice'\n"
             message += "• 'help'"
 
-        return {
-            'success': False,
-            'message': message,
-            'suggestions': parsed.suggestions
-        }
+        return {"success": False, "message": message, "suggestions": parsed.suggestions}
 
     def _format_error_message(self, error: str, context: UserContext) -> str:
         """Format error message based on user level"""
@@ -580,12 +609,15 @@ class ConversationalInterface:
         history = self.conversation_history.get(user_id, [])
 
         return {
-            'user_level': context.ux_level.value,
-            'total_commands': len(context.last_commands),
-            'success_rate': context.success_count / max(context.success_count + context.error_count, 1),
-            'session_duration': (datetime.now() - context.session_start).total_seconds(),
-            'conversation_length': len(history),
-            'most_common_intent': self._get_most_common_intent(history)
+            "user_level": context.ux_level.value,
+            "total_commands": len(context.last_commands),
+            "success_rate": context.success_count
+            / max(context.success_count + context.error_count, 1),
+            "session_duration": (
+                datetime.now() - context.session_start
+            ).total_seconds(),
+            "conversation_length": len(history),
+            "most_common_intent": self._get_most_common_intent(history),
         }
 
     def _get_most_common_intent(self, history: List[Dict]) -> str:
@@ -593,7 +625,7 @@ class ConversationalInterface:
         if not history:
             return "none"
 
-        intents = [msg['parsed_intent'] for msg in history]
+        intents = [msg["parsed_intent"] for msg in history]
         return max(set(intents), key=intents.count)
 
 

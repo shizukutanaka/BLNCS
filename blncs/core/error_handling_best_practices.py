@@ -5,62 +5,74 @@ Implements 2024 best practices for exception handling
 """
 
 import logging
+import sys
 import traceback
-from typing import Optional, Callable, Any, Type, TypeVar, Tuple
 from contextlib import contextmanager
 from functools import wraps
-import sys
+from typing import Any, Callable, Optional, Tuple, Type, TypeVar
 
 logger = logging.getLogger(__name__)
 
 # Type for exceptions
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class BLNCsException(Exception):
     """Base exception for BLNCS"""
-    def __init__(self, message: str, error_code: Optional[str] = None, details: Optional[dict] = None):
+
+    def __init__(
+        self,
+        message: str,
+        error_code: Optional[str] = None,
+        details: Optional[dict] = None,
+    ):
         self.message = message
-        self.error_code = error_code or 'UNKNOWN_ERROR'
+        self.error_code = error_code or "UNKNOWN_ERROR"
         self.details = details or {}
         super().__init__(self.message)
 
     def to_dict(self) -> dict:
         """Convert exception to dictionary for API response"""
         return {
-            'error': self.error_code,
-            'message': self.message,
-            'details': self.details
+            "error": self.error_code,
+            "message": self.message,
+            "details": self.details,
         }
 
 
 class LightningException(BLNCsException):
     """Lightning Network specific exceptions"""
+
     pass
 
 
 class ConfigurationException(BLNCsException):
     """Configuration related exceptions"""
+
     pass
 
 
 class DatabaseException(BLNCsException):
     """Database operation exceptions"""
+
     pass
 
 
 class AuthenticationException(BLNCsException):
     """Authentication exceptions"""
+
     pass
 
 
 class ValidationException(BLNCsException):
     """Input validation exceptions"""
+
     pass
 
 
 class RateLimitException(BLNCsException):
     """Rate limiting exceptions"""
+
     pass
 
 
@@ -70,7 +82,7 @@ def safe_execute(
     default: Any = None,
     on_error: Optional[Callable] = None,
     log_level: int = logging.WARNING,
-    **kwargs
+    **kwargs,
 ) -> Any:
     """
     Safely execute a function with error handling
@@ -89,12 +101,13 @@ def handle_exceptions(
     *exception_types: Type[Exception],
     logger_func: Optional[Callable] = None,
     reraise: bool = False,
-    default: Any = None
+    default: Any = None,
 ):
     """
     Decorator for specific exception handling
     Order matters: more specific exceptions before general ones
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -117,6 +130,7 @@ def handle_exceptions(
                 raise
 
         return wrapper
+
     return decorator
 
 
@@ -125,7 +139,7 @@ def error_context(
     operation: str,
     exception_type: Type[BLNCsException] = BLNCsException,
     error_code: Optional[str] = None,
-    reraise: bool = True
+    reraise: bool = True,
 ):
     """
     Context manager for error handling with context information
@@ -145,7 +159,7 @@ def error_context(
             raise exception_type(
                 message=msg,
                 error_code=error_code_final,
-                details={'operation': operation, 'original_error': str(e)}
+                details={"operation": operation, "original_error": str(e)},
             )
 
 
@@ -153,16 +167,18 @@ def retry_on_exception(
     max_attempts: int = 3,
     delay: float = 0.1,
     backoff_factor: float = 2.0,
-    exceptions: Tuple[Type[Exception], ...] = (Exception,)
+    exceptions: Tuple[Type[Exception], ...] = (Exception,),
 ):
     """
     Decorator for retrying failed operations with exponential backoff
     Useful for network operations and transient failures
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
             import time
+
             current_delay = delay
             last_exception = None
 
@@ -179,33 +195,37 @@ def retry_on_exception(
                         time.sleep(current_delay)
                         current_delay *= backoff_factor
                     else:
-                        logger.error(f"All {max_attempts} attempts failed for {func.__name__}")
+                        logger.error(
+                            f"All {max_attempts} attempts failed for {func.__name__}"
+                        )
 
             raise last_exception
 
         return wrapper
+
     return decorator
 
 
 class ValidationError(ValidationException):
     """Specific validation error with field information"""
+
     def __init__(self, field: str, message: str, value: Any = None):
         self.field = field
         self.value = value
         super().__init__(
             message=f"Validation failed for '{field}': {message}",
-            error_code='VALIDATION_ERROR',
-            details={'field': field, 'value': str(value)[:100]}
+            error_code="VALIDATION_ERROR",
+            details={"field": field, "value": str(value)[:100]},
         )
 
 
 def validate_input(
     value: Any,
     expected_type: Type,
-    field_name: str = 'input',
+    field_name: str = "input",
     required: bool = True,
     min_value: Optional[Any] = None,
-    max_value: Optional[Any] = None
+    max_value: Optional[Any] = None,
 ) -> None:
     """
     Validate input parameters with clear error messages
@@ -213,31 +233,23 @@ def validate_input(
     """
     # Check if required
     if required and value is None:
-        raise ValidationError(field_name, 'This field is required', value)
+        raise ValidationError(field_name, "This field is required", value)
 
     # Check type
     if value is not None and not isinstance(value, expected_type):
         raise ValidationError(
             field_name,
-            f'Expected type {expected_type.__name__}, got {type(value).__name__}',
-            value
+            f"Expected type {expected_type.__name__}, got {type(value).__name__}",
+            value,
         )
 
     # Check min value
     if min_value is not None and value is not None and value < min_value:
-        raise ValidationError(
-            field_name,
-            f'Value must be at least {min_value}',
-            value
-        )
+        raise ValidationError(field_name, f"Value must be at least {min_value}", value)
 
     # Check max value
     if max_value is not None and value is not None and value > max_value:
-        raise ValidationError(
-            field_name,
-            f'Value must be at most {max_value}',
-            value
-        )
+        raise ValidationError(field_name, f"Value must be at most {max_value}", value)
 
 
 @contextmanager
@@ -261,12 +273,13 @@ class ErrorAggregator:
     Collect multiple errors and report them together
     Useful for batch operations and form validation
     """
+
     def __init__(self):
         self.errors: list = []
 
     def add(self, error: str, error_code: Optional[str] = None):
         """Add an error"""
-        self.errors.append({'message': error, 'code': error_code})
+        self.errors.append({"message": error, "code": error_code})
 
     def has_errors(self) -> bool:
         """Check if there are any errors"""
@@ -275,32 +288,32 @@ class ErrorAggregator:
     def raise_if_errors(self, exception_type: Type[BLNCsException] = BLNCsException):
         """Raise exception if there are accumulated errors"""
         if self.has_errors():
-            msg = '; '.join([e['message'] for e in self.errors])
+            msg = "; ".join([e["message"] for e in self.errors])
             raise exception_type(
                 message=msg,
-                error_code='MULTIPLE_ERRORS',
-                details={'errors': self.errors}
+                error_code="MULTIPLE_ERRORS",
+                details={"errors": self.errors},
             )
 
     def to_dict(self) -> dict:
         """Convert errors to dictionary"""
-        return {'errors': self.errors, 'count': len(self.errors)}
+        return {"errors": self.errors, "count": len(self.errors)}
 
 
 __all__ = [
-    'BLNCsException',
-    'LightningException',
-    'ConfigurationException',
-    'DatabaseException',
-    'AuthenticationException',
-    'ValidationException',
-    'RateLimitException',
-    'ValidationError',
-    'safe_execute',
-    'handle_exceptions',
-    'error_context',
-    'retry_on_exception',
-    'validate_input',
-    'ensure_cleanup',
-    'ErrorAggregator',
+    "BLNCsException",
+    "LightningException",
+    "ConfigurationException",
+    "DatabaseException",
+    "AuthenticationException",
+    "ValidationException",
+    "RateLimitException",
+    "ValidationError",
+    "safe_execute",
+    "handle_exceptions",
+    "error_context",
+    "retry_on_exception",
+    "validate_input",
+    "ensure_cleanup",
+    "ErrorAggregator",
 ]

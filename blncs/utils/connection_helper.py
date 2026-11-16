@@ -5,13 +5,14 @@ Simple utilities for Lightning node connections.
 
 import socket
 import time
-from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
 class ConnectionConfig:
     """Lightning node connection configuration"""
+
     host: str
     port: int
     cert_path: Optional[str] = None
@@ -22,18 +23,19 @@ class ConnectionConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'host': self.host,
-            'port': self.port,
-            'cert_path': self.cert_path,
-            'macaroon_path': self.macaroon_path,
-            'network': self.network,
-            'timeout': self.timeout
+            "host": self.host,
+            "port": self.port,
+            "cert_path": self.cert_path,
+            "macaroon_path": self.macaroon_path,
+            "network": self.network,
+            "timeout": self.timeout,
         }
 
 
 @dataclass
 class ConnectionTest:
     """Connection test result"""
+
     host: str
     port: int
     success: bool
@@ -49,9 +51,9 @@ class ConnectionHelper:
 
     # Well-known test nodes
     TEST_NODES = [
-        ('endurance.acinq.co', 9735),
-        ('ln.bitrefill.com', 9735),
-        ('yalls.org', 9735),
+        ("endurance.acinq.co", 9735),
+        ("ln.bitrefill.com", 9735),
+        ("yalls.org", 9735),
     ]
 
     @staticmethod
@@ -74,7 +76,7 @@ class ConnectionHelper:
                 port=port,
                 success=success,
                 response_time=response_time,
-                error=error
+                error=error,
             )
 
         except Exception as e:
@@ -83,11 +85,13 @@ class ConnectionHelper:
                 port=port,
                 success=False,
                 response_time=time.time() - start_time,
-                error=str(e)
+                error=str(e),
             )
 
     @classmethod
-    def scan_ports(cls, host: str, ports: List[int] = None, timeout: int = 3) -> List[ConnectionTest]:
+    def scan_ports(
+        cls, host: str, ports: List[int] = None, timeout: int = 3
+    ) -> List[ConnectionTest]:
         """Scan multiple ports on a host"""
         if ports is None:
             ports = cls.COMMON_PORTS
@@ -100,7 +104,9 @@ class ConnectionHelper:
         return results
 
     @classmethod
-    def find_available_port(cls, host: str, ports: List[int] = None, timeout: int = 3) -> Optional[int]:
+    def find_available_port(
+        cls, host: str, ports: List[int] = None, timeout: int = 3
+    ) -> Optional[int]:
         """Find first available port on host"""
         results = cls.scan_ports(host, ports, timeout)
         for test in results:
@@ -123,7 +129,7 @@ class ConnectionHelper:
         port: int = 10009,
         cert_path: str = None,
         macaroon_path: str = None,
-        network: str = "mainnet"
+        network: str = "mainnet",
     ) -> ConnectionConfig:
         """Create connection configuration"""
         return ConnectionConfig(
@@ -131,7 +137,7 @@ class ConnectionHelper:
             port=port,
             cert_path=cert_path,
             macaroon_path=macaroon_path,
-            network=network
+            network=network,
         )
 
     @staticmethod
@@ -151,6 +157,7 @@ class ConnectionHelper:
 
         # File path validation
         import os
+
         if config.cert_path and not os.path.exists(config.cert_path):
             errors.append(f"Certificate file not found: {config.cert_path}")
 
@@ -167,20 +174,14 @@ class ConnectionHelper:
             test = cls.test_connection("localhost", port, timeout)
             if test.success:
                 return ConnectionConfig(
-                    host="localhost",
-                    port=port,
-                    network="mainnet"  # Default assumption
+                    host="localhost", port=port, network="mainnet"  # Default assumption
                 )
 
         # Try 127.0.0.1
         for port in cls.COMMON_PORTS:
             test = cls.test_connection("127.0.0.1", port, timeout)
             if test.success:
-                return ConnectionConfig(
-                    host="127.0.0.1",
-                    port=port,
-                    network="mainnet"
-                )
+                return ConnectionConfig(host="127.0.0.1", port=port, network="mainnet")
 
         return None
 
@@ -188,12 +189,12 @@ class ConnectionHelper:
     def get_connection_summary(config: ConnectionConfig) -> Dict[str, Any]:
         """Get connection configuration summary"""
         return {
-            'host': config.host,
-            'port': config.port,
-            'network': config.network,
-            'has_cert': config.cert_path is not None,
-            'has_macaroon': config.macaroon_path is not None,
-            'connection_string': f"{config.host}:{config.port}"
+            "host": config.host,
+            "port": config.port,
+            "network": config.network,
+            "has_cert": config.cert_path is not None,
+            "has_macaroon": config.macaroon_path is not None,
+            "connection_string": f"{config.host}:{config.port}",
         }
 
 
@@ -246,4 +247,6 @@ if __name__ == "__main__":
 
     # Test specific connection
     test = ConnectionHelper.test_connection("127.0.0.1", 10009)
-    print(f"Test localhost:10009 - Success: {test.success}, Time: {test.response_time:.3f}s")
+    print(
+        f"Test localhost:10009 - Success: {test.success}, Time: {test.response_time:.3f}s"
+    )

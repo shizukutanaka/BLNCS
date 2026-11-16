@@ -3,16 +3,17 @@ BLNCS Performance Profiler
 Real-time performance monitoring and bottleneck detection
 """
 
-import time
-import threading
-import logging
-import psutil
 import functools
-from typing import Any, Callable, Dict, List, Optional
+import logging
+import threading
+import time
+from collections import defaultdict, deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from contextlib import contextmanager
-from collections import defaultdict, deque
+from typing import Any, Callable, Dict, List, Optional
+
+import psutil
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +21,11 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PerformanceMetrics:
     """Performance metrics for a function or operation"""
+
     name: str
     call_count: int = 0
     total_time: float = 0.0
-    min_time: float = float('inf')
+    min_time: float = float("inf")
     max_time: float = 0.0
     avg_time: float = 0.0
     p50_time: float = 0.0
@@ -58,6 +60,7 @@ class PerformanceMetrics:
 @dataclass
 class ResourceSnapshot:
     """System resource snapshot"""
+
     timestamp: str
     cpu_percent: float
     memory_percent: float
@@ -84,7 +87,7 @@ class PerformanceProfiler:
         self,
         slow_threshold: float = 1.0,
         monitoring_interval: float = 5.0,
-        enable_resource_monitoring: bool = True
+        enable_resource_monitoring: bool = True,
     ):
         self.slow_threshold = slow_threshold
         self.monitoring_interval = monitoring_interval
@@ -103,6 +106,7 @@ class PerformanceProfiler:
 
     def _start_resource_monitoring(self):
         """Start background resource monitoring"""
+
         def monitor():
             process = psutil.Process()
             last_disk_io = process.io_counters()
@@ -119,14 +123,22 @@ class PerformanceProfiler:
 
                     # Disk I/O
                     current_disk_io = process.io_counters()
-                    disk_read_mb = (current_disk_io.read_bytes - last_disk_io.read_bytes) / (1024 * 1024)
-                    disk_write_mb = (current_disk_io.write_bytes - last_disk_io.write_bytes) / (1024 * 1024)
+                    disk_read_mb = (
+                        current_disk_io.read_bytes - last_disk_io.read_bytes
+                    ) / (1024 * 1024)
+                    disk_write_mb = (
+                        current_disk_io.write_bytes - last_disk_io.write_bytes
+                    ) / (1024 * 1024)
                     last_disk_io = current_disk_io
 
                     # Network I/O
                     current_net_io = psutil.net_io_counters()
-                    net_sent_mb = (current_net_io.bytes_sent - last_net_io.bytes_sent) / (1024 * 1024)
-                    net_recv_mb = (current_net_io.bytes_recv - last_net_io.bytes_recv) / (1024 * 1024)
+                    net_sent_mb = (
+                        current_net_io.bytes_sent - last_net_io.bytes_sent
+                    ) / (1024 * 1024)
+                    net_recv_mb = (
+                        current_net_io.bytes_recv - last_net_io.bytes_recv
+                    ) / (1024 * 1024)
                     last_net_io = current_net_io
 
                     # Create snapshot
@@ -140,7 +152,7 @@ class PerformanceProfiler:
                         network_sent_mb=net_sent_mb / self.monitoring_interval,
                         network_recv_mb=net_recv_mb / self.monitoring_interval,
                         thread_count=threading.active_count(),
-                        open_files=len(process.open_files())
+                        open_files=len(process.open_files()),
                     )
 
                     with self._lock:
@@ -180,7 +192,9 @@ class PerformanceProfiler:
             duration = time.perf_counter() - start_time
             self._record_metric(name, duration, error)
 
-    def profile_function(self, func: Optional[Callable] = None, *, name: Optional[str] = None):
+    def profile_function(
+        self, func: Optional[Callable] = None, *, name: Optional[str] = None
+    ):
         """
         Decorator for profiling functions
 
@@ -193,6 +207,7 @@ class PerformanceProfiler:
             def my_function():
                 pass
         """
+
         def decorator(f: Callable) -> Callable:
             metric_name = name or f"{f.__module__}.{f.__name__}"
 
@@ -230,7 +245,9 @@ class PerformanceProfiler:
             if duration >= self.slow_threshold:
                 logger.warning(
                     "Slow operation detected: %s took %.3fs (threshold: %.3fs)",
-                    name, duration, self.slow_threshold
+                    name,
+                    duration,
+                    self.slow_threshold,
                 )
 
             # Check for performance regression
@@ -239,7 +256,9 @@ class PerformanceProfiler:
                 if duration > baseline * 1.5:  # 50% slower than baseline
                     logger.warning(
                         "Performance regression: %s took %.3fs (baseline: %.3fs)",
-                        name, duration, baseline
+                        name,
+                        duration,
+                        baseline,
                     )
 
     def set_baseline(self, name: str, duration: Optional[float] = None):
@@ -278,24 +297,24 @@ class PerformanceProfiler:
                     return None
 
                 return {
-                    'name': metric.name,
-                    'call_count': metric.call_count,
-                    'avg_time': round(metric.avg_time, 4),
-                    'min_time': round(metric.min_time, 4),
-                    'max_time': round(metric.max_time, 4),
-                    'p50_time': round(metric.p50_time, 4),
-                    'p95_time': round(metric.p95_time, 4),
-                    'p99_time': round(metric.p99_time, 4),
-                    'errors': metric.errors,
-                    'last_called': metric.last_called
+                    "name": metric.name,
+                    "call_count": metric.call_count,
+                    "avg_time": round(metric.avg_time, 4),
+                    "min_time": round(metric.min_time, 4),
+                    "max_time": round(metric.max_time, 4),
+                    "p50_time": round(metric.p50_time, 4),
+                    "p95_time": round(metric.p95_time, 4),
+                    "p99_time": round(metric.p99_time, 4),
+                    "errors": metric.errors,
+                    "last_called": metric.last_called,
                 }
             else:
                 return {
                     name: {
-                        'call_count': m.call_count,
-                        'avg_time': round(m.avg_time, 4),
-                        'p95_time': round(m.p95_time, 4),
-                        'errors': m.errors
+                        "call_count": m.call_count,
+                        "avg_time": round(m.avg_time, 4),
+                        "p95_time": round(m.p95_time, 4),
+                        "errors": m.errors,
                     }
                     for name, m in self._metrics.items()
                 }
@@ -304,18 +323,16 @@ class PerformanceProfiler:
         """Get slowest operations by average time"""
         with self._lock:
             sorted_metrics = sorted(
-                self._metrics.values(),
-                key=lambda m: m.avg_time,
-                reverse=True
+                self._metrics.values(), key=lambda m: m.avg_time, reverse=True
             )
 
             return [
                 {
-                    'name': m.name,
-                    'avg_time': round(m.avg_time, 4),
-                    'call_count': m.call_count,
-                    'p95_time': round(m.p95_time, 4),
-                    'max_time': round(m.max_time, 4)
+                    "name": m.name,
+                    "avg_time": round(m.avg_time, 4),
+                    "call_count": m.call_count,
+                    "p95_time": round(m.p95_time, 4),
+                    "max_time": round(m.max_time, 4),
                 }
                 for m in sorted_metrics[:limit]
             ]
@@ -328,33 +345,43 @@ class PerformanceProfiler:
             for name, metric in self._metrics.items():
                 # High average time
                 if metric.avg_time > self.slow_threshold:
-                    bottlenecks.append({
-                        'name': name,
-                        'type': 'high_latency',
-                        'avg_time': round(metric.avg_time, 4),
-                        'severity': 'high' if metric.avg_time > self.slow_threshold * 2 else 'medium'
-                    })
+                    bottlenecks.append(
+                        {
+                            "name": name,
+                            "type": "high_latency",
+                            "avg_time": round(metric.avg_time, 4),
+                            "severity": (
+                                "high"
+                                if metric.avg_time > self.slow_threshold * 2
+                                else "medium"
+                            ),
+                        }
+                    )
 
                 # High variance (p99 >> p50)
                 if metric.call_count > 10 and metric.p99_time > metric.p50_time * 3:
-                    bottlenecks.append({
-                        'name': name,
-                        'type': 'high_variance',
-                        'p50': round(metric.p50_time, 4),
-                        'p99': round(metric.p99_time, 4),
-                        'severity': 'medium'
-                    })
+                    bottlenecks.append(
+                        {
+                            "name": name,
+                            "type": "high_variance",
+                            "p50": round(metric.p50_time, 4),
+                            "p99": round(metric.p99_time, 4),
+                            "severity": "medium",
+                        }
+                    )
 
                 # High error rate
                 if metric.call_count > 0:
                     error_rate = metric.errors / metric.call_count
                     if error_rate > 0.05:  # 5% error rate
-                        bottlenecks.append({
-                            'name': name,
-                            'type': 'high_error_rate',
-                            'error_rate': round(error_rate * 100, 2),
-                            'severity': 'high'
-                        })
+                        bottlenecks.append(
+                            {
+                                "name": name,
+                                "type": "high_error_rate",
+                                "error_rate": round(error_rate * 100, 2),
+                                "severity": "high",
+                            }
+                        )
 
             return bottlenecks
 
@@ -367,20 +394,24 @@ class PerformanceProfiler:
             recent = list(self._resource_history)[-100:]  # Last 100 samples
 
             return {
-                'current': {
-                    'cpu_percent': recent[-1].cpu_percent,
-                    'memory_percent': recent[-1].memory_percent,
-                    'memory_mb': round(recent[-1].memory_mb, 2),
-                    'thread_count': recent[-1].thread_count
+                "current": {
+                    "cpu_percent": recent[-1].cpu_percent,
+                    "memory_percent": recent[-1].memory_percent,
+                    "memory_mb": round(recent[-1].memory_mb, 2),
+                    "thread_count": recent[-1].thread_count,
                 },
-                'avg': {
-                    'cpu_percent': round(sum(s.cpu_percent for s in recent) / len(recent), 2),
-                    'memory_mb': round(sum(s.memory_mb for s in recent) / len(recent), 2)
+                "avg": {
+                    "cpu_percent": round(
+                        sum(s.cpu_percent for s in recent) / len(recent), 2
+                    ),
+                    "memory_mb": round(
+                        sum(s.memory_mb for s in recent) / len(recent), 2
+                    ),
                 },
-                'max': {
-                    'cpu_percent': max(s.cpu_percent for s in recent),
-                    'memory_mb': round(max(s.memory_mb for s in recent), 2)
-                }
+                "max": {
+                    "cpu_percent": max(s.cpu_percent for s in recent),
+                    "memory_mb": round(max(s.memory_mb for s in recent), 2),
+                },
             }
 
     def export_report(self, output_file: str):
@@ -389,14 +420,14 @@ class PerformanceProfiler:
 
         with self._lock:
             report = {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'metrics': self.get_metrics(),
-                'slow_operations': self.get_slow_operations(),
-                'bottlenecks': self.get_bottlenecks(),
-                'resource_stats': self.get_resource_stats()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "metrics": self.get_metrics(),
+                "slow_operations": self.get_slow_operations(),
+                "bottlenecks": self.get_bottlenecks(),
+                "resource_stats": self.get_resource_stats(),
             }
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             json.dump(report, f, indent=2)
 
         logger.info("Performance report exported to %s", output_file)
@@ -432,9 +463,9 @@ def profile(func: Optional[Callable] = None, *, name: Optional[str] = None):
 
 
 __all__ = [
-    'PerformanceProfiler',
-    'PerformanceMetrics',
-    'ResourceSnapshot',
-    'get_performance_profiler',
-    'profile'
+    "PerformanceProfiler",
+    "PerformanceMetrics",
+    "ResourceSnapshot",
+    "get_performance_profiler",
+    "profile",
 ]

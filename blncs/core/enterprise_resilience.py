@@ -6,23 +6,26 @@ Production-grade error handling with self-healing capabilities.
 import asyncio
 import functools
 import logging
+import signal
+import sys
+import threading
 import time
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-import threading
-import signal
-import sys
-from collections import deque
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 
 class FailureMode(Enum):
     """Types of system failures"""
+
     TRANSIENT = "transient"  # Temporary, retry may succeed
     PERMANENT = "permanent"  # Permanent failure, needs intervention
-    DEGRADED = "degraded"  # Partial failure, system can continue with reduced functionality
+    DEGRADED = (
+        "degraded"  # Partial failure, system can continue with reduced functionality
+    )
     CASCADE = "cascade"  # Failure affecting multiple components
     CRITICAL = "critical"  # System-critical failure requiring immediate action
 
@@ -30,14 +33,18 @@ class FailureMode(Enum):
 @dataclass
 class CircuitBreakerConfig:
     """Circuit breaker configuration"""
+
     failure_threshold: int = 5
     recovery_timeout: int = 60  # seconds
     half_open_max_calls: int = 3
-    exceptions_to_track: List[Type[Exception]] = field(default_factory=lambda: [Exception])
+    exceptions_to_track: List[Type[Exception]] = field(
+        default_factory=lambda: [Exception]
+    )
 
 
 class CircuitBreakerState(Enum):
     """Circuit breaker states"""
+
     CLOSED = "closed"  # Normal operation
     OPEN = "open"  # Circuit tripped, rejecting calls
     HALF_OPEN = "half_open"  # Testing if service recovered
@@ -98,7 +105,10 @@ class CircuitBreaker:
     def _on_failure(self, exception: Exception):
         """Handle failed call"""
         with self._lock:
-            if not any(isinstance(exception, exc_type) for exc_type in self.config.exceptions_to_track):
+            if not any(
+                isinstance(exception, exc_type)
+                for exc_type in self.config.exceptions_to_track
+            ):
                 return
 
             self.failure_count += 1
@@ -106,10 +116,14 @@ class CircuitBreaker:
 
             if self.state == CircuitBreakerState.HALF_OPEN:
                 self.state = CircuitBreakerState.OPEN
-                self.logger.warning("Circuit breaker reopened due to failure in half-open state")
+                self.logger.warning(
+                    "Circuit breaker reopened due to failure in half-open state"
+                )
             elif self.failure_count >= self.config.failure_threshold:
                 self.state = CircuitBreakerState.OPEN
-                self.logger.error(f"Circuit breaker opened after {self.failure_count} failures")
+                self.logger.error(
+                    f"Circuit breaker opened after {self.failure_count} failures"
+                )
 
     def get_state(self) -> CircuitBreakerState:
         """Get current circuit breaker state"""
@@ -119,7 +133,9 @@ class CircuitBreaker:
 class RetryStrategy:
     """Intelligent retry strategy with exponential backoff"""
 
-    def __init__(self, max_retries: int = 3, base_delay: float = 1.0, max_delay: float = 60.0):
+    def __init__(
+        self, max_retries: int = 3, base_delay: float = 1.0, max_delay: float = 60.0
+    ):
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.max_delay = max_delay
@@ -135,7 +151,7 @@ class RetryStrategy:
                 last_exception = e
 
                 if attempt < self.max_retries:
-                    delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+                    delay = min(self.base_delay * (2**attempt), self.max_delay)
                     time.sleep(delay)
                     continue
 
@@ -147,6 +163,7 @@ class RetryStrategy:
 @dataclass
 class HealthCheck:
     """Health check configuration"""
+
     name: str
     check_function: Callable[[], bool]
     interval: int = 30  # seconds
@@ -208,8 +225,7 @@ class SelfHealingSystem:
                 try:
                     # Execute health check with timeout
                     result = self._execute_with_timeout(
-                        health_check.check_function,
-                        health_check.timeout
+                        health_check.check_function, health_check.timeout
                     )
 
                     if not result:
@@ -239,7 +255,9 @@ class SelfHealingSystem:
         thread.join(timeout)
 
         if thread.is_alive():
-            raise TimeoutError(f"Function execution exceeded timeout of {timeout} seconds")
+            raise TimeoutError(
+                f"Function execution exceeded timeout of {timeout} seconds"
+            )
 
         if exception[0]:
             raise exception[0]
@@ -249,9 +267,9 @@ class SelfHealingSystem:
     def _handle_health_failure(self, health_check: HealthCheck):
         """Handle health check failure"""
         failure_entry = {
-            'timestamp': datetime.now(),
-            'health_check': health_check.name,
-            'critical': health_check.critical
+            "timestamp": datetime.now(),
+            "health_check": health_check.name,
+            "critical": health_check.critical,
         }
         self.failure_history.append(failure_entry)
 
@@ -267,7 +285,9 @@ class SelfHealingSystem:
                 if health_check.critical:
                     self._escalate_critical_failure(health_check, e)
 
-    def _escalate_critical_failure(self, health_check: HealthCheck, exception: Exception):
+    def _escalate_critical_failure(
+        self, health_check: HealthCheck, exception: Exception
+    ):
         """Escalate critical failures"""
         self.logger.critical(f"CRITICAL FAILURE in {health_check.name}: {exception}")
 
@@ -288,11 +308,11 @@ class ErrorCollector:
         """Collect error information"""
         with self._lock:
             error_entry = {
-                'timestamp': datetime.now(),
-                'type': type(error).__name__,
-                'message': str(error),
-                'traceback': traceback.format_exc(),
-                'context': context or {}
+                "timestamp": datetime.now(),
+                "type": type(error).__name__,
+                "message": str(error),
+                "traceback": traceback.format_exc(),
+                "context": context or {},
             }
 
             self.errors.append(error_entry)
@@ -305,9 +325,9 @@ class ErrorCollector:
         """Get error statistics summary"""
         with self._lock:
             return {
-                'total_errors': len(self.errors),
-                'error_types': dict(self.error_stats),
-                'recent_errors': list(self.errors)[-10:] if self.errors else []
+                "total_errors": len(self.errors),
+                "error_types": dict(self.error_stats),
+                "recent_errors": list(self.errors)[-10:] if self.errors else [],
             }
 
     def analyze_patterns(self) -> List[Dict[str, Any]]:
@@ -318,23 +338,29 @@ class ErrorCollector:
             # Find most common errors
             if self.error_stats:
                 most_common = max(self.error_stats, key=self.error_stats.get)
-                patterns.append({
-                    'pattern': 'most_common_error',
-                    'error_type': most_common,
-                    'count': self.error_stats[most_common]
-                })
+                patterns.append(
+                    {
+                        "pattern": "most_common_error",
+                        "error_type": most_common,
+                        "count": self.error_stats[most_common],
+                    }
+                )
 
             # Detect error spikes
             if len(self.errors) >= 10:
                 recent_window = datetime.now() - timedelta(minutes=5)
-                recent_errors = [e for e in self.errors if e['timestamp'] > recent_window]
+                recent_errors = [
+                    e for e in self.errors if e["timestamp"] > recent_window
+                ]
 
                 if len(recent_errors) > len(self.errors) * 0.5:
-                    patterns.append({
-                        'pattern': 'error_spike',
-                        'recent_count': len(recent_errors),
-                        'spike_detected': True
-                    })
+                    patterns.append(
+                        {
+                            "pattern": "error_spike",
+                            "recent_count": len(recent_errors),
+                            "spike_detected": True,
+                        }
+                    )
 
         return patterns
 
@@ -372,9 +398,9 @@ class EnterpriseResilienceManager:
             patterns = self.error_collector.analyze_patterns()
 
             report = {
-                'timestamp': datetime.now().isoformat(),
-                'summary': summary,
-                'patterns': patterns
+                "timestamp": datetime.now().isoformat(),
+                "summary": summary,
+                "patterns": patterns,
             }
 
             # Save to file or database
@@ -389,6 +415,7 @@ class EnterpriseResilienceManager:
 
     def with_resilience(self, service_name: str = "default"):
         """Decorator to add resilience to functions"""
+
         def decorator(func):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
@@ -396,20 +423,26 @@ class EnterpriseResilienceManager:
                     # Use circuit breaker if available
                     if service_name in self.circuit_breakers:
                         cb = self.circuit_breakers[service_name]
-                        return cb.call(lambda: self.retry_strategy.execute(func, *args, **kwargs))
+                        return cb.call(
+                            lambda: self.retry_strategy.execute(func, *args, **kwargs)
+                        )
                     else:
                         return self.retry_strategy.execute(func, *args, **kwargs)
 
                 except Exception as e:
                     # Collect error information
-                    self.error_collector.collect(e, {'service': service_name, 'function': func.__name__})
+                    self.error_collector.collect(
+                        e, {"service": service_name, "function": func.__name__}
+                    )
                     raise
 
             return wrapper
+
         return decorator
 
     async def with_async_resilience(self, service_name: str = "default"):
         """Async decorator for resilience"""
+
         def decorator(func):
             @functools.wraps(func)
             async def wrapper(*args, **kwargs):
@@ -417,10 +450,13 @@ class EnterpriseResilienceManager:
                     # Implement async resilience logic
                     return await func(*args, **kwargs)
                 except Exception as e:
-                    self.error_collector.collect(e, {'service': service_name, 'function': func.__name__})
+                    self.error_collector.collect(
+                        e, {"service": service_name, "function": func.__name__}
+                    )
                     raise
 
             return wrapper
+
         return decorator
 
     def start(self):
@@ -437,11 +473,10 @@ class EnterpriseResilienceManager:
     def get_status(self) -> Dict[str, Any]:
         """Get resilience system status"""
         return {
-            'circuit_breakers': {
-                name: cb.get_state().value
-                for name, cb in self.circuit_breakers.items()
+            "circuit_breakers": {
+                name: cb.get_state().value for name, cb in self.circuit_breakers.items()
             },
-            'error_summary': self.error_collector.get_error_summary(),
-            'error_patterns': self.error_collector.analyze_patterns(),
-            'health_checks': len(self.self_healing.health_checks)
+            "error_summary": self.error_collector.get_error_summary(),
+            "error_patterns": self.error_collector.analyze_patterns(),
+            "health_checks": len(self.self_healing.health_checks),
         }

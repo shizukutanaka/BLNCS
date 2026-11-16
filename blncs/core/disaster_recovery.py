@@ -3,24 +3,25 @@ BLNCS Disaster Recovery System
 Automated backup, recovery, and failover management
 """
 
-import shutil
-import tarfile
 import gzip
 import hashlib
 import json
 import logging
+import shutil
+import tarfile
 import threading
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class BackupType(Enum):
     """Backup types"""
+
     FULL = "full"
     INCREMENTAL = "incremental"
     DIFFERENTIAL = "differential"
@@ -28,6 +29,7 @@ class BackupType(Enum):
 
 class BackupStatus(Enum):
     """Backup status"""
+
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -37,6 +39,7 @@ class BackupStatus(Enum):
 @dataclass
 class BackupMetadata:
     """Backup metadata"""
+
     backup_id: str
     timestamp: str
     backup_type: str
@@ -68,7 +71,7 @@ class DisasterRecoverySystem:
         retention_days: int = 30,
         max_backups: int = 100,
         compression_level: int = 6,
-        enable_encryption: bool = False
+        enable_encryption: bool = False,
     ):
         self.backup_root = Path(backup_root)
         self.backup_root.mkdir(parents=True, exist_ok=True)
@@ -91,9 +94,9 @@ class DisasterRecoverySystem:
             return
 
         try:
-            with open(self._metadata_file, 'r') as f:
+            with open(self._metadata_file, "r") as f:
                 data = json.load(f)
-                for backup_data in data.get('backups', []):
+                for backup_data in data.get("backups", []):
                     backup = BackupMetadata(**backup_data)
                     self._backups[backup.backup_id] = backup
 
@@ -105,11 +108,11 @@ class DisasterRecoverySystem:
         """Save backup metadata to disk"""
         try:
             data = {
-                'last_updated': datetime.now(timezone.utc).isoformat(),
-                'backups': [asdict(backup) for backup in self._backups.values()]
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+                "backups": [asdict(backup) for backup in self._backups.values()],
             }
 
-            with open(self._metadata_file, 'w') as f:
+            with open(self._metadata_file, "w") as f:
                 json.dump(data, f, indent=2)
 
         except Exception as e:
@@ -119,7 +122,7 @@ class DisasterRecoverySystem:
         self,
         source_paths: List[str],
         backup_type: BackupType = BackupType.FULL,
-        backup_id: Optional[str] = None
+        backup_id: Optional[str] = None,
     ) -> Optional[BackupMetadata]:
         """
         Create backup of specified paths
@@ -132,8 +135,8 @@ class DisasterRecoverySystem:
         Returns:
             BackupMetadata or None if failed
         """
-        import uuid
         import time
+        import uuid
 
         start_time = time.time()
 
@@ -152,7 +155,9 @@ class DisasterRecoverySystem:
         try:
             # Create tar.gz archive
             file_count = 0
-            with tarfile.open(archive_path, f'w:gz', compresslevel=self.compression_level) as tar:
+            with tarfile.open(
+                archive_path, f"w:gz", compresslevel=self.compression_level
+            ) as tar:
                 for source_path in source_paths:
                     source = Path(source_path)
                     if not source.exists():
@@ -165,7 +170,10 @@ class DisasterRecoverySystem:
                     elif source.is_dir():
                         for file_path in source.rglob("*"):
                             if file_path.is_file():
-                                tar.add(file_path, arcname=str(file_path.relative_to(source.parent)))
+                                tar.add(
+                                    file_path,
+                                    arcname=str(file_path.relative_to(source.parent)),
+                                )
                                 file_count += 1
 
             # Calculate checksum
@@ -187,7 +195,7 @@ class DisasterRecoverySystem:
                 checksum=checksum,
                 source_paths=source_paths,
                 backup_path=str(archive_path),
-                duration_seconds=round(duration, 2)
+                duration_seconds=round(duration, 2),
             )
 
             # Save metadata
@@ -200,7 +208,7 @@ class DisasterRecoverySystem:
                 backup_id,
                 file_count,
                 size_bytes / (1024 * 1024),
-                duration
+                duration,
             )
 
             # Apply retention policy
@@ -222,7 +230,7 @@ class DisasterRecoverySystem:
                 checksum="",
                 source_paths=source_paths,
                 backup_path=str(archive_path),
-                duration_seconds=time.time() - start_time
+                duration_seconds=time.time() - start_time,
             )
 
             with self._lock:
@@ -261,12 +269,12 @@ class DisasterRecoverySystem:
                     "Checksum mismatch for backup %s: expected %s, got %s",
                     backup_id,
                     backup.checksum,
-                    current_checksum
+                    current_checksum,
                 )
                 return False
 
             # Try to open archive
-            with tarfile.open(archive_path, 'r:gz') as tar:
+            with tarfile.open(archive_path, "r:gz") as tar:
                 members = tar.getmembers()
                 if len(members) == 0:
                     logger.error("Backup archive is empty: %s", backup_id)
@@ -287,10 +295,7 @@ class DisasterRecoverySystem:
             return False
 
     def restore_backup(
-        self,
-        backup_id: str,
-        restore_path: str,
-        verify_before_restore: bool = True
+        self, backup_id: str, restore_path: str, verify_before_restore: bool = True
     ) -> bool:
         """
         Restore backup to specified path
@@ -322,7 +327,7 @@ class DisasterRecoverySystem:
         try:
             logger.info("Restoring backup %s to %s", backup_id, restore_path)
 
-            with tarfile.open(archive_path, 'r:gz') as tar:
+            with tarfile.open(archive_path, "r:gz") as tar:
                 tar.extractall(restore_dir)
 
             logger.info("Backup restored successfully: %s", backup_id)
@@ -336,8 +341,8 @@ class DisasterRecoverySystem:
         """Calculate SHA-256 checksum of file"""
         sha256 = hashlib.sha256()
 
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(8192), b''):
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
                 sha256.update(chunk)
 
         return sha256.hexdigest()
@@ -347,16 +352,16 @@ class DisasterRecoverySystem:
         with self._lock:
             # Sort backups by timestamp
             sorted_backups = sorted(
-                self._backups.values(),
-                key=lambda b: b.timestamp,
-                reverse=True
+                self._backups.values(), key=lambda b: b.timestamp, reverse=True
             )
 
             # Remove old backups
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.retention_days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(
+                days=self.retention_days
+            )
             to_delete = []
 
-            for backup in sorted_backups[self.max_backups:]:
+            for backup in sorted_backups[self.max_backups :]:
                 to_delete.append(backup.backup_id)
 
             for backup in sorted_backups:
@@ -394,9 +399,7 @@ class DisasterRecoverySystem:
             logger.error("Failed to delete backup %s: %s", backup_id, e)
 
     def list_backups(
-        self,
-        backup_type: Optional[BackupType] = None,
-        verified_only: bool = False
+        self, backup_type: Optional[BackupType] = None, verified_only: bool = False
     ) -> List[BackupMetadata]:
         """
         List available backups
@@ -426,25 +429,28 @@ class DisasterRecoverySystem:
             verified_count = sum(1 for b in self._backups.values() if b.verified)
 
             return {
-                'total_backups': len(self._backups),
-                'verified_backups': verified_count,
-                'total_size_mb': round(total_size / (1024 * 1024), 2),
-                'backup_types': {
+                "total_backups": len(self._backups),
+                "verified_backups": verified_count,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "backup_types": {
                     BackupType.FULL.value: sum(
-                        1 for b in self._backups.values()
+                        1
+                        for b in self._backups.values()
                         if b.backup_type == BackupType.FULL.value
                     ),
                     BackupType.INCREMENTAL.value: sum(
-                        1 for b in self._backups.values()
+                        1
+                        for b in self._backups.values()
                         if b.backup_type == BackupType.INCREMENTAL.value
                     ),
                     BackupType.DIFFERENTIAL.value: sum(
-                        1 for b in self._backups.values()
+                        1
+                        for b in self._backups.values()
                         if b.backup_type == BackupType.DIFFERENTIAL.value
-                    )
+                    ),
                 },
-                'retention_days': self.retention_days,
-                'max_backups': self.max_backups
+                "retention_days": self.retention_days,
+                "max_backups": self.max_backups,
             }
 
 
@@ -463,9 +469,9 @@ def get_disaster_recovery_system() -> DisasterRecoverySystem:
 
 
 __all__ = [
-    'DisasterRecoverySystem',
-    'BackupMetadata',
-    'BackupType',
-    'BackupStatus',
-    'get_disaster_recovery_system'
+    "DisasterRecoverySystem",
+    "BackupMetadata",
+    "BackupType",
+    "BackupStatus",
+    "get_disaster_recovery_system",
 ]

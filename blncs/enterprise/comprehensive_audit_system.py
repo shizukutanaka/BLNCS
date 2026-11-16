@@ -3,24 +3,25 @@
 包括的な監査ログ記録とコンプライアンスレポート機能を提供
 """
 
+import hashlib
 import json
-import time
+import logging
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-import logging
-import hashlib
+import time
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class AuditEventType(Enum):
     """監査イベントタイプ"""
+
     USER_LOGIN = "user_login"
     USER_LOGOUT = "user_logout"
     DATA_ACCESS = "data_access"
@@ -35,6 +36,7 @@ class AuditEventType(Enum):
 
 class ComplianceStandard(Enum):
     """コンプライアンス基準"""
+
     GDPR = "GDPR"
     HIPAA = "HIPAA"
     SOX = "SOX"
@@ -47,24 +49,26 @@ class ComplianceStandard(Enum):
 @dataclass
 class AuditEvent:
     """監査イベント情報"""
+
     event_id: str
     timestamp: float
     event_type: AuditEventType
     user_id: Optional[str] = None
     session_id: Optional[str] = None
     resource: str = ""  # アクセス対象リソース
-    action: str = ""     # 実行アクション
+    action: str = ""  # 実行アクション
     details: Dict[str, Any] = field(default_factory=dict)
     ip_address: str = ""
     user_agent: str = ""
     compliance_standards: List[ComplianceStandard] = field(default_factory=list)
     risk_level: str = "low"  # low, medium, high, critical
-    location: str = ""   # 地理的位置情報
+    location: str = ""  # 地理的位置情報
 
 
 @dataclass
 class ComplianceReport:
     """コンプライアンスレポート情報"""
+
     report_id: str
     standard: ComplianceStandard
     period_start: float
@@ -138,20 +142,34 @@ class AuditLogger:
         """
         try:
             with sqlite3.connect(self.db_path) as conn:
-                compliance_standards_str = json.dumps([s.value for s in event.compliance_standards])
+                compliance_standards_str = json.dumps(
+                    [s.value for s in event.compliance_standards]
+                )
 
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO audit_events
                     (event_id, timestamp, event_type, user_id, session_id, resource,
                      action, details, ip_address, user_agent, compliance_standards,
                      risk_level, location)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    event.event_id, event.timestamp, event.event_type.value,
-                    event.user_id, event.session_id, event.resource, event.action,
-                    json.dumps(event.details), event.ip_address, event.user_agent,
-                    compliance_standards_str, event.risk_level, event.location
-                ))
+                """,
+                    (
+                        event.event_id,
+                        event.timestamp,
+                        event.event_type.value,
+                        event.user_id,
+                        event.session_id,
+                        event.resource,
+                        event.action,
+                        json.dumps(event.details),
+                        event.ip_address,
+                        event.user_agent,
+                        compliance_standards_str,
+                        event.risk_level,
+                        event.location,
+                    ),
+                )
                 conn.commit()
 
             # 監査コールバック実行
@@ -164,11 +182,14 @@ class AuditLogger:
         except Exception as e:
             logger.error(f"監査ログ記録エラー: {e}")
 
-    def query_events(self, start_time: Optional[float] = None,
-                    end_time: Optional[float] = None,
-                    event_type: Optional[AuditEventType] = None,
-                    user_id: Optional[str] = None,
-                    limit: int = 1000) -> List[AuditEvent]:
+    def query_events(
+        self,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+        event_type: Optional[AuditEventType] = None,
+        user_id: Optional[str] = None,
+        limit: int = 1000,
+    ) -> List[AuditEvent]:
         """
         監査イベントをクエリ
         Args:
@@ -208,9 +229,11 @@ class AuditLogger:
 
                 events = []
                 for row in cursor.fetchall():
-                    compliance_standards = [
-                        ComplianceStandard(s) for s in json.loads(row[10])
-                    ] if row[10] else []
+                    compliance_standards = (
+                        [ComplianceStandard(s) for s in json.loads(row[10])]
+                        if row[10]
+                        else []
+                    )
 
                     event = AuditEvent(
                         event_id=row[0],
@@ -225,7 +248,7 @@ class AuditLogger:
                         user_agent=row[9],
                         compliance_standards=compliance_standards,
                         risk_level=row[11],
-                        location=row[12]
+                        location=row[12],
                     )
                     events.append(event)
 
@@ -242,8 +265,7 @@ class AuditLogger:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute(
-                    "DELETE FROM audit_events WHERE timestamp < ?",
-                    (cutoff_time,)
+                    "DELETE FROM audit_events WHERE timestamp < ?", (cutoff_time,)
                 )
                 deleted_count = cursor.rowcount
                 conn.commit()
@@ -275,8 +297,9 @@ class ComplianceReporter:
         self.audit_logger = audit_logger
         self.report_callbacks: List[Callable] = []
 
-    def generate_compliance_report(self, standard: ComplianceStandard,
-                                 start_date: datetime, end_date: datetime) -> ComplianceReport:
+    def generate_compliance_report(
+        self, standard: ComplianceStandard, start_date: datetime, end_date: datetime
+    ) -> ComplianceReport:
         """
         コンプライアンスレポートを生成
         Args:
@@ -291,9 +314,7 @@ class ComplianceReporter:
 
         # 関連イベントを取得
         all_events = self.audit_logger.query_events(
-            start_time=start_timestamp,
-            end_time=end_timestamp,
-            limit=10000
+            start_time=start_timestamp, end_time=end_timestamp, limit=10000
         )
 
         # 基準に関連するイベントをフィルタリング
@@ -303,7 +324,9 @@ class ComplianceReporter:
         violations = self._detect_violations(relevant_events, standard)
 
         # コンプライアンススコアを計算
-        compliance_score = self._calculate_compliance_score(relevant_events, violations, standard)
+        compliance_score = self._calculate_compliance_score(
+            relevant_events, violations, standard
+        )
 
         # 推奨事項を生成
         recommendations = self._generate_recommendations(violations, standard)
@@ -316,7 +339,7 @@ class ComplianceReporter:
             total_events=len(relevant_events),
             compliance_score=compliance_score,
             violations=violations,
-            recommendations=recommendations
+            recommendations=recommendations,
         )
 
         # レポートコールバック実行
@@ -328,36 +351,54 @@ class ComplianceReporter:
 
         return report
 
-    def _filter_events_by_standard(self, events: List[AuditEvent], standard: ComplianceStandard) -> List[AuditEvent]:
+    def _filter_events_by_standard(
+        self, events: List[AuditEvent], standard: ComplianceStandard
+    ) -> List[AuditEvent]:
         """基準に関連するイベントをフィルタリング"""
         # 実際の実装では各基準の要件に基づいてフィルタリング
         if standard == ComplianceStandard.GDPR:
-            return [e for e in events if e.compliance_standards and standard in e.compliance_standards]
+            return [
+                e
+                for e in events
+                if e.compliance_standards and standard in e.compliance_standards
+            ]
         elif standard == ComplianceStandard.HIPAA:
-            return [e for e in events if e.event_type in [AuditEventType.DATA_ACCESS, AuditEventType.DATA_MODIFICATION]]
+            return [
+                e
+                for e in events
+                if e.event_type
+                in [AuditEventType.DATA_ACCESS, AuditEventType.DATA_MODIFICATION]
+            ]
         else:
             return events  # デフォルトはすべてのイベント
 
-    def _detect_violations(self, events: List[AuditEvent], standard: ComplianceStandard) -> List[Dict[str, Any]]:
+    def _detect_violations(
+        self, events: List[AuditEvent], standard: ComplianceStandard
+    ) -> List[Dict[str, Any]]:
         """違反を検出"""
         violations = []
 
         for event in events:
             # リスクレベルに基づいて違反を判定
             if event.risk_level in ["high", "critical"]:
-                violations.append({
-                    "event_id": event.event_id,
-                    "timestamp": event.timestamp,
-                    "violation_type": event.risk_level,
-                    "description": f"高リスクイベント検知: {event.action}",
-                    "severity": event.risk_level
-                })
+                violations.append(
+                    {
+                        "event_id": event.event_id,
+                        "timestamp": event.timestamp,
+                        "violation_type": event.risk_level,
+                        "description": f"高リスクイベント検知: {event.action}",
+                        "severity": event.risk_level,
+                    }
+                )
 
         return violations
 
-    def _calculate_compliance_score(self, events: List[AuditEvent],
-                                  violations: List[Dict[str, Any]],
-                                  standard: ComplianceStandard) -> float:
+    def _calculate_compliance_score(
+        self,
+        events: List[AuditEvent],
+        violations: List[Dict[str, Any]],
+        standard: ComplianceStandard,
+    ) -> float:
         """コンプライアンススコアを計算"""
         if not events:
             return 100.0
@@ -371,19 +412,24 @@ class ComplianceReporter:
         # 基準固有の調整
         if standard == ComplianceStandard.GDPR:
             # GDPRの場合、データアクセスログの完全性を重視
-            data_access_events = len([e for e in events if e.event_type == AuditEventType.DATA_ACCESS])
+            data_access_events = len(
+                [e for e in events if e.event_type == AuditEventType.DATA_ACCESS]
+            )
             if data_access_events > 0:
                 base_score *= 0.9  # データアクセスログの割引
 
         return min(100.0, max(0.0, base_score))
 
-    def _generate_recommendations(self, violations: List[Dict[str, Any]],
-                                standard: ComplianceStandard) -> List[str]:
+    def _generate_recommendations(
+        self, violations: List[Dict[str, Any]], standard: ComplianceStandard
+    ) -> List[str]:
         """推奨事項を生成"""
         recommendations = []
 
         if violations:
-            recommendations.append("リスクの高い操作に対する追加の承認プロセスを実装してください")
+            recommendations.append(
+                "リスクの高い操作に対する追加の承認プロセスを実装してください"
+            )
 
         if standard == ComplianceStandard.GDPR:
             recommendations.append("データ処理活動の記録を強化してください")
@@ -436,11 +482,16 @@ class EnterpriseAuditManager:
         if self.audit_thread:
             self.audit_thread.join()
 
-    def record_audit_event(self, event_type: AuditEventType, user_id: Optional[str] = None,
-                          resource: str = "", action: str = "",
-                          details: Dict[str, Any] = None,
-                          compliance_standards: List[ComplianceStandard] = None,
-                          risk_level: str = "low"):
+    def record_audit_event(
+        self,
+        event_type: AuditEventType,
+        user_id: Optional[str] = None,
+        resource: str = "",
+        action: str = "",
+        details: Dict[str, Any] = None,
+        compliance_standards: List[ComplianceStandard] = None,
+        risk_level: str = "low",
+    ):
         """
         監査イベントを記録
         Args:
@@ -461,7 +512,7 @@ class EnterpriseAuditManager:
             action=action,
             details=details or {},
             compliance_standards=compliance_standards or [],
-            risk_level=risk_level
+            risk_level=risk_level,
         )
 
         self.audit_logger.log_event(event)
@@ -477,7 +528,9 @@ class EnterpriseAuditManager:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
 
-        return self.compliance_reporter.generate_compliance_report(standard, start_date, end_date)
+        return self.compliance_reporter.generate_compliance_report(
+            standard, start_date, end_date
+        )
 
     def get_audit_summary(self, days: int = 30) -> Dict[str, Any]:
         """
@@ -491,9 +544,7 @@ class EnterpriseAuditManager:
         start_time = end_time - (days * 24 * 3600)
 
         all_events = self.audit_logger.query_events(
-            start_time=start_time,
-            end_time=end_time,
-            limit=10000
+            start_time=start_time, end_time=end_time, limit=10000
         )
 
         # イベントタイプ別集計
@@ -513,7 +564,7 @@ class EnterpriseAuditManager:
             "event_type_breakdown": event_counts,
             "risk_level_breakdown": risk_counts,
             "unique_users": len(set(e.user_id for e in all_events if e.user_id)),
-            "generated_at": time.time()
+            "generated_at": time.time(),
         }
 
     def _audit_loop(self):
@@ -543,7 +594,7 @@ def example_usage():
         action="login",
         details={"method": "password"},
         compliance_standards=[ComplianceStandard.GDPR],
-        risk_level="low"
+        risk_level="low",
     )
 
     manager.record_audit_event(
@@ -553,7 +604,7 @@ def example_usage():
         action="read",
         details={"record_count": 10},
         compliance_standards=[ComplianceStandard.HIPAA],
-        risk_level="medium"
+        risk_level="medium",
     )
 
     manager.record_audit_event(
@@ -563,7 +614,7 @@ def example_usage():
         action="modify",
         details={"config_section": "security"},
         compliance_standards=[ComplianceStandard.SOX, ComplianceStandard.ISO_27001],
-        risk_level="high"
+        risk_level="high",
     )
 
     # サマリー取得
@@ -572,7 +623,9 @@ def example_usage():
 
     # コンプライアンスレポート生成
     report = manager.generate_monthly_report(ComplianceStandard.GDPR)
-    print(f"GDPRレポート: スコア={report.compliance_score:.2f}, 違反={len(report.violations)}件")
+    print(
+        f"GDPRレポート: スコア={report.compliance_score:.2f}, 違反={len(report.violations)}件"
+    )
 
     manager.stop_audit_system()
 

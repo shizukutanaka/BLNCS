@@ -4,17 +4,18 @@ Lightning Network API Integration for BLNCS
 Provides unified interface to Lightning Network nodes (LND, CLN, etc.)
 """
 
-import os
+import codecs
 import json
 import logging
-import requests
+import os
 import time
-from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 from pathlib import Path
-import grpc
-import codecs
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
+
+import grpc
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LightningNodeConfig:
     """Lightning Network node configuration"""
+
     node_type: str = "lnd"  # lnd, cln, etc.
     host: str = "localhost"
     port: int = 10009  # LND default
@@ -51,7 +53,7 @@ class LightningAPI:
             tls_cert_path=os.getenv("LIGHTNING_TLS_CERT"),
             macaroon_path=os.getenv("LIGHTNING_MACAROON"),
             network=os.getenv("LIGHTNING_NETWORK", "testnet"),
-            timeout=int(os.getenv("LIGHTNING_TIMEOUT", "30"))
+            timeout=int(os.getenv("LIGHTNING_TIMEOUT", "30")),
         )
 
     def _setup_session(self):
@@ -62,9 +64,9 @@ class LightningAPI:
         # Add authentication headers if needed
         if self.config.macaroon_path and Path(self.config.macaroon_path).exists():
             try:
-                with open(self.config.macaroon_path, 'rb') as f:
-                    macaroon = codecs.encode(f.read(), 'hex').decode()
-                self.session.headers.update({'Grpc-Metadata-macaroon': macaroon})
+                with open(self.config.macaroon_path, "rb") as f:
+                    macaroon = codecs.encode(f.read(), "hex").decode()
+                self.session.headers.update({"Grpc-Metadata-macaroon": macaroon})
             except Exception as e:
                 logger.warning(f"Failed to load macaroon: {e}")
 
@@ -81,7 +83,9 @@ class LightningAPI:
             if response.status_code == 200:
                 return response.json()
             else:
-                logger.warning(f"API request failed: {response.status_code} - {response.text}")
+                logger.warning(
+                    f"API request failed: {response.status_code} - {response.text}"
+                )
                 return None
 
         except Exception as e:
@@ -103,12 +107,7 @@ class LightningAPI:
     def connect_peer(self, pubkey: str, address: str) -> bool:
         """Connect to a peer"""
         try:
-            data = {
-                "addr": {
-                    "pubkey": pubkey,
-                    "host": address
-                }
-            }
+            data = {"addr": {"pubkey": pubkey, "host": address}}
             result = self._make_request("POST", "/v1/peers", json=data)
             return result is not None
         except Exception as e:
@@ -132,7 +131,9 @@ class LightningAPI:
         """List payments"""
         return self._make_request("GET", "/v1/payments")
 
-    def send_payment(self, payment_request: str, amount: Optional[int] = None) -> Optional[Dict]:
+    def send_payment(
+        self, payment_request: str, amount: Optional[int] = None
+    ) -> Optional[Dict]:
         """Send payment"""
         try:
             data = {"payment_request": payment_request}
@@ -147,10 +148,7 @@ class LightningAPI:
     def create_invoice(self, amount: int, description: str = "") -> Optional[Dict]:
         """Create invoice"""
         try:
-            data = {
-                "value": amount,
-                "memo": description
-            }
+            data = {"value": amount, "memo": description}
             return self._make_request("POST", "/v1/invoices", json=data)
         except Exception as e:
             logger.error(f"Failed to create invoice: {e}")
@@ -168,23 +166,22 @@ class LightningAPI:
     def close_channel(self, channel_point: str, force: bool = False) -> bool:
         """Close channel"""
         try:
-            data = {
-                "channel_point": channel_point,
-                "force": force
-            }
+            data = {"channel_point": channel_point, "force": force}
             result = self._make_request("DELETE", "/v1/channels", json=data)
             return result is not None
         except Exception as e:
             logger.error(f"Failed to close channel: {e}")
             return False
 
-    def open_channel(self, node_pubkey: str, amount: int, private: bool = False) -> bool:
+    def open_channel(
+        self, node_pubkey: str, amount: int, private: bool = False
+    ) -> bool:
         """Open channel"""
         try:
             data = {
                 "node_pubkey": node_pubkey,
                 "local_funding_amount": amount,
-                "private": private
+                "private": private,
             }
             result = self._make_request("POST", "/v1/channels", json=data)
             return result is not None
@@ -200,14 +197,12 @@ class LightningAPI:
         """Get node information"""
         return self._make_request("GET", f"/v1/graph/node/{pubkey}")
 
-    def query_routes(self, pubkey: str, amount: int, num_routes: int = 1) -> Optional[List]:
+    def query_routes(
+        self, pubkey: str, amount: int, num_routes: int = 1
+    ) -> Optional[List]:
         """Query routes to destination"""
         try:
-            data = {
-                "pub_key": pubkey,
-                "amt": amount,
-                "num_routes": num_routes
-            }
+            data = {"pub_key": pubkey, "amt": amount, "num_routes": num_routes}
             return self._make_request("POST", "/v1/graph/routes", json=data)
         except Exception as e:
             logger.error(f"Failed to query routes: {e}")
@@ -216,24 +211,18 @@ class LightningAPI:
     def estimate_fee(self, addr: str, amount: int) -> Optional[Dict]:
         """Estimate fee for transaction"""
         try:
-            data = {
-                "AddrToAmount": {
-                    addr: amount
-                }
-            }
+            data = {"AddrToAmount": {addr: amount}}
             return self._make_request("POST", "/v1/transactions/estimatefee", json=data)
         except Exception as e:
             logger.error(f"Failed to estimate fee: {e}")
             return None
 
-    def send_coins(self, addr: str, amount: int, sat_per_byte: int = 1) -> Optional[Dict]:
+    def send_coins(
+        self, addr: str, amount: int, sat_per_byte: int = 1
+    ) -> Optional[Dict]:
         """Send coins to address"""
         try:
-            data = {
-                "addr": addr,
-                "amount": amount,
-                "sat_per_byte": sat_per_byte
-            }
+            data = {"addr": addr, "amount": amount, "sat_per_byte": sat_per_byte}
             return self._make_request("POST", "/v1/transactions", json=data)
         except Exception as e:
             logger.error(f"Failed to send coins: {e}")
@@ -259,7 +248,7 @@ class LightningAPI:
         """Perform health check on Lightning node"""
         try:
             info = self.get_info()
-            return info is not None and info.get('synced_to_chain', False)
+            return info is not None and info.get("synced_to_chain", False)
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return False
@@ -285,6 +274,8 @@ if __name__ == "__main__":
         print("✅ Lightning node is healthy")
         info = api.get_info()
         if info:
-            print(f"Node info: {info.get('alias', 'Unknown')} - Block: {info.get('block_height', 'Unknown')}")
+            print(
+                f"Node info: {info.get('alias', 'Unknown')} - Block: {info.get('block_height', 'Unknown')}"
+            )
     else:
         print("❌ Lightning node is not responding")

@@ -6,27 +6,35 @@ Test all newly implemented lightweight improvement systems
 
 import os
 import sys
-import time
 import tempfile
+import time
 from pathlib import Path
 
 # Add BLNCS to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "."))
+
 
 def test_ultra_lightweight_optimizations():
     """Test ultra-lightweight optimizations"""
     print("⚡ Testing Ultra-Lightweight Optimizations...")
 
     try:
-        from blncs.core.ultra_lightweight_optimizations import optimize_lightning_operations, fast_hash
+        from blncs.core.ultra_lightweight_optimizations import (
+            fast_hash,
+            optimize_lightning_operations,
+        )
 
         start_time = time.time()
         results = optimize_lightning_operations()
         execution_time = time.time() - start_time
 
         print(f"  🚀 Optimizations applied in {execution_time * 1000:.2f}ms")
-        print(f"  📊 Total optimizations: {results['optimization_summary']['total_optimizations']}")
-        print(f"  🧠 Applied: {', '.join(results['optimization_summary']['optimizations_applied'])}")
+        print(
+            f"  📊 Total optimizations: {results['optimization_summary']['total_optimizations']}"
+        )
+        print(
+            f"  🧠 Applied: {', '.join(results['optimization_summary']['optimizations_applied'])}"
+        )
 
         # Test fast hash
         test_hash = fast_hash("test_lightning_payment_12345")
@@ -38,12 +46,16 @@ def test_ultra_lightweight_optimizations():
         print(f"  ❌ Ultra-lightweight optimizations test failed: {e}")
         return False
 
+
 def test_micro_speed_boosts():
     """Test micro speed boosts"""
     print("⚡ Testing Micro Speed Boosts...")
 
     try:
-        from blncs.core.micro_speed_boosts import apply_micro_speed_boosts, lightning_amount_format
+        from blncs.core.micro_speed_boosts import (
+            apply_micro_speed_boosts,
+            lightning_amount_format,
+        )
 
         start_time = time.time()
         results = apply_micro_speed_boosts()
@@ -63,13 +75,15 @@ def test_micro_speed_boosts():
         print(f"  ❌ Micro speed boosts test failed: {e}")
         return False
 
+
 def test_simple_backup_recovery():
     """Test simple backup and recovery"""
     print("💾 Testing Simple Backup Recovery...")
 
     try:
-        from blncs.utils.simple_backup_recovery import SimpleBackup, emergency_backup
         import json
+
+        from blncs.utils.simple_backup_recovery import SimpleBackup, emergency_backup
 
         # Create test backup system
         backup_system = SimpleBackup("test_backups", max_backups=3)
@@ -77,7 +91,7 @@ def test_simple_backup_recovery():
         # Create test file
         test_file = "test_backup_data.json"
         test_data = {"test": "backup_data", "timestamp": time.time()}
-        with open(test_file, 'w') as f:
+        with open(test_file, "w") as f:
             json.dump(test_data, f)
 
         # Test file backup
@@ -95,12 +109,15 @@ def test_simple_backup_recovery():
 
         print(f"  📦 File backup: {'✅' if backup_success else '❌'}")
         print(f"  📋 Available backups: {len(backups)}")
-        print(f"  🚨 Emergency backup items: {len(emergency_result['emergency_backups'])}")
+        print(
+            f"  🚨 Emergency backup items: {len(emergency_result['emergency_backups'])}"
+        )
         print(f"  💾 Backup size: {size_info['total_size_mb']:.2f}MB")
 
         # Cleanup
         os.remove(test_file)
         import shutil
+
         shutil.rmtree("test_backups", ignore_errors=True)
         shutil.rmtree("emergency_backups", ignore_errors=True)
 
@@ -110,41 +127,45 @@ def test_simple_backup_recovery():
         print(f"  ❌ Simple backup recovery test failed: {e}")
         return False
 
+
 def test_database_speed_optimizer():
     """Test database speed optimizer"""
     print("🗄️ Testing Database Speed Optimizer...")
 
     try:
-        from blncs.core.database_speed_optimizer import create_optimized_database
-        import tempfile
         import os
+        import tempfile
+
+        from blncs.core.database_speed_optimizer import create_optimized_database
 
         # Create temporary database
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
             test_db = tmp.name
 
         try:
             # Create optimized database
             db_system = create_optimized_database(test_db)
-            optimizer = db_system['optimizer']
-            connection = db_system['connection']
+            optimizer = db_system["optimizer"]
+            connection = db_system["connection"]
 
             # Test payment operations
             test_payment = {
-                'payment_hash': 'test_hash_speed_12345',
-                'amount_sats': 2000,
-                'status': 'pending',
-                'created_at': time.time(),
-                'updated_at': time.time(),
-                'destination': 'test_node',
-                'description': 'Speed test payment'
+                "payment_hash": "test_hash_speed_12345",
+                "amount_sats": 2000,
+                "status": "pending",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "destination": "test_node",
+                "description": "Speed test payment",
             }
 
             # Test insert
             insert_success = optimizer.fast_payment_insert(connection, test_payment)
 
             # Test query
-            query_result = optimizer.fast_payment_query(connection, 'test_hash_speed_12345')
+            query_result = optimizer.fast_payment_query(
+                connection, "test_hash_speed_12345"
+            )
 
             # Test channel listing
             channels = optimizer.fast_channel_list(connection, limit=10)
@@ -155,7 +176,9 @@ def test_database_speed_optimizer():
             print(f"  💳 Payment insert: {'✅' if insert_success else '❌'}")
             print(f"  🔍 Payment query: {'✅' if query_result else '❌'}")
             print(f"  📊 Performance profiles: {len(stats['query_profiles'])}")
-            print(f"  💾 Cache stats available: {'✅' if 'cache_stats' in stats else '❌'}")
+            print(
+                f"  💾 Cache stats available: {'✅' if 'cache_stats' in stats else '❌'}"
+            )
 
             # Cleanup
             optimizer.cleanup()
@@ -170,6 +193,7 @@ def test_database_speed_optimizer():
         print(f"  ❌ Database speed optimizer test failed: {e}")
         return False
 
+
 def test_lightweight_security():
     """Test lightweight security"""
     print("🔒 Testing Lightweight Security...")
@@ -181,29 +205,29 @@ def test_lightweight_security():
 
         # Test payment validation
         test_payment = {
-            'payment_hash': 'a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd',
-            'amount_sats': 1500,
-            'description': 'Security test payment',
-            'source_ip': '127.0.0.1'
+            "payment_hash": "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd",
+            "amount_sats": 1500,
+            "description": "Security test payment",
+            "source_ip": "127.0.0.1",
         }
 
         validation_result = security.validate_payment_request(test_payment)
-        payment_valid = validation_result['valid']
+        payment_valid = validation_result["valid"]
 
         # Test invoice validation
         test_invoice = {
-            'amount_sats': 1000,
-            'description': 'Test invoice',
-            'source_ip': '127.0.0.1'
+            "amount_sats": 1000,
+            "description": "Test invoice",
+            "source_ip": "127.0.0.1",
         }
 
         invoice_result = security.validate_invoice_request(test_invoice)
-        invoice_valid = invoice_result['valid']
+        invoice_valid = invoice_result["valid"]
 
         # Test rate limiting
         rate_limit_triggered = False
         for i in range(102):  # Over limit of 100
-            if not security.rate_limiter.is_allowed('test_rate_limit'):
+            if not security.rate_limiter.is_allowed("test_rate_limit"):
                 rate_limit_triggered = True
                 break
 
@@ -228,15 +252,16 @@ def test_lightweight_security():
         print(f"  ❌ Lightweight security test failed: {e}")
         return False
 
+
 def test_integration_systems():
     """Test integration of all systems"""
     print("🔗 Testing System Integration...")
 
     try:
         # Test that all systems can work together
-        from blncs.core.ultra_lightweight_optimizations import SpeedOptimizer
-        from blncs.core.micro_speed_boosts import LightningMicroOptimizer
         from blncs.core.lightweight_security import LightweightSecurity
+        from blncs.core.micro_speed_boosts import LightningMicroOptimizer
+        from blncs.core.ultra_lightweight_optimizations import SpeedOptimizer
 
         # Create optimizers
         speed_optimizer = SpeedOptimizer()
@@ -245,27 +270,35 @@ def test_integration_systems():
 
         # Apply optimizations
         speed_results = speed_optimizer.apply_all_optimizations()
-        micro_results = micro_optimizer.optimize_payment_processing({
-            'amount_btc': 0.001,
-            'payment_hash': 'integration_test_hash_12345678901234567890123456789012345678901234',
-            'status': 'pending'
-        })
-
-        # Test security with optimized data (use proper 64-char hex hash)
-        security_result = security.validate_payment_request({
-            'payment_hash': 'a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd',
-            'amount_sats': micro_results.get('amount_sats', 100000),
-            'source_ip': '127.0.0.1'
-        })
-
-        integration_success = (
-            speed_results['optimization_summary']['total_optimizations'] > 0 and
-            'amount_sats' in micro_results and
-            security_result['valid']
+        micro_results = micro_optimizer.optimize_payment_processing(
+            {
+                "amount_btc": 0.001,
+                "payment_hash": "integration_test_hash_12345678901234567890123456789012345678901234",
+                "status": "pending",
+            }
         )
 
-        print(f"  🚀 Speed optimizations: {speed_results['optimization_summary']['total_optimizations']}")
-        print(f"  ⚡ Micro optimizations: {'✅' if 'amount_sats' in micro_results else '❌'}")
+        # Test security with optimized data (use proper 64-char hex hash)
+        security_result = security.validate_payment_request(
+            {
+                "payment_hash": "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd",
+                "amount_sats": micro_results.get("amount_sats", 100000),
+                "source_ip": "127.0.0.1",
+            }
+        )
+
+        integration_success = (
+            speed_results["optimization_summary"]["total_optimizations"] > 0
+            and "amount_sats" in micro_results
+            and security_result["valid"]
+        )
+
+        print(
+            f"  🚀 Speed optimizations: {speed_results['optimization_summary']['total_optimizations']}"
+        )
+        print(
+            f"  ⚡ Micro optimizations: {'✅' if 'amount_sats' in micro_results else '❌'}"
+        )
         print(f"  🔒 Security validation: {'✅' if security_result['valid'] else '❌'}")
         print(f"  🔗 Integration success: {'✅' if integration_success else '❌'}")
 
@@ -274,6 +307,7 @@ def test_integration_systems():
     except Exception as e:
         print(f"  ❌ System integration test failed: {e}")
         return False
+
 
 def main():
     """Run all additional improvement tests"""
@@ -324,6 +358,7 @@ def main():
     else:
         print(f"⚠️ {len(tests) - passed_tests} tests failed")
         return False
+
 
 if __name__ == "__main__":
     success = main()

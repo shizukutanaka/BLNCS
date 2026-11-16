@@ -176,7 +176,6 @@ jobs:
         
     - name: Run performance benchmarks
       run: |
-        python blncs_cli.py benchmark --quick
         pytest tests/performance/ -v --benchmark-json=benchmark.json || echo "Performance tests completed"
         
     - name: Upload benchmark results
@@ -245,7 +244,7 @@ jobs:
     - name: Test Docker image
       run: |
         docker run --rm blncs:test python -c "import blncs; print('BLNCS imports successfully')"
-        docker run --rm blncs:test python blncs_cli.py --help
+        docker run --rm blncs:test python blncs_main.py --help
         
     - name: Run container health check
       run: |

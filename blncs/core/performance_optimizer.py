@@ -4,13 +4,14 @@ BLNCS Performance Optimizer
 Comprehensive performance optimization and monitoring
 """
 
+import gc
 import os
 import sys
-import time
-import gc
 import threading
-from typing import Dict, Any, List, Optional, Callable
+import time
 from collections import defaultdict
+from typing import Any, Callable, Dict, List, Optional
+
 
 class PerformanceOptimizer:
     """Comprehensive performance optimization"""
@@ -28,7 +29,9 @@ class PerformanceOptimizer:
             return
 
         self.running = True
-        self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
+        self.monitoring_thread = threading.Thread(
+            target=self._monitoring_loop, daemon=True
+        )
         self.monitoring_thread.start()
 
     def stop_monitoring(self):
@@ -53,6 +56,7 @@ class PerformanceOptimizer:
 
         try:
             import psutil
+
             process = psutil.Process()
 
             # System metrics
@@ -68,13 +72,13 @@ class PerformanceOptimizer:
             gc_collections = sum(gc.get_stats()[0].values())
 
             metrics = {
-                'timestamp': timestamp,
-                'cpu_percent': cpu_percent,
-                'memory_rss': memory_info.rss,
-                'memory_percent': memory_percent,
-                'thread_count': thread_count,
-                'gc_objects': gc_objects,
-                'gc_collections': gc_collections
+                "timestamp": timestamp,
+                "cpu_percent": cpu_percent,
+                "memory_rss": memory_info.rss,
+                "memory_percent": memory_percent,
+                "thread_count": thread_count,
+                "gc_objects": gc_objects,
+                "gc_collections": gc_collections,
             }
 
             # Store metrics
@@ -86,13 +90,13 @@ class PerformanceOptimizer:
         except ImportError:
             # Fallback metrics without psutil
             fallback_metrics = {
-                'timestamp': timestamp,
-                'cpu_percent': 0,
-                'memory_rss': 0,
-                'memory_percent': 0,
-                'thread_count': threading.active_count(),
-                'gc_objects': len(gc.get_objects()),
-                'gc_collections': 0
+                "timestamp": timestamp,
+                "cpu_percent": 0,
+                "memory_rss": 0,
+                "memory_percent": 0,
+                "thread_count": threading.active_count(),
+                "gc_objects": len(gc.get_objects()),
+                "gc_collections": 0,
             }
 
             for key, value in fallback_metrics.items():
@@ -104,29 +108,32 @@ class PerformanceOptimizer:
 
         # Memory optimization
         memory_opt = self.optimize_memory()
-        if memory_opt['freed_bytes'] > 0:
-            optimizations.append(f"Memory: freed {memory_opt['freed_bytes'] / 1024 / 1024:.1f} MB")
+        if memory_opt["freed_bytes"] > 0:
+            optimizations.append(
+                f"Memory: freed {memory_opt['freed_bytes'] / 1024 / 1024:.1f} MB"
+            )
 
         # Import optimization
         import_opt = self.optimize_imports()
-        if import_opt['optimized']:
+        if import_opt["optimized"]:
             optimizations.append("Imports: optimized module loading")
 
         # Cache optimization
         cache_opt = self.optimize_caches()
-        if cache_opt['cleared_entries'] > 0:
-            optimizations.append(f"Cache: cleared {cache_opt['cleared_entries']} entries")
+        if cache_opt["cleared_entries"] > 0:
+            optimizations.append(
+                f"Cache: cleared {cache_opt['cleared_entries']} entries"
+            )
 
         # Thread optimization
         thread_opt = self.optimize_threads()
-        if thread_opt['optimized']:
+        if thread_opt["optimized"]:
             optimizations.append("Threads: optimized thread pool")
 
         if optimizations:
-            self.optimization_history.append({
-                'timestamp': time.time(),
-                'optimizations': optimizations
-            })
+            self.optimization_history.append(
+                {"timestamp": time.time(), "optimizations": optimizations}
+            )
 
     def optimize_memory(self) -> Dict[str, Any]:
         """Optimize memory usage"""
@@ -139,22 +146,22 @@ class PerformanceOptimizer:
         freed_objects = before_objects - after_objects
 
         return {
-            'freed_objects': freed_objects,
-            'freed_bytes': 0,  # Cannot easily calculate bytes without more info
-            'gc_collections': 1
+            "freed_objects": freed_objects,
+            "freed_bytes": 0,  # Cannot easily calculate bytes without more info
+            "gc_collections": 1,
         }
 
     def optimize_imports(self) -> Dict[str, Any]:
         """Optimize import statements"""
         try:
             # Preload critical modules
-            critical_modules = ['json', 'os', 'sys', 'time', 'sqlite3']
+            critical_modules = ["json", "os", "sys", "time", "sqlite3"]
             for module in critical_modules:
                 __import__(module)
 
-            return {'optimized': True, 'modules_loaded': len(critical_modules)}
+            return {"optimized": True, "modules_loaded": len(critical_modules)}
         except Exception:
-            return {'optimized': False, 'modules_loaded': 0}
+            return {"optimized": False, "modules_loaded": 0}
 
     def optimize_caches(self) -> Dict[str, Any]:
         """Optimize system caches"""
@@ -163,13 +170,14 @@ class PerformanceOptimizer:
         # Clear Python bytecode cache if it gets too large
         try:
             import sys
-            if hasattr(sys, '_clear_type_cache'):
+
+            if hasattr(sys, "_clear_type_cache"):
                 sys._clear_type_cache()
                 cleared_entries += 1
         except Exception:
             pass
 
-        return {'cleared_entries': cleared_entries, 'cache_types': ['type_cache']}
+        return {"cleared_entries": cleared_entries, "cache_types": ["type_cache"]}
 
     def optimize_threads(self) -> Dict[str, Any]:
         """Optimize thread usage"""
@@ -178,16 +186,18 @@ class PerformanceOptimizer:
         # Check for excessive threads
         if current_threads > 50:
             # Log warning about excessive threads
-            return {'optimized': True, 'threads_before': current_threads}
+            return {"optimized": True, "threads_before": current_threads}
         else:
-            return {'optimized': False, 'threads_before': current_threads}
+            return {"optimized": False, "threads_before": current_threads}
 
     def get_performance_report(self) -> Dict[str, Any]:
         """Get comprehensive performance report"""
-        if not self.metrics['timestamp']:
-            return {'error': 'No metrics available'}
+        if not self.metrics["timestamp"]:
+            return {"error": "No metrics available"}
 
-        latest_metrics = {key: values[-1] if values else 0 for key, values in self.metrics.items()}
+        latest_metrics = {
+            key: values[-1] if values else 0 for key, values in self.metrics.items()
+        }
 
         # Calculate averages
         averages = {}
@@ -196,37 +206,57 @@ class PerformanceOptimizer:
                 averages[key] = sum(values) / len(values)
 
         return {
-            'current_metrics': latest_metrics,
-            'averages': averages,
-            'sample_count': len(self.metrics['timestamp']),
-            'monitoring_duration': time.time() - min(self.metrics['timestamp']) if self.metrics['timestamp'] else 0,
-            'recent_optimizations': self.optimization_history[-5:] if self.optimization_history else [],
-            'recommendations': self.generate_recommendations()
+            "current_metrics": latest_metrics,
+            "averages": averages,
+            "sample_count": len(self.metrics["timestamp"]),
+            "monitoring_duration": (
+                time.time() - min(self.metrics["timestamp"])
+                if self.metrics["timestamp"]
+                else 0
+            ),
+            "recent_optimizations": (
+                self.optimization_history[-5:] if self.optimization_history else []
+            ),
+            "recommendations": self.generate_recommendations(),
         }
 
     def generate_recommendations(self) -> List[str]:
         """Generate performance recommendations"""
         recommendations = []
 
-        if self.metrics['cpu_percent']:
-            avg_cpu = sum(self.metrics['cpu_percent']) / len(self.metrics['cpu_percent'])
+        if self.metrics["cpu_percent"]:
+            avg_cpu = sum(self.metrics["cpu_percent"]) / len(
+                self.metrics["cpu_percent"]
+            )
             if avg_cpu > 80:
-                recommendations.append("High CPU usage detected - consider optimizing CPU-intensive operations")
+                recommendations.append(
+                    "High CPU usage detected - consider optimizing CPU-intensive operations"
+                )
 
-        if self.metrics['memory_percent']:
-            avg_memory = sum(self.metrics['memory_percent']) / len(self.metrics['memory_percent'])
+        if self.metrics["memory_percent"]:
+            avg_memory = sum(self.metrics["memory_percent"]) / len(
+                self.metrics["memory_percent"]
+            )
             if avg_memory > 85:
-                recommendations.append("High memory usage detected - consider memory optimization")
+                recommendations.append(
+                    "High memory usage detected - consider memory optimization"
+                )
 
-        if self.metrics['thread_count']:
-            avg_threads = sum(self.metrics['thread_count']) / len(self.metrics['thread_count'])
+        if self.metrics["thread_count"]:
+            avg_threads = sum(self.metrics["thread_count"]) / len(
+                self.metrics["thread_count"]
+            )
             if avg_threads > 50:
-                recommendations.append("High thread count detected - consider thread pool optimization")
+                recommendations.append(
+                    "High thread count detected - consider thread pool optimization"
+                )
 
         return recommendations
 
+
 # Global performance optimizer
 _optimizer_instance = None
+
 
 def get_performance_optimizer() -> PerformanceOptimizer:
     """Get global performance optimizer"""
@@ -235,20 +265,24 @@ def get_performance_optimizer() -> PerformanceOptimizer:
         _optimizer_instance = PerformanceOptimizer()
     return _optimizer_instance
 
+
 def start_performance_monitoring():
     """Start performance monitoring"""
     optimizer = get_performance_optimizer()
     optimizer.start_monitoring()
+
 
 def stop_performance_monitoring():
     """Stop performance monitoring"""
     optimizer = get_performance_optimizer()
     optimizer.stop_monitoring()
 
+
 def get_performance_report() -> Dict[str, Any]:
     """Get performance report"""
     optimizer = get_performance_optimizer()
     return optimizer.get_performance_report()
+
 
 def run_performance_optimization():
     """Run performance optimization"""
@@ -256,7 +290,8 @@ def run_performance_optimization():
     optimizer.run_optimizations()
     return optimizer.get_performance_report()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Test performance optimizer
     optimizer = get_performance_optimizer()
 
@@ -273,7 +308,9 @@ if __name__ == '__main__':
 
     # Run optimization
     optimization = run_performance_optimization()
-    print(f"✅ Optimization completed: {len(optimization.get('recommendations', []))} recommendations")
+    print(
+        f"✅ Optimization completed: {len(optimization.get('recommendations', []))} recommendations"
+    )
 
     # Stop monitoring
     stop_performance_monitoring()

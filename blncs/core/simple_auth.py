@@ -27,6 +27,7 @@ except Exception:  # pragma: no cover - fallback when config manager is unavaila
 try:
     from .rate_limiter import RateLimiter
 except Exception:  # pragma: no cover - very small fallback to keep module usable
+
     class RateLimiter:  # type: ignore
         def __init__(self, max_requests: int = 5, window_seconds: int = 3600) -> None:
             self.max_requests = max_requests
@@ -38,7 +39,9 @@ except Exception:  # pragma: no cover - very small fallback to keep module usabl
             now = time.time()
             with self._lock:
                 timestamps = self._timestamps.setdefault(identifier, [])
-                self._timestamps[identifier] = [ts for ts in timestamps if ts > now - self.window_seconds]
+                self._timestamps[identifier] = [
+                    ts for ts in timestamps if ts > now - self.window_seconds
+                ]
                 if len(self._timestamps[identifier]) < self.max_requests:
                     self._timestamps[identifier].append(now)
                     return True
@@ -77,6 +80,7 @@ except Exception:  # pragma: no cover - very small fallback to keep module usabl
                     "max_requests_per_window": self.max_requests,
                     "window_seconds": self.window_seconds,
                 }
+
 
 DEFAULT_STORAGE_PATH = Path("config/auth.json")
 DEFAULT_ITERATIONS = 240_000
@@ -257,7 +261,9 @@ class SimpleAuth:
             if stored is None:
                 raise ValueError("Token ID not found")
 
-            normalized_permissions = self._normalize_permissions(permissions or stored.permissions)
+            normalized_permissions = self._normalize_permissions(
+                permissions or stored.permissions
+            )
             expiration = self._determine_expiration(
                 expires_in,
                 expires_at if expires_at is not None else stored.expires_at,
@@ -447,18 +453,22 @@ class SimpleAuth:
                     reasons.append("expired")
 
                 if idle_window is not None:
-                    last_activity = token.last_used_at or token.updated_at or token.created_at
+                    last_activity = (
+                        token.last_used_at or token.updated_at or token.created_at
+                    )
                     if last_activity <= now - idle_window:
                         reasons.append("inactive")
 
                 if reasons:
-                    matched.append({
-                        "token_id": token.token_id,
-                        "reasons": sorted(set(reasons)),
-                        "expires_at": token.expires_at,
-                        "last_used_at": token.last_used_at,
-                        "usage_count": token.usage_count,
-                    })
+                    matched.append(
+                        {
+                            "token_id": token.token_id,
+                            "reasons": sorted(set(reasons)),
+                            "expires_at": token.expires_at,
+                            "last_used_at": token.last_used_at,
+                            "usage_count": token.usage_count,
+                        }
+                    )
 
             if dry_run or not matched:
                 return {
@@ -623,7 +633,12 @@ class SimpleAuth:
     def clear_all_failures(self) -> None:
         self.failure_limiter.clear()
 
-    def update_failure_limits(self, *, max_attempts: Optional[int] = None, window_seconds: Optional[int] = None) -> None:
+    def update_failure_limits(
+        self,
+        *,
+        max_attempts: Optional[int] = None,
+        window_seconds: Optional[int] = None,
+    ) -> None:
         with self._lock:
             if max_attempts is not None:
                 self.failure_config["max_attempts"] = int(max(1, max_attempts))
@@ -637,11 +652,18 @@ class SimpleAuth:
 
             if self.config_manager is not None:
                 try:
-                    self.config_manager.set("security.max_attempts", self.failure_config["max_attempts"])
-                    self.config_manager.set("security.failure_window_seconds", self.failure_config["window_seconds"])
+                    self.config_manager.set(
+                        "security.max_attempts", self.failure_config["max_attempts"]
+                    )
+                    self.config_manager.set(
+                        "security.failure_window_seconds",
+                        self.failure_config["window_seconds"],
+                    )
                     self.config_manager.save()
                 except Exception:
-                    self.logger.exception("Failed to persist authentication failure limits")
+                    self.logger.exception(
+                        "Failed to persist authentication failure limits"
+                    )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -666,8 +688,16 @@ class SimpleAuth:
             return defaults
 
         try:
-            max_attempts = int(self.config_manager.get("security.max_attempts", defaults["max_attempts"]))
-            window_seconds = int(self.config_manager.get("security.failure_window_seconds", defaults["window_seconds"]))
+            max_attempts = int(
+                self.config_manager.get(
+                    "security.max_attempts", defaults["max_attempts"]
+                )
+            )
+            window_seconds = int(
+                self.config_manager.get(
+                    "security.failure_window_seconds", defaults["window_seconds"]
+                )
+            )
             return {
                 "max_attempts": max(1, max_attempts),
                 "window_seconds": max(1, window_seconds),
@@ -720,10 +750,14 @@ class SimpleAuth:
             salt,
             self.iterations,
         )
-        return base64.b64encode(salt).decode("ascii"), base64.b64encode(digest).decode("ascii")
+        return base64.b64encode(salt).decode("ascii"), base64.b64encode(digest).decode(
+            "ascii"
+        )
 
     def _rehash_api_key(self, api_key: str, salt: bytes, iterations: int) -> str:
-        digest = hashlib.pbkdf2_hmac("sha256", api_key.encode("utf-8"), salt, iterations)
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", api_key.encode("utf-8"), salt, iterations
+        )
         return base64.b64encode(digest).decode("ascii")
 
     def _compare_api_key(self, api_key: str, token: AuthToken) -> bool:
@@ -742,7 +776,9 @@ class SimpleAuth:
                 return token
         return None
 
-    def _normalize_permissions(self, permissions: Optional[Dict[str, bool]]) -> Dict[str, bool]:
+    def _normalize_permissions(
+        self, permissions: Optional[Dict[str, bool]]
+    ) -> Dict[str, bool]:
         normalized = dict(DEFAULT_PERMISSIONS)
         if permissions:
             for key in normalized.keys():
@@ -822,7 +858,9 @@ class SimpleAuth:
             normalized[key] = key in tokens
         return normalized
 
-    def _parse_expiration(self, ttl: Optional[str], explicit: Optional[str]) -> Optional[float]:
+    def _parse_expiration(
+        self, ttl: Optional[str], explicit: Optional[str]
+    ) -> Optional[float]:
         if explicit:
             explicit = explicit.strip()
             if explicit.isdigit():

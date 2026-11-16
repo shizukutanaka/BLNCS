@@ -3,12 +3,12 @@ BLNCS Configuration Change Tracker
 Lightweight configuration change tracking and audit system
 """
 
-import time
-import threading
 import hashlib
-from typing import Dict, Any, List, Optional, Set
+import threading
+import time
 from collections import deque
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Set
 
 
 class ConfigChangeTracker:
@@ -27,9 +27,12 @@ class ConfigChangeTracker:
             self.baseline_config = self._deep_copy_config(config)
             self.current_config_hash = self._calculate_config_hash(config)
 
-    def record_config_change(self, new_config: Dict[str, Any],
-                           change_source: str = "unknown",
-                           metadata: Optional[Dict[str, Any]] = None):
+    def record_config_change(
+        self,
+        new_config: Dict[str, Any],
+        change_source: str = "unknown",
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
         """Record a configuration change"""
         with self._lock:
             if self.baseline_config is None:
@@ -44,15 +47,19 @@ class ConfigChangeTracker:
 
             # Record the change
             change_record = {
-                'timestamp': time.time(),
-                'datetime': datetime.now().isoformat(),
-                'old_hash': old_hash,
-                'new_hash': new_hash,
-                'change_source': change_source,
-                'metadata': metadata or {},
-                'changed_keys': self._get_changed_keys(self.baseline_config, new_config),
-                'added_keys': self._get_added_keys(self.baseline_config, new_config),
-                'removed_keys': self._get_removed_keys(self.baseline_config, new_config)
+                "timestamp": time.time(),
+                "datetime": datetime.now().isoformat(),
+                "old_hash": old_hash,
+                "new_hash": new_hash,
+                "change_source": change_source,
+                "metadata": metadata or {},
+                "changed_keys": self._get_changed_keys(
+                    self.baseline_config, new_config
+                ),
+                "added_keys": self._get_added_keys(self.baseline_config, new_config),
+                "removed_keys": self._get_removed_keys(
+                    self.baseline_config, new_config
+                ),
             }
 
             self.change_history.append(change_record)
@@ -65,20 +72,25 @@ class ConfigChangeTracker:
 
     def _config_to_sorted_string(self, config: Dict[str, Any]) -> str:
         """Convert config to sorted string for hashing"""
+
         def sort_dict(d):
             if not isinstance(d, dict):
                 return str(d)
             return {k: sort_dict(v) for k, v in sorted(d.items())}
 
         import json
+
         return json.dumps(sort_dict(config), sort_keys=True)
 
     def _deep_copy_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Deep copy configuration"""
         import copy
+
         return copy.deepcopy(config)
 
-    def _get_changed_keys(self, old_config: Dict[str, Any], new_config: Dict[str, Any]) -> List[str]:
+    def _get_changed_keys(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> List[str]:
         """Get keys that have changed values"""
         changed = []
 
@@ -100,7 +112,9 @@ class ConfigChangeTracker:
         compare_configs(old_config, new_config)
         return changed
 
-    def _get_added_keys(self, old_config: Dict[str, Any], new_config: Dict[str, Any]) -> List[str]:
+    def _get_added_keys(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> List[str]:
         """Get keys that were added"""
         added = []
 
@@ -118,7 +132,9 @@ class ConfigChangeTracker:
         find_added(old_config, new_config)
         return added
 
-    def _get_removed_keys(self, old_config: Dict[str, Any], new_config: Dict[str, Any]) -> List[str]:
+    def _get_removed_keys(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> List[str]:
         """Get keys that were removed"""
         removed = []
 
@@ -130,7 +146,9 @@ class ConfigChangeTracker:
                 current_path = f"{path}.{key}" if path else key
                 if key not in new_cfg:
                     removed.append(current_path)
-                elif isinstance(old_cfg[key], dict) and isinstance(new_cfg.get(key), dict):
+                elif isinstance(old_cfg[key], dict) and isinstance(
+                    new_cfg.get(key), dict
+                ):
                     find_removed(old_cfg[key], new_cfg[key], current_path)
 
         find_removed(old_config, new_config)
@@ -148,13 +166,17 @@ class ConfigChangeTracker:
         """Get changes from the last N minutes"""
         with self._lock:
             cutoff_time = time.time() - (minutes * 60)
-            return [change for change in self.change_history if change['timestamp'] >= cutoff_time]
+            return [
+                change
+                for change in self.change_history
+                if change["timestamp"] >= cutoff_time
+            ]
 
     def get_change_summary(self) -> Dict[str, Any]:
         """Get change summary"""
         with self._lock:
             if not self.change_history:
-                return {'total_changes': 0, 'recent_changes': 0}
+                return {"total_changes": 0, "recent_changes": 0}
 
             total_changes = len(self.change_history)
             recent_changes = len(self.get_recent_changes(60))
@@ -162,16 +184,22 @@ class ConfigChangeTracker:
             # Get change sources
             sources = {}
             for change in self.change_history:
-                source = change['change_source']
+                source = change["change_source"]
                 sources[source] = sources.get(source, 0) + 1
 
             return {
-                'total_changes': total_changes,
-                'recent_changes': recent_changes,
-                'change_sources': sources,
-                'baseline_hash': self.current_config_hash,
-                'oldest_change': self.change_history[0]['timestamp'] if self.change_history else None,
-                'newest_change': self.change_history[-1]['timestamp'] if self.change_history else None
+                "total_changes": total_changes,
+                "recent_changes": recent_changes,
+                "change_sources": sources,
+                "baseline_hash": self.current_config_hash,
+                "oldest_change": (
+                    self.change_history[0]["timestamp"] if self.change_history else None
+                ),
+                "newest_change": (
+                    self.change_history[-1]["timestamp"]
+                    if self.change_history
+                    else None
+                ),
             }
 
     def rollback_to_change(self, change_index: int) -> Optional[Dict[str, Any]]:
@@ -197,28 +225,33 @@ class SystemEventTracker:
         self.events: deque = deque(maxlen=max_events)
         self._lock = threading.Lock()
 
-    def record_event(self, event_type: str, description: str,
-                    metadata: Optional[Dict[str, Any]] = None):
+    def record_event(
+        self,
+        event_type: str,
+        description: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
         """Record a system event"""
         with self._lock:
             event = {
-                'timestamp': time.time(),
-                'datetime': datetime.now().isoformat(),
-                'event_type': event_type,
-                'description': description,
-                'metadata': metadata or {}
+                "timestamp": time.time(),
+                "datetime": datetime.now().isoformat(),
+                "event_type": event_type,
+                "description": description,
+                "metadata": metadata or {},
             }
 
             self.events.append(event)
 
-    def get_events(self, event_type: Optional[str] = None,
-                  limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_events(
+        self, event_type: Optional[str] = None, limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """Get events with optional filtering"""
         with self._lock:
             events = list(self.events)
 
             if event_type:
-                events = [e for e in events if e['event_type'] == event_type]
+                events = [e for e in events if e["event_type"] == event_type]
 
             if limit:
                 events = events[-limit:]
@@ -229,18 +262,18 @@ class SystemEventTracker:
         """Get event summary"""
         with self._lock:
             if not self.events:
-                return {'total_events': 0, 'event_types': {}}
+                return {"total_events": 0, "event_types": {}}
 
             event_types = {}
             for event in self.events:
-                event_type = event['event_type']
+                event_type = event["event_type"]
                 event_types[event_type] = event_types.get(event_type, 0) + 1
 
             return {
-                'total_events': len(self.events),
-                'event_types': event_types,
-                'oldest_event': self.events[0]['timestamp'] if self.events else None,
-                'newest_event': self.events[-1]['timestamp'] if self.events else None
+                "total_events": len(self.events),
+                "event_types": event_types,
+                "oldest_event": self.events[0]["timestamp"] if self.events else None,
+                "newest_event": self.events[-1]["timestamp"] if self.events else None,
             }
 
     def clear_events(self):
@@ -275,15 +308,19 @@ def get_system_event_tracker() -> SystemEventTracker:
     return _event_tracker
 
 
-def record_config_change(config: Dict[str, Any], source: str = "system",
-                        metadata: Optional[Dict[str, Any]] = None):
+def record_config_change(
+    config: Dict[str, Any],
+    source: str = "system",
+    metadata: Optional[Dict[str, Any]] = None,
+):
     """Record configuration change (convenience function)"""
     tracker = get_config_change_tracker()
     tracker.record_config_change(config, source, metadata)
 
 
-def record_system_event(event_type: str, description: str,
-                       metadata: Optional[Dict[str, Any]] = None):
+def record_system_event(
+    event_type: str, description: str, metadata: Optional[Dict[str, Any]] = None
+):
     """Record system event (convenience function)"""
     tracker = get_system_event_tracker()
     tracker.record_event(event_type, description, metadata)
@@ -295,14 +332,18 @@ def get_change_summary():
     event_tracker = get_system_event_tracker()
 
     return {
-        'config_changes': config_tracker.get_change_summary(),
-        'system_events': event_tracker.get_event_summary(),
-        'recent_events': event_tracker.get_events(limit=10)
+        "config_changes": config_tracker.get_change_summary(),
+        "system_events": event_tracker.get_event_summary(),
+        "recent_events": event_tracker.get_events(limit=10),
     }
 
 
 __all__ = [
-    'ConfigChangeTracker', 'SystemEventTracker',
-    'get_config_change_tracker', 'get_system_event_tracker',
-    'record_config_change', 'record_system_event', 'get_change_summary'
+    "ConfigChangeTracker",
+    "SystemEventTracker",
+    "get_config_change_tracker",
+    "get_system_event_tracker",
+    "record_config_change",
+    "record_system_event",
+    "get_change_summary",
 ]

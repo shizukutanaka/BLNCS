@@ -4,23 +4,25 @@ YouTube、論文、Web検索などの外部ソースを統合
 """
 
 import asyncio
-import aiohttp
-import json
-import time
 import hashlib
+import json
 import logging
-from typing import Dict, List, Optional, Any, Union
-from dataclasses import dataclass, field
-from enum import Enum
-from urllib.parse import urlencode, quote_plus
-from datetime import datetime, timedelta
 import re
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Optional, Union
+from urllib.parse import quote_plus, urlencode
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
 
 class SearchProvider(Enum):
     """検索プロバイダー"""
+
     YOUTUBE = "youtube"
     GOOGLE_SCHOLAR = "google_scholar"
     ARXIV = "arxiv"
@@ -33,6 +35,7 @@ class SearchProvider(Enum):
 
 class Language(Enum):
     """対応言語"""
+
     AUTO = "auto"
     JA = "ja"
     EN = "en"
@@ -50,6 +53,7 @@ class Language(Enum):
 @dataclass
 class SearchResult:
     """検索結果"""
+
     title: str
     description: str
     url: str
@@ -65,6 +69,7 @@ class SearchResult:
 @dataclass
 class SearchQuery:
     """検索クエリ"""
+
     text: str
     provider: SearchProvider
     language: Language = Language.AUTO
@@ -93,19 +98,37 @@ class ExternalSearchManager:
     def _init_rate_limits(self):
         """レート制限を初期化"""
         limits = {
-            SearchProvider.YOUTUBE: {"requests_per_minute": 60, "requests_per_day": 10000},
-            SearchProvider.GOOGLE_WEB: {"requests_per_minute": 60, "requests_per_day": 10000},
-            SearchProvider.BING_WEB: {"requests_per_minute": 60, "requests_per_day": 10000},
-            SearchProvider.GOOGLE_SCHOLAR: {"requests_per_minute": 30, "requests_per_day": 1000},
-            SearchProvider.ARXIV: {"requests_per_minute": 100, "requests_per_day": 10000},
-            SearchProvider.SEMANTIC_SCHOLAR: {"requests_per_minute": 100, "requests_per_day": 10000},
+            SearchProvider.YOUTUBE: {
+                "requests_per_minute": 60,
+                "requests_per_day": 10000,
+            },
+            SearchProvider.GOOGLE_WEB: {
+                "requests_per_minute": 60,
+                "requests_per_day": 10000,
+            },
+            SearchProvider.BING_WEB: {
+                "requests_per_minute": 60,
+                "requests_per_day": 10000,
+            },
+            SearchProvider.GOOGLE_SCHOLAR: {
+                "requests_per_minute": 30,
+                "requests_per_day": 1000,
+            },
+            SearchProvider.ARXIV: {
+                "requests_per_minute": 100,
+                "requests_per_day": 10000,
+            },
+            SearchProvider.SEMANTIC_SCHOLAR: {
+                "requests_per_minute": 100,
+                "requests_per_day": 10000,
+            },
         }
 
         for provider, limit in limits.items():
             self.rate_limits[provider] = {
                 "requests": [],
                 "requests_per_minute": limit["requests_per_minute"],
-                "requests_per_day": limit["requests_per_day"]
+                "requests_per_day": limit["requests_per_day"],
             }
 
     async def __aenter__(self):
@@ -115,8 +138,8 @@ class ExternalSearchManager:
             headers={
                 "User-Agent": "BLNCS-External-Search/1.0",
                 "Accept": "application/json",
-                "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
-            }
+                "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            },
         )
         return self
 
@@ -135,14 +158,12 @@ class ExternalSearchManager:
 
         # 1分以内のリクエストをフィルタ
         limits["requests"] = [
-            req_time for req_time in limits["requests"]
-            if (now - req_time).seconds < 60
+            req_time for req_time in limits["requests"] if (now - req_time).seconds < 60
         ]
 
         # 1日以内のリクエストをフィルタ
         limits["requests"] = [
-            req_time for req_time in limits["requests"]
-            if (now - req_time).days < 1
+            req_time for req_time in limits["requests"] if (now - req_time).days < 1
         ]
 
         # 制限チェック
@@ -160,7 +181,7 @@ class ExternalSearchManager:
             "provider": query.provider.value,
             "language": query.language.value,
             "max_results": query.max_results,
-            "filters": str(sorted(query.filters.items()))
+            "filters": str(sorted(query.filters.items())),
         }
         key_string = json.dumps(key_data, sort_keys=True)
         return hashlib.md5(key_string.encode()).hexdigest()
@@ -181,7 +202,9 @@ class ExternalSearchManager:
 
         return None
 
-    def _set_cache(self, query: SearchQuery, results: List[SearchResult], ttl_minutes: int = 60):
+    def _set_cache(
+        self, query: SearchQuery, results: List[SearchResult], ttl_minutes: int = 60
+    ):
         """キャッシュに保存"""
         cache_key = self._get_cache_key(query)
         self.cache[cache_key] = results
@@ -252,7 +275,7 @@ class ExternalSearchManager:
             "type": "video",
             "maxResults": min(query.max_results, 50),
             "key": api_key,
-            "safeSearch": "strict" if query.safe_search else "none"
+            "safeSearch": "strict" if query.safe_search else "none",
         }
 
         if query.language != Language.AUTO:
@@ -274,7 +297,9 @@ class ExternalSearchManager:
                         published_date = None
                         if published_str:
                             try:
-                                published_date = datetime.fromisoformat(published_str.replace('Z', '+00:00'))
+                                published_date = datetime.fromisoformat(
+                                    published_str.replace("Z", "+00:00")
+                                )
                             except:
                                 pass
 
@@ -288,12 +313,14 @@ class ExternalSearchManager:
                                 "channel_title": snippet.get("channelTitle", ""),
                                 "video_id": item["id"]["videoId"],
                                 "duration": "",  # 追加のAPIコールが必要
-                                "view_count": 0
+                                "view_count": 0,
                             },
-                            thumbnail_url=snippet.get("thumbnails", {}).get("default", {}).get("url"),
+                            thumbnail_url=snippet.get("thumbnails", {})
+                            .get("default", {})
+                            .get("url"),
                             published_date=published_date,
                             language=self._detect_language(snippet.get("title", "")),
-                            tags=snippet.get("tags", [])
+                            tags=snippet.get("tags", []),
                         )
                         results.append(result)
 
@@ -314,7 +341,7 @@ class ExternalSearchManager:
         params = {
             "q": search_text,
             "hl": query.language.value if query.language != Language.AUTO else "en",
-            "num": query.max_results
+            "num": query.max_results,
         }
 
         url = "https://scholar.google.com/scholar"
@@ -324,7 +351,9 @@ class ExternalSearchManager:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
 
-            async with self.session.get(url, params=params, headers=headers) as response:
+            async with self.session.get(
+                url, params=params, headers=headers
+            ) as response:
                 if response.status == 200:
                     html = await response.text()
 
@@ -332,17 +361,22 @@ class ExternalSearchManager:
                     results = []
 
                     # 論文タイトルの抽出（正規表現）
-                    title_pattern = r'<h3[^>]*><a[^>]*>(.*?)</a></h3>'
+                    title_pattern = r"<h3[^>]*><a[^>]*>(.*?)</a></h3>"
                     titles = re.findall(title_pattern, html, re.DOTALL)
 
                     # 説明の抽出
                     desc_pattern = r'<div[^>]*class="gs_rs"[^>]*>(.*?)</div>'
                     descriptions = re.findall(desc_pattern, html, re.DOTALL)
 
-                    for i, (title, desc) in enumerate(zip(titles[:query.max_results], descriptions[:query.max_results])):
+                    for i, (title, desc) in enumerate(
+                        zip(
+                            titles[: query.max_results],
+                            descriptions[: query.max_results],
+                        )
+                    ):
                         # HTMLタグを除去
-                        title = re.sub(r'<[^>]+>', '', title).strip()
-                        desc = re.sub(r'<[^>]+>', '', desc).strip()
+                        title = re.sub(r"<[^>]+>", "", title).strip()
+                        desc = re.sub(r"<[^>]+>", "", desc).strip()
 
                         result = SearchResult(
                             title=title,
@@ -351,7 +385,7 @@ class ExternalSearchManager:
                             provider=SearchProvider.GOOGLE_SCHOLAR,
                             score=1.0 - (i * 0.1),  # 順位によるスコア
                             metadata={"rank": i + 1},
-                            language=self._detect_language(title)
+                            language=self._detect_language(title),
                         )
                         results.append(result)
 
@@ -373,7 +407,7 @@ class ExternalSearchManager:
             "start": 0,
             "max_results": query.max_results,
             "sortBy": "relevance" if query.sort_by == "relevance" else "submittedDate",
-            "sortOrder": "descending"
+            "sortOrder": "descending",
         }
 
         url = "http://export.arxiv.org/api/query"
@@ -387,35 +421,38 @@ class ExternalSearchManager:
                     results = []
 
                     # タイトル、要約、URLを抽出
-                    title_pattern = r'<title>(.*?)</title>'
-                    summary_pattern = r'<summary>(.*?)</summary>'
-                    id_pattern = r'<id>(.*?)</id>'
+                    title_pattern = r"<title>(.*?)</title>"
+                    summary_pattern = r"<summary>(.*?)</summary>"
+                    id_pattern = r"<id>(.*?)</id>"
 
                     titles = re.findall(title_pattern, xml_data)
                     summaries = re.findall(summary_pattern, xml_data)
                     ids = re.findall(id_pattern, xml_data)
 
-                    for i, (title, summary, arxiv_id) in enumerate(zip(titles, summaries, ids)):
+                    for i, (title, summary, arxiv_id) in enumerate(
+                        zip(titles, summaries, ids)
+                    ):
                         if i >= query.max_results:
                             break
 
                         # arXiv IDからURLを構築
-                        match = re.search(r'arxiv.org/abs/([^/]+)', arxiv_id)
+                        match = re.search(r"arxiv.org/abs/([^/]+)", arxiv_id)
                         if match:
                             paper_id = match.group(1)
                             url = f"https://arxiv.org/abs/{paper_id}"
 
                             result = SearchResult(
                                 title=title.strip(),
-                                description=summary.strip()[:200] + "..." if len(summary.strip()) > 200 else summary.strip(),
+                                description=(
+                                    summary.strip()[:200] + "..."
+                                    if len(summary.strip()) > 200
+                                    else summary.strip()
+                                ),
                                 url=url,
                                 provider=SearchProvider.ARXIV,
                                 score=1.0 - (i * 0.05),
-                                metadata={
-                                    "arxiv_id": paper_id,
-                                    "categories": []
-                                },
-                                language=self._detect_language(title)
+                                metadata={"arxiv_id": paper_id, "categories": []},
+                                language=self._detect_language(title),
                             )
                             results.append(result)
 
@@ -435,7 +472,7 @@ class ExternalSearchManager:
         params = {
             "query": search_text,
             "limit": query.max_results,
-            "fields": "title,abstract,url,year,authors,venue,citationCount"
+            "fields": "title,abstract,url,year,authors,venue,citationCount",
         }
 
         url = "https://api.semanticscholar.org/graph/v1/paper/search"
@@ -449,17 +486,24 @@ class ExternalSearchManager:
                     for i, paper in enumerate(data.get("data", [])):
                         result = SearchResult(
                             title=paper.get("title", ""),
-                            description=paper.get("abstract", "")[:200] + "..." if len(paper.get("abstract", "")) > 200 else paper.get("abstract", ""),
+                            description=(
+                                paper.get("abstract", "")[:200] + "..."
+                                if len(paper.get("abstract", "")) > 200
+                                else paper.get("abstract", "")
+                            ),
                             url=paper.get("url", ""),
                             provider=SearchProvider.SEMANTIC_SCHOLAR,
                             score=1.0 - (i * 0.05),
                             metadata={
                                 "year": paper.get("year"),
-                                "authors": [author.get("name", "") for author in paper.get("authors", [])],
+                                "authors": [
+                                    author.get("name", "")
+                                    for author in paper.get("authors", [])
+                                ],
                                 "venue": paper.get("venue", ""),
-                                "citation_count": paper.get("citationCount", 0)
+                                "citation_count": paper.get("citationCount", 0),
                             },
-                            language=self._detect_language(paper.get("title", ""))
+                            language=self._detect_language(paper.get("title", "")),
                         )
                         results.append(result)
 
@@ -488,7 +532,7 @@ class ExternalSearchManager:
             "cx": search_engine_id,
             "q": search_text,
             "num": query.max_results,
-            "safe": "active" if query.safe_search else "off"
+            "safe": "active" if query.safe_search else "off",
         }
 
         if query.language != Language.AUTO:
@@ -511,9 +555,9 @@ class ExternalSearchManager:
                             score=1.0 - (i * 0.1),
                             metadata={
                                 "display_link": item.get("displayLink", ""),
-                                "formatted_url": item.get("formattedUrl", "")
+                                "formatted_url": item.get("formattedUrl", ""),
                             },
-                            language=self._detect_language(item.get("title", ""))
+                            language=self._detect_language(item.get("title", "")),
                         )
                         results.append(result)
 
@@ -537,20 +581,22 @@ class ExternalSearchManager:
 
         headers = {
             "Ocp-Apim-Subscription-Key": api_key,
-            "User-Agent": "BLNCS-External-Search/1.0"
+            "User-Agent": "BLNCS-External-Search/1.0",
         }
 
         params = {
             "q": search_text,
             "count": query.max_results,
             "mkt": query.language.value if query.language != Language.AUTO else "en-US",
-            "safeSearch": "Strict" if query.safe_search else "Off"
+            "safeSearch": "Strict" if query.safe_search else "Off",
         }
 
         url = "https://api.bing.microsoft.com/v7.0/search"
 
         try:
-            async with self.session.get(url, headers=headers, params=params) as response:
+            async with self.session.get(
+                url, headers=headers, params=params
+            ) as response:
                 if response.status == 200:
                     data = await response.json()
 
@@ -564,9 +610,9 @@ class ExternalSearchManager:
                             score=1.0 - (i * 0.1),
                             metadata={
                                 "display_url": item.get("displayUrl", ""),
-                                "last_crawled": item.get("dateLastCrawled", "")
+                                "last_crawled": item.get("dateLastCrawled", ""),
                             },
-                            language=self._detect_language(item.get("name", ""))
+                            language=self._detect_language(item.get("name", "")),
                         )
                         results.append(result)
 
@@ -587,7 +633,7 @@ class ExternalSearchManager:
             "q": search_text,
             "sort": "best-match",
             "order": "desc",
-            "per_page": query.max_results
+            "per_page": query.max_results,
         }
 
         url = "https://api.github.com/search/repositories"
@@ -595,7 +641,7 @@ class ExternalSearchManager:
         try:
             headers = {
                 "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "BLNCS-External-Search/1.0"
+                "User-Agent": "BLNCS-External-Search/1.0",
             }
 
             # GitHub APIは認証不要だが、レート制限が厳しい
@@ -603,7 +649,9 @@ class ExternalSearchManager:
             if token:
                 headers["Authorization"] = f"token {token}"
 
-            async with self.session.get(url, headers=headers, params=params) as response:
+            async with self.session.get(
+                url, headers=headers, params=params
+            ) as response:
                 if response.status == 200:
                     data = await response.json()
 
@@ -620,9 +668,9 @@ class ExternalSearchManager:
                                 "forks": repo.get("forks_count", 0),
                                 "language": repo.get("language", ""),
                                 "updated_at": repo.get("updated_at", ""),
-                                "owner": repo.get("owner", {}).get("login", "")
+                                "owner": repo.get("owner", {}).get("login", ""),
                             },
-                            language=self._detect_language(repo.get("description", ""))
+                            language=self._detect_language(repo.get("description", "")),
                         )
                         results.append(result)
 
@@ -644,7 +692,7 @@ class ExternalSearchManager:
             "site": "stackoverflow.com",
             "pagesize": query.max_results,
             "order": "desc",
-            "sort": "relevance"
+            "sort": "relevance",
         }
 
         url = "https://api.stackexchange.com/2.3/search"
@@ -658,7 +706,11 @@ class ExternalSearchManager:
                     for i, item in enumerate(data.get("items", [])):
                         result = SearchResult(
                             title=item.get("title", ""),
-                            description=item.get("excerpt", "")[:200] + "..." if len(item.get("excerpt", "")) > 200 else item.get("excerpt", ""),
+                            description=(
+                                item.get("excerpt", "")[:200] + "..."
+                                if len(item.get("excerpt", "")) > 200
+                                else item.get("excerpt", "")
+                            ),
                             url=item.get("link", ""),
                             provider=SearchProvider.STACK_OVERFLOW,
                             score=1.0 - (i * 0.05),
@@ -667,9 +719,13 @@ class ExternalSearchManager:
                                 "answer_count": item.get("answer_count", 0),
                                 "view_count": item.get("view_count", 0),
                                 "tags": item.get("tags", []),
-                                "creation_date": datetime.fromtimestamp(item.get("creation_date", 0)) if item.get("creation_date") else None
+                                "creation_date": (
+                                    datetime.fromtimestamp(item.get("creation_date", 0))
+                                    if item.get("creation_date")
+                                    else None
+                                ),
                             },
-                            language=self._detect_language(item.get("title", ""))
+                            language=self._detect_language(item.get("title", "")),
                         )
                         results.append(result)
 
@@ -705,15 +761,15 @@ class ExternalSearchManager:
 
         # 簡易的な言語検出（実際にはより高度なライブラリを使用）
         # 日本語文字を含む場合
-        if re.search(r'[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]', text):
+        if re.search(r"[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]", text):
             return Language.JA
 
         # 中国語文字を含む場合
-        if re.search(r'[\u4e00-\u9faf]', text):
+        if re.search(r"[\u4e00-\u9faf]", text):
             return Language.ZH
 
         # 韓国語文字を含む場合
-        if re.search(r'[\uac00-\ud7af]', text):
+        if re.search(r"[\uac00-\ud7af]", text):
             return Language.KO
 
         # その他の言語は英語として扱う
@@ -725,11 +781,18 @@ class ExternalSearchManager:
             "cache_size": len(self.cache),
             "rate_limits": {
                 provider.value: {
-                    "requests_last_minute": len([r for r in limits["requests"]
-                                               if (datetime.now() - r).seconds < 60]),
-                    "limit_per_minute": limits["requests_per_minute"]
+                    "requests_last_minute": len(
+                        [
+                            r
+                            for r in limits["requests"]
+                            if (datetime.now() - r).seconds < 60
+                        ]
+                    ),
+                    "limit_per_minute": limits["requests_per_minute"],
                 }
                 for provider, limits in self.rate_limits.items()
             },
-            "total_searches": sum(len(limits["requests"]) for limits in self.rate_limits.values())
+            "total_searches": sum(
+                len(limits["requests"]) for limits in self.rate_limits.values()
+            ),
         }

@@ -3,22 +3,25 @@
 ブロックチェーン以外のDLT統合と相互運用性機能を提供
 """
 
-import time
+import asyncio
+import hashlib
 import json
+import logging
+import random
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable
+import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
-import hashlib
-import asyncio
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class DistributedLedgerType(Enum):
     """分散台帳技術タイプ"""
+
     BLOCKCHAIN = "blockchain"
     DAG = "dag"  # Directed Acyclic Graph (例: IOTA, Nano)
     HASHGRAPH = "hashgraph"  # Hedera Hashgraph
@@ -29,6 +32,7 @@ class DistributedLedgerType(Enum):
 
 class ConsensusMechanism(Enum):
     """合意形成メカニズム"""
+
     PROOF_OF_WORK = "proof_of_work"
     PROOF_OF_STAKE = "proof_of_stake"
     PROOF_OF_AUTHORITY = "proof_of_authority"
@@ -40,6 +44,7 @@ class ConsensusMechanism(Enum):
 @dataclass
 class DistributedLedgerNode:
     """分散台帳ノード情報"""
+
     node_id: str
     ledger_type: DistributedLedgerType
     consensus_mechanism: ConsensusMechanism
@@ -55,6 +60,7 @@ class DistributedLedgerNode:
 @dataclass
 class DLTTransaction:
     """DLTトランザクション情報"""
+
     transaction_id: str
     ledger_type: DistributedLedgerType
     sender: str
@@ -70,6 +76,7 @@ class DLTTransaction:
 @dataclass
 class CrossLedgerBridge:
     """クロス台帳ブリッジ情報"""
+
     bridge_id: str
     source_ledger: DistributedLedgerType
     target_ledger: DistributedLedgerType
@@ -170,7 +177,7 @@ class DLTConsensusEngine:
             "node_id": node.node_id,
             "approved": random.random() > 0.1,  # 90%の確率で承認
             "timestamp": time.time(),
-            "signature": f"sig_{node.node_id}"
+            "signature": f"sig_{node.node_id}",
         }
 
 
@@ -180,8 +187,12 @@ class CrossLedgerInteroperabilityManager:
     def __init__(self):
         """初期化"""
         self.bridges: Dict[str, CrossLedgerBridge] = {}
-        self.asset_mappings: Dict[str, Dict[str, str]] = defaultdict(dict)  # asset_id -> ledger_asset_id
-        self.exchange_rates: Dict[Tuple[str, str], float] = {}  # (source_ledger, target_ledger) -> rate
+        self.asset_mappings: Dict[str, Dict[str, str]] = defaultdict(
+            dict
+        )  # asset_id -> ledger_asset_id
+        self.exchange_rates: Dict[Tuple[str, str], float] = (
+            {}
+        )  # (source_ledger, target_ledger) -> rate
 
     def register_bridge(self, bridge: CrossLedgerBridge):
         """
@@ -195,12 +206,19 @@ class CrossLedgerInteroperabilityManager:
         rate_key = (bridge.source_ledger.value, bridge.target_ledger.value)
         self.exchange_rates[rate_key] = bridge.exchange_rate
 
-        logger.info(f"ブリッジ登録: {bridge.source_ledger.value} -> {bridge.target_ledger.value}")
+        logger.info(
+            f"ブリッジ登録: {bridge.source_ledger.value} -> {bridge.target_ledger.value}"
+        )
 
-    async def transfer_asset_cross_ledger(self, source_ledger: DistributedLedgerType,
-                                        target_ledger: DistributedLedgerType,
-                                        asset_id: str, amount: float,
-                                        sender: str, recipient: str) -> str:
+    async def transfer_asset_cross_ledger(
+        self,
+        source_ledger: DistributedLedgerType,
+        target_ledger: DistributedLedgerType,
+        asset_id: str,
+        amount: float,
+        sender: str,
+        recipient: str,
+    ) -> str:
         """
         資産をクロス台帳で転送
         Args:
@@ -219,7 +237,9 @@ class CrossLedgerInteroperabilityManager:
         bridge_id = self._find_bridge(source_ledger, target_ledger)
 
         if not bridge_id:
-            raise ValueError(f"ブリッジが見つかりません: {source_ledger.value} -> {target_ledger.value}")
+            raise ValueError(
+                f"ブリッジが見つかりません: {source_ledger.value} -> {target_ledger.value}"
+            )
 
         # 為替レートを取得
         rate_key = (source_ledger.value, target_ledger.value)
@@ -230,33 +250,53 @@ class CrossLedgerInteroperabilityManager:
 
         # ブリッジ経由で転送を実行（簡易版）
         await self._execute_cross_ledger_transfer(
-            transfer_id, bridge_id, asset_id, amount, converted_amount,
-            sender, recipient, source_ledger, target_ledger
+            transfer_id,
+            bridge_id,
+            asset_id,
+            amount,
+            converted_amount,
+            sender,
+            recipient,
+            source_ledger,
+            target_ledger,
         )
 
         return transfer_id
 
-    def _find_bridge(self, source_ledger: DistributedLedgerType, target_ledger: DistributedLedgerType) -> Optional[str]:
+    def _find_bridge(
+        self, source_ledger: DistributedLedgerType, target_ledger: DistributedLedgerType
+    ) -> Optional[str]:
         """ブリッジを検索"""
         for bridge in self.bridges.values():
-            if (bridge.source_ledger == source_ledger and
-                bridge.target_ledger == target_ledger and
-                bridge.status == "active"):
+            if (
+                bridge.source_ledger == source_ledger
+                and bridge.target_ledger == target_ledger
+                and bridge.status == "active"
+            ):
                 return bridge.bridge_id
 
         return None
 
-    async def _execute_cross_ledger_transfer(self, transfer_id: str, bridge_id: str,
-                                           asset_id: str, source_amount: float, target_amount: float,
-                                           sender: str, recipient: str,
-                                           source_ledger: DistributedLedgerType,
-                                           target_ledger: DistributedLedgerType):
+    async def _execute_cross_ledger_transfer(
+        self,
+        transfer_id: str,
+        bridge_id: str,
+        asset_id: str,
+        source_amount: float,
+        target_amount: float,
+        sender: str,
+        recipient: str,
+        source_ledger: DistributedLedgerType,
+        target_ledger: DistributedLedgerType,
+    ):
         """クロス台帳転送を実行"""
         bridge = self.bridges[bridge_id]
 
         # 実際の実装ではブリッジスマートコントラクトを呼び出し
         logger.info(f"クロス台帳転送実行: {transfer_id}")
-        logger.info(f"  {source_ledger.value}: {source_amount} {asset_id} -> {target_ledger.value}: {target_amount}")
+        logger.info(
+            f"  {source_ledger.value}: {source_amount} {asset_id} -> {target_ledger.value}: {target_amount}"
+        )
 
         # 転送プロセスをシミュレーション
         await asyncio.sleep(2.0)  # 転送時間をシミュレーション
@@ -270,7 +310,9 @@ class DAGLedgerSystem:
     def __init__(self):
         """初期化"""
         self.transactions: Dict[str, DLTTransaction] = {}
-        self.transaction_graph: Dict[str, List[str]] = defaultdict(list)  # transaction_id -> references
+        self.transaction_graph: Dict[str, List[str]] = defaultdict(
+            list
+        )  # transaction_id -> references
         self.cumulative_weight: Dict[str, int] = defaultdict(int)  # 累積重み
 
     def submit_dag_transaction(self, transaction: DLTTransaction) -> bool:
@@ -321,7 +363,9 @@ class HashgraphConsensusSystem:
         self.event_graph: Dict[str, List[str]] = defaultdict(list)
         self.consensus_order: List[str] = []
 
-    def create_event(self, creator: str, transactions: List[str], parents: List[str]) -> str:
+    def create_event(
+        self, creator: str, transactions: List[str], parents: List[str]
+    ) -> str:
         """
         イベントを作成
         Args:
@@ -340,7 +384,7 @@ class HashgraphConsensusSystem:
             "parents": parents,
             "timestamp": time.time(),
             "round": 0,
-            "witness": False
+            "witness": False,
         }
 
         self.events.append(event)
@@ -405,7 +449,7 @@ class DistributedLedgerManager:
                 public_key="pubkey_1",
                 stake_amount=1000.0,
                 is_validator=True,
-                region="asia"
+                region="asia",
             ),
             DistributedLedgerNode(
                 node_id="dag_node_1",
@@ -415,7 +459,7 @@ class DistributedLedgerManager:
                 public_key="pubkey_2",
                 reputation_score=0.8,
                 is_validator=True,
-                region="europe"
+                region="europe",
             ),
             DistributedLedgerNode(
                 node_id="hashgraph_node_1",
@@ -425,8 +469,8 @@ class DistributedLedgerManager:
                 public_key="pubkey_3",
                 stake_amount=500.0,
                 is_validator=True,
-                region="north_america"
-            )
+                region="north_america",
+            ),
         ]
 
         for node in nodes:
@@ -441,7 +485,7 @@ class DistributedLedgerManager:
                 target_ledger=DistributedLedgerType.DAG,
                 bridge_contract="bridge_contract_1",
                 supported_assets=["BTC", "ETH"],
-                exchange_rate=1.0
+                exchange_rate=1.0,
             ),
             CrossLedgerBridge(
                 bridge_id="dag_hashgraph_bridge",
@@ -449,8 +493,8 @@ class DistributedLedgerManager:
                 target_ledger=DistributedLedgerType.HASHGRAPH,
                 bridge_contract="bridge_contract_2",
                 supported_assets=["MIOTA", "HBAR"],
-                exchange_rate=0.95
-            )
+                exchange_rate=0.95,
+            ),
         ]
 
         for bridge in bridges:
@@ -467,8 +511,14 @@ class DistributedLedgerManager:
         self.is_dlt_active = False
         logger.info("分散台帳技術システムを停止しました")
 
-    def submit_transaction(self, ledger_type: DistributedLedgerType, sender: str,
-                          receiver: str, amount: float, data: Dict[str, Any] = None) -> str:
+    def submit_transaction(
+        self,
+        ledger_type: DistributedLedgerType,
+        sender: str,
+        receiver: str,
+        amount: float,
+        data: Dict[str, Any] = None,
+    ) -> str:
         """
         トランザクションを送信
         Args:
@@ -488,7 +538,7 @@ class DistributedLedgerManager:
             sender=sender,
             receiver=receiver,
             amount=amount,
-            data=data or {}
+            data=data or {},
         )
 
         # 台帳タイプに応じた処理
@@ -497,9 +547,7 @@ class DistributedLedgerManager:
         elif ledger_type == DistributedLedgerType.HASHGRAPH:
             # Hashgraphイベントを作成
             event_id = self.hashgraph_system.create_event(
-                creator=sender,
-                transactions=[transaction_id],
-                parents=[]  # 簡易版
+                creator=sender, transactions=[transaction_id], parents=[]  # 簡易版
             )
             success = True
         else:
@@ -511,10 +559,15 @@ class DistributedLedgerManager:
         else:
             raise ValueError(f"トランザクション送信失敗: {transaction_id}")
 
-    async def transfer_cross_ledger(self, source_ledger: DistributedLedgerType,
-                                   target_ledger: DistributedLedgerType,
-                                   asset_id: str, amount: float,
-                                   sender: str, recipient: str) -> str:
+    async def transfer_cross_ledger(
+        self,
+        source_ledger: DistributedLedgerType,
+        target_ledger: DistributedLedgerType,
+        asset_id: str,
+        amount: float,
+        sender: str,
+        recipient: str,
+    ) -> str:
         """
         クロス台帳転送を実行
         Args:
@@ -531,7 +584,9 @@ class DistributedLedgerManager:
             source_ledger, target_ledger, asset_id, amount, sender, recipient
         )
 
-    def create_hashgraph_event(self, creator: str, transactions: List[str], parent_events: List[str] = None) -> str:
+    def create_hashgraph_event(
+        self, creator: str, transactions: List[str], parent_events: List[str] = None
+    ) -> str:
         """
         Hashgraphイベントを作成
         Args:
@@ -541,19 +596,23 @@ class DistributedLedgerManager:
         Returns:
             イベントID
         """
-        return self.hashgraph_system.create_event(creator, transactions, parent_events or [])
+        return self.hashgraph_system.create_event(
+            creator, transactions, parent_events or []
+        )
 
     def get_dlt_system_status(self) -> Dict[str, Any]:
         """分散台帳システムステータスを取得"""
         return {
             "is_active": self.is_dlt_active,
             "total_nodes": len(self.consensus_engine.nodes),
-            "validator_nodes": len([n for n in self.consensus_engine.nodes.values() if n.is_validator]),
+            "validator_nodes": len(
+                [n for n in self.consensus_engine.nodes.values() if n.is_validator]
+            ),
             "pending_transactions": len(self.consensus_engine.pending_transactions),
             "confirmed_transactions": len(self.consensus_engine.confirmed_transactions),
             "active_bridges": len(self.interoperability_manager.bridges),
             "dag_transactions": len(self.dag_system.transactions),
-            "hashgraph_events": len(self.hashgraph_system.events)
+            "hashgraph_events": len(self.hashgraph_system.events),
         }
 
 
@@ -570,11 +629,7 @@ async def example_usage():
     # ブロックチェーントランザクション送信
     try:
         tx_id = manager.submit_transaction(
-            DistributedLedgerType.BLOCKCHAIN,
-            "user_1",
-            "user_2",
-            1.0,
-            {"asset": "BTC"}
+            DistributedLedgerType.BLOCKCHAIN, "user_1", "user_2", 1.0, {"asset": "BTC"}
         )
         print(f"ブロックチェーントランザクション送信: {tx_id}")
     except Exception as e:
@@ -583,22 +638,14 @@ async def example_usage():
     # DAGトランザクション送信
     try:
         dag_tx_id = manager.submit_transaction(
-            DistributedLedgerType.DAG,
-            "user_3",
-            "user_4",
-            100.0,
-            {"asset": "MIOTA"}
+            DistributedLedgerType.DAG, "user_3", "user_4", 100.0, {"asset": "MIOTA"}
         )
         print(f"DAGトランザクション送信: {dag_tx_id}")
     except Exception as e:
         print(f"DAGトランザクションエラー: {e}")
 
     # Hashgraphイベント作成
-    event_id = manager.create_hashgraph_event(
-        "user_5",
-        ["sample_transaction"],
-        []
-    )
+    event_id = manager.create_hashgraph_event("user_5", ["sample_transaction"], [])
     print(f"Hashgraphイベント作成: {event_id}")
 
     # クロス台帳転送
@@ -609,7 +656,7 @@ async def example_usage():
             "BTC",
             0.001,
             "user_1",
-            "user_3"
+            "user_3",
         )
         print(f"クロス台帳転送開始: {transfer_id}")
     except Exception as e:

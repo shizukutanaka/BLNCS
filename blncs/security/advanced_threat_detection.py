@@ -3,25 +3,27 @@
 AIベースの脅威検知と自動対応システムを提供
 """
 
-import time
-import json
-import sqlite3
-import threading
-from typing import Any, Dict, List, Optional, Callable, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-import logging
 import asyncio
-import numpy as np
 import hashlib
 import ipaddress
+import json
+import logging
+import sqlite3
+import threading
+import time
 from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
 class ThreatLevel(Enum):
     """脅威レベル"""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -30,6 +32,7 @@ class ThreatLevel(Enum):
 
 class ThreatType(Enum):
     """脅威タイプ"""
+
     DDoS_ATTACK = "ddos_attack"
     SQL_INJECTION = "sql_injection"
     XSS_ATTACK = "xss_attack"
@@ -43,6 +46,7 @@ class ThreatType(Enum):
 
 class DetectionMethod(Enum):
     """検知手法"""
+
     RULE_BASED = "rule_based"
     MACHINE_LEARNING = "machine_learning"
     BEHAVIORAL_ANALYSIS = "behavioral_analysis"
@@ -53,6 +57,7 @@ class DetectionMethod(Enum):
 @dataclass
 class SecurityEvent:
     """セキュリティイベント情報"""
+
     event_id: str
     timestamp: float
     event_type: str
@@ -72,6 +77,7 @@ class SecurityEvent:
 @dataclass
 class ThreatIntelligence:
     """脅威インテリジェンス情報"""
+
     threat_id: str
     threat_type: ThreatType
     indicators: List[str]  # 攻撃指標（IP、ドメイン、ファイルハッシュなど）
@@ -85,6 +91,7 @@ class ThreatIntelligence:
 @dataclass
 class AutomatedResponse:
     """自動対応情報"""
+
     response_id: str
     threat_id: str
     response_type: str  # 'block_ip', 'isolate_user', 'alert_admin', 'shutdown_service'
@@ -103,7 +110,9 @@ class AIBasedThreatDetector:
         self.behavioral_baselines: Dict[str, Dict[str, float]] = defaultdict(dict)
         self.anomaly_detectors: Dict[str, Any] = {}
 
-    def train_threat_model(self, training_data: List[Dict[str, Any]], threat_type: ThreatType):
+    def train_threat_model(
+        self, training_data: List[Dict[str, Any]], threat_type: ThreatType
+    ):
         """
         脅威検知モデルを学習
         Args:
@@ -129,7 +138,7 @@ class AIBasedThreatDetector:
             "weights": np.random.randn(len(features[0])),
             "bias": 0.0,
             "training_samples": len(training_data),
-            "accuracy": 0.85  # 仮の精度
+            "accuracy": 0.85,  # 仮の精度
         }
 
     def _extract_features(self, data: Dict[str, Any]) -> List[float]:
@@ -151,7 +160,9 @@ class AIBasedThreatDetector:
 
         return features
 
-    def detect_threat(self, event_data: Dict[str, Any], threat_type: ThreatType) -> Tuple[bool, float]:
+    def detect_threat(
+        self, event_data: Dict[str, Any], threat_type: ThreatType
+    ) -> Tuple[bool, float]:
         """
         脅威を検知
         Args:
@@ -171,11 +182,15 @@ class AIBasedThreatDetector:
         # 簡易的な予測（実際の実装では学習済みモデルを使用）
         prediction_score = np.random.random()  # 仮の予測スコア
 
-        confidence = prediction_score if prediction_score > 0.5 else 1 - prediction_score
+        confidence = (
+            prediction_score if prediction_score > 0.5 else 1 - prediction_score
+        )
 
         return prediction_score > 0.7, confidence
 
-    def analyze_behavioral_anomaly(self, user_id: str, behavior_data: Dict[str, Any]) -> Tuple[bool, float]:
+    def analyze_behavioral_anomaly(
+        self, user_id: str, behavior_data: Dict[str, Any]
+    ) -> Tuple[bool, float]:
         """
         行動異常を分析
         Args:
@@ -271,21 +286,35 @@ class ThreatIntelligenceManager:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO threat_intelligence
                     (threat_id, threat_type, indicators, severity, description, mitre_technique, confidence, last_updated)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    intel.threat_id, intel.threat_type.value, json.dumps(intel.indicators),
-                    intel.severity, intel.description, intel.mitre_technique,
-                    intel.confidence, intel.last_updated
-                ))
+                """,
+                    (
+                        intel.threat_id,
+                        intel.threat_type.value,
+                        json.dumps(intel.indicators),
+                        intel.severity,
+                        intel.description,
+                        intel.mitre_technique,
+                        intel.confidence,
+                        intel.last_updated,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
             logger.error(f"脅威インテリジェンス追加エラー: {e}")
 
-    def add_to_blacklist(self, indicator_type: str, indicator_value: str, threat_type: str = None, source: str = "automated"):
+    def add_to_blacklist(
+        self,
+        indicator_type: str,
+        indicator_value: str,
+        threat_type: str = None,
+        source: str = "automated",
+    ):
         """
         ブラックリストに追加
         Args:
@@ -301,11 +330,14 @@ class ThreatIntelligenceManager:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO blacklists
                     (indicator_type, indicator_value, threat_type, added_at, source)
                     VALUES (?, ?, ?, ?, ?)
-                """, (indicator_type, indicator_value, threat_type, time.time(), source))
+                """,
+                    (indicator_type, indicator_value, threat_type, time.time(), source),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -326,15 +358,25 @@ class ThreatIntelligenceManager:
             return indicator_value in self.blacklisted_domains
         return False
 
-    def get_threat_intel_by_type(self, threat_type: ThreatType) -> List[ThreatIntelligence]:
+    def get_threat_intel_by_type(
+        self, threat_type: ThreatType
+    ) -> List[ThreatIntelligence]:
         """脅威タイプ別のインテリジェンスを取得"""
-        return [intel for intel in self.threat_intel.values() if intel.threat_type == threat_type]
+        return [
+            intel
+            for intel in self.threat_intel.values()
+            if intel.threat_type == threat_type
+        ]
 
 
 class AutomatedResponseEngine:
     """自動対応エンジン"""
 
-    def __init__(self, threat_detector: AIBasedThreatDetector, threat_intel: ThreatIntelligenceManager):
+    def __init__(
+        self,
+        threat_detector: AIBasedThreatDetector,
+        threat_intel: ThreatIntelligenceManager,
+    ):
         """
         初期化
         Args:
@@ -346,7 +388,9 @@ class AutomatedResponseEngine:
         self.response_rules: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.response_history: List[AutomatedResponse] = []
 
-    def add_response_rule(self, threat_type: ThreatType, response_config: Dict[str, Any]):
+    def add_response_rule(
+        self, threat_type: ThreatType, response_config: Dict[str, Any]
+    ):
         """
         対応ルールを追加
         Args:
@@ -355,7 +399,9 @@ class AutomatedResponseEngine:
         """
         self.response_rules[threat_type.value].append(response_config)
 
-    def execute_automated_response(self, threat_event: SecurityEvent) -> List[AutomatedResponse]:
+    def execute_automated_response(
+        self, threat_event: SecurityEvent
+    ) -> List[AutomatedResponse]:
         """
         自動対応を実行
         Args:
@@ -381,7 +427,12 @@ class AutomatedResponseEngine:
 
         return responses
 
-    def _execute_response(self, threat_event: SecurityEvent, response_type: str, parameters: Dict[str, Any]) -> AutomatedResponse:
+    def _execute_response(
+        self,
+        threat_event: SecurityEvent,
+        response_type: str,
+        parameters: Dict[str, Any],
+    ) -> AutomatedResponse:
         """対応を実行"""
         response_id = f"response_{int(time.time() * 1000000)}"
 
@@ -389,7 +440,7 @@ class AutomatedResponseEngine:
             response_id=response_id,
             threat_id=threat_event.event_id,
             response_type=response_type,
-            parameters=parameters
+            parameters=parameters,
         )
 
         try:
@@ -444,7 +495,9 @@ class AdvancedThreatDetectionManager:
         self._init_db()
         self.threat_detector = AIBasedThreatDetector()
         self.threat_intel = ThreatIntelligenceManager(db_path)
-        self.response_engine = AutomatedResponseEngine(self.threat_detector, self.threat_intel)
+        self.response_engine = AutomatedResponseEngine(
+            self.threat_detector, self.threat_intel
+        )
 
         self.detected_threats: List[SecurityEvent] = []
         self.is_detection_active = False
@@ -501,21 +554,29 @@ class AdvancedThreatDetectionManager:
             ThreatIntelligence(
                 threat_id="ddos_patterns",
                 threat_type=ThreatType.DDoS_ATTACK,
-                indicators=["high_request_rate", "multiple_source_ips", "unusual_traffic_pattern"],
+                indicators=[
+                    "high_request_rate",
+                    "multiple_source_ips",
+                    "unusual_traffic_pattern",
+                ],
                 severity="high",
                 description="DDoS攻撃パターン",
                 mitre_technique="T1498",
-                confidence=0.8
+                confidence=0.8,
             ),
             ThreatIntelligence(
                 threat_id="sql_injection_patterns",
                 threat_type=ThreatType.SQL_INJECTION,
-                indicators=["single_quote_usage", "union_select_pattern", "comment_syntax"],
+                indicators=[
+                    "single_quote_usage",
+                    "union_select_pattern",
+                    "comment_syntax",
+                ],
                 severity="critical",
                 description="SQLインジェクション攻撃パターン",
                 mitre_technique="T1190",
-                confidence=0.9
-            )
+                confidence=0.9,
+            ),
         ]
 
         for intel in default_intel:
@@ -524,22 +585,33 @@ class AdvancedThreatDetectionManager:
     def _setup_default_response_rules(self):
         """デフォルトの対応ルールを設定"""
         # DDoS攻撃対応ルール
-        self.response_engine.add_response_rule(ThreatType.DDoS_ATTACK, {
-            "response_type": "block_ip",
-            "parameters": {"ip_address": "source_ip", "duration": 3600}
-        })
+        self.response_engine.add_response_rule(
+            ThreatType.DDoS_ATTACK,
+            {
+                "response_type": "block_ip",
+                "parameters": {"ip_address": "source_ip", "duration": 3600},
+            },
+        )
 
         # SQLインジェクション対応ルール
-        self.response_engine.add_response_rule(ThreatType.SQL_INJECTION, {
-            "response_type": "alert_admin",
-            "parameters": {"priority": "high", "message": "SQLインジェクション検知"}
-        })
+        self.response_engine.add_response_rule(
+            ThreatType.SQL_INJECTION,
+            {
+                "response_type": "alert_admin",
+                "parameters": {
+                    "priority": "high",
+                    "message": "SQLインジェクション検知",
+                },
+            },
+        )
 
     def start_threat_detection(self):
         """脅威検知を開始"""
         if not self.is_detection_active:
             self.is_detection_active = True
-            self.detection_thread = threading.Thread(target=self._detection_loop, daemon=True)
+            self.detection_thread = threading.Thread(
+                target=self._detection_loop, daemon=True
+            )
             self.detection_thread.start()
 
     def stop_threat_detection(self):
@@ -548,7 +620,9 @@ class AdvancedThreatDetectionManager:
         if self.detection_thread:
             self.detection_thread.join()
 
-    def analyze_security_event(self, event_data: Dict[str, Any]) -> Optional[SecurityEvent]:
+    def analyze_security_event(
+        self, event_data: Dict[str, Any]
+    ) -> Optional[SecurityEvent]:
         """
         セキュリティイベントを分析
         Args:
@@ -570,7 +644,7 @@ class AdvancedThreatDetectionManager:
                     threat_type=ThreatType.UNAUTHORIZED_ACCESS,
                     detection_method=DetectionMethod.RULE_BASED,
                     description="ブラックリストIPからのアクセス",
-                    confidence=0.9
+                    confidence=0.9,
                 )
 
                 self.detected_threats.append(threat_event)
@@ -580,7 +654,9 @@ class AdvancedThreatDetectionManager:
 
             # AIベースの脅威検知を実行
             for threat_type in ThreatType:
-                is_threat, confidence = self.threat_detector.detect_threat(event_data, threat_type)
+                is_threat, confidence = self.threat_detector.detect_threat(
+                    event_data, threat_type
+                )
 
                 if is_threat:
                     threat_event = SecurityEvent(
@@ -593,14 +669,16 @@ class AdvancedThreatDetectionManager:
                         threat_type=threat_type,
                         detection_method=DetectionMethod.MACHINE_LEARNING,
                         description=f"AI検知: {threat_type.value}",
-                        confidence=confidence
+                        confidence=confidence,
                     )
 
                     self.detected_threats.append(threat_event)
                     self._save_security_event(threat_event)
 
                     # 自動対応を実行
-                    responses = self.response_engine.execute_automated_response(threat_event)
+                    responses = self.response_engine.execute_automated_response(
+                        threat_event
+                    )
                     for response in responses:
                         self._save_automated_response(response)
 
@@ -609,7 +687,9 @@ class AdvancedThreatDetectionManager:
             # 行動異常チェック
             if "user_id" in event_data:
                 user_id = event_data["user_id"]
-                is_anomaly, anomaly_score = self.threat_detector.analyze_behavioral_anomaly(user_id, event_data)
+                is_anomaly, anomaly_score = (
+                    self.threat_detector.analyze_behavioral_anomaly(user_id, event_data)
+                )
 
                 if is_anomaly:
                     threat_event = SecurityEvent(
@@ -623,7 +703,7 @@ class AdvancedThreatDetectionManager:
                         threat_type=ThreatType.INSIDER_THREAT,
                         detection_method=DetectionMethod.BEHAVIORAL_ANALYSIS,
                         description="行動異常検知",
-                        confidence=anomaly_score
+                        confidence=anomaly_score,
                     )
 
                     self.detected_threats.append(threat_event)
@@ -640,17 +720,30 @@ class AdvancedThreatDetectionManager:
         """セキュリティイベントを保存"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO security_events
                     (event_id, timestamp, event_type, source_ip, destination_ip, user_id, session_id,
                      threat_level, threat_type, detection_method, description, raw_data, confidence, false_positive_likelihood)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    event.event_id, event.timestamp, event.event_type, event.source_ip,
-                    event.destination_ip, event.user_id, event.session_id, event.threat_level.value,
-                    event.threat_type.value if event.threat_type else None, event.detection_method.value,
-                    event.description, json.dumps(event.raw_data), event.confidence, event.false_positive_likelihood
-                ))
+                """,
+                    (
+                        event.event_id,
+                        event.timestamp,
+                        event.event_type,
+                        event.source_ip,
+                        event.destination_ip,
+                        event.user_id,
+                        event.session_id,
+                        event.threat_level.value,
+                        event.threat_type.value if event.threat_type else None,
+                        event.detection_method.value,
+                        event.description,
+                        json.dumps(event.raw_data),
+                        event.confidence,
+                        event.false_positive_likelihood,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -660,15 +753,22 @@ class AdvancedThreatDetectionManager:
         """自動対応を保存"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO automated_responses
                     (response_id, threat_id, response_type, parameters, executed_at, success, error_message)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    response.response_id, response.threat_id, response.response_type,
-                    json.dumps(response.parameters), response.executed_at,
-                    1 if response.success else 0, response.error_message
-                ))
+                """,
+                    (
+                        response.response_id,
+                        response.threat_id,
+                        response.response_type,
+                        json.dumps(response.parameters),
+                        response.executed_at,
+                        1 if response.success else 0,
+                        response.error_message,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -684,7 +784,9 @@ class AdvancedThreatDetectionManager:
         """
         cutoff_time = time.time() - (hours * 3600)
 
-        relevant_threats = [threat for threat in self.detected_threats if threat.timestamp > cutoff_time]
+        relevant_threats = [
+            threat for threat in self.detected_threats if threat.timestamp > cutoff_time
+        ]
 
         # 脅威レベル別集計
         threat_levels = defaultdict(int)
@@ -703,7 +805,7 @@ class AdvancedThreatDetectionManager:
             "threat_type_breakdown": dict(threat_types),
             "automated_responses": len(self.response_engine.response_history),
             "blacklisted_ips": len(self.threat_intel.blacklisted_ips),
-            "period_hours": hours
+            "period_hours": hours,
         }
 
     def _detection_loop(self):
@@ -737,7 +839,7 @@ def example_usage():
     manager.threat_detector.behavioral_baselines["user_123"] = {
         "avg_login_hour": 9,
         "avg_requests_per_hour": 10,
-        "usual_location": "JP"
+        "usual_location": "JP",
     }
 
     # セキュリティイベント分析のシミュレーション
@@ -751,7 +853,7 @@ def example_usage():
             "error_rate": 0.05,
             "login_hour": 9,
             "requests_per_hour": 10,
-            "location": "JP"
+            "location": "JP",
         }
 
         threat_detected = manager.analyze_security_event(normal_event)
@@ -763,12 +865,14 @@ def example_usage():
                 "destination_ip": "10.0.0.1",
                 "request_count": 1000,  # 高負荷
                 "error_rate": 0.8,
-                "repeated_patterns": 50
+                "repeated_patterns": 50,
             }
 
             threat_detected = manager.analyze_security_event(threat_event)
             if threat_detected:
-                print(f"脅威検知: {threat_detected.threat_type.value} (レベル: {threat_detected.threat_level.value})")
+                print(
+                    f"脅威検知: {threat_detected.threat_type.value} (レベル: {threat_detected.threat_level.value})"
+                )
 
     # 脅威サマリー取得
     summary = manager.get_threat_summary(hours=1)

@@ -5,19 +5,20 @@
 
 import asyncio
 import json
+import logging
 import sqlite3
+import threading
 import time
-from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
-import threading
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class SyncStatus(Enum):
     """同期ステータス"""
+
     PENDING = "pending"
     SYNCING = "syncing"
     COMPLETED = "completed"
@@ -27,6 +28,7 @@ class SyncStatus(Enum):
 
 class NetworkStatus(Enum):
     """ネットワークステータス"""
+
     ONLINE = "online"
     OFFLINE = "offline"
     UNKNOWN = "unknown"
@@ -35,6 +37,7 @@ class NetworkStatus(Enum):
 @dataclass
 class OfflineData:
     """オフラインデータ情報"""
+
     data_id: str
     data_type: str
     data: Any
@@ -47,6 +50,7 @@ class OfflineData:
 @dataclass
 class SyncResult:
     """同期結果情報"""
+
     data_id: str
     status: SyncStatus
     timestamp: float = field(default_factory=time.time)
@@ -98,14 +102,22 @@ class OfflineStorage:
             data: オフラインデータ
         """
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO offline_data
                 (data_id, data_type, data, operation, timestamp, retry_count, max_retries)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                data.data_id, data.data_type, json.dumps(data.data),
-                data.operation, data.timestamp, data.retry_count, data.max_retries
-            ))
+            """,
+                (
+                    data.data_id,
+                    data.data_type,
+                    json.dumps(data.data),
+                    data.operation,
+                    data.timestamp,
+                    data.retry_count,
+                    data.max_retries,
+                ),
+            )
             conn.commit()
 
     def get_pending_data(self) -> List[OfflineData]:
@@ -128,7 +140,7 @@ class OfflineStorage:
                     operation=row[3],
                     timestamp=row[4],
                     retry_count=row[5],
-                    max_retries=row[6]
+                    max_retries=row[6],
                 )
                 for row in cursor.fetchall()
             ]
@@ -151,9 +163,12 @@ class OfflineStorage:
             retry_count: リトライ回数
         """
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE offline_data SET retry_count = ? WHERE data_id = ?
-            """, (retry_count, data_id))
+            """,
+                (retry_count, data_id),
+            )
             conn.commit()
 
     def save_sync_result(self, result: SyncResult):
@@ -163,14 +178,20 @@ class OfflineStorage:
             result: 同期結果
         """
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO sync_results
                 (data_id, status, timestamp, error_message, server_data)
                 VALUES (?, ?, ?, ?, ?)
-            """, (
-                result.data_id, result.status.value, result.timestamp,
-                result.error_message, json.dumps(result.server_data) if result.server_data else None
-            ))
+            """,
+                (
+                    result.data_id,
+                    result.status.value,
+                    result.timestamp,
+                    result.error_message,
+                    json.dumps(result.server_data) if result.server_data else None,
+                ),
+            )
             conn.commit()
 
     def get_sync_history(self, data_id: str) -> List[SyncResult]:
@@ -182,17 +203,20 @@ class OfflineStorage:
             同期結果リスト
         """
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT data_id, status, timestamp, error_message, server_data
                 FROM sync_results WHERE data_id = ? ORDER BY timestamp DESC
-            """, (data_id,))
+            """,
+                (data_id,),
+            )
             return [
                 SyncResult(
                     data_id=row[0],
                     status=SyncStatus(row[1]),
                     timestamp=row[2],
                     error_message=row[3],
-                    server_data=json.loads(row[4]) if row[4] else None
+                    server_data=json.loads(row[4]) if row[4] else None,
                 )
                 for row in cursor.fetchall()
             ]
@@ -217,7 +241,9 @@ class NetworkMonitor:
         """ネットワーク監視を開始"""
         if not self.is_monitoring:
             self.is_monitoring = True
-            self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+            self.monitor_thread = threading.Thread(
+                target=self._monitor_loop, daemon=True
+            )
             self.monitor_thread.start()
 
     def stop_monitoring(self):
@@ -245,7 +271,9 @@ class NetworkMonitor:
                         try:
                             callback(new_status)
                         except Exception as e:
-                            logger.error(f"ネットワークステータスコールバックエラー: {e}")
+                            logger.error(
+                                f"ネットワークステータスコールバックエラー: {e}"
+                            )
                 time.sleep(self.check_interval)
             except Exception as e:
                 logger.error(f"ネットワーク監視エラー: {e}")
@@ -259,6 +287,7 @@ class NetworkMonitor:
         try:
             # 実際の実装では適切なネットワークチェックを行う
             import socket
+
             socket.create_connection(("8.8.8.8", 53), timeout=3)
             return NetworkStatus.ONLINE
         except OSError:
@@ -336,7 +365,7 @@ class DataSynchronizer:
                     result = SyncResult(
                         data_id=offline_data.data_id,
                         status=SyncStatus.FAILED,
-                        error_message=str(e)
+                        error_message=str(e),
                     )
                     self.storage.save_sync_result(result)
                     self.storage.remove_offline_data(offline_data.data_id)
@@ -352,10 +381,7 @@ class DataSynchronizer:
         # 実際の実装ではサーバーとの通信を行う
         await asyncio.sleep(0.5)  # シミュレーション
 
-        return SyncResult(
-            data_id=offline_data.data_id,
-            status=SyncStatus.COMPLETED
-        )
+        return SyncResult(data_id=offline_data.data_id, status=SyncStatus.COMPLETED)
 
 
 class OfflineModeManager:
@@ -394,10 +420,7 @@ class OfflineModeManager:
         """
         data_id = f"{data_type}_{int(time.time() * 1000000)}"
         offline_data = OfflineData(
-            data_id=data_id,
-            data_type=data_type,
-            data=data,
-            operation=operation
+            data_id=data_id, data_type=data_type, data=data, operation=operation
         )
         self.storage.save_offline_data(offline_data)
 

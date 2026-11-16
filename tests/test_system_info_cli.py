@@ -9,7 +9,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "blncs" / "utils" / "system_info.py"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="CLI test relies on POSIX-style invocations under WSL")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="CLI test relies on POSIX-style invocations under WSL",
+)
 def test_system_info_json_output():
     result = subprocess.run(
         [sys.executable, str(MODULE_PATH), "--json"],

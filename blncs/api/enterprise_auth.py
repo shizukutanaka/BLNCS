@@ -5,19 +5,21 @@
 政府機関レベルの多要素認証とセキュリティ機能
 """
 
-import os
-import jwt
-import hmac
 import hashlib
-import secrets
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Tuple
-from functools import wraps
-from werkzeug.security import check_password_hash, generate_password_hash
+import hmac
 import ipaddress
+import logging
+import os
+import secrets
+from datetime import datetime, timedelta
+from functools import wraps
+from typing import Dict, List, Optional, Tuple
+
+import jwt
+from werkzeug.security import check_password_hash, generate_password_hash
 
 logger = logging.getLogger(__name__)
+
 
 class EnterpriseAuthManager:
     """エンタープライズ認証管理システム"""
@@ -32,7 +34,7 @@ class EnterpriseAuthManager:
 
     def _get_jwt_secret(self) -> str:
         """JWT秘密鍵の安全な取得"""
-        jwt_secret = os.getenv('BLNCS_JWT_SECRET')
+        jwt_secret = os.getenv("BLNCS_JWT_SECRET")
         if not jwt_secret:
             raise ValueError("BLNCS_JWT_SECRET 環境変数が設定されていません")
 
@@ -50,38 +52,53 @@ class EnterpriseAuthManager:
     def _initialize_security_policies(self):
         """セキュリティポリシーの初期化"""
         # ログイン試行制限
-        self.max_failed_attempts = int(os.getenv('BLNCS_MAX_FAILED_ATTEMPTS', '5'))
-        self.lockout_duration = int(os.getenv('BLNCS_LOCKOUT_DURATION', '900'))  # 15分
+        self.max_failed_attempts = int(os.getenv("BLNCS_MAX_FAILED_ATTEMPTS", "5"))
+        self.lockout_duration = int(os.getenv("BLNCS_LOCKOUT_DURATION", "900"))  # 15分
 
         # セッション設定
-        self.session_timeout = int(os.getenv('BLNCS_SESSION_TIMEOUT', '1800'))  # 30分
-        self.require_mfa = os.getenv('BLNCS_REQUIRE_MFA', 'true').lower() == 'true'
+        self.session_timeout = int(os.getenv("BLNCS_SESSION_TIMEOUT", "1800"))  # 30分
+        self.require_mfa = os.getenv("BLNCS_REQUIRE_MFA", "true").lower() == "true"
 
         # IP制限設定
-        whitelist_env = os.getenv('BLNCS_IP_WHITELIST', '')
+        whitelist_env = os.getenv("BLNCS_IP_WHITELIST", "")
         if whitelist_env:
-            for ip_range in whitelist_env.split(','):
+            for ip_range in whitelist_env.split(","):
                 try:
-                    self.ip_whitelist.add(ipaddress.ip_network(ip_range.strip(), strict=False))
+                    self.ip_whitelist.add(
+                        ipaddress.ip_network(ip_range.strip(), strict=False)
+                    )
                 except Exception as e:
                     logger.error(f"❌ 無効なIP範囲: {ip_range} - {e}")
 
         logger.info(f"🔒 セキュリティポリシー初期化完了 - MFA: {self.require_mfa}")
 
-    def authenticate_user(self, username: str, password: str, client_ip: str,
-                         mfa_token: Optional[str] = None,
-                         client_cert: Optional[str] = None) -> Dict[str, any]:
+    def authenticate_user(
+        self,
+        username: str,
+        password: str,
+        client_ip: str,
+        mfa_token: Optional[str] = None,
+        client_cert: Optional[str] = None,
+    ) -> Dict[str, any]:
         """多段階ユーザー認証"""
 
         # 1. IP制限チェック
         if not self._check_ip_allowed(client_ip):
             logger.warning(f"🚫 IP制限によりアクセス拒否: {client_ip}")
-            return {"success": False, "error": "IP_NOT_ALLOWED", "requires_whitelist": True}
+            return {
+                "success": False,
+                "error": "IP_NOT_ALLOWED",
+                "requires_whitelist": True,
+            }
 
         # 2. レート制限チェック
         if self._is_rate_limited(username, client_ip):
             logger.warning(f"🚫 レート制限によりアクセス拒否: {username}@{client_ip}")
-            return {"success": False, "error": "RATE_LIMITED", "retry_after": self.lockout_duration}
+            return {
+                "success": False,
+                "error": "RATE_LIMITED",
+                "retry_after": self.lockout_duration,
+            }
 
         # 3. ユーザー認証
         user_info = self._verify_credentials(username, password)
@@ -92,7 +109,11 @@ class EnterpriseAuthManager:
         # 4. 多要素認証（MFA）
         if self.require_mfa:
             if not mfa_token:
-                return {"success": False, "error": "MFA_REQUIRED", "mfa_challenge": self._generate_mfa_challenge(username)}
+                return {
+                    "success": False,
+                    "error": "MFA_REQUIRED",
+                    "mfa_challenge": self._generate_mfa_challenge(username),
+                }
 
             if not self._verify_mfa_token(username, mfa_token):
                 self._record_failed_attempt(username, client_ip)
@@ -116,8 +137,10 @@ class EnterpriseAuthManager:
             "success": True,
             "token": session_token,
             "user": user_info,
-            "expires_at": (datetime.now() + timedelta(seconds=self.session_timeout)).isoformat(),
-            "security_level": self._calculate_security_level(client_cert, mfa_token)
+            "expires_at": (
+                datetime.now() + timedelta(seconds=self.session_timeout)
+            ).isoformat(),
+            "security_level": self._calculate_security_level(client_cert, mfa_token),
         }
 
     def _check_ip_allowed(self, client_ip: str) -> bool:
@@ -166,8 +189,12 @@ class EnterpriseAuthManager:
 
         # ロック判定
         if self.failed_attempts[key]["count"] >= self.max_failed_attempts:
-            self.failed_attempts[key]["locked_until"] = current_time + timedelta(seconds=self.lockout_duration)
-            logger.warning(f"🔒 アカウントロック: {username}@{client_ip} - {self.lockout_duration}秒間")
+            self.failed_attempts[key]["locked_until"] = current_time + timedelta(
+                seconds=self.lockout_duration
+            )
+            logger.warning(
+                f"🔒 アカウントロック: {username}@{client_ip} - {self.lockout_duration}秒間"
+            )
 
     def _clear_failed_attempts(self, username: str, client_ip: str):
         """失敗試行のクリア"""
@@ -184,14 +211,14 @@ class EnterpriseAuthManager:
                 "password_hash": generate_password_hash("SecurePassword123!"),
                 "role": "administrator",
                 "permissions": ["all"],
-                "mfa_enabled": True
+                "mfa_enabled": True,
             },
             "operator": {
                 "password_hash": generate_password_hash("OperatorPass456!"),
                 "role": "operator",
                 "permissions": ["read", "lightning_operations"],
-                "mfa_enabled": True
-            }
+                "mfa_enabled": True,
+            },
         }
 
         if username in demo_users:
@@ -201,7 +228,7 @@ class EnterpriseAuthManager:
                     "username": username,
                     "role": user["role"],
                     "permissions": user["permissions"],
-                    "mfa_enabled": user["mfa_enabled"]
+                    "mfa_enabled": user["mfa_enabled"],
                 }
 
         return None
@@ -212,12 +239,14 @@ class EnterpriseAuthManager:
         challenge = {
             "type": "totp",
             "message": "Google Authenticator等のTOTPアプリでコードを入力してください",
-            "backup_methods": ["sms", "email"]
+            "backup_methods": ["sms", "email"],
         }
 
         # 実装時はWebAuthnも対応
-        if os.getenv('BLNCS_WEBAUTHN_ENABLED', 'false').lower() == 'true':
-            challenge["webauthn_challenge"] = self._generate_webauthn_challenge(username)
+        if os.getenv("BLNCS_WEBAUTHN_ENABLED", "false").lower() == "true":
+            challenge["webauthn_challenge"] = self._generate_webauthn_challenge(
+                username
+            )
 
         return challenge
 
@@ -228,7 +257,9 @@ class EnterpriseAuthManager:
         if len(token) == 6 and token.isdigit():
             # 簡易TOTP風検証（実際はpyotp等を使用）
             current_minute = datetime.now().minute
-            expected_token = f"{current_minute:02d}{(current_minute + 1) % 60:02d}XX"[:6]
+            expected_token = f"{current_minute:02d}{(current_minute + 1) % 60:02d}XX"[
+                :6
+            ]
             return token == expected_token or token == "123456"  # デモ用固定トークン
 
         return False
@@ -244,7 +275,10 @@ class EnterpriseAuthManager:
 
             # 証明書の有効性チェック
             current_time = datetime.now()
-            if current_time < cert.not_valid_before or current_time > cert.not_valid_after:
+            if (
+                current_time < cert.not_valid_before
+                or current_time > cert.not_valid_after
+            ):
                 logger.warning("🚫 証明書の有効期限切れ")
                 return False
 
@@ -257,7 +291,9 @@ class EnterpriseAuthManager:
                     break
 
             if cert_username != username:
-                logger.warning(f"🚫 証明書のユーザー名不一致: {cert_username} != {username}")
+                logger.warning(
+                    f"🚫 証明書のユーザー名不一致: {cert_username} != {username}"
+                )
                 return False
 
             # 証明書チェーンの検証（実装時はCA証明書と照合）
@@ -283,7 +319,7 @@ class EnterpriseAuthManager:
             "client_ip": client_ip,
             "iat": current_time.timestamp(),
             "exp": expires_at.timestamp(),
-            "jti": session_id  # JWT ID
+            "jti": session_id,  # JWT ID
         }
 
         # JWTトークン生成
@@ -295,13 +331,15 @@ class EnterpriseAuthManager:
             "client_ip": client_ip,
             "created_at": current_time,
             "expires_at": expires_at,
-            "last_access": current_time
+            "last_access": current_time,
         }
 
         logger.info(f"🎫 セッション作成: {user_info['username']} - {session_id[:8]}...")
         return token
 
-    def _calculate_security_level(self, client_cert: Optional[str], mfa_token: Optional[str]) -> str:
+    def _calculate_security_level(
+        self, client_cert: Optional[str], mfa_token: Optional[str]
+    ) -> str:
         """セキュリティレベルの計算"""
         level = "basic"
 
@@ -328,7 +366,9 @@ class EnterpriseAuthManager:
 
             # IP制限チェック
             if session["client_ip"] != client_ip:
-                logger.warning(f"🚫 IP不一致: 期待={session['client_ip']}, 実際={client_ip}")
+                logger.warning(
+                    f"🚫 IP不一致: 期待={session['client_ip']}, 実際={client_ip}"
+                )
                 return None
 
             # セッション有効期限チェック
@@ -344,7 +384,9 @@ class EnterpriseAuthManager:
                 "valid": True,
                 "user": session["user_info"],
                 "session_id": session_id,
-                "security_level": self._calculate_security_level(None, None)  # TODO: 実際の値を設定
+                "security_level": self._calculate_security_level(
+                    None, None
+                ),  # TODO: 実際の値を設定
             }
 
         except jwt.ExpiredSignatureError:
@@ -380,13 +422,17 @@ class EnterpriseAuthManager:
         current_time = datetime.now()
 
         # アクティブセッション数
-        active_sessions = sum(1 for s in self.session_store.values()
-                            if s["expires_at"] > current_time)
+        active_sessions = sum(
+            1 for s in self.session_store.values() if s["expires_at"] > current_time
+        )
 
         # 失敗試行統計
         failed_attempts_count = len(self.failed_attempts)
-        locked_accounts = sum(1 for attempts in self.failed_attempts.values()
-                            if attempts.get("locked_until", current_time) > current_time)
+        locked_accounts = sum(
+            1
+            for attempts in self.failed_attempts.values()
+            if attempts.get("locked_until", current_time) > current_time
+        )
 
         return {
             "timestamp": current_time.isoformat(),
@@ -396,7 +442,7 @@ class EnterpriseAuthManager:
             "locked_accounts": locked_accounts,
             "ip_whitelist_enabled": len(self.ip_whitelist) > 0,
             "mfa_required": self.require_mfa,
-            "security_recommendations": self._generate_security_recommendations()
+            "security_recommendations": self._generate_security_recommendations(),
         }
 
     def _generate_security_recommendations(self) -> List[str]:
@@ -410,30 +456,41 @@ class EnterpriseAuthManager:
             recommendations.append("IP許可リストの設定を検討してください")
 
         if self.session_timeout > 3600:
-            recommendations.append("セッションタイムアウトを1時間以下に設定することを推奨します")
+            recommendations.append(
+                "セッションタイムアウトを1時間以下に設定することを推奨します"
+            )
 
         # 古いセッションのクリーンアップ警告
-        old_sessions = sum(1 for s in self.session_store.values()
-                         if (datetime.now() - s["last_access"]).total_seconds() > 86400)
+        old_sessions = sum(
+            1
+            for s in self.session_store.values()
+            if (datetime.now() - s["last_access"]).total_seconds() > 86400
+        )
         if old_sessions > 10:
-            recommendations.append(f"{old_sessions}個の古いセッションが残っています。クリーンアップを検討してください")
+            recommendations.append(
+                f"{old_sessions}個の古いセッションが残っています。クリーンアップを検討してください"
+            )
 
         return recommendations
 
+
 # デコレータ：認証が必要なエンドポイント用
-def require_auth(auth_manager: EnterpriseAuthManager, required_permissions: List[str] = None):
+def require_auth(
+    auth_manager: EnterpriseAuthManager, required_permissions: List[str] = None
+):
     """認証デコレータ"""
+
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            from flask import request, jsonify
+            from flask import jsonify, request
 
             # Authorizationヘッダーの取得
-            auth_header = request.headers.get('Authorization')
-            if not auth_header or not auth_header.startswith('Bearer '):
+            auth_header = request.headers.get("Authorization")
+            if not auth_header or not auth_header.startswith("Bearer "):
                 return jsonify({"error": "認証が必要です"}), 401
 
-            token = auth_header.split(' ')[1]
+            token = auth_header.split(" ")[1]
             client_ip = request.remote_addr
 
             # トークン検証
@@ -444,7 +501,10 @@ def require_auth(auth_manager: EnterpriseAuthManager, required_permissions: List
             # 権限チェック
             if required_permissions:
                 user_permissions = auth_result["user"]["permissions"]
-                if not any(perm in user_permissions for perm in required_permissions) and "all" not in user_permissions:
+                if (
+                    not any(perm in user_permissions for perm in required_permissions)
+                    and "all" not in user_permissions
+                ):
                     return jsonify({"error": "権限が不足しています"}), 403
 
             # ユーザー情報をリクエストコンテキストに追加
@@ -452,15 +512,18 @@ def require_auth(auth_manager: EnterpriseAuthManager, required_permissions: List
             request.session_id = auth_result["session_id"]
 
             return f(*args, **kwargs)
+
         return decorated_function
+
     return decorator
+
 
 # 使用例
 def main():
     """認証システムのテスト"""
     try:
         # 環境変数設定（テスト用）
-        os.environ['BLNCS_JWT_SECRET'] = secrets.token_urlsafe(32)
+        os.environ["BLNCS_JWT_SECRET"] = secrets.token_urlsafe(32)
 
         # 認証管理の初期化
         auth_manager = EnterpriseAuthManager()
@@ -470,7 +533,7 @@ def main():
             username="admin",
             password="SecurePassword123!",
             client_ip="127.0.0.1",
-            mfa_token="123456"  # デモ用固定
+            mfa_token="123456",  # デモ用固定
         )
 
         if auth_result["success"]:
@@ -501,6 +564,7 @@ def main():
         return False
 
     return True
+
 
 if __name__ == "__main__":
     main()

@@ -3,19 +3,20 @@ BLNCS HTLC Manager
 Hash Time Locked Contract management for Lightning Network
 """
 
-import time
+import hashlib
 import json
 import logging
-import hashlib
 import secrets
-from typing import Dict, List, Any, Optional, Tuple
-from dataclasses import dataclass, asdict
-from pathlib import Path
+import time
+from dataclasses import asdict, dataclass
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class HTLCState(Enum):
     """HTLC states"""
+
     PENDING = "pending"
     OFFERED = "offered"
     RECEIVED = "received"
@@ -27,6 +28,7 @@ class HTLCState(Enum):
 @dataclass
 class HTLC:
     """Hash Time Locked Contract"""
+
     htlc_id: str
     payment_hash: str
     amount_sats: int
@@ -50,7 +52,7 @@ class HTLC:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         data = asdict(self)
-        data['state'] = self.state.value
+        data["state"] = self.state.value
         return data
 
 
@@ -78,10 +80,10 @@ class HTLCManager:
         """Load HTLCs from storage"""
         if self.htlc_file.exists():
             try:
-                with open(self.htlc_file, 'r') as f:
+                with open(self.htlc_file, "r") as f:
                     data = json.load(f)
                     for htlc_id, htlc_data in data.items():
-                        htlc_data['state'] = HTLCState(htlc_data['state'])
+                        htlc_data["state"] = HTLCState(htlc_data["state"])
                         htlc = HTLC(**htlc_data)
                         self.htlcs[htlc_id] = htlc
                         self.payment_hash_map[htlc.payment_hash] = htlc_id
@@ -94,14 +96,19 @@ class HTLCManager:
         """Save HTLCs to storage"""
         try:
             data = {htlc_id: htlc.to_dict() for htlc_id, htlc in self.htlcs.items()}
-            with open(self.htlc_file, 'w') as f:
+            with open(self.htlc_file, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             self.logger.error(f"Failed to save HTLCs: {e}")
 
-    def create_htlc(self, payment_hash: str, amount_sats: int,
-                   channel_id: str, direction: str,
-                   cltv_expiry: Optional[int] = None) -> Optional[HTLC]:
+    def create_htlc(
+        self,
+        payment_hash: str,
+        amount_sats: int,
+        channel_id: str,
+        direction: str,
+        cltv_expiry: Optional[int] = None,
+    ) -> Optional[HTLC]:
         """Create a new HTLC"""
         # Validate inputs
         if amount_sats < self.min_htlc_value or amount_sats > self.max_htlc_value:
@@ -112,7 +119,7 @@ class HTLCManager:
             self.logger.error(f"Invalid payment hash length: {len(payment_hash)}")
             return None
 
-        if direction not in ['outgoing', 'incoming']:
+        if direction not in ["outgoing", "incoming"]:
             self.logger.error(f"Invalid direction: {direction}")
             return None
 
@@ -129,8 +136,14 @@ class HTLCManager:
         if payment_hash in self.payment_hash_map:
             existing_htlc_id = self.payment_hash_map[payment_hash]
             existing_htlc = self.htlcs[existing_htlc_id]
-            if existing_htlc.state not in [HTLCState.FULFILLED, HTLCState.FAILED, HTLCState.EXPIRED]:
-                self.logger.warning(f"HTLC already exists for payment hash: {payment_hash[:16]}...")
+            if existing_htlc.state not in [
+                HTLCState.FULFILLED,
+                HTLCState.FAILED,
+                HTLCState.EXPIRED,
+            ]:
+                self.logger.warning(
+                    f"HTLC already exists for payment hash: {payment_hash[:16]}..."
+                )
                 return existing_htlc
 
         # Create HTLC
@@ -142,7 +155,7 @@ class HTLCManager:
             state=HTLCState.PENDING,
             channel_id=channel_id,
             direction=direction,
-            created_at=time.time()
+            created_at=time.time(),
         )
 
         self.htlcs[htlc_id] = htlc
@@ -212,7 +225,11 @@ class HTLCManager:
     def expire_htlc(self, htlc_id: str) -> bool:
         """Mark HTLC as expired"""
         htlc = self.htlcs.get(htlc_id)
-        if not htlc or htlc.state in [HTLCState.FULFILLED, HTLCState.FAILED, HTLCState.EXPIRED]:
+        if not htlc or htlc.state in [
+            HTLCState.FULFILLED,
+            HTLCState.FAILED,
+            HTLCState.EXPIRED,
+        ]:
             return False
 
         htlc.state = HTLCState.EXPIRED
@@ -242,8 +259,9 @@ class HTLCManager:
             return self.htlcs.get(htlc_id)
         return None
 
-    def list_htlcs(self, channel_id: str = None, state: HTLCState = None,
-                  direction: str = None) -> List[HTLC]:
+    def list_htlcs(
+        self, channel_id: str = None, state: HTLCState = None, direction: str = None
+    ) -> List[HTLC]:
         """List HTLCs with optional filters"""
         htlcs = list(self.htlcs.values())
 
@@ -261,8 +279,9 @@ class HTLCManager:
 
         return htlcs
 
-    def check_expiring_htlcs(self, current_block_height: int,
-                           blocks_ahead: int = 10) -> List[HTLC]:
+    def check_expiring_htlcs(
+        self, current_block_height: int, blocks_ahead: int = 10
+    ) -> List[HTLC]:
         """Find HTLCs expiring soon"""
         expiring_htlcs = []
 
@@ -301,13 +320,16 @@ class HTLCManager:
         # Count by direction
         direction_counts = {
             "outgoing": sum(1 for h in htlcs if h.direction == "outgoing"),
-            "incoming": sum(1 for h in htlcs if h.direction == "incoming")
+            "incoming": sum(1 for h in htlcs if h.direction == "incoming"),
         }
 
         # Value statistics
         total_value = sum(h.amount_sats for h in htlcs)
-        pending_value = sum(h.amount_sats for h in htlcs
-                           if h.state in [HTLCState.PENDING, HTLCState.OFFERED, HTLCState.RECEIVED])
+        pending_value = sum(
+            h.amount_sats
+            for h in htlcs
+            if h.state in [HTLCState.PENDING, HTLCState.OFFERED, HTLCState.RECEIVED]
+        )
 
         fulfilled_htlcs = [h for h in htlcs if h.state == HTLCState.FULFILLED]
         success_rate = (len(fulfilled_htlcs) / len(htlcs)) * 100 if htlcs else 0
@@ -319,7 +341,7 @@ class HTLCManager:
             "total_value_sats": total_value,
             "pending_value_sats": pending_value,
             "success_rate": success_rate,
-            "avg_amount_sats": total_value / len(htlcs) if htlcs else 0
+            "avg_amount_sats": total_value / len(htlcs) if htlcs else 0,
         }
 
     def cleanup_old_htlcs(self, older_than_days: int = 30) -> int:
@@ -328,8 +350,11 @@ class HTLCManager:
         old_htlcs = []
 
         for htlc_id, htlc in self.htlcs.items():
-            if (htlc.state in [HTLCState.FULFILLED, HTLCState.FAILED, HTLCState.EXPIRED] and
-                htlc.settled_at and htlc.settled_at < cutoff_time):
+            if (
+                htlc.state in [HTLCState.FULFILLED, HTLCState.FAILED, HTLCState.EXPIRED]
+                and htlc.settled_at
+                and htlc.settled_at < cutoff_time
+            ):
                 old_htlcs.append(htlc_id)
 
         for htlc_id in old_htlcs:
@@ -371,7 +396,7 @@ if __name__ == "__main__":
         amount_sats=100000,  # 100k sats
         channel_id="test_channel_123",
         direction="outgoing",
-        cltv_expiry=750144  # ~24 hours from now
+        cltv_expiry=750144,  # ~24 hours from now
     )
 
     print(f"🔗 HTLC created: {htlc.htlc_id if htlc else 'Failed'}")
@@ -386,7 +411,9 @@ if __name__ == "__main__":
 
         # Create another HTLC and fail it
         payment_hash2, _ = generate_payment_hash_and_preimage()
-        htlc2 = manager.create_htlc(payment_hash2, 50000, "test_channel_123", "incoming")
+        htlc2 = manager.create_htlc(
+            payment_hash2, 50000, "test_channel_123", "incoming"
+        )
 
         if htlc2:
             manager.offer_htlc(htlc2.htlc_id)
@@ -404,6 +431,7 @@ if __name__ == "__main__":
 
     # Cleanup
     import shutil
+
     shutil.rmtree("test_data", ignore_errors=True)
 
     print("✅ HTLC manager test completed!")

@@ -3,19 +3,20 @@ BLNCS Practical Lightning Monitor
 Real-world monitoring for Lightning Network operations
 """
 
-import time
 import json
 import logging
 import threading
-from typing import Dict, List, Any, Optional, Callable
-from dataclasses import dataclass, asdict
-from pathlib import Path
-from collections import deque, defaultdict
+import time
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass
 from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 
 class AlertLevel(Enum):
     """Alert severity levels"""
+
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
@@ -25,6 +26,7 @@ class AlertLevel(Enum):
 @dataclass
 class LightningMetric:
     """Lightning-specific metric data point"""
+
     name: str
     value: float
     unit: str
@@ -37,6 +39,7 @@ class LightningMetric:
 @dataclass
 class Alert:
     """System alert"""
+
     alert_id: str
     level: AlertLevel
     title: str
@@ -55,9 +58,15 @@ class MetricCollector:
         self.lock = threading.RLock()
         self.logger = logging.getLogger("BLNCS_MetricCollector")
 
-    def record_metric(self, name: str, value: float, unit: str = "",
-                     node_id: str = None, channel_id: str = None,
-                     metadata: Dict[str, Any] = None):
+    def record_metric(
+        self,
+        name: str,
+        value: float,
+        unit: str = "",
+        node_id: str = None,
+        channel_id: str = None,
+        metadata: Dict[str, Any] = None,
+    ):
         """Record a metric data point"""
         metric = LightningMetric(
             name=name,
@@ -66,7 +75,7 @@ class MetricCollector:
             timestamp=time.time(),
             node_id=node_id,
             channel_id=channel_id,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
 
         with self.lock:
@@ -78,7 +87,8 @@ class MetricCollector:
 
         with self.lock:
             return [
-                metric for metric in self.metrics[name]
+                metric
+                for metric in self.metrics[name]
                 if metric.timestamp >= cutoff_time
             ]
 
@@ -97,7 +107,7 @@ class MetricCollector:
             "max": max(values),
             "avg": sum(values) / len(values),
             "latest": values[-1] if values else 0,
-            "unit": recent_metrics[0].unit if recent_metrics else ""
+            "unit": recent_metrics[0].unit if recent_metrics else "",
         }
 
 
@@ -115,8 +125,9 @@ class AlertManager:
         """Add alert notification handler"""
         self.alert_handlers.append(handler)
 
-    def create_alert(self, level: AlertLevel, title: str, description: str,
-                    source: str = "system") -> Alert:
+    def create_alert(
+        self, level: AlertLevel, title: str, description: str, source: str = "system"
+    ) -> Alert:
         """Create and process a new alert"""
         alert_id = f"alert_{int(time.time() * 1000)}"
 
@@ -126,7 +137,7 @@ class AlertManager:
             title=title,
             description=description,
             timestamp=time.time(),
-            source=source
+            source=source,
         )
 
         with self.lock:
@@ -138,7 +149,7 @@ class AlertManager:
             AlertLevel.INFO: self.logger.info,
             AlertLevel.WARNING: self.logger.warning,
             AlertLevel.CRITICAL: self.logger.critical,
-            AlertLevel.EMERGENCY: self.logger.critical
+            AlertLevel.EMERGENCY: self.logger.critical,
         }.get(level, self.logger.info)
 
         log_method(f"ALERT [{level.value.upper()}]: {title} - {description}")
@@ -188,8 +199,9 @@ class HealthChecker:
         self.check_thread: Optional[threading.Thread] = None
         self.logger = logging.getLogger("BLNCS_HealthChecker")
 
-    def register_check(self, name: str, check_func: Callable[[], bool],
-                      interval_seconds: float = 60):
+    def register_check(
+        self, name: str, check_func: Callable[[], bool], interval_seconds: float = 60
+    ):
         """Register a health check function"""
         self.health_checks[name] = check_func
         self.check_intervals[name] = interval_seconds
@@ -231,7 +243,7 @@ class HealthChecker:
                                 AlertLevel.WARNING,
                                 f"Health check failed: {check_name}",
                                 f"System health check '{check_name}' reported unhealthy status",
-                                "health_checker"
+                                "health_checker",
                             )
 
                     except Exception as e:
@@ -240,7 +252,7 @@ class HealthChecker:
                             AlertLevel.CRITICAL,
                             f"Health check error: {check_name}",
                             f"Health check '{check_name}' raised exception: {str(e)}",
-                            "health_checker"
+                            "health_checker",
                         )
 
             time.sleep(1)  # Check every second for due health checks
@@ -265,10 +277,13 @@ class PracticalMonitor:
 
     def _register_default_checks(self):
         """Register default health checks"""
+
         # Channel connectivity check
         def check_channel_connectivity():
             # Simplified check - in real implementation would check actual channels
-            channel_metrics = self.metric_collector.get_recent_metrics("active_channels", 5)
+            channel_metrics = self.metric_collector.get_recent_metrics(
+                "active_channels", 5
+            )
             return len(channel_metrics) > 0 or True  # Default to healthy for demo
 
         # Payment success rate check
@@ -294,26 +309,34 @@ class PracticalMonitor:
             latest_sync = sync_metrics[-1]
             return time.time() - latest_sync.timestamp < 300  # 5 minute threshold
 
-        self.health_checker.register_check("channel_connectivity", check_channel_connectivity, 60)
-        self.health_checker.register_check("payment_success_rate", check_payment_success_rate, 300)
+        self.health_checker.register_check(
+            "channel_connectivity", check_channel_connectivity, 60
+        )
+        self.health_checker.register_check(
+            "payment_success_rate", check_payment_success_rate, 300
+        )
         self.health_checker.register_check("node_sync", check_node_sync, 120)
 
     def _setup_default_alerts(self):
         """Setup default alert handlers"""
+
         def console_alert_handler(alert: Alert):
             severity_icons = {
                 AlertLevel.INFO: "ℹ️",
                 AlertLevel.WARNING: "⚠️",
                 AlertLevel.CRITICAL: "🚨",
-                AlertLevel.EMERGENCY: "🔥"
+                AlertLevel.EMERGENCY: "🔥",
             }
             icon = severity_icons.get(alert.level, "📢")
-            print(f"{icon} [{alert.level.value.upper()}] {alert.title}: {alert.description}")
+            print(
+                f"{icon} [{alert.level.value.upper()}] {alert.title}: {alert.description}"
+            )
 
         self.alert_manager.add_alert_handler(console_alert_handler)
 
-    def record_payment_attempt(self, amount_sats: int, success: bool,
-                              fee_sats: int = 0, duration_ms: int = 0):
+    def record_payment_attempt(
+        self, amount_sats: int, success: bool, fee_sats: int = 0, duration_ms: int = 0
+    ):
         """Record payment attempt metrics"""
         timestamp = time.time()
 
@@ -326,45 +349,49 @@ class PracticalMonitor:
         else:
             self.metric_collector.record_metric("payment_failure", 1, "count")
 
-    def record_channel_event(self, channel_id: str, event_type: str,
-                            balance_local: int = 0, balance_remote: int = 0):
+    def record_channel_event(
+        self,
+        channel_id: str,
+        event_type: str,
+        balance_local: int = 0,
+        balance_remote: int = 0,
+    ):
         """Record channel-related events"""
         self.metric_collector.record_metric(
-            f"channel_{event_type}", 1, "count",
-            channel_id=channel_id
+            f"channel_{event_type}", 1, "count", channel_id=channel_id
         )
 
         if balance_local > 0:
             self.metric_collector.record_metric(
-                "channel_balance_local", balance_local, "sats",
-                channel_id=channel_id
+                "channel_balance_local", balance_local, "sats", channel_id=channel_id
             )
 
         if balance_remote > 0:
             self.metric_collector.record_metric(
-                "channel_balance_remote", balance_remote, "sats",
-                channel_id=channel_id
+                "channel_balance_remote", balance_remote, "sats", channel_id=channel_id
             )
 
-    def record_node_metrics(self, node_id: str, sync_height: int = 0,
-                           peer_count: int = 0, channel_count: int = 0):
+    def record_node_metrics(
+        self,
+        node_id: str,
+        sync_height: int = 0,
+        peer_count: int = 0,
+        channel_count: int = 0,
+    ):
         """Record node operational metrics"""
         if sync_height > 0:
             self.metric_collector.record_metric(
-                "sync_height", sync_height, "blocks",
-                node_id=node_id
+                "sync_height", sync_height, "blocks", node_id=node_id
             )
 
         if peer_count > 0:
             self.metric_collector.record_metric(
-                "peer_count", peer_count, "count",
-                node_id=node_id
+                "peer_count", peer_count, "count", node_id=node_id
             )
 
         if channel_count > 0:
             self.metric_collector.record_metric(
-                "active_channels", channel_count, "count",
-                node_id=node_id
+                "active_channels", channel_count, "count", node_id=node_id
             )
 
     def get_system_health(self) -> Dict[str, Any]:
@@ -377,8 +404,12 @@ class PracticalMonitor:
             alert_counts[alert.level.value] += 1
 
         # Get key metrics summaries
-        payment_success = self.metric_collector.get_metric_summary("payment_success", 60)
-        payment_failure = self.metric_collector.get_metric_summary("payment_failure", 60)
+        payment_success = self.metric_collector.get_metric_summary(
+            "payment_success", 60
+        )
+        payment_failure = self.metric_collector.get_metric_summary(
+            "payment_failure", 60
+        )
         channel_count = self.metric_collector.get_metric_summary("active_channels", 5)
 
         # Calculate health score (0-100)
@@ -394,16 +425,24 @@ class PracticalMonitor:
 
         return {
             "health_score": health_score,
-            "status": "healthy" if health_score >= 80 else "degraded" if health_score >= 50 else "unhealthy",
+            "status": (
+                "healthy"
+                if health_score >= 80
+                else "degraded" if health_score >= 50 else "unhealthy"
+            ),
             "active_alerts": len(active_alerts),
             "alert_breakdown": dict(alert_counts),
-            "recent_payments": payment_success.get("count", 0) + payment_failure.get("count", 0),
+            "recent_payments": payment_success.get("count", 0)
+            + payment_failure.get("count", 0),
             "payment_success_rate": (
-                payment_success.get("count", 0) /
-                max(1, payment_success.get("count", 0) + payment_failure.get("count", 0)) * 100
+                payment_success.get("count", 0)
+                / max(
+                    1, payment_success.get("count", 0) + payment_failure.get("count", 0)
+                )
+                * 100
             ),
             "active_channels": channel_count.get("latest", 0),
-            "monitoring_active": self.health_checker.running
+            "monitoring_active": self.health_checker.running,
         }
 
     def start_monitoring(self):
@@ -423,12 +462,13 @@ class PracticalMonitor:
         exported_data = {
             "export_timestamp": time.time(),
             "hours_included": hours,
-            "metrics": {}
+            "metrics": {},
         }
 
         for metric_name, metric_history in self.metric_collector.metrics.items():
             recent_metrics = [
-                asdict(metric) for metric in metric_history
+                asdict(metric)
+                for metric in metric_history
                 if metric.timestamp >= cutoff_time
             ]
             exported_data["metrics"][metric_name] = recent_metrics
@@ -461,7 +501,7 @@ if __name__ == "__main__":
         AlertLevel.WARNING,
         "Test Alert",
         "This is a test alert for demonstration",
-        "test_system"
+        "test_system",
     )
 
     # Get health status
@@ -480,6 +520,7 @@ if __name__ == "__main__":
 
     # Cleanup
     import shutil
+
     shutil.rmtree("test_data", ignore_errors=True)
 
     print("✅ Practical monitor test completed!")

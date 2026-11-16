@@ -5,21 +5,22 @@ Implements Redis-like and Memcached-like caching patterns
 Based on 2025 research on distributed caching strategies
 """
 
+import hashlib
+import json
 import logging
 import time
-import hashlib
-from typing import Dict, Any, Optional, List, Set, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
-import json
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 
 class CacheBackend(Enum):
     """Cache backend types"""
+
     MEMORY = "memory"
     REDIS = "redis"
     MEMCACHED = "memcached"
@@ -27,6 +28,7 @@ class CacheBackend(Enum):
 
 class EvictionPolicy(Enum):
     """Cache eviction policies"""
+
     LRU = "lru"  # Least Recently Used
     LFU = "lfu"  # Least Frequently Used
     FIFO = "fifo"  # First In First Out
@@ -36,6 +38,7 @@ class EvictionPolicy(Enum):
 @dataclass
 class CacheEntry:
     """Individual cache entry"""
+
     key: str
     value: Any
     ttl_seconds: Optional[int] = None
@@ -55,17 +58,18 @@ class CacheEntry:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'key': self.key,
-            'ttl_seconds': self.ttl_seconds,
-            'access_count': self.access_count,
-            'size_bytes': self.size_bytes,
-            'is_expired': self.is_expired()
+            "key": self.key,
+            "ttl_seconds": self.ttl_seconds,
+            "access_count": self.access_count,
+            "size_bytes": self.size_bytes,
+            "is_expired": self.is_expired(),
         }
 
 
 @dataclass
 class CacheMetrics:
     """Cache performance metrics"""
+
     total_requests: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
@@ -88,13 +92,13 @@ class CacheMetrics:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'total_requests': self.total_requests,
-            'cache_hits': self.cache_hits,
-            'cache_misses': self.cache_misses,
-            'hit_rate': self.hit_rate,
-            'miss_rate': self.miss_rate,
-            'evictions': self.evictions,
-            'total_memory_bytes': self.total_memory_bytes
+            "total_requests": self.total_requests,
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "hit_rate": self.hit_rate,
+            "miss_rate": self.miss_rate,
+            "evictions": self.evictions,
+            "total_memory_bytes": self.total_memory_bytes,
         }
 
 
@@ -141,7 +145,7 @@ class InMemoryCache(CacheStore):
     def __init__(
         self,
         max_size_bytes: int = 100 * 1024 * 1024,  # 100MB
-        eviction_policy: EvictionPolicy = EvictionPolicy.LRU
+        eviction_policy: EvictionPolicy = EvictionPolicy.LRU,
     ):
         """Initialize in-memory cache"""
         self.max_size_bytes = max_size_bytes
@@ -183,10 +187,7 @@ class InMemoryCache(CacheStore):
             size = 1000  # Estimate for non-JSON objects
 
         entry = CacheEntry(
-            key=key,
-            value=value,
-            ttl_seconds=ttl_seconds,
-            size_bytes=size
+            key=key, value=value, ttl_seconds=ttl_seconds, size_bytes=size
         )
 
         # Evict if necessary
@@ -250,7 +251,10 @@ class InMemoryCache(CacheStore):
 
         elif self.eviction_policy == EvictionPolicy.TTL:
             # Expire oldest TTL first
-            key = min(self.cache.keys(), key=lambda k: self.cache[k].ttl_seconds or float('inf'))
+            key = min(
+                self.cache.keys(),
+                key=lambda k: self.cache[k].ttl_seconds or float("inf"),
+            )
 
         else:
             key = next(iter(self.cache))
@@ -322,7 +326,7 @@ class DistributedCacheLayer:
             cache_hits=l1_metrics.cache_hits,
             cache_misses=l1_metrics.cache_misses,
             evictions=l1_metrics.evictions,
-            total_memory_bytes=l1_metrics.total_memory_bytes
+            total_memory_bytes=l1_metrics.total_memory_bytes,
         )
         return self.metrics
 
@@ -335,7 +339,9 @@ class CacheWarmer:
         self.cache = cache
         self.warm_data: Dict[str, Any] = {}
 
-    def register_warm_data(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+    def register_warm_data(
+        self, key: str, value: Any, ttl: Optional[int] = None
+    ) -> None:
         """Register data to preload"""
         self.warm_data[key] = (value, ttl)
 
@@ -399,13 +405,13 @@ class CacheInvalidator:
 
 
 __all__ = [
-    'CacheBackend',
-    'EvictionPolicy',
-    'CacheEntry',
-    'CacheMetrics',
-    'CacheStore',
-    'InMemoryCache',
-    'DistributedCacheLayer',
-    'CacheWarmer',
-    'CacheInvalidator',
+    "CacheBackend",
+    "EvictionPolicy",
+    "CacheEntry",
+    "CacheMetrics",
+    "CacheStore",
+    "InMemoryCache",
+    "DistributedCacheLayer",
+    "CacheWarmer",
+    "CacheInvalidator",
 ]

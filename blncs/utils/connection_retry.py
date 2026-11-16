@@ -3,18 +3,19 @@ Smart Connection Retry Logic for BLNCS
 指数バックオフとサーキットブレーカーパターン実装
 """
 
-import time
+import logging
 import random
 import threading
-from typing import Callable, Any, Optional, Dict, List
+import time
 from dataclasses import dataclass
 from enum import Enum
-import logging
 from functools import wraps
+from typing import Any, Callable, Dict, List, Optional
 
 
 class ConnectionState(Enum):
     """Connection state"""
+
     CLOSED = "closed"
     HALF_OPEN = "half_open"
     OPEN = "open"
@@ -23,6 +24,7 @@ class ConnectionState(Enum):
 @dataclass
 class RetryConfig:
     """Retry configuration"""
+
     max_attempts: int = 5
     base_delay: float = 1.0
     max_delay: float = 60.0
@@ -34,6 +36,7 @@ class RetryConfig:
 @dataclass
 class RetryResult:
     """Retry operation result"""
+
     success: bool
     attempts: int
     total_time: float
@@ -110,7 +113,7 @@ class SmartRetry:
 
     def retry_with_backoff(self, func: Callable, *args, **kwargs) -> RetryResult:
         """Execute function with retry and backoff"""
-        func_name = getattr(func, '__name__', 'unknown')
+        func_name = getattr(func, "__name__", "unknown")
         circuit_breaker = self.get_circuit_breaker(func_name)
 
         start_time = time.time()
@@ -120,49 +123,51 @@ class SmartRetry:
         # Initialize stats if not exists
         if func_name not in self.stats:
             self.stats[func_name] = {
-                'total_calls': 0,
-                'successful_calls': 0,
-                'failed_calls': 0,
-                'total_attempts': 0,
-                'circuit_breaker_trips': 0
+                "total_calls": 0,
+                "successful_calls": 0,
+                "failed_calls": 0,
+                "total_attempts": 0,
+                "circuit_breaker_trips": 0,
             }
 
         stats = self.stats[func_name]
-        stats['total_calls'] += 1
+        stats["total_calls"] += 1
 
         # Check circuit breaker
         if not circuit_breaker.can_execute():
-            stats['circuit_breaker_trips'] += 1
+            stats["circuit_breaker_trips"] += 1
             return RetryResult(
                 success=False,
                 attempts=0,
                 total_time=time.time() - start_time,
                 last_error="Circuit breaker open",
-                circuit_breaker_triggered=True
+                circuit_breaker_triggered=True,
             )
 
         for attempt in range(1, self.config.max_attempts + 1):
             attempts = attempt
-            stats['total_attempts'] += 1
+            stats["total_attempts"] += 1
 
             try:
                 # Set timeout for the operation
                 result = func(*args, **kwargs)
                 circuit_breaker.record_success()
-                stats['successful_calls'] += 1
+                stats["successful_calls"] += 1
 
                 return RetryResult(
                     success=True,
                     attempts=attempts,
                     total_time=time.time() - start_time,
-                    circuit_breaker_triggered=False
+                    circuit_breaker_triggered=False,
                 )
 
             except Exception as e:
                 last_error = str(e)
                 circuit_breaker.record_failure()
 
-                self.logger.warning(f"Attempt {attempt}/{self.config.max_attempts} failed for {func_name}: {e}")
+                self.logger.warning(
+                    f"Attempt {attempt}/{self.config.max_attempts} failed for {func_name}: {e}"
+                )
 
                 # Don't delay on last attempt
                 if attempt < self.config.max_attempts:
@@ -170,13 +175,13 @@ class SmartRetry:
                     time.sleep(delay)
 
         # All attempts failed
-        stats['failed_calls'] += 1
+        stats["failed_calls"] += 1
         return RetryResult(
             success=False,
             attempts=attempts,
             total_time=time.time() - start_time,
             last_error=last_error,
-            circuit_breaker_triggered=False
+            circuit_breaker_triggered=False,
         )
 
     def get_stats(self) -> Dict[str, Any]:
@@ -196,8 +201,11 @@ class SmartRetry:
                 breaker.state = ConnectionState.CLOSED
 
 
-def retry_on_failure(config: Optional[RetryConfig] = None, circuit_breaker_name: Optional[str] = None):
+def retry_on_failure(
+    config: Optional[RetryConfig] = None, circuit_breaker_name: Optional[str] = None
+):
     """Decorator for automatic retry with backoff"""
+
     def decorator(func: Callable) -> Callable:
         retry_logic = SmartRetry(config)
         breaker_name = circuit_breaker_name or func.__name__
@@ -218,6 +226,7 @@ def retry_on_failure(config: Optional[RetryConfig] = None, circuit_breaker_name:
         wrapper.get_retry_stats = lambda: retry_logic.get_stats()
         wrapper.reset_retry_stats = retry_logic.reset_stats
         return wrapper
+
     return decorator
 
 
@@ -249,7 +258,9 @@ class ConnectionPool:
                     self.in_use.append(conn)
                     return conn
                 else:
-                    raise ConnectionError(f"Failed to create connection: {result.last_error}")
+                    raise ConnectionError(
+                        f"Failed to create connection: {result.last_error}"
+                    )
 
             raise ConnectionError("Connection pool exhausted")
 
@@ -260,7 +271,7 @@ class ConnectionPool:
                 self.in_use.remove(conn)
                 # Simple validation - check if connection is still valid
                 try:
-                    if hasattr(conn, 'ping'):
+                    if hasattr(conn, "ping"):
                         conn.ping()
                     self.connections.append(conn)
                 except:
@@ -273,7 +284,7 @@ class ConnectionPool:
             all_connections = self.connections + self.in_use
             for conn in all_connections:
                 try:
-                    if hasattr(conn, 'close'):
+                    if hasattr(conn, "close"):
                         conn.close()
                 except:
                     pass
@@ -316,7 +327,9 @@ class ReliableLightningClient:
             self.connect()
         return self.base_client.create_invoice(amount, memo)
 
-    @retry_on_failure(RetryConfig(max_attempts=1, base_delay=5.0))  # Payments are critical
+    @retry_on_failure(
+        RetryConfig(max_attempts=1, base_delay=5.0)
+    )  # Payments are critical
     def pay_invoice(self, payment_request: str):
         """Pay invoice with limited retry (dangerous to retry payments)"""
         if not self.base_client.connected:
@@ -344,11 +357,18 @@ def get_global_retry() -> SmartRetry:
 def create_reliable_lightning_client():
     """Create Lightning client with retry logic"""
     from blncs.lightning.simple_client import SimpleLightningClient
+
     return ReliableLightningClient(SimpleLightningClient)
 
 
 __all__ = [
-    'SmartRetry', 'RetryConfig', 'RetryResult', 'CircuitBreaker',
-    'ConnectionPool', 'ReliableLightningClient',
-    'retry_on_failure', 'get_global_retry', 'create_reliable_lightning_client'
+    "SmartRetry",
+    "RetryConfig",
+    "RetryResult",
+    "CircuitBreaker",
+    "ConnectionPool",
+    "ReliableLightningClient",
+    "retry_on_failure",
+    "get_global_retry",
+    "create_reliable_lightning_client",
 ]

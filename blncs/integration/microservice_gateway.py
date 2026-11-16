@@ -3,24 +3,27 @@
 マイクロサービス統合とAPIゲートウェイ機能を提供
 """
 
-import time
+import asyncio
 import json
+import logging
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable, Tuple
+import time
+import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
-import asyncio
-import aiohttp
-import uuid
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
 
 class ServiceStatus(Enum):
     """サービスステータス"""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
@@ -29,6 +32,7 @@ class ServiceStatus(Enum):
 
 class RequestMethod(Enum):
     """リクエストメソッド"""
+
     GET = "GET"
     POST = "POST"
     PUT = "PUT"
@@ -39,6 +43,7 @@ class RequestMethod(Enum):
 @dataclass
 class MicroService:
     """マイクロサービス情報"""
+
     service_id: str
     name: str
     base_url: str
@@ -55,6 +60,7 @@ class MicroService:
 @dataclass
 class ServiceRequest:
     """サービスリクエスト情報"""
+
     request_id: str
     service_id: str
     method: RequestMethod
@@ -69,6 +75,7 @@ class ServiceRequest:
 @dataclass
 class ServiceResponse:
     """サービスレスポンス情報"""
+
     request_id: str
     status_code: int
     headers: Dict[str, str] = field(default_factory=dict)
@@ -137,17 +144,27 @@ class ServiceRegistry:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO services
                     (service_id, name, base_url, version, status, health_endpoint,
                      dependencies, last_check, response_time, error_rate, load_score)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    service.service_id, service.name, service.base_url, service.version,
-                    service.status.value, service.health_endpoint,
-                    json.dumps(service.dependencies), service.last_check,
-                    service.response_time, service.error_rate, service.load_score
-                ))
+                """,
+                    (
+                        service.service_id,
+                        service.name,
+                        service.base_url,
+                        service.version,
+                        service.status.value,
+                        service.health_endpoint,
+                        json.dumps(service.dependencies),
+                        service.last_check,
+                        service.response_time,
+                        service.error_rate,
+                        service.load_score,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -183,8 +200,10 @@ class ServiceRegistry:
 
         # サービス名で検索
         matching_services = [
-            service for service in self.services.values()
-            if service_name.lower() in service.name.lower() and service.status == ServiceStatus.HEALTHY
+            service
+            for service in self.services.values()
+            if service_name.lower() in service.name.lower()
+            and service.status == ServiceStatus.HEALTHY
         ]
 
         urls = [service.base_url for service in matching_services]
@@ -204,8 +223,13 @@ class ServiceRegistry:
         """
         return self.services.get(service_id)
 
-    def update_service_health(self, service_id: str, status: ServiceStatus,
-                            response_time: float = 0.0, error_rate: float = 0.0):
+    def update_service_health(
+        self,
+        service_id: str,
+        status: ServiceStatus,
+        response_time: float = 0.0,
+        error_rate: float = 0.0,
+    ):
         """
         サービスヘルスを更新
         Args:
@@ -297,29 +321,38 @@ class LoadBalancer:
         """最小接続数選択"""
         # 簡易実装：レスポンスタイムで代用
         best_endpoint = endpoints[0]
-        best_time = float('inf')
+        best_time = float("inf")
 
         for endpoint in endpoints:
-            response_time = self.endpoint_health.get(service_name, {}).get(endpoint, 1000)
+            response_time = self.endpoint_health.get(service_name, {}).get(
+                endpoint, 1000
+            )
             if response_time < best_time:
                 best_time = response_time
                 best_endpoint = endpoint
 
         return best_endpoint
 
-    def _weighted_response_time_select(self, service_name: str, endpoints: List[str]) -> str:
+    def _weighted_response_time_select(
+        self, service_name: str, endpoints: List[str]
+    ) -> str:
         """重み付きレスポンスタイム選択"""
         total_weight = 0
         weighted_endpoints = []
 
         for endpoint in endpoints:
-            response_time = self.endpoint_health.get(service_name, {}).get(endpoint, 1000)
-            weight = max(0.1, 1.0 / (response_time / 1000 + 0.1))  # レスポンスタイムが短いほど重みが高い
+            response_time = self.endpoint_health.get(service_name, {}).get(
+                endpoint, 1000
+            )
+            weight = max(
+                0.1, 1.0 / (response_time / 1000 + 0.1)
+            )  # レスポンスタイムが短いほど重みが高い
             weighted_endpoints.append((endpoint, weight))
             total_weight += weight
 
         # 重み付きランダム選択
         import random
+
         random_value = random.random() * total_weight
 
         current_weight = 0
@@ -330,7 +363,9 @@ class LoadBalancer:
 
         return endpoints[0]  # フォールバック
 
-    def update_endpoint_health(self, service_name: str, endpoint: str, response_time: float):
+    def update_endpoint_health(
+        self, service_name: str, endpoint: str, response_time: float
+    ):
         """
         エンドポイントヘルスを更新
         Args:
@@ -358,7 +393,9 @@ class CircuitBreaker:
         self.recovery_timeout = recovery_timeout
         self.failure_counts: Dict[str, int] = defaultdict(int)
         self.last_failure_times: Dict[str, float] = defaultdict(float)
-        self.circuit_states: Dict[str, str] = defaultdict(lambda: "closed")  # closed, open, half-open
+        self.circuit_states: Dict[str, str] = defaultdict(
+            lambda: "closed"
+        )  # closed, open, half-open
 
     def is_request_allowed(self, service_name: str) -> bool:
         """
@@ -374,7 +411,10 @@ class CircuitBreaker:
             return True
         elif state == "open":
             # 回復タイムアウトをチェック
-            if time.time() - self.last_failure_times[service_name] > self.recovery_timeout:
+            if (
+                time.time() - self.last_failure_times[service_name]
+                > self.recovery_timeout
+            ):
                 self.circuit_states[service_name] = "half-open"
                 return True
             return False
@@ -414,7 +454,12 @@ class CircuitBreaker:
 class APIGateway:
     """APIゲートウェイ"""
 
-    def __init__(self, service_registry: ServiceRegistry, load_balancer: LoadBalancer, circuit_breaker: CircuitBreaker):
+    def __init__(
+        self,
+        service_registry: ServiceRegistry,
+        load_balancer: LoadBalancer,
+        circuit_breaker: CircuitBreaker,
+    ):
         """
         初期化
         Args:
@@ -456,11 +501,15 @@ class APIGateway:
             target_url = self.load_balancer.select_endpoint(request.service_id)
 
             if not target_url:
-                raise ValueError(f"利用可能なエンドポイントがありません: {request.service_id}")
+                raise ValueError(
+                    f"利用可能なエンドポイントがありません: {request.service_id}"
+                )
 
             # サーキットブレーカーチェック
             if not self.circuit_breaker.is_request_allowed(request.service_id):
-                raise ValueError(f"サービスが利用できません（サーキットブレーカー）: {request.service_id}")
+                raise ValueError(
+                    f"サービスが利用できません（サーキットブレーカー）: {request.service_id}"
+                )
 
             # リクエスト実行
             response = await self._execute_request(request, target_url)
@@ -477,7 +526,9 @@ class APIGateway:
 
             # エンドポイントヘルスを更新
             response_time = time.time() - start_time
-            self.load_balancer.update_endpoint_health(request.service_id, target_url, response_time)
+            self.load_balancer.update_endpoint_health(
+                request.service_id, target_url, response_time
+            )
 
             return response
 
@@ -491,10 +542,12 @@ class APIGateway:
                 request_id=request.request_id,
                 status_code=500,
                 body={"error": str(e)},
-                response_time=time.time() - start_time
+                response_time=time.time() - start_time,
             )
 
-    async def _execute_request(self, request: ServiceRequest, target_url: str) -> ServiceResponse:
+    async def _execute_request(
+        self, request: ServiceRequest, target_url: str
+    ) -> ServiceResponse:
         """リクエストを実行"""
         full_url = f"{target_url.rstrip('/')}{request.endpoint}"
 
@@ -507,7 +560,9 @@ class APIGateway:
 
                 # リクエスト実行
                 if request.method == RequestMethod.GET:
-                    async with session.get(full_url, headers=request.headers) as response:
+                    async with session.get(
+                        full_url, headers=request.headers
+                    ) as response:
                         response_body = await response.text()
                         response_time = time.time() - start_request_time
 
@@ -516,11 +571,13 @@ class APIGateway:
                             status_code=response.status,
                             headers=dict(response.headers),
                             body=response_body,
-                            response_time=response_time
+                            response_time=response_time,
                         )
 
                 elif request.method == RequestMethod.POST:
-                    async with session.post(full_url, headers=request.headers, json=request.body) as response:
+                    async with session.post(
+                        full_url, headers=request.headers, json=request.body
+                    ) as response:
                         response_body = await response.text()
                         response_time = time.time() - start_request_time
 
@@ -529,7 +586,7 @@ class APIGateway:
                             status_code=response.status,
                             headers=dict(response.headers),
                             body=response_body,
-                            response_time=response_time
+                            response_time=response_time,
                         )
 
                 # 他のHTTPメソッドも同様に実装可能
@@ -569,7 +626,9 @@ class SystemIntegrationManager:
         self.service_registry = ServiceRegistry(db_path)
         self.load_balancer = LoadBalancer()
         self.circuit_breaker = CircuitBreaker()
-        self.api_gateway = APIGateway(self.service_registry, self.load_balancer, self.circuit_breaker)
+        self.api_gateway = APIGateway(
+            self.service_registry, self.load_balancer, self.circuit_breaker
+        )
 
         self.is_integration_active = False
 
@@ -589,7 +648,7 @@ class SystemIntegrationManager:
                 name="ユーザーサービス",
                 base_url="http://localhost:8001",
                 version="1.0.0",
-                health_endpoint="/health"
+                health_endpoint="/health",
             ),
             MicroService(
                 service_id="payment_service",
@@ -597,15 +656,15 @@ class SystemIntegrationManager:
                 base_url="http://localhost:8002",
                 version="1.0.0",
                 health_endpoint="/health",
-                dependencies=["user_service"]
+                dependencies=["user_service"],
             ),
             MicroService(
                 service_id="notification_service",
                 name="通知サービス",
                 base_url="http://localhost:8003",
                 version="1.0.0",
-                health_endpoint="/health"
-            )
+                health_endpoint="/health",
+            ),
         ]
 
         for service in services:
@@ -614,6 +673,7 @@ class SystemIntegrationManager:
 
     def _setup_default_middleware(self):
         """デフォルトのミドルウェアを設定"""
+
         # 認証ミドルウェア
         async def auth_middleware(request: ServiceRequest):
             # 実際の実装ではトークン検証などを実行
@@ -635,7 +695,9 @@ class SystemIntegrationManager:
 
         # レスポンスログミドルウェア
         async def response_logging_middleware(response: ServiceResponse):
-            logger.info(f"APIレスポンス: {response.status_code} ({response.response_time:.3f}s)")
+            logger.info(
+                f"APIレスポンス: {response.status_code} ({response.response_time:.3f}s)"
+            )
 
         self.api_gateway.add_response_middleware(response_logging_middleware)
 
@@ -650,7 +712,9 @@ class SystemIntegrationManager:
         """統合システムを停止"""
         self.is_integration_active = False
 
-    def register_service(self, service_id: str, name: str, base_url: str, version: str = "1.0.0"):
+    def register_service(
+        self, service_id: str, name: str, base_url: str, version: str = "1.0.0"
+    ):
         """
         サービスを登録
         Args:
@@ -660,18 +724,21 @@ class SystemIntegrationManager:
             version: バージョン
         """
         service = MicroService(
-            service_id=service_id,
-            name=name,
-            base_url=base_url,
-            version=version
+            service_id=service_id, name=name, base_url=base_url, version=version
         )
 
         self.service_registry.register_service(service)
         self.load_balancer.register_endpoint(name, base_url)
 
-    async def make_request(self, service_name: str, method: RequestMethod, endpoint: str,
-                          headers: Dict[str, str] = None, body: Any = None,
-                          timeout: float = 30.0) -> ServiceResponse:
+    async def make_request(
+        self,
+        service_name: str,
+        method: RequestMethod,
+        endpoint: str,
+        headers: Dict[str, str] = None,
+        body: Any = None,
+        timeout: float = 30.0,
+    ) -> ServiceResponse:
         """
         リクエストを実行
         Args:
@@ -691,24 +758,28 @@ class SystemIntegrationManager:
             endpoint=endpoint,
             headers=headers or {},
             body=body,
-            timeout=timeout
+            timeout=timeout,
         )
 
         return await self.api_gateway.route_request(request)
 
     def get_integration_status(self) -> Dict[str, Any]:
         """統合ステータスを取得"""
-        healthy_services = len([
-            service for service in self.service_registry.services.values()
-            if service.status == ServiceStatus.HEALTHY
-        ])
+        healthy_services = len(
+            [
+                service
+                for service in self.service_registry.services.values()
+                if service.status == ServiceStatus.HEALTHY
+            ]
+        )
 
         return {
             "is_active": self.is_integration_active,
             "total_services": len(self.service_registry.services),
             "healthy_services": healthy_services,
-            "unhealthy_services": len(self.service_registry.services) - healthy_services,
-            "circuit_breaker_states": dict(self.circuit_breaker.circuit_states)
+            "unhealthy_services": len(self.service_registry.services)
+            - healthy_services,
+            "circuit_breaker_states": dict(self.circuit_breaker.circuit_states),
         }
 
     async def _health_check_loop(self):
@@ -729,7 +800,9 @@ class SystemIntegrationManager:
                 start_time = time.time()
 
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(health_url, timeout=aiohttp.ClientTimeout(total=5.0)) as response:
+                    async with session.get(
+                        health_url, timeout=aiohttp.ClientTimeout(total=5.0)
+                    ) as response:
                         response_time = time.time() - start_time
 
                         if response.status == 200:
@@ -762,17 +835,13 @@ async def example_usage():
 
     # 追加のサービス登録
     manager.register_service(
-        "analytics_service",
-        "アナリティクスサービス",
-        "http://localhost:8004"
+        "analytics_service", "アナリティクスサービス", "http://localhost:8004"
     )
 
     # リクエスト実行のテスト
     try:
         response = await manager.make_request(
-            "ユーザーサービス",
-            RequestMethod.GET,
-            "/users/123"
+            "ユーザーサービス", RequestMethod.GET, "/users/123"
         )
 
         print(f"レスポンス: {response.status_code} - {response.response_time:.3f}s")

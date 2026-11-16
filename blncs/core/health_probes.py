@@ -8,24 +8,26 @@ Based on Kubernetes Pod Health Check standards and cloud-native patterns
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Callable, Any, Awaitable
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class ProbeType(Enum):
     """Health probe types following Kubernetes standards"""
-    LIVENESS = "liveness"      # Is the container running?
-    READINESS = "readiness"    # Is the container ready to receive traffic?
-    STARTUP = "startup"        # Has the container started?
+
+    LIVENESS = "liveness"  # Is the container running?
+    READINESS = "readiness"  # Is the container ready to receive traffic?
+    STARTUP = "startup"  # Has the container started?
 
 
 class ProbeStatus(Enum):
     """Health probe status outcomes"""
+
     SUCCESS = "success"
     FAILURE = "failure"
     UNKNOWN = "unknown"
@@ -34,20 +36,22 @@ class ProbeStatus(Enum):
 @dataclass
 class ProbeConfig:
     """Configuration for a health probe"""
+
     name: str
     probe_type: ProbeType
     check_func: Callable[[], Awaitable[bool]]
     initial_delay_seconds: int = 0  # Delay before first check
-    timeout_seconds: int = 1        # Timeout for the probe
-    period_seconds: int = 10        # How often to perform the probe
-    success_threshold: int = 1      # Consecutive successes required
-    failure_threshold: int = 3      # Consecutive failures before marking unhealthy
-    critical: bool = False          # If failure should block readiness
+    timeout_seconds: int = 1  # Timeout for the probe
+    period_seconds: int = 10  # How often to perform the probe
+    success_threshold: int = 1  # Consecutive successes required
+    failure_threshold: int = 3  # Consecutive failures before marking unhealthy
+    critical: bool = False  # If failure should block readiness
 
 
 @dataclass
 class ProbeResult:
     """Result of a health probe execution"""
+
     name: str
     probe_type: ProbeType
     status: ProbeStatus
@@ -71,16 +75,11 @@ class HealthProbeManager:
         self.last_check_time: Dict[str, datetime] = {}
         self.max_history: int = 100  # Keep last N results
 
-    def register_probe(
-        self,
-        config: ProbeConfig
-    ) -> None:
+    def register_probe(self, config: ProbeConfig) -> None:
         """Register a new health probe"""
         self.probes[config.name] = config
         self.results[config.name] = ProbeResult(
-            name=config.name,
-            probe_type=config.probe_type,
-            status=ProbeStatus.UNKNOWN
+            name=config.name, probe_type=config.probe_type, status=ProbeStatus.UNKNOWN
         )
         self.probe_history[config.name] = []
         logger.info(f"Registered {config.probe_type.value} probe: {config.name}")
@@ -109,8 +108,7 @@ class HealthProbeManager:
 
             # Execute probe with timeout
             health_check = await asyncio.wait_for(
-                config.check_func(),
-                timeout=config.timeout_seconds
+                config.check_func(), timeout=config.timeout_seconds
             )
 
             execution_time = (time.time() - start_time) * 1000
@@ -148,7 +146,9 @@ class HealthProbeManager:
             current_result.timestamp = datetime.utcnow()
 
         except asyncio.TimeoutError:
-            logger.error(f"Probe {probe_name} timed out after {config.timeout_seconds}s")
+            logger.error(
+                f"Probe {probe_name} timed out after {config.timeout_seconds}s"
+            )
             current_result = self.results[probe_name]
             current_result.status = ProbeStatus.FAILURE
             current_result.error_message = f"Timeout after {config.timeout_seconds}s"
@@ -180,9 +180,13 @@ class HealthProbeManager:
 
         # Keep only recent history
         if len(self.probe_history[probe_name]) > self.max_history:
-            self.probe_history[probe_name] = self.probe_history[probe_name][-self.max_history:]
+            self.probe_history[probe_name] = self.probe_history[probe_name][
+                -self.max_history :
+            ]
 
-    async def run_all_probes_of_type(self, probe_type: ProbeType) -> Dict[str, ProbeResult]:
+    async def run_all_probes_of_type(
+        self, probe_type: ProbeType
+    ) -> Dict[str, ProbeResult]:
         """
         Run all probes of a specific type concurrently
 
@@ -193,7 +197,8 @@ class HealthProbeManager:
             Dict of probe results
         """
         probes_to_run = [
-            name for name, config in self.probes.items()
+            name
+            for name, config in self.probes.items()
             if config.probe_type == probe_type
         ]
 
@@ -211,7 +216,7 @@ class HealthProbeManager:
                     name=probe_name,
                     probe_type=ProbeType(probe_name),
                     status=ProbeStatus.FAILURE,
-                    error_message=str(result)
+                    error_message=str(result),
                 )
             else:
                 result_dict[probe_name] = result
@@ -224,7 +229,8 @@ class HealthProbeManager:
         Container should be restarted if liveness is false
         """
         liveness_probes = {
-            name: config for name, config in self.probes.items()
+            name: config
+            for name, config in self.probes.items()
             if config.probe_type == ProbeType.LIVENESS
         }
 
@@ -244,7 +250,8 @@ class HealthProbeManager:
         Container should not receive traffic if readiness is false
         """
         readiness_probes = {
-            name: config for name, config in self.probes.items()
+            name: config
+            for name, config in self.probes.items()
             if config.probe_type == ProbeType.READINESS
         }
 
@@ -266,7 +273,8 @@ class HealthProbeManager:
         Liveness and readiness probes don't start until startup succeeds
         """
         startup_probes = {
-            name: config for name, config in self.probes.items()
+            name: config
+            for name, config in self.probes.items()
             if config.probe_type == ProbeType.STARTUP
         }
 
@@ -295,11 +303,11 @@ class HealthProbeManager:
                         "status": result.status.value,
                         "last_check": result.timestamp.isoformat(),
                         "consecutive_failures": result.consecutive_failures,
-                        "error": result.error_message
+                        "error": result.error_message,
                     }
                     for name, result in self.results.items()
                     if self.probes[name].probe_type == ProbeType.LIVENESS
-                }
+                },
             },
             "readiness": {
                 "status": "ready" if self.get_readiness_status() else "not_ready",
@@ -308,11 +316,11 @@ class HealthProbeManager:
                         "status": result.status.value,
                         "last_check": result.timestamp.isoformat(),
                         "consecutive_failures": result.consecutive_failures,
-                        "error": result.error_message
+                        "error": result.error_message,
                     }
                     for name, result in self.results.items()
                     if self.probes[name].probe_type == ProbeType.READINESS
-                }
+                },
             },
             "startup": {
                 "status": "started" if self.get_startup_status() else "starting",
@@ -320,12 +328,12 @@ class HealthProbeManager:
                     name: {
                         "status": result.status.value,
                         "last_check": result.timestamp.isoformat(),
-                        "error": result.error_message
+                        "error": result.error_message,
                     }
                     for name, result in self.results.items()
                     if self.probes[name].probe_type == ProbeType.STARTUP
-                }
-            }
+                },
+            },
         }
 
     def reset_probe_counters(self, probe_name: str) -> None:
@@ -348,9 +356,7 @@ def get_probe_manager() -> HealthProbeManager:
 
 
 @asynccontextmanager
-async def health_probe_context(
-    manager: Optional[HealthProbeManager] = None
-):
+async def health_probe_context(manager: Optional[HealthProbeManager] = None):
     """Context manager for probe management"""
     mgr = manager or get_probe_manager()
     try:
@@ -360,11 +366,11 @@ async def health_probe_context(
 
 
 __all__ = [
-    'ProbeType',
-    'ProbeStatus',
-    'ProbeConfig',
-    'ProbeResult',
-    'HealthProbeManager',
-    'get_probe_manager',
-    'health_probe_context',
+    "ProbeType",
+    "ProbeStatus",
+    "ProbeConfig",
+    "ProbeResult",
+    "HealthProbeManager",
+    "get_probe_manager",
+    "health_probe_context",
 ]

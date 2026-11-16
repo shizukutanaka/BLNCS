@@ -4,16 +4,17 @@
 """
 
 import json
-import os
-from typing import Dict, Optional, Any
-from pathlib import Path
 import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class LanguageCode:
     """言語コード定数"""
+
     # 主要言語
     ENGLISH = "en"
     JAPANESE = "ja"
@@ -69,14 +70,57 @@ class LanguageCode:
 
     # 言語リスト
     SUPPORTED_LANGUAGES = [
-        ENGLISH, JAPANESE, CHINESE_SIMPLIFIED, CHINESE_TRADITIONAL, KOREAN,
-        SPANISH, FRENCH, GERMAN, ITALIAN, PORTUGUESE, RUSSIAN, ARABIC,
-        HINDI, BENGALI, URDU, INDONESIAN, THAI, VIETNAMESE, TURKISH, POLISH,
-        DUTCH, SWEDISH, NORWEGIAN, DANISH, FINNISH, GREEK, CZECH, HUNGARIAN,
-        ROMANIAN, BULGARIAN, CROATIAN, SERBIAN, SLOVENIAN, SLOVAK, ESTONIAN,
-        LATVIAN, LITHUANIAN, MALTESE, ICELANDIC, ALBANIAN, MACEDONIAN,
-        BOSNIAN, MONTENEGRIN, LUXEMBOURGISH, IRISH, WELSH, SCOTTISH_GAELIC,
-        BASQUE, CATALAN, GALICIAN, ASTURIAN
+        ENGLISH,
+        JAPANESE,
+        CHINESE_SIMPLIFIED,
+        CHINESE_TRADITIONAL,
+        KOREAN,
+        SPANISH,
+        FRENCH,
+        GERMAN,
+        ITALIAN,
+        PORTUGUESE,
+        RUSSIAN,
+        ARABIC,
+        HINDI,
+        BENGALI,
+        URDU,
+        INDONESIAN,
+        THAI,
+        VIETNAMESE,
+        TURKISH,
+        POLISH,
+        DUTCH,
+        SWEDISH,
+        NORWEGIAN,
+        DANISH,
+        FINNISH,
+        GREEK,
+        CZECH,
+        HUNGARIAN,
+        ROMANIAN,
+        BULGARIAN,
+        CROATIAN,
+        SERBIAN,
+        SLOVENIAN,
+        SLOVAK,
+        ESTONIAN,
+        LATVIAN,
+        LITHUANIAN,
+        MALTESE,
+        ICELANDIC,
+        ALBANIAN,
+        MACEDONIAN,
+        BOSNIAN,
+        MONTENEGRIN,
+        LUXEMBOURGISH,
+        IRISH,
+        WELSH,
+        SCOTTISH_GAELIC,
+        BASQUE,
+        CATALAN,
+        GALICIAN,
+        ASTURIAN,
     ]
 
 
@@ -113,7 +157,7 @@ class TranslationManager:
         try:
             file_path = self.translations_dir / f"{language_code}.json"
             if file_path.exists():
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_path, "r", encoding="utf-8") as f:
                     self.translations[language_code] = json.load(f)
             else:
                 logger.warning(f"翻訳ファイルが存在しません: {file_path}")
@@ -176,15 +220,20 @@ class TranslationManager:
         """翻訳ファイルを保存"""
         try:
             file_path = self.translations_dir / f"{language_code}.json"
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(self.translations[language_code], f, ensure_ascii=False, indent=2)
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    self.translations[language_code], f, ensure_ascii=False, indent=2
+                )
         except Exception as e:
             logger.error(f"翻訳ファイル保存エラー: {e}")
 
     def get_available_languages(self) -> list:
         """利用可能な言語リストを取得"""
-        return [lang for lang in LanguageCode.SUPPORTED_LANGUAGES
-                if (self.translations_dir / f"{lang}.json").exists()]
+        return [
+            lang
+            for lang in LanguageCode.SUPPORTED_LANGUAGES
+            if (self.translations_dir / f"{lang}.json").exists()
+        ]
 
     def create_language_template(self, language_code: str):
         """
@@ -201,7 +250,7 @@ class TranslationManager:
         if self.fallback_language in self.translations:
             template_data = self.translations[self.fallback_language].copy()
             # キーを言語名に変更（例: "Hello" -> "こんにちは"）
-            with open(template_path, 'w', encoding='utf-8') as f:
+            with open(template_path, "w", encoding="utf-8") as f:
                 json.dump(template_data, f, ensure_ascii=False, indent=2)
 
             logger.info(f"言語テンプレートを作成しました: {template_path}")
@@ -239,7 +288,7 @@ class LocalizedFormatter:
             フォーマットされた文字列
         """
         # 言語によるフォーマットの違いを実装（簡易版）
-        if self.translator.current_language in ['ja', 'zh_CN', 'zh_TW', 'ko']:
+        if self.translator.current_language in ["ja", "zh_CN", "zh_TW", "ko"]:
             return f"{number:.{decimals}f}"
         else:
             return f"{number:,.{decimals}f}"
@@ -254,13 +303,14 @@ class LocalizedFormatter:
         """
         # 言語による日付フォーマットの違いを実装（簡易版）
         from datetime import datetime
+
         dt = datetime.fromtimestamp(timestamp)
 
-        if self.translator.current_language == 'ja':
+        if self.translator.current_language == "ja":
             return dt.strftime("%Y年%m月%d日 %H:%M:%S")
-        elif self.translator.current_language in ['zh_CN', 'zh_TW']:
+        elif self.translator.current_language in ["zh_CN", "zh_TW"]:
             return dt.strftime("%Y年%m月%d日 %H:%M:%S")
-        elif self.translator.current_language == 'ko':
+        elif self.translator.current_language == "ko":
             return dt.strftime("%Y년 %m월 %d일 %H:%M:%S")
         else:
             return dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -276,17 +326,23 @@ class LocalizedFormatter:
         """
         # 通貨記号のマッピング
         currency_symbols = {
-            "USD": "$", "EUR": "€", "JPY": "¥", "GBP": "£",
-            "CNY": "¥", "KRW": "₩", "INR": "₹", "RUB": "₽"
+            "USD": "$",
+            "EUR": "€",
+            "JPY": "¥",
+            "GBP": "£",
+            "CNY": "¥",
+            "KRW": "₩",
+            "INR": "₹",
+            "RUB": "₽",
         }
 
         symbol = currency_symbols.get(currency, currency)
 
-        if self.translator.current_language == 'ja':
+        if self.translator.current_language == "ja":
             return f"{symbol}{amount:,}"
-        elif self.translator.current_language in ['zh_CN', 'zh_TW']:
+        elif self.translator.current_language in ["zh_CN", "zh_TW"]:
             return f"{symbol}{amount:,}"
-        elif self.translator.current_language == 'ko':
+        elif self.translator.current_language == "ko":
             return f"{symbol}{amount:,}"
         else:
             return f"{symbol}{amount:,.2f}"

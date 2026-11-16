@@ -3,24 +3,25 @@
 リクエスト追跡とパフォーマンス監視機能を提供
 """
 
-import time
+import asyncio
 import json
+import logging
+import random
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable
+import time
+import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
-import asyncio
-import uuid
-import random
-from collections import defaultdict
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class TraceStatus(Enum):
     """トレースステータス"""
+
     STARTED = "started"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -30,6 +31,7 @@ class TraceStatus(Enum):
 
 class SpanKind(Enum):
     """スパン種別"""
+
     SERVER = "server"
     CLIENT = "client"
     INTERNAL = "internal"
@@ -40,6 +42,7 @@ class SpanKind(Enum):
 @dataclass
 class TraceSpan:
     """トレーススパン情報"""
+
     span_id: str
     trace_id: str
     parent_span_id: Optional[str] = None
@@ -58,6 +61,7 @@ class TraceSpan:
 @dataclass
 class DistributedTrace:
     """分散トレース情報"""
+
     trace_id: str
     root_span_id: str
     service_name: str = ""
@@ -73,7 +77,9 @@ class DistributedTrace:
 class TraceContext:
     """トレースコンテキスト"""
 
-    def __init__(self, trace_id: str, span_id: str, parent_span_id: Optional[str] = None):
+    def __init__(
+        self, trace_id: str, span_id: str, parent_span_id: Optional[str] = None
+    ):
         """
         初期化
         Args:
@@ -90,11 +96,11 @@ class TraceContext:
         return {
             "X-Trace-ID": self.trace_id,
             "X-Span-ID": self.span_id,
-            "X-Parent-Span-ID": self.parent_span_id or ""
+            "X-Parent-Span-ID": self.parent_span_id or "",
         }
 
     @classmethod
-    def from_headers(cls, headers: Dict[str, str]) -> Optional['TraceContext']:
+    def from_headers(cls, headers: Dict[str, str]) -> Optional["TraceContext"]:
         """HTTPヘッダーから作成"""
         trace_id = headers.get("X-Trace-ID")
         span_id = headers.get("X-Span-ID")
@@ -160,7 +166,9 @@ class TracingEngine:
 
             conn.commit()
 
-    def start_trace(self, operation_name: str, tags: Dict[str, str] = None) -> TraceContext:
+    def start_trace(
+        self, operation_name: str, tags: Dict[str, str] = None
+    ) -> TraceContext:
         """
         トレースを開始
         Args:
@@ -177,7 +185,7 @@ class TracingEngine:
             root_span_id=span_id,
             service_name=self.service_name,
             operation_name=operation_name,
-            tags=tags or {}
+            tags=tags or {},
         )
 
         root_span = TraceSpan(
@@ -186,7 +194,7 @@ class TracingEngine:
             operation_name=operation_name,
             span_kind=SpanKind.SERVER,
             service_name=self.service_name,
-            tags=tags or {}
+            tags=tags or {},
         )
 
         self.active_traces[trace_id] = trace
@@ -196,8 +204,13 @@ class TracingEngine:
 
         return TraceContext(trace_id, span_id)
 
-    def start_span(self, operation_name: str, parent_context: TraceContext,
-                  span_kind: SpanKind = SpanKind.INTERNAL, tags: Dict[str, str] = None) -> TraceContext:
+    def start_span(
+        self,
+        operation_name: str,
+        parent_context: TraceContext,
+        span_kind: SpanKind = SpanKind.INTERNAL,
+        tags: Dict[str, str] = None,
+    ) -> TraceContext:
         """
         スパンを開始
         Args:
@@ -217,7 +230,7 @@ class TracingEngine:
             operation_name=operation_name,
             span_kind=span_kind,
             service_name=self.service_name,
-            tags=tags or {}
+            tags=tags or {},
         )
 
         self.active_spans[span_id] = span
@@ -230,8 +243,12 @@ class TracingEngine:
 
         return TraceContext(parent_context.trace_id, span_id, parent_context.span_id)
 
-    def end_span(self, context: TraceContext, status: TraceStatus = TraceStatus.COMPLETED,
-                logs: List[Dict[str, Any]] = None):
+    def end_span(
+        self,
+        context: TraceContext,
+        status: TraceStatus = TraceStatus.COMPLETED,
+        logs: List[Dict[str, Any]] = None,
+    ):
         """
         スパンを終了
         Args:
@@ -259,7 +276,12 @@ class TracingEngine:
         logger.debug(f"スパン終了: {context.span_id} - {span.duration:.3f}s")
 
         # ルートスパンの場合はトレースも終了
-        if context.span_id == self.active_traces.get(context.trace_id, DistributedTrace("", "")).root_span_id:
+        if (
+            context.span_id
+            == self.active_traces.get(
+                context.trace_id, DistributedTrace("", "")
+            ).root_span_id
+        ):
             self._end_trace(context.trace_id, status)
 
     def _end_trace(self, trace_id: str, status: TraceStatus):
@@ -284,17 +306,29 @@ class TracingEngine:
         """スパンをデータベースに保存"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO spans
                     (span_id, trace_id, parent_span_id, operation_name, span_kind, start_time,
                      end_time, duration, status, tags, logs, service_name, resource_name)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    span.span_id, span.trace_id, span.parent_span_id, span.operation_name,
-                    span.span_kind.value, span.start_time, span.end_time, span.duration,
-                    span.status.value, json.dumps(span.tags), json.dumps(span.logs),
-                    span.service_name, span.resource_name
-                ))
+                """,
+                    (
+                        span.span_id,
+                        span.trace_id,
+                        span.parent_span_id,
+                        span.operation_name,
+                        span.span_kind.value,
+                        span.start_time,
+                        span.end_time,
+                        span.duration,
+                        span.status.value,
+                        json.dumps(span.tags),
+                        json.dumps(span.logs),
+                        span.service_name,
+                        span.resource_name,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -304,16 +338,25 @@ class TracingEngine:
         """トレースをデータベースに保存"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO traces
                     (trace_id, root_span_id, service_name, operation_name, start_time,
                      end_time, duration, status, tags)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    trace.trace_id, trace.root_span_id, trace.service_name,
-                    trace.operation_name, trace.start_time, trace.end_time,
-                    trace.duration, trace.status.value, json.dumps(trace.tags)
-                ))
+                """,
+                    (
+                        trace.trace_id,
+                        trace.root_span_id,
+                        trace.service_name,
+                        trace.operation_name,
+                        trace.start_time,
+                        trace.end_time,
+                        trace.duration,
+                        trace.status.value,
+                        json.dumps(trace.tags),
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -338,40 +381,48 @@ class TracingEngine:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # トレース情報を取得
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT trace_id, root_span_id, service_name, operation_name, start_time,
                            end_time, duration, status, tags
                     FROM traces WHERE trace_id = ?
-                """, (trace_id,))
+                """,
+                    (trace_id,),
+                )
 
                 trace_row = cursor.fetchone()
                 if not trace_row:
                     return None
 
                 # スパン情報を取得
-                spans_cursor = conn.execute("""
+                spans_cursor = conn.execute(
+                    """
                     SELECT span_id, parent_span_id, operation_name, span_kind, start_time,
                            end_time, duration, status, tags, logs, service_name, resource_name
                     FROM spans WHERE trace_id = ?
                     ORDER BY start_time
-                """, (trace_id,))
+                """,
+                    (trace_id,),
+                )
 
                 spans = []
                 for span_row in spans_cursor.fetchall():
-                    spans.append({
-                        "span_id": span_row[0],
-                        "parent_span_id": span_row[1],
-                        "operation_name": span_row[2],
-                        "span_kind": span_row[3],
-                        "start_time": span_row[4],
-                        "end_time": span_row[5],
-                        "duration": span_row[6],
-                        "status": span_row[7],
-                        "tags": json.loads(span_row[8]) if span_row[8] else {},
-                        "logs": json.loads(span_row[9]) if span_row[9] else [],
-                        "service_name": span_row[10],
-                        "resource_name": span_row[11]
-                    })
+                    spans.append(
+                        {
+                            "span_id": span_row[0],
+                            "parent_span_id": span_row[1],
+                            "operation_name": span_row[2],
+                            "span_kind": span_row[3],
+                            "start_time": span_row[4],
+                            "end_time": span_row[5],
+                            "duration": span_row[6],
+                            "status": span_row[7],
+                            "tags": json.loads(span_row[8]) if span_row[8] else {},
+                            "logs": json.loads(span_row[9]) if span_row[9] else [],
+                            "service_name": span_row[10],
+                            "resource_name": span_row[11],
+                        }
+                    )
 
                 return {
                     "trace_id": trace_row[0],
@@ -383,7 +434,7 @@ class TracingEngine:
                     "duration": trace_row[6],
                     "status": trace_row[7],
                     "tags": json.loads(trace_row[8]) if trace_row[8] else {},
-                    "spans": spans
+                    "spans": spans,
                 }
 
         except Exception as e:
@@ -412,7 +463,9 @@ class TraceSampler:
             サンプリングフラグ
         """
         # エラーや高遅延操作は常にサンプリング
-        if tags and (tags.get("error") == "true" or float(tags.get("duration", 0)) > 1000):
+        if tags and (
+            tags.get("error") == "true" or float(tags.get("duration", 0)) > 1000
+        ):
             return True
 
         # 確率ベースのサンプリング
@@ -444,6 +497,7 @@ class DistributedTracingManager:
 
     def _register_default_trace_callbacks(self):
         """デフォルトのトレースコールバックを登録"""
+
         def log_trace_completion(trace_context: TraceContext):
             logger.info(f"トレース完了: {trace_context.trace_id}")
 
@@ -460,8 +514,14 @@ class DistributedTracingManager:
         self.is_tracing_active = False
         logger.info("分散トレーシングシステムを停止しました")
 
-    def start_request_trace(self, operation_name: str, method: str = "", url: str = "",
-                          user_agent: str = "", tags: Dict[str, str] = None) -> TraceContext:
+    def start_request_trace(
+        self,
+        operation_name: str,
+        method: str = "",
+        url: str = "",
+        user_agent: str = "",
+        tags: Dict[str, str] = None,
+    ) -> TraceContext:
         """
         リクエストトレースを開始
         Args:
@@ -475,12 +535,14 @@ class DistributedTracingManager:
         """
         # タグを準備
         request_tags = tags or {}
-        request_tags.update({
-            "http.method": method,
-            "http.url": url,
-            "user_agent": user_agent,
-            "component": "http"
-        })
+        request_tags.update(
+            {
+                "http.method": method,
+                "http.url": url,
+                "user_agent": user_agent,
+                "component": "http",
+            }
+        )
 
         # サンプリングチェック
         if not self.trace_sampler.should_sample(operation_name, request_tags):
@@ -493,8 +555,12 @@ class DistributedTracingManager:
 
         return context
 
-    def start_child_span(self, operation_name: str, span_kind: SpanKind = SpanKind.INTERNAL,
-                        tags: Dict[str, str] = None) -> TraceContext:
+    def start_child_span(
+        self,
+        operation_name: str,
+        span_kind: SpanKind = SpanKind.INTERNAL,
+        tags: Dict[str, str] = None,
+    ) -> TraceContext:
         """
         子スパンを開始
         Args:
@@ -512,10 +578,15 @@ class DistributedTracingManager:
         child_tags = tags or {}
         child_tags.update({"component": "internal"})
 
-        return self.tracing_engine.start_span(operation_name, self.current_context, span_kind, child_tags)
+        return self.tracing_engine.start_span(
+            operation_name, self.current_context, span_kind, child_tags
+        )
 
-    def end_current_span(self, status: TraceStatus = TraceStatus.COMPLETED,
-                        logs: List[Dict[str, Any]] = None):
+    def end_current_span(
+        self,
+        status: TraceStatus = TraceStatus.COMPLETED,
+        logs: List[Dict[str, Any]] = None,
+    ):
         """
         現在のスパンを終了
         Args:
@@ -526,8 +597,13 @@ class DistributedTracingManager:
             self.tracing_engine.end_span(self.current_context, status, logs)
 
             # ルートスパンの場合はコンテキストをクリア
-            trace_details = self.tracing_engine.get_trace_details(self.current_context.trace_id)
-            if trace_details and self.current_context.span_id == trace_details["root_span_id"]:
+            trace_details = self.tracing_engine.get_trace_details(
+                self.current_context.trace_id
+            )
+            if (
+                trace_details
+                and self.current_context.span_id == trace_details["root_span_id"]
+            ):
                 self.current_context = None
 
     def inject_trace_context(self, headers: Dict[str, str]) -> Dict[str, str]:
@@ -572,7 +648,9 @@ class DistributedTracingManager:
             "active_traces": len(self.tracing_engine.active_traces),
             "active_spans": len(self.tracing_engine.active_spans),
             "sample_rate": self.trace_sampler.sample_rate,
-            "current_context": self.current_context.trace_id if self.current_context else None
+            "current_context": (
+                self.current_context.trace_id if self.current_context else None
+            ),
         }
 
     def get_trace_analytics(self, hours: int = 24) -> Dict[str, Any]:
@@ -582,34 +660,44 @@ class DistributedTracingManager:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # トレース統計
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT COUNT(*) as total_traces,
                            AVG(duration) as avg_duration,
                            COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_traces
                     FROM traces
                     WHERE start_time > ?
-                """, (cutoff_time,))
+                """,
+                    (cutoff_time,),
+                )
 
                 trace_stats = cursor.fetchone()
 
                 # サービス別統計
-                service_stats = conn.execute("""
+                service_stats = conn.execute(
+                    """
                     SELECT service_name, COUNT(*) as traces, AVG(duration) as avg_duration
                     FROM traces
                     WHERE start_time > ?
                     GROUP BY service_name
                     ORDER BY traces DESC
-                """, (cutoff_time,)).fetchall()
+                """,
+                    (cutoff_time,),
+                ).fetchall()
 
                 return {
                     "total_traces": trace_stats[0],
                     "avg_duration": trace_stats[1],
-                    "error_rate": (trace_stats[2] / trace_stats[0] * 100) if trace_stats[0] > 0 else 0,
+                    "error_rate": (
+                        (trace_stats[2] / trace_stats[0] * 100)
+                        if trace_stats[0] > 0
+                        else 0
+                    ),
                     "service_breakdown": [
                         {"service": stat[0], "traces": stat[1], "avg_duration": stat[2]}
                         for stat in service_stats[:10]
                     ],
-                    "period_hours": hours
+                    "period_hours": hours,
                 }
 
         except Exception as e:
@@ -632,7 +720,7 @@ def example_usage():
         "process_user_request",
         method="POST",
         url="/api/users",
-        tags={"user_id": "123", "endpoint": "/api/users"}
+        tags={"user_id": "123", "endpoint": "/api/users"},
     )
 
     print(f"トレース開始: {context.trace_id}")
@@ -641,21 +729,21 @@ def example_usage():
     db_context = manager.start_child_span(
         "database_query",
         SpanKind.CLIENT,
-        {"db.operation": "SELECT", "db.table": "users"}
+        {"db.operation": "SELECT", "db.table": "users"},
     )
 
     # データベース処理をシミュレーション
     time.sleep(0.1)
 
-    manager.end_current_span(TraceStatus.COMPLETED, [
-        {"timestamp": time.time(), "message": "クエリ実行完了"}
-    ])
+    manager.end_current_span(
+        TraceStatus.COMPLETED, [{"timestamp": time.time(), "message": "クエリ実行完了"}]
+    )
 
     # 外部API呼び出しのスパン
     api_context = manager.start_child_span(
         "external_api_call",
         SpanKind.CLIENT,
-        {"api.endpoint": "https://external-api.com/users"}
+        {"api.endpoint": "https://external-api.com/users"},
     )
 
     # API呼び出しをシミュレーション
