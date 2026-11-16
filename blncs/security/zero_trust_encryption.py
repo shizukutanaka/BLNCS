@@ -3,29 +3,31 @@
 ゼロトラストアーキテクチャとエンドツーエンド暗号化機能を提供
 """
 
-import time
-import json
-import sqlite3
-import threading
-from typing import Any, Dict, List, Optional, Callable, Tuple, Set
-from dataclasses import dataclass, field
-from enum import Enum
-import logging
+import base64
 import hashlib
 import hmac
+import json
+import logging
+import os
 import secrets
-import base64
+import sqlite3
+import threading
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-import os
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger(__name__)
 
 
 class TrustLevel(Enum):
     """信頼レベル"""
+
     UNTRUSTED = "untrusted"
     LOW_TRUST = "low_trust"
     MEDIUM_TRUST = "medium_trust"
@@ -35,6 +37,7 @@ class TrustLevel(Enum):
 
 class SecurityEventType(Enum):
     """セキュリティイベントタイプ"""
+
     AUTHENTICATION = "authentication"
     AUTHORIZATION = "authorization"
     DATA_ACCESS = "data_access"
@@ -47,6 +50,7 @@ class SecurityEventType(Enum):
 @dataclass
 class SecurityContext:
     """セキュリティコンテキスト情報"""
+
     user_id: str
     session_id: str
     device_id: str
@@ -62,6 +66,7 @@ class SecurityContext:
 @dataclass
 class AccessRequest:
     """アクセスリクエスト情報"""
+
     request_id: str
     user_id: str
     resource: str
@@ -75,6 +80,7 @@ class AccessRequest:
 @dataclass
 class EncryptionKey:
     """暗号化キー情報"""
+
     key_id: str
     key_type: str  # 'aes', 'rsa', 'ecc'
     key_data: bytes
@@ -132,8 +138,16 @@ class ZeroTrustPolicyEngine:
 
             conn.commit()
 
-    def add_security_policy(self, policy_id: str, name: str, resource_pattern: str,
-                          action: str, conditions: Dict[str, Any], decision: str, priority: int = 0):
+    def add_security_policy(
+        self,
+        policy_id: str,
+        name: str,
+        resource_pattern: str,
+        action: str,
+        conditions: Dict[str, Any],
+        decision: str,
+        priority: int = 0,
+    ):
         """
         セキュリティポリシーを追加
         Args:
@@ -154,21 +168,31 @@ class ZeroTrustPolicyEngine:
             "decision": decision,
             "priority": priority,
             "is_active": True,
-            "created_at": time.time()
+            "created_at": time.time(),
         }
 
         self.policies[policy_id] = policy
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO security_policies
                     (policy_id, name, resource_pattern, action, conditions, decision, priority, is_active, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    policy_id, name, resource_pattern, action,
-                    json.dumps(conditions), decision, priority, 1, time.time()
-                ))
+                """,
+                    (
+                        policy_id,
+                        name,
+                        resource_pattern,
+                        action,
+                        json.dumps(conditions),
+                        decision,
+                        priority,
+                        1,
+                        time.time(),
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -190,7 +214,9 @@ class ZeroTrustPolicyEngine:
                 continue
 
             # リソースパターンマッチング（簡易版）
-            if self._match_resource_pattern(request.resource, policy["resource_pattern"]):
+            if self._match_resource_pattern(
+                request.resource, policy["resource_pattern"]
+            ):
                 if request.action == policy["action"]:
                     applicable_policies.append(policy)
 
@@ -222,7 +248,9 @@ class ZeroTrustPolicyEngine:
         else:
             return resource == pattern
 
-    def _evaluate_policy_conditions(self, request: AccessRequest, policy: Dict[str, Any]) -> str:
+    def _evaluate_policy_conditions(
+        self, request: AccessRequest, policy: Dict[str, Any]
+    ) -> str:
         """ポリシー条件を評価"""
         conditions = policy["conditions"]
 
@@ -233,7 +261,7 @@ class ZeroTrustPolicyEngine:
             "low_trust": TrustLevel.LOW_TRUST,
             "medium_trust": TrustLevel.MEDIUM_TRUST,
             "high_trust": TrustLevel.HIGH_TRUST,
-            "fully_trusted": TrustLevel.FULLY_TRUSTED
+            "fully_trusted": TrustLevel.FULLY_TRUSTED,
         }
 
         if request.context.trust_level.value < trust_levels[required_trust].value:
@@ -252,7 +280,11 @@ class ZeroTrustPolicyEngine:
         time_restrictions = conditions.get("time_restrictions")
         if time_restrictions:
             current_hour = time.localtime().tm_hour
-            if not (time_restrictions["start_hour"] <= current_hour <= time_restrictions["end_hour"]):
+            if not (
+                time_restrictions["start_hour"]
+                <= current_hour
+                <= time_restrictions["end_hour"]
+            ):
                 return "deny"
 
         return policy["decision"]
@@ -261,21 +293,31 @@ class ZeroTrustPolicyEngine:
         """アクセスリクエストをログ記録"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO access_log
                     (request_id, user_id, resource, action, decision, reason, timestamp, context)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    request.request_id, request.user_id, request.resource,
-                    request.action, request.decision, request.reason,
-                    request.timestamp, json.dumps({
-                        "session_id": request.context.session_id,
-                        "device_id": request.context.device_id,
-                        "ip_address": request.context.ip_address,
-                        "trust_level": request.context.trust_level.value,
-                        "risk_score": request.context.risk_score
-                    })
-                ))
+                """,
+                    (
+                        request.request_id,
+                        request.user_id,
+                        request.resource,
+                        request.action,
+                        request.decision,
+                        request.reason,
+                        request.timestamp,
+                        json.dumps(
+                            {
+                                "session_id": request.context.session_id,
+                                "device_id": request.context.device_id,
+                                "ip_address": request.context.ip_address,
+                                "trust_level": request.context.trust_level.value,
+                                "risk_score": request.context.risk_score,
+                            }
+                        ),
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -306,7 +348,7 @@ class ZeroTrustPolicyEngine:
             TrustLevel.LOW_TRUST: 50.0,
             TrustLevel.MEDIUM_TRUST: 20.0,
             TrustLevel.HIGH_TRUST: 10.0,
-            TrustLevel.FULLY_TRUSTED: 0.0
+            TrustLevel.FULLY_TRUSTED: 0.0,
         }
 
         risk_score += trust_risks.get(context.trust_level, 50.0)
@@ -355,20 +397,21 @@ class EndToEndEncryptionManager:
         key_id = f"key_{int(time.time() * 1000000)}"
 
         encryption_key = EncryptionKey(
-            key_id=key_id,
-            key_type=key_type,
-            key_data=key_data,
-            algorithm=algorithm
+            key_id=key_id, key_type=key_type, key_data=key_data, algorithm=algorithm
         )
 
         self.encryption_keys[key_id] = encryption_key
 
         # 回転スケジュールを設定
-        self.key_rotation_schedule[key_id] = time.time() + (self.key_rotation_days * 24 * 3600)
+        self.key_rotation_schedule[key_id] = time.time() + (
+            self.key_rotation_days * 24 * 3600
+        )
 
         return encryption_key
 
-    def encrypt_message(self, message: str, recipient_public_key: bytes) -> Dict[str, Any]:
+    def encrypt_message(
+        self, message: str, recipient_public_key: bytes
+    ) -> Dict[str, Any]:
         """
         メッセージを暗号化
         Args:
@@ -382,21 +425,23 @@ class EndToEndEncryptionManager:
 
         # メッセージをデータキーで暗号化
         fernet = Fernet(data_key.key_data)
-        encrypted_message = fernet.encrypt(message.encode('utf-8'))
+        encrypted_message = fernet.encrypt(message.encode("utf-8"))
 
         # データキーを受信者の公開鍵で暗号化（簡易版）
         # 実際の実装では適切な非対称暗号化を使用
         encrypted_data_key = base64.b64encode(data_key.key_data)
 
         return {
-            "encrypted_message": base64.b64encode(encrypted_message).decode('utf-8'),
-            "encrypted_data_key": encrypted_data_key.decode('utf-8'),
+            "encrypted_message": base64.b64encode(encrypted_message).decode("utf-8"),
+            "encrypted_data_key": encrypted_data_key.decode("utf-8"),
             "key_id": data_key.key_id,
             "algorithm": data_key.algorithm,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
-    def decrypt_message(self, encrypted_data: Dict[str, Any], recipient_private_key: bytes) -> str:
+    def decrypt_message(
+        self, encrypted_data: Dict[str, Any], recipient_private_key: bytes
+    ) -> str:
         """
         メッセージを復号化
         Args:
@@ -415,7 +460,7 @@ class EndToEndEncryptionManager:
             encrypted_message = base64.b64decode(encrypted_data["encrypted_message"])
             decrypted_message = fernet.decrypt(encrypted_message)
 
-            return decrypted_message.decode('utf-8')
+            return decrypted_message.decode("utf-8")
 
         except Exception as e:
             logger.error(f"メッセージ復号エラー: {e}")
@@ -438,7 +483,9 @@ class EndToEndEncryptionManager:
                     key.expires_at = current_time
 
                     # 新しいキーの回転スケジュールを設定
-                    self.key_rotation_schedule[new_key.key_id] = current_time + (self.key_rotation_days * 24 * 3600)
+                    self.key_rotation_schedule[new_key.key_id] = current_time + (
+                        self.key_rotation_days * 24 * 3600
+                    )
 
     def get_active_keys(self) -> List[EncryptionKey]:
         """アクティブなキーを取得"""
@@ -458,7 +505,9 @@ class NetworkSecurityLayer:
         self.secure_channels: Dict[str, Dict[str, Any]] = {}
         self.tls_certificates: Dict[str, Dict[str, Any]] = {}
 
-    def establish_secure_channel(self, connection_id: str, peer_info: Dict[str, Any]) -> bool:
+    def establish_secure_channel(
+        self, connection_id: str, peer_info: Dict[str, Any]
+    ) -> bool:
         """
         セキュアチャネルを確立
         Args:
@@ -481,7 +530,7 @@ class NetworkSecurityLayer:
                 "peer_info": peer_info,
                 "established_at": time.time(),
                 "is_authenticated": True,
-                "encryption_enabled": True
+                "encryption_enabled": True,
             }
 
             return True
@@ -502,12 +551,16 @@ class NetworkSecurityLayer:
         # 未知の証明書は拒否（厳格モード）
         return False
 
-    def _perform_zero_trust_authentication(self, connection_id: str, peer_info: Dict[str, Any]) -> bool:
+    def _perform_zero_trust_authentication(
+        self, connection_id: str, peer_info: Dict[str, Any]
+    ) -> bool:
         """ゼロトラスト認証を実行"""
         # 実際の実装では継続的な認証を実行
         return True
 
-    def validate_ongoing_access(self, connection_id: str, resource: str, action: str) -> bool:
+    def validate_ongoing_access(
+        self, connection_id: str, resource: str, action: str
+    ) -> bool:
         """
         継続的なアクセスを検証
         Args:
@@ -568,10 +621,10 @@ class SecurityEnhancementManager:
                 "min_trust_level": "high_trust",
                 "require_mfa": True,
                 "max_risk_score": 30.0,
-                "time_restrictions": {"start_hour": 9, "end_hour": 18}
+                "time_restrictions": {"start_hour": 9, "end_hour": 18},
             },
             "challenge",
-            priority=100
+            priority=100,
         )
 
         # データアクセスポリシー
@@ -583,21 +636,15 @@ class SecurityEnhancementManager:
             {
                 "min_trust_level": "medium_trust",
                 "require_mfa": False,
-                "max_risk_score": 50.0
+                "max_risk_score": 50.0,
             },
             "allow",
-            priority=50
+            priority=50,
         )
 
         # デフォルト拒否ポリシー
         self.zero_trust_engine.add_security_policy(
-            "default_deny_policy",
-            "デフォルト拒否",
-            "*",
-            "*",
-            {},
-            "deny",
-            priority=0
+            "default_deny_policy", "デフォルト拒否", "*", "*", {}, "deny", priority=0
         )
 
     def _setup_default_certificates(self):
@@ -609,7 +656,9 @@ class SecurityEnhancementManager:
         """セキュリティシステムを開始"""
         if not self.is_security_active:
             self.is_security_active = True
-            self.security_thread = threading.Thread(target=self._security_loop, daemon=True)
+            self.security_thread = threading.Thread(
+                target=self._security_loop, daemon=True
+            )
             self.security_thread.start()
 
     def stop_security_system(self):
@@ -618,8 +667,13 @@ class SecurityEnhancementManager:
         if self.security_thread:
             self.security_thread.join()
 
-    def evaluate_access(self, user_id: str, resource: str, action: str,
-                       context: Optional[SecurityContext] = None) -> str:
+    def evaluate_access(
+        self,
+        user_id: str,
+        resource: str,
+        action: str,
+        context: Optional[SecurityContext] = None,
+    ) -> str:
         """
         アクセスを評価
         Args:
@@ -638,7 +692,7 @@ class SecurityEnhancementManager:
                 ip_address="0.0.0.0",
                 location="unknown",
                 user_agent="unknown",
-                trust_level=TrustLevel.UNTRUSTED
+                trust_level=TrustLevel.UNTRUSTED,
             )
 
         # リスクスコアを計算
@@ -653,7 +707,7 @@ class SecurityEnhancementManager:
             user_id=user_id,
             resource=resource,
             action=action,
-            context=context
+            context=context,
         )
 
         # アクセスを評価
@@ -673,7 +727,9 @@ class SecurityEnhancementManager:
 
         return self.encryption_manager.encrypt_message(message, recipient_public_key)
 
-    def decrypt_communication(self, encrypted_data: Dict[str, Any], recipient_id: str) -> str:
+    def decrypt_communication(
+        self, encrypted_data: Dict[str, Any], recipient_id: str
+    ) -> str:
         """
         通信を復号化
         Args:
@@ -685,7 +741,9 @@ class SecurityEnhancementManager:
         # 実際の実装では受信者の秘密鍵を取得
         recipient_private_key = b"dummy_private_key"
 
-        return self.encryption_manager.decrypt_message(encrypted_data, recipient_private_key)
+        return self.encryption_manager.decrypt_message(
+            encrypted_data, recipient_private_key
+        )
 
     def get_security_status(self) -> Dict[str, Any]:
         """セキュリティステータスを取得"""
@@ -694,7 +752,7 @@ class SecurityEnhancementManager:
             "active_policies": len(self.zero_trust_engine.policies),
             "active_keys": len(self.encryption_manager.get_active_keys()),
             "secure_channels": len(self.network_security.secure_channels),
-            "risk_score_average": self._calculate_average_risk_score()
+            "risk_score_average": self._calculate_average_risk_score(),
         }
 
     def _calculate_average_risk_score(self) -> float:
@@ -702,7 +760,9 @@ class SecurityEnhancementManager:
         if not self.zero_trust_engine.security_contexts:
             return 0.0
 
-        scores = [ctx.risk_score for ctx in self.zero_trust_engine.security_contexts.values()]
+        scores = [
+            ctx.risk_score for ctx in self.zero_trust_engine.security_contexts.values()
+        ]
         return sum(scores) / len(scores)
 
     def _security_loop(self):
@@ -737,7 +797,7 @@ def example_usage():
         user_agent="Mozilla/5.0...",
         trust_level=TrustLevel.HIGH_TRUST,
         mfa_verified=True,
-        risk_score=10.0
+        risk_score=10.0,
     )
 
     # アクセス評価

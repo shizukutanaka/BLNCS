@@ -8,31 +8,33 @@ Based on 2025 microservices best practices
 import asyncio
 import logging
 import time
-from typing import Callable, Awaitable, Optional, TypeVar, Any
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from collections import deque
+from typing import Any, Awaitable, Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class CircuitState(Enum):
     """Circuit breaker state"""
-    CLOSED = "closed"          # Normal operation
-    OPEN = "open"             # Failing, reject requests
-    HALF_OPEN = "half_open"   # Testing if service recovered
+
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing, reject requests
+    HALF_OPEN = "half_open"  # Testing if service recovered
 
 
 @dataclass
 class CircuitBreakerConfig:
     """Configuration for circuit breaker"""
-    failure_threshold: int = 5        # Consecutive failures to open circuit
-    success_threshold: int = 2        # Consecutive successes to close circuit
-    timeout_seconds: int = 60         # Time to wait before half-open
-    max_request_size: int = 100       # Max requests to track
+
+    failure_threshold: int = 5  # Consecutive failures to open circuit
+    success_threshold: int = 2  # Consecutive successes to close circuit
+    timeout_seconds: int = 60  # Time to wait before half-open
+    max_request_size: int = 100  # Max requests to track
 
 
 class CircuitBreaker:
@@ -110,7 +112,7 @@ class CircuitBreaker:
 
     def _record_success(self) -> None:
         """Record successful request"""
-        self.request_history.append({'status': 'success', 'time': datetime.utcnow()})
+        self.request_history.append({"status": "success", "time": datetime.utcnow()})
         self.failure_count = 0
         self.success_count += 1
 
@@ -123,7 +125,7 @@ class CircuitBreaker:
 
     def _record_failure(self) -> None:
         """Record failed request"""
-        self.request_history.append({'status': 'failure', 'time': datetime.utcnow()})
+        self.request_history.append({"status": "failure", "time": datetime.utcnow()})
         self.last_failure_time = datetime.utcnow()
         self.success_count = 0
         self.failure_count += 1
@@ -141,20 +143,23 @@ class CircuitBreaker:
     def get_metrics(self) -> dict:
         """Get circuit breaker metrics"""
         return {
-            'state': self.state.value,
-            'failure_count': self.failure_count,
-            'success_count': self.success_count,
-            'last_failure': self.last_failure_time.isoformat() if self.last_failure_time else None,
-            'requests_tracked': len(self.request_history)
+            "state": self.state.value,
+            "failure_count": self.failure_count,
+            "success_count": self.success_count,
+            "last_failure": (
+                self.last_failure_time.isoformat() if self.last_failure_time else None
+            ),
+            "requests_tracked": len(self.request_history),
         }
 
 
 @dataclass
 class BulkheadConfig:
     """Configuration for bulkhead pattern"""
-    max_concurrent_calls: int = 10      # Max concurrent requests
-    max_wait_duration_ms: int = 1000    # Max wait time for semaphore
-    max_queue_size: int = 100           # Max queued requests
+
+    max_concurrent_calls: int = 10  # Max concurrent requests
+    max_wait_duration_ms: int = 1000  # Max wait time for semaphore
+    max_queue_size: int = 100  # Max queued requests
 
 
 class Bulkhead:
@@ -172,12 +177,7 @@ class Bulkhead:
         self.active_count = 0
         self.max_active_count = 0
 
-    async def call(
-        self,
-        func: Callable[..., Awaitable[T]],
-        *args,
-        **kwargs
-    ) -> T:
+    async def call(self, func: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
         """
         Execute function with bulkhead protection
 
@@ -204,7 +204,7 @@ class Bulkhead:
             # Acquire semaphore with timeout
             acquired = await asyncio.wait_for(
                 self.semaphore.acquire(),
-                timeout=self.config.max_wait_duration_ms / 1000.0
+                timeout=self.config.max_wait_duration_ms / 1000.0,
             )
 
             if acquired:
@@ -227,11 +227,11 @@ class Bulkhead:
     def get_metrics(self) -> dict:
         """Get bulkhead metrics"""
         return {
-            'active_calls': self.active_count,
-            'queued_calls': self.queue_size,
-            'max_active_calls': self.max_active_count,
-            'rejected_calls': self.rejected_count,
-            'max_concurrent': self.config.max_concurrent_calls
+            "active_calls": self.active_count,
+            "queued_calls": self.queue_size,
+            "max_active_calls": self.max_active_count,
+            "rejected_calls": self.rejected_count,
+            "max_concurrent": self.config.max_concurrent_calls,
         }
 
 
@@ -244,17 +244,12 @@ class ResilientOperation:
     def __init__(
         self,
         circuit_breaker_config: Optional[CircuitBreakerConfig] = None,
-        bulkhead_config: Optional[BulkheadConfig] = None
+        bulkhead_config: Optional[BulkheadConfig] = None,
     ):
         self.circuit_breaker = CircuitBreaker(circuit_breaker_config)
         self.bulkhead = Bulkhead(bulkhead_config)
 
-    async def execute(
-        self,
-        func: Callable[..., Awaitable[T]],
-        *args,
-        **kwargs
-    ) -> T:
+    async def execute(self, func: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
         """
         Execute function with both circuit breaker and bulkhead protection
 
@@ -278,12 +273,13 @@ class ResilientOperation:
     def get_health(self) -> dict:
         """Get health status of resilient operation"""
         return {
-            'circuit_breaker': self.circuit_breaker.get_metrics(),
-            'bulkhead': self.bulkhead.get_metrics(),
-            'healthy': (
-                not self.circuit_breaker.is_open and
-                self.bulkhead.active_count < self.bulkhead.config.max_concurrent_calls
-            )
+            "circuit_breaker": self.circuit_breaker.get_metrics(),
+            "bulkhead": self.bulkhead.get_metrics(),
+            "healthy": (
+                not self.circuit_breaker.is_open
+                and self.bulkhead.active_count
+                < self.bulkhead.config.max_concurrent_calls
+            ),
         }
 
 
@@ -299,7 +295,7 @@ class Retry:
         initial_delay_ms: float = 100,
         max_delay_ms: float = 10000,
         backoff_factor: float = 2.0,
-        jitter: bool = True
+        jitter: bool = True,
     ):
         self.max_attempts = max_attempts
         self.initial_delay_ms = initial_delay_ms
@@ -308,12 +304,7 @@ class Retry:
         self.jitter = jitter
         self.attempt_count = 0
 
-    async def execute(
-        self,
-        func: Callable[..., Awaitable[T]],
-        *args,
-        **kwargs
-    ) -> T:
+    async def execute(self, func: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
         """
         Execute function with retry logic
 
@@ -347,29 +338,28 @@ class Retry:
                     logger.debug(f"Retrying after {delay}ms")
                     await asyncio.sleep(delay / 1000.0)
 
-        logger.error(
-            f"All {self.max_attempts} retry attempts failed: {last_exception}"
-        )
+        logger.error(f"All {self.max_attempts} retry attempts failed: {last_exception}")
         raise last_exception
 
     def _calculate_delay(self, attempt: int) -> float:
         """Calculate delay with exponential backoff"""
-        delay = self.initial_delay_ms * (self.backoff_factor ** attempt)
+        delay = self.initial_delay_ms * (self.backoff_factor**attempt)
         delay = min(delay, self.max_delay_ms)
 
         if self.jitter:
             import random
+
             delay = delay * (0.5 + random.random())
 
         return delay
 
 
 __all__ = [
-    'CircuitState',
-    'CircuitBreakerConfig',
-    'CircuitBreaker',
-    'BulkheadConfig',
-    'Bulkhead',
-    'ResilientOperation',
-    'Retry',
+    "CircuitState",
+    "CircuitBreakerConfig",
+    "CircuitBreaker",
+    "BulkheadConfig",
+    "Bulkhead",
+    "ResilientOperation",
+    "Retry",
 ]

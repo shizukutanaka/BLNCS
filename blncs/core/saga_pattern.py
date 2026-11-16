@@ -7,17 +7,18 @@ Based on 2024-2025 research on microservices transaction patterns
 
 import logging
 import uuid
-from typing import Dict, List, Optional, Callable, Awaitable, Any
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from abc import ABC, abstractmethod
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class SagaState(Enum):
     """Saga execution state"""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -27,6 +28,7 @@ class SagaState(Enum):
 
 class StepStatus(Enum):
     """Individual step status"""
+
     PENDING = "pending"
     EXECUTING = "executing"
     COMPLETED = "completed"
@@ -38,6 +40,7 @@ class StepStatus(Enum):
 @dataclass
 class SagaStep:
     """Represents a step in a saga"""
+
     name: str
     action: Callable[..., Awaitable[Any]]
     compensation: Callable[..., Awaitable[None]]
@@ -56,7 +59,9 @@ class SagaStep:
 
         while attempt < self.retry_count:
             try:
-                logger.info(f"Executing step '{self.name}' (attempt {attempt + 1}/{self.retry_count})")
+                logger.info(
+                    f"Executing step '{self.name}' (attempt {attempt + 1}/{self.retry_count})"
+                )
                 self.result = await self.action(**context)
                 self.status = StepStatus.COMPLETED
                 self.executed_at = datetime.utcnow()
@@ -73,7 +78,9 @@ class SagaStep:
                     self.status = StepStatus.FAILED
                     raise
 
-        raise RuntimeError(f"Step '{self.name}' failed after {self.retry_count} attempts")
+        raise RuntimeError(
+            f"Step '{self.name}' failed after {self.retry_count} attempts"
+        )
 
     async def compensate(self, context: Dict[str, Any]) -> None:
         """Execute compensation (rollback)"""
@@ -95,6 +102,7 @@ class SagaStep:
 @dataclass
 class SagaExecution:
     """Record of saga execution"""
+
     saga_id: str
     state: SagaState = SagaState.PENDING
     steps_executed: List[str] = field(default_factory=list)
@@ -112,14 +120,16 @@ class SagaExecution:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'saga_id': self.saga_id,
-            'state': self.state.value,
-            'steps_executed': self.steps_executed,
-            'steps_compensated': self.steps_compensated,
-            'error': self.error,
-            'duration_seconds': self.get_duration_seconds(),
-            'started_at': self.started_at.isoformat(),
-            'completed_at': self.completed_at.isoformat() if self.completed_at else None
+            "saga_id": self.saga_id,
+            "state": self.state.value,
+            "steps_executed": self.steps_executed,
+            "steps_compensated": self.steps_compensated,
+            "error": self.error,
+            "duration_seconds": self.get_duration_seconds(),
+            "started_at": self.started_at.isoformat(),
+            "completed_at": (
+                self.completed_at.isoformat() if self.completed_at else None
+            ),
         }
 
 
@@ -140,7 +150,7 @@ class Saga:
         action: Callable[..., Awaitable[Any]],
         compensation: Callable[..., Awaitable[None]],
         timeout_seconds: int = 30,
-        retry_count: int = 3
+        retry_count: int = 3,
     ) -> None:
         """Add step to saga"""
         step = SagaStep(
@@ -148,19 +158,20 @@ class Saga:
             action=action,
             compensation=compensation,
             timeout_seconds=timeout_seconds,
-            retry_count=retry_count
+            retry_count=retry_count,
         )
         self.steps.append(step)
         logger.debug(f"Added step '{name}' to saga {self.saga_id}")
 
-    async def execute(self, initial_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def execute(
+        self, initial_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         Execute saga with compensation on failure
         Implements compensating transaction pattern
         """
         self.execution = SagaExecution(
-            saga_id=self.saga_id,
-            context=initial_context or {}
+            saga_id=self.saga_id, context=initial_context or {}
         )
 
         self.execution.state = SagaState.IN_PROGRESS
@@ -241,7 +252,9 @@ class SagaOrchestrator:
         logger.info(f"Created saga: {saga.saga_id}")
         return saga
 
-    async def execute_saga(self, saga: Saga, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def execute_saga(
+        self, saga: Saga, context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Execute saga and track execution"""
         self.total_executed += 1
 
@@ -275,15 +288,16 @@ class SagaOrchestrator:
     def get_statistics(self) -> Dict[str, Any]:
         """Get orchestrator statistics"""
         return {
-            'total_sagas': len(self.sagas),
-            'total_executed': self.total_executed,
-            'total_succeeded': self.total_succeeded,
-            'total_failed': self.total_failed,
-            'success_rate': (
+            "total_sagas": len(self.sagas),
+            "total_executed": self.total_executed,
+            "total_succeeded": self.total_succeeded,
+            "total_failed": self.total_failed,
+            "success_rate": (
                 self.total_succeeded / self.total_executed * 100
-                if self.total_executed > 0 else 0
+                if self.total_executed > 0
+                else 0
             ),
-            'stored_executions': len(self.executions)
+            "stored_executions": len(self.executions),
         }
 
 
@@ -306,11 +320,13 @@ class ChoreographySaga:
 
     async def publish_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """Publish event for choreography"""
-        self.event_history.append({
-            'event_type': event_type,
-            'data': data,
-            'timestamp': datetime.utcnow().isoformat()
-        })
+        self.event_history.append(
+            {
+                "event_type": event_type,
+                "data": data,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
         if event_type in self.event_handlers:
             handler = self.event_handlers[event_type]
@@ -327,11 +343,11 @@ class ChoreographySaga:
 
 
 __all__ = [
-    'SagaState',
-    'StepStatus',
-    'SagaStep',
-    'SagaExecution',
-    'Saga',
-    'SagaOrchestrator',
-    'ChoreographySaga',
+    "SagaState",
+    "StepStatus",
+    "SagaStep",
+    "SagaExecution",
+    "Saga",
+    "SagaOrchestrator",
+    "ChoreographySaga",
 ]

@@ -6,15 +6,15 @@ Based on 2025 enterprise architecture best practices
 """
 
 import logging
-from typing import Any, List, Dict, Optional, TypeVar, Generic
-from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
-ID = TypeVar('ID')
+T = TypeVar("T")
+ID = TypeVar("ID")
 
 
 @dataclass
@@ -42,16 +42,17 @@ class ValueObject:
 @dataclass
 class Money(ValueObject):
     """Example Value Object - monetary amount"""
+
     amount: float
     currency: str = "BTC"
 
-    def add(self, other: 'Money') -> 'Money':
+    def add(self, other: "Money") -> "Money":
         """Add two monetary amounts"""
         if self.currency != other.currency:
             raise ValueError(f"Cannot add {self.currency} and {other.currency}")
         return Money(self.amount + other.amount, self.currency)
 
-    def multiply(self, factor: float) -> 'Money':
+    def multiply(self, factor: float) -> "Money":
         """Multiply monetary amount"""
         return Money(self.amount * factor, self.currency)
 
@@ -59,6 +60,7 @@ class Money(ValueObject):
 @dataclass
 class Address(ValueObject):
     """Example Value Object - address"""
+
     street: str
     city: str
     country: str
@@ -191,15 +193,15 @@ class Specification(ABC, Generic[T]):
         """Check if candidate satisfies specification"""
         pass
 
-    def and_spec(self, other: 'Specification[T]') -> 'AndSpecification[T]':
+    def and_spec(self, other: "Specification[T]") -> "AndSpecification[T]":
         """Combine with AND"""
         return AndSpecification(self, other)
 
-    def or_spec(self, other: 'Specification[T]') -> 'OrSpecification[T]':
+    def or_spec(self, other: "Specification[T]") -> "OrSpecification[T]":
         """Combine with OR"""
         return OrSpecification(self, other)
 
-    def not_spec(self) -> 'NotSpecification[T]':
+    def not_spec(self) -> "NotSpecification[T]":
         """Negate specification"""
         return NotSpecification(self)
 
@@ -212,7 +214,9 @@ class AndSpecification(Specification[T]):
         self.right = right
 
     def is_satisfied_by(self, candidate: T) -> bool:
-        return self.left.is_satisfied_by(candidate) and self.right.is_satisfied_by(candidate)
+        return self.left.is_satisfied_by(candidate) and self.right.is_satisfied_by(
+            candidate
+        )
 
 
 class OrSpecification(Specification[T]):
@@ -223,7 +227,9 @@ class OrSpecification(Specification[T]):
         self.right = right
 
     def is_satisfied_by(self, candidate: T) -> bool:
-        return self.left.is_satisfied_by(candidate) or self.right.is_satisfied_by(candidate)
+        return self.left.is_satisfied_by(candidate) or self.right.is_satisfied_by(
+            candidate
+        )
 
 
 class NotSpecification(Specification[T]):
@@ -333,18 +339,18 @@ class BoundedContext:
 
 
 __all__ = [
-    'ValueObject',
-    'Money',
-    'Address',
-    'Entity',
-    'Aggregate',
-    'Repository',
-    'DomainEvent',
-    'Specification',
-    'AndSpecification',
-    'OrSpecification',
-    'NotSpecification',
-    'DomainService',
-    'UnitOfWork',
-    'BoundedContext',
+    "ValueObject",
+    "Money",
+    "Address",
+    "Entity",
+    "Aggregate",
+    "Repository",
+    "DomainEvent",
+    "Specification",
+    "AndSpecification",
+    "OrSpecification",
+    "NotSpecification",
+    "DomainService",
+    "UnitOfWork",
+    "BoundedContext",
 ]

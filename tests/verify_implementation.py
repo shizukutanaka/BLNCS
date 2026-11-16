@@ -4,12 +4,13 @@ BLNCS Implementation Verification Script
 Verifies all implemented components are accessible and functional.
 """
 
-import sys
 import importlib
+import sys
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
+
 
 def verify_component(module_path, class_name=None):
     """Verify a component can be imported"""
@@ -32,6 +33,7 @@ def verify_component(module_path, class_name=None):
         print(f"⚠️  {module_path} - Warning: {e}")
         return True  # Don't fail for warnings
 
+
 def main():
     """Verify all implemented BLNCS components"""
     print("🔍 BLNCS Implementation Verification\n")
@@ -43,21 +45,17 @@ def main():
         ("blncs.core.health_monitor", "HealthMonitor"),
         ("blncs.core.logger", None),
         ("blncs.core.metrics", None),
-
         # Lightning Network Components
         ("blncs.lightning.smart_rebalancer", "SmartRebalancer"),
         ("blncs.lightning.network_analyzer", "NetworkAnalyzer"),
         ("blncs.lightning.fee_optimizer", "FeeOptimizer"),
         ("blncs.core.invoice_manager", "InvoiceManager"),
-
         # Monitoring and Security
         ("blncs.monitoring.unified_production_dashboard", "UnifiedProductionDashboard"),
         ("blncs.security.audit_logger", "SecurityAuditLogger"),
-
         # CLI and API
         ("blncs.cli.main", None),
         ("blncs.api.unified_rest_api", "UnifiedRESTAPI"),
-
         # Deployment
         ("blncs.deployment.production_system", "ProductionSystem"),
     ]
@@ -83,6 +81,7 @@ def main():
     print("\n🚀 Testing main CLI entry point...")
     try:
         from blncs_main import main
+
         print("✅ Main CLI entry point accessible")
     except Exception as e:
         print(f"❌ Main CLI error: {e}")
@@ -95,6 +94,7 @@ def main():
     print("  python3 blncs_main.py rebalance     # Smart channel rebalancing")
     print("  python3 blncs_main.py security      # Security audit")
     print("  python3 blncs_main.py cli           # Launch standard CLI")
+
 
 if __name__ == "__main__":
     main()

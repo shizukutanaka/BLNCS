@@ -6,15 +6,16 @@ Lightweight connection pooling and optimization utilities.
 """
 
 import asyncio
-import time
 import logging
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass, field
+import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from urllib3.util import Retry
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
+
 import aiohttp
 import requests
+from urllib3.util import Retry
 
 from ..core.exceptions import ConnectionError, TimeoutError
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ConnectionMetrics:
     """Connection pool metrics"""
+
     total_connections: int = 0
     active_connections: int = 0
     idle_connections: int = 0
@@ -36,11 +38,13 @@ class ConnectionMetrics:
 class ConnectionPoolOptimizer:
     """Lightweight connection pool optimizer"""
 
-    def __init__(self,
-                 max_connections: int = 10,
-                 max_connections_per_host: int = 5,
-                 timeout: float = 30.0,
-                 retry_attempts: int = 3):
+    def __init__(
+        self,
+        max_connections: int = 10,
+        max_connections_per_host: int = 5,
+        timeout: float = 30.0,
+        retry_attempts: int = 3,
+    ):
         self.max_connections = max_connections
         self.max_connections_per_host = max_connections_per_host
         self.timeout = timeout
@@ -66,17 +70,19 @@ class ConnectionPoolOptimizer:
             max_retries=self.retry_strategy,
             pool_connections=self.max_connections,
             pool_maxsize=self.max_connections_per_host,
-            pool_block=False
+            pool_block=False,
         )
 
-        session.mount('http://', adapter)
-        session.mount('https://', adapter)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
 
         # Set default headers
-        session.headers.update({
-            'User-Agent': 'BLNCS/2.0',
-            'Connection': 'keep-alive',
-        })
+        session.headers.update(
+            {
+                "User-Agent": "BLNCS/2.0",
+                "Connection": "keep-alive",
+            }
+        )
 
         # Set timeout
         session.timeout = self.timeout
@@ -94,10 +100,9 @@ class ConnectionPoolOptimizer:
             if session:
                 session.close()
 
-    async def make_request(self,
-                          url: str,
-                          method: str = 'GET',
-                          **kwargs) -> requests.Response:
+    async def make_request(
+        self, url: str, method: str = "GET", **kwargs
+    ) -> requests.Response:
         """Make an HTTP request with connection optimization"""
         start_time = time.time()
 
@@ -132,22 +137,23 @@ class ConnectionPoolOptimizer:
 
         # Update average
         if self.metrics.response_times:
-            self.metrics.avg_response_time = (
-                sum(self.metrics.response_times) / len(self.metrics.response_times)
+            self.metrics.avg_response_time = sum(self.metrics.response_times) / len(
+                self.metrics.response_times
             )
 
     def get_metrics(self) -> Dict[str, Any]:
         """Get current connection metrics"""
         return {
-            'total_connections': self.max_connections,
-            'active_connections': getattr(self, '_active_connections', 0),
-            'failed_connections': self.metrics.failed_connections,
-            'avg_response_time': self.metrics.avg_response_time,
-            'request_count': self.metrics.request_count,
-            'success_rate': (
+            "total_connections": self.max_connections,
+            "active_connections": getattr(self, "_active_connections", 0),
+            "failed_connections": self.metrics.failed_connections,
+            "avg_response_time": self.metrics.avg_response_time,
+            "request_count": self.metrics.request_count,
+            "success_rate": (
                 (self.metrics.request_count - self.metrics.failed_connections)
-                / max(self.metrics.request_count, 1) * 100
-            )
+                / max(self.metrics.request_count, 1)
+                * 100
+            ),
         }
 
     def optimize_for_load(self, current_load: float) -> Dict[str, Any]:
@@ -156,18 +162,26 @@ class ConnectionPoolOptimizer:
 
         if current_load > 0.8:  # High load
             # Increase connection limits
-            optimizations.update({
-                'max_connections': min(self.max_connections * 2, 100),
-                'max_connections_per_host': min(self.max_connections_per_host * 2, 20),
-                'timeout': min(self.timeout * 1.5, 60.0)
-            })
+            optimizations.update(
+                {
+                    "max_connections": min(self.max_connections * 2, 100),
+                    "max_connections_per_host": min(
+                        self.max_connections_per_host * 2, 20
+                    ),
+                    "timeout": min(self.timeout * 1.5, 60.0),
+                }
+            )
         elif current_load < 0.3:  # Low load
             # Reduce resource usage
-            optimizations.update({
-                'max_connections': max(self.max_connections // 2, 5),
-                'max_connections_per_host': max(self.max_connections_per_host // 2, 2),
-                'timeout': max(self.timeout * 0.8, 10.0)
-            })
+            optimizations.update(
+                {
+                    "max_connections": max(self.max_connections // 2, 5),
+                    "max_connections_per_host": max(
+                        self.max_connections_per_host // 2, 2
+                    ),
+                    "timeout": max(self.timeout * 0.8, 10.0),
+                }
+            )
 
         return optimizations
 
@@ -175,11 +189,13 @@ class ConnectionPoolOptimizer:
 class DatabaseConnectionPool:
     """Lightweight database connection pool"""
 
-    def __init__(self,
-                 connection_factory: Callable,
-                 min_connections: int = 2,
-                 max_connections: int = 10,
-                 max_idle_time: float = 300.0):
+    def __init__(
+        self,
+        connection_factory: Callable,
+        min_connections: int = 2,
+        max_connections: int = 10,
+        max_idle_time: float = 300.0,
+    ):
         self.connection_factory = connection_factory
         self.min_connections = min_connections
         self.max_connections = max_connections
@@ -197,19 +213,19 @@ class DatabaseConnectionPool:
         async with self._lock:
             # Try to get an idle connection
             for conn_info in self._pool:
-                if not conn_info['in_use']:
-                    conn_info['in_use'] = True
-                    conn_info['last_used'] = time.time()
-                    return conn_info['connection']
+                if not conn_info["in_use"]:
+                    conn_info["in_use"] = True
+                    conn_info["last_used"] = time.time()
+                    return conn_info["connection"]
 
             # Create new connection if under limit
             if len(self._active_connections) < self.max_connections:
                 connection = await self._create_connection()
                 conn_info = {
-                    'connection': connection,
-                    'in_use': True,
-                    'last_used': time.time(),
-                    'created': time.time()
+                    "connection": connection,
+                    "in_use": True,
+                    "last_used": time.time(),
+                    "created": time.time(),
                 }
                 self._active_connections[id(connection)] = conn_info
                 return connection
@@ -223,11 +239,11 @@ class DatabaseConnectionPool:
             conn_id = id(connection)
             if conn_id in self._active_connections:
                 conn_info = self._active_connections[conn_id]
-                conn_info['in_use'] = False
-                conn_info['last_used'] = time.time()
+                conn_info["in_use"] = False
+                conn_info["last_used"] = time.time()
 
                 # Move back to pool if still valid
-                if time.time() - conn_info['created'] < self.max_idle_time:
+                if time.time() - conn_info["created"] < self.max_idle_time:
                     self._pool.append(conn_info)
                     del self._active_connections[conn_id]
 
@@ -236,13 +252,13 @@ class DatabaseConnectionPool:
         async with self._lock:
             # Close active connections
             for conn_info in self._active_connections.values():
-                if hasattr(conn_info['connection'], 'close'):
-                    await conn_info['connection'].close()
+                if hasattr(conn_info["connection"], "close"):
+                    await conn_info["connection"].close()
 
             # Close pooled connections
             for conn_info in self._pool:
-                if hasattr(conn_info['connection'], 'close'):
-                    await conn_info['connection'].close()
+                if hasattr(conn_info["connection"], "close"):
+                    await conn_info["connection"].close()
 
             self._pool.clear()
             self._active_connections.clear()
@@ -265,8 +281,9 @@ class DatabaseConnectionPool:
                     # Remove expired connections
                     current_time = time.time()
                     self._pool = [
-                        conn for conn in self._pool
-                        if current_time - conn['last_used'] < self.max_idle_time
+                        conn
+                        for conn in self._pool
+                        if current_time - conn["last_used"] < self.max_idle_time
                     ]
 
                     # Ensure minimum connections
@@ -274,10 +291,10 @@ class DatabaseConnectionPool:
                         try:
                             connection = await self._create_connection()
                             conn_info = {
-                                'connection': connection,
-                                'in_use': False,
-                                'last_used': current_time,
-                                'created': current_time
+                                "connection": connection,
+                                "in_use": False,
+                                "last_used": current_time,
+                                "created": current_time,
                             }
                             self._pool.append(conn_info)
                         except Exception as e:
@@ -297,6 +314,7 @@ class DatabaseConnectionPool:
 _http_pool = None
 _db_pool = None
 
+
 def get_http_connection_pool() -> ConnectionPoolOptimizer:
     """Get global HTTP connection pool"""
     global _http_pool
@@ -304,7 +322,10 @@ def get_http_connection_pool() -> ConnectionPoolOptimizer:
         _http_pool = ConnectionPoolOptimizer()
     return _http_pool
 
-def get_database_connection_pool(connection_factory: Callable) -> DatabaseConnectionPool:
+
+def get_database_connection_pool(
+    connection_factory: Callable,
+) -> DatabaseConnectionPool:
     """Get global database connection pool"""
     global _db_pool
     if _db_pool is None:

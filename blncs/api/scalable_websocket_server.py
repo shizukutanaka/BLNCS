@@ -4,17 +4,19 @@ Scalable WebSocket Server - 1M Concurrent Connections
 Based on: Ably, VideoSDK, WebSocket.org Production Guide 2025
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from typing import Dict, Set, Optional, Any
 import asyncio
 import json
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import Any, Dict, Optional, Set
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
 try:
     import redis.asyncio as redis
+
     HAS_REDIS = True
 except ImportError:
     HAS_REDIS = False
@@ -51,10 +53,10 @@ class ConnectionManager:
 
         # Statistics
         self.stats = {
-            'total_connections': 0,
-            'messages_sent': 0,
-            'messages_received': 0,
-            'node_id': f'node_{id(self)}'
+            "total_connections": 0,
+            "messages_sent": 0,
+            "messages_received": 0,
+            "node_id": f"node_{id(self)}",
         }
 
     async def initialize(self):
@@ -72,8 +74,8 @@ class ConnectionManager:
                 socket_keepalive_options={
                     1: 1,  # TCP_KEEPIDLE
                     2: 1,  # TCP_KEEPINTVL
-                    3: 3   # TCP_KEEPCNT
-                }
+                    3: 3,  # TCP_KEEPCNT
+                },
             )
 
             # Test connection
@@ -97,7 +99,7 @@ class ConnectionManager:
         """
         await websocket.accept()
         self.active_connections[client_id] = websocket
-        self.stats['total_connections'] += 1
+        self.stats["total_connections"] += 1
 
         logger.info(
             f"Client {client_id} connected to {self.stats['node_id']}. "
@@ -105,12 +107,15 @@ class ConnectionManager:
         )
 
         # Notify other nodes
-        await self._publish_to_redis("system", {
-            'type': 'client_connected',
-            'client_id': client_id,
-            'node_id': self.stats['node_id'],
-            'timestamp': datetime.utcnow().isoformat()
-        })
+        await self._publish_to_redis(
+            "system",
+            {
+                "type": "client_connected",
+                "client_id": client_id,
+                "node_id": self.stats["node_id"],
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
     async def disconnect(self, client_id: str):
         """Disconnect client"""
@@ -166,8 +171,7 @@ class ConnectionManager:
         if self.redis_client:
             try:
                 await self.redis_client.publish(
-                    f"blncs:ws:{topic}",
-                    json.dumps(message)
+                    f"blncs:ws:{topic}", json.dumps(message)
                 )
             except Exception as e:
                 logger.error(f"Redis publish failed: {e}")
@@ -191,16 +195,16 @@ class ConnectionManager:
             logger.info(f"Redis Pub/Sub listener started on {self.stats['node_id']}")
 
             async for message in self.pubsub.listen():
-                if message['type'] == 'pmessage':
+                if message["type"] == "pmessage":
                     try:
                         # Extract topic
-                        channel = message['channel']
+                        channel = message["channel"]
                         if isinstance(channel, bytes):
-                            channel = channel.decode('utf-8')
-                        topic = channel.replace('blncs:ws:', '')
+                            channel = channel.decode("utf-8")
+                        topic = channel.replace("blncs:ws:", "")
 
                         # Parse message
-                        data = json.loads(message['data'])
+                        data = json.loads(message["data"])
 
                         # Deliver to local subscribers
                         await self._deliver_to_subscribers(topic, data)
@@ -228,7 +232,7 @@ class ConnectionManager:
                 try:
                     websocket = self.active_connections[client_id]
                     await websocket.send_json(message)
-                    self.stats['messages_sent'] += 1
+                    self.stats["messages_sent"] += 1
                 except Exception as e:
                     logger.error(f"Failed to send to {client_id}: {e}")
                     disconnected.append(client_id)
@@ -243,7 +247,7 @@ class ConnectionManager:
             try:
                 websocket = self.active_connections[client_id]
                 await websocket.send_json(message)
-                self.stats['messages_sent'] += 1
+                self.stats["messages_sent"] += 1
             except Exception as e:
                 logger.error(f"Failed to send personal message to {client_id}: {e}")
 
@@ -260,7 +264,9 @@ class ConnectionManager:
 
                 for client_id, websocket in list(self.active_connections.items()):
                     try:
-                        await websocket.send_json({'type': 'ping', 'timestamp': datetime.utcnow().isoformat()})
+                        await websocket.send_json(
+                            {"type": "ping", "timestamp": datetime.utcnow().isoformat()}
+                        )
                     except Exception:
                         disconnected.append(client_id)
 
@@ -276,16 +282,16 @@ class ConnectionManager:
     def get_stats(self) -> Dict[str, Any]:
         """Get connection statistics"""
         return {
-            'node_id': self.stats['node_id'],
-            'active_connections': len(self.active_connections),
-            'total_connections': self.stats['total_connections'],
-            'messages_sent': self.stats['messages_sent'],
-            'messages_received': self.stats['messages_received'],
-            'topics': {
+            "node_id": self.stats["node_id"],
+            "active_connections": len(self.active_connections),
+            "total_connections": self.stats["total_connections"],
+            "messages_sent": self.stats["messages_sent"],
+            "messages_received": self.stats["messages_received"],
+            "topics": {
                 topic: len(subscribers)
                 for topic, subscribers in self.topic_subscriptions.items()
             },
-            'redis_enabled': self.redis_client is not None
+            "redis_enabled": self.redis_client is not None,
         }
 
     async def shutdown(self):
@@ -349,33 +355,37 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         while True:
             # Receive message from client
             data = await websocket.receive_json()
-            manager.stats['messages_received'] += 1
+            manager.stats["messages_received"] += 1
 
-            message_type = data.get('type')
+            message_type = data.get("type")
 
-            if message_type == 'subscribe':
+            if message_type == "subscribe":
                 # Subscribe to topic
-                topic = data.get('topic')
+                topic = data.get("topic")
                 if topic:
                     await manager.subscribe(client_id, topic)
-                    await websocket.send_json({
-                        'type': 'subscribed',
-                        'topic': topic,
-                        'timestamp': datetime.utcnow().isoformat()
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "subscribed",
+                            "topic": topic,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                    )
 
-            elif message_type == 'unsubscribe':
+            elif message_type == "unsubscribe":
                 # Unsubscribe from topic
-                topic = data.get('topic')
+                topic = data.get("topic")
                 if topic:
                     await manager.unsubscribe(client_id, topic)
-                    await websocket.send_json({
-                        'type': 'unsubscribed',
-                        'topic': topic,
-                        'timestamp': datetime.utcnow().isoformat()
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "unsubscribed",
+                            "topic": topic,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                    )
 
-            elif message_type == 'pong':
+            elif message_type == "pong":
                 # Heartbeat response
                 pass
 
@@ -411,44 +421,54 @@ async def broadcast_message(topic: str, message: Dict[str, Any]):
 # Integration with Lightning events
 async def on_invoice_settled(invoice: Dict[str, Any]):
     """Handle invoice settlement event"""
-    await manager.broadcast('invoices', {
-        'type': 'invoice_settled',
-        'payment_hash': invoice.get('payment_hash'),
-        'amount': invoice.get('amount'),
-        'memo': invoice.get('memo'),
-        'timestamp': datetime.utcnow().isoformat()
-    })
+    await manager.broadcast(
+        "invoices",
+        {
+            "type": "invoice_settled",
+            "payment_hash": invoice.get("payment_hash"),
+            "amount": invoice.get("amount"),
+            "memo": invoice.get("memo"),
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
 
 
 async def on_payment_sent(payment: Dict[str, Any]):
     """Handle payment sent event"""
-    await manager.broadcast('payments', {
-        'type': 'payment_sent',
-        'payment_hash': payment.get('payment_hash'),
-        'amount_msat': payment.get('amount_msat'),
-        'fee_msat': payment.get('fee_msat'),
-        'destination': payment.get('destination'),
-        'timestamp': datetime.utcnow().isoformat()
-    })
+    await manager.broadcast(
+        "payments",
+        {
+            "type": "payment_sent",
+            "payment_hash": payment.get("payment_hash"),
+            "amount_msat": payment.get("amount_msat"),
+            "fee_msat": payment.get("fee_msat"),
+            "destination": payment.get("destination"),
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
 
 
 async def on_channel_opened(channel: Dict[str, Any]):
     """Handle channel opened event"""
-    await manager.broadcast('channels', {
-        'type': 'channel_opened',
-        'channel_id': channel.get('channel_id'),
-        'capacity': channel.get('capacity'),
-        'peer': channel.get('peer_pubkey'),
-        'timestamp': datetime.utcnow().isoformat()
-    })
+    await manager.broadcast(
+        "channels",
+        {
+            "type": "channel_opened",
+            "channel_id": channel.get("channel_id"),
+            "capacity": channel.get("capacity"),
+            "peer": channel.get("peer_pubkey"),
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "scalable_websocket_server:app",
         host="0.0.0.0",
         port=8000,
         log_level="info",
-        workers=4  # Multiple workers for horizontal scaling
+        workers=4,  # Multiple workers for horizontal scaling
     )

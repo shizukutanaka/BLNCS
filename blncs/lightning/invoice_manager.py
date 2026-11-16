@@ -3,20 +3,21 @@ BLNCS Lightning Invoice Manager
 Practical invoice creation and management for Lightning Network
 """
 
-import time
-import json
 import hashlib
-import secrets
+import json
 import logging
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
+import secrets
+import time
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
 class Invoice:
     """Lightning invoice data structure"""
+
     payment_hash: str
     payment_request: str  # BOLT11 invoice string
     amount_sats: int
@@ -58,7 +59,7 @@ class InvoiceManager:
         """Load invoices from storage"""
         if self.invoice_file.exists():
             try:
-                with open(self.invoice_file, 'r') as f:
+                with open(self.invoice_file, "r") as f:
                     data = json.load(f)
                     for payment_hash, invoice_data in data.items():
                         self.invoices[payment_hash] = Invoice(**invoice_data)
@@ -71,13 +72,14 @@ class InvoiceManager:
         """Save invoices to storage"""
         try:
             data = {hash: invoice.to_dict() for hash, invoice in self.invoices.items()}
-            with open(self.invoice_file, 'w') as f:
+            with open(self.invoice_file, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             self.logger.error(f"Failed to save invoices: {e}")
 
-    def create_invoice(self, amount_sats: int, description: str = "",
-                      expiry_seconds: int = 3600) -> Invoice:
+    def create_invoice(
+        self, amount_sats: int, description: str = "", expiry_seconds: int = 3600
+    ) -> Invoice:
         """Create a new Lightning invoice"""
         # Generate payment hash and preimage
         preimage = secrets.token_bytes(32)
@@ -100,17 +102,20 @@ class InvoiceManager:
             expiry_seconds=expiry_seconds,
             created_at=current_time,
             expires_at=expires_at,
-            preimage=preimage.hex()
+            preimage=preimage.hex(),
         )
 
         self.invoices[payment_hash] = invoice
         self._save_invoices()
 
-        self.logger.info(f"Created invoice: {payment_hash[:16]}... for {amount_sats} sats")
+        self.logger.info(
+            f"Created invoice: {payment_hash[:16]}... for {amount_sats} sats"
+        )
         return invoice
 
-    def _create_bolt11_invoice(self, payment_hash: str, amount_sats: int,
-                              description: str, expires_at: float) -> str:
+    def _create_bolt11_invoice(
+        self, payment_hash: str, amount_sats: int, description: str, expires_at: float
+    ) -> str:
         """Create simplified BOLT11 invoice string"""
         # Simplified BOLT11 format for demo
         # Real implementation would use proper BOLT11 library
@@ -163,7 +168,9 @@ class InvoiceManager:
         self.logger.info(f"Invoice cancelled: {payment_hash[:16]}...")
         return True
 
-    def list_invoices(self, status: Optional[str] = None, limit: int = 100) -> List[Invoice]:
+    def list_invoices(
+        self, status: Optional[str] = None, limit: int = 100
+    ) -> List[Invoice]:
         """List invoices with optional status filter"""
         invoices = list(self.invoices.values())
 
@@ -218,25 +225,25 @@ class InvoiceManager:
             "status_counts": status_counts,
             "total_amount_sats": total_amount,
             "paid_amount_sats": paid_amount,
-            "success_rate": paid_amount / total_amount * 100 if total_amount > 0 else 0
+            "success_rate": paid_amount / total_amount * 100 if total_amount > 0 else 0,
         }
 
     def decode_invoice(self, payment_request: str) -> Optional[Dict[str, Any]]:
         """Decode BOLT11 invoice (simplified)"""
         try:
             # Simplified BOLT11 decoding for demo
-            if not payment_request.startswith(('lnbc', 'lntb', 'lnbcrt')):
+            if not payment_request.startswith(("lnbc", "lntb", "lnbcrt")):
                 return None
 
             # Extract basic info from simplified format
-            network = "mainnet" if payment_request.startswith('lnbc') else "testnet"
+            network = "mainnet" if payment_request.startswith("lnbc") else "testnet"
 
             # Find amount (very simplified parsing)
             amount_sats = 0
-            if 'm' in payment_request:
+            if "m" in payment_request:
                 # milli-bitcoin
                 try:
-                    amount_part = payment_request.split('m')[0][4:]  # Skip 'lnbc'
+                    amount_part = payment_request.split("m")[0][4:]  # Skip 'lnbc'
                     amount_sats = int(amount_part) * 100000
                 except:
                     pass
@@ -245,7 +252,7 @@ class InvoiceManager:
                 "network": network,
                 "amount_sats": amount_sats,
                 "payment_request": payment_request,
-                "valid": True
+                "valid": True,
             }
 
         except Exception as e:
@@ -268,7 +275,7 @@ if __name__ == "__main__":
     invoice = manager.create_invoice(
         amount_sats=100000,  # 100k sats
         description="Test payment for Lightning demo",
-        expiry_seconds=3600  # 1 hour
+        expiry_seconds=3600,  # 1 hour
     )
 
     print(f"✅ Created invoice: {invoice.payment_hash[:16]}...")
@@ -293,6 +300,7 @@ if __name__ == "__main__":
 
     # Cleanup
     import shutil
+
     shutil.rmtree("test_data", ignore_errors=True)
 
     print("✅ Invoice manager test completed!")

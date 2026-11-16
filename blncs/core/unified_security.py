@@ -10,31 +10,35 @@ Consolidates functionality from:
 - national_security_framework.py
 """
 
-import secrets
-import time
-import jwt
-import bcrypt
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
-from dataclasses import dataclass, field
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-import logging
-import json
-import ipaddress
-from pathlib import Path
-import threading
-from collections import defaultdict, deque
+from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
+import ipaddress
+import json
+import logging
 import os
+import secrets
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+import bcrypt
+import jwt
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Try to import pyotp for TOTP support
 try:
     import pyotp
+
     HAS_PYOTP = True
 except ImportError:
     pyotp = None
@@ -42,9 +46,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class SecurityEvent:
     """Security event data structure"""
+
     event_type: str
     severity: str  # low, medium, high, critical
     description: str
@@ -53,9 +59,11 @@ class SecurityEvent:
     timestamp: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+
 @dataclass
 class MFASecret:
     """MFA secret data structure"""
+
     user_id: str
     secret: str
     backup_codes: List[str] = field(default_factory=list)
@@ -63,15 +71,18 @@ class MFASecret:
     created_at: float = field(default_factory=time.time)
     last_used: Optional[float] = None
 
+
 @dataclass
 class MFAAuthentication:
     """MFA authentication attempt"""
+
     user_id: str
     method: str  # 'totp', 'sms', 'email', 'backup_code'
     code: str
     timestamp: float = field(default_factory=time.time)
     success: bool = False
     ip_address: Optional[str] = None
+
 
 class MultiFactorAuthenticator:
     """Multi-factor authentication system"""
@@ -93,9 +104,7 @@ class MultiFactorAuthenticator:
 
         with self.lock:
             self.secrets[user_id] = MFASecret(
-                user_id=user_id,
-                secret=secret,
-                backup_codes=backup_codes
+                user_id=user_id, secret=secret, backup_codes=backup_codes
             )
 
         logger.info(f"Generated TOTP secret for user: {user_id}")
@@ -113,7 +122,9 @@ class MultiFactorAuthenticator:
         totp = pyotp.TOTP(secret.secret)
         return totp.provisioning_uri(name=user_id, issuer_name=issuer)
 
-    def verify_totp(self, user_id: str, code: str, ip_address: Optional[str] = None) -> bool:
+    def verify_totp(
+        self, user_id: str, code: str, ip_address: Optional[str] = None
+    ) -> bool:
         """Verify TOTP code"""
         if not HAS_PYOTP:
             raise RuntimeError("pyotp library not available for TOTP support")
@@ -137,10 +148,10 @@ class MultiFactorAuthenticator:
         # Record attempt
         attempt = MFAAuthentication(
             user_id=user_id,
-            method='totp',
+            method="totp",
             code=code,
             success=is_valid,
-            ip_address=ip_address
+            ip_address=ip_address,
         )
 
         with self.lock:
@@ -155,7 +166,9 @@ class MultiFactorAuthenticator:
 
         return is_valid
 
-    def verify_backup_code(self, user_id: str, code: str, ip_address: Optional[str] = None) -> bool:
+    def verify_backup_code(
+        self, user_id: str, code: str, ip_address: Optional[str] = None
+    ) -> bool:
         """Verify backup code (one-time use)"""
         if user_id not in self.secrets:
             return False
@@ -171,10 +184,10 @@ class MultiFactorAuthenticator:
         # Record attempt
         attempt = MFAAuthentication(
             user_id=user_id,
-            method='backup_code',
+            method="backup_code",
             code=code,
             success=True,
-            ip_address=ip_address
+            ip_address=ip_address,
         )
         self.attempts.append(attempt)
 
@@ -187,7 +200,8 @@ class MultiFactorAuthenticator:
         window_start = current_time - 3600  # 1 hour window
 
         recent_attempts = [
-            attempt for attempt in self.attempts
+            attempt
+            for attempt in self.attempts
             if attempt.user_id == user_id and attempt.timestamp > window_start
         ]
 
@@ -222,18 +236,20 @@ class MultiFactorAuthenticator:
     def get_mfa_status(self, user_id: str) -> Dict[str, Any]:
         """Get MFA status for user"""
         if user_id not in self.secrets:
-            return {'enabled': False, 'configured': False}
+            return {"enabled": False, "configured": False}
 
         secret = self.secrets[user_id]
         return {
-            'enabled': secret.enabled,
-            'configured': True,
-            'backup_codes_remaining': len(secret.backup_codes),
-            'last_used': secret.last_used,
-            'created_at': secret.created_at
+            "enabled": secret.enabled,
+            "configured": True,
+            "backup_codes_remaining": len(secret.backup_codes),
+            "last_used": secret.last_used,
+            "created_at": secret.created_at,
         }
 
-    def get_mfa_attempts(self, user_id: Optional[str] = None, limit: int = 50) -> List[MFAAuthentication]:
+    def get_mfa_attempts(
+        self, user_id: Optional[str] = None, limit: int = 50
+    ) -> List[MFAAuthentication]:
         """Get MFA authentication attempts"""
         attempts = list(self.attempts)
         if user_id:
@@ -241,9 +257,11 @@ class MultiFactorAuthenticator:
 
         return attempts[-limit:]  # Return most recent
 
+
 @dataclass
 class ZKPChallenge:
     """Zero-Knowledge Proof challenge"""
+
     user_id: str
     challenge: str
     timestamp: float = field(default_factory=time.time)
@@ -262,6 +280,7 @@ class ZKPChallenge:
 @dataclass
 class ZKPSecret:
     """Zero-Knowledge Proof secret data"""
+
     user_id: str
     salt: str
     verifier: str  # Stored verifier for SRP-like protocol
@@ -289,9 +308,7 @@ class ZeroKnowledgeAuthenticator:
 
         with self.lock:
             self.secrets[user_id] = ZKPSecret(
-                user_id=user_id,
-                salt=salt,
-                verifier=verifier
+                user_id=user_id, salt=salt, verifier=verifier
             )
 
         logger.info(f"Registered ZKP credentials for user: {user_id}")
@@ -321,7 +338,7 @@ class ZeroKnowledgeAuthenticator:
             self.challenges[user_id] = ZKPChallenge(
                 user_id=user_id,
                 challenge=challenge,
-                expires_at=time.time() + self.challenge_timeout
+                expires_at=time.time() + self.challenge_timeout,
             )
 
         logger.info(f"Initiated ZKP authentication for user: {user_id}")
@@ -418,9 +435,11 @@ class ZeroKnowledgeAuthenticator:
             for user_id in expired_users:
                 del self.challenges[user_id]
 
+
 @dataclass
 class FirewallRule:
     """Dynamic firewall rule"""
+
     rule_id: str
     source_ip: str
     action: str  # 'allow', 'deny', 'block'
@@ -445,6 +464,7 @@ class FirewallRule:
 @dataclass
 class ThreatPattern:
     """Threat pattern for rule generation"""
+
     pattern_id: str
     description: str
     severity: str  # 'low', 'medium', 'high', 'critical'
@@ -470,81 +490,90 @@ class DynamicFirewall:
     def _initialize_threat_patterns(self):
         """Initialize default threat patterns"""
         self.threat_patterns = {
-            'brute_force': ThreatPattern(
-                pattern_id='brute_force',
-                description='Brute force login attempts',
-                severity='high',
-                triggers=['authentication', 'failed_login'],
-                actions=['block_ip', 'alert_admin'],
+            "brute_force": ThreatPattern(
+                pattern_id="brute_force",
+                description="Brute force login attempts",
+                severity="high",
+                triggers=["authentication", "failed_login"],
+                actions=["block_ip", "alert_admin"],
                 rule_template={
-                    'action': 'deny',
-                    'protocol': 'tcp',
-                    'port': [22, 80, 443],  # SSH, HTTP, HTTPS
-                    'duration_hours': 24
+                    "action": "deny",
+                    "protocol": "tcp",
+                    "port": [22, 80, 443],  # SSH, HTTP, HTTPS
+                    "duration_hours": 24,
                 },
-                cooldown_period=3600
+                cooldown_period=3600,
             ),
-            'suspicious_traffic': ThreatPattern(
-                pattern_id='suspicious_traffic',
-                description='Suspicious network traffic patterns',
-                severity='medium',
-                triggers=['high_traffic', 'unusual_ports'],
-                actions=['rate_limit', 'monitor'],
+            "suspicious_traffic": ThreatPattern(
+                pattern_id="suspicious_traffic",
+                description="Suspicious network traffic patterns",
+                severity="medium",
+                triggers=["high_traffic", "unusual_ports"],
+                actions=["rate_limit", "monitor"],
                 rule_template={
-                    'action': 'rate_limit',
-                    'protocol': 'tcp',
-                    'rate_limit': '10/minute',
-                    'duration_hours': 1
+                    "action": "rate_limit",
+                    "protocol": "tcp",
+                    "rate_limit": "10/minute",
+                    "duration_hours": 1,
                 },
-                cooldown_period=1800
+                cooldown_period=1800,
             ),
-            'failed_mfa': ThreatPattern(
-                pattern_id='failed_mfa',
-                description='Multiple MFA failures',
-                severity='critical',
-                triggers=['mfa_failed'],
-                actions=['block_ip', 'require_captcha', 'alert_security'],
+            "failed_mfa": ThreatPattern(
+                pattern_id="failed_mfa",
+                description="Multiple MFA failures",
+                severity="critical",
+                triggers=["mfa_failed"],
+                actions=["block_ip", "require_captcha", "alert_security"],
                 rule_template={
-                    'action': 'block',
-                    'protocol': 'tcp',
-                    'port': 'all',
-                    'duration_hours': 48
+                    "action": "block",
+                    "protocol": "tcp",
+                    "port": "all",
+                    "duration_hours": 48,
                 },
-                cooldown_period=7200
+                cooldown_period=7200,
             ),
-            'suspicious_api': ThreatPattern(
-                pattern_id='suspicious_api',
-                description='Suspicious API access patterns',
-                severity='medium',
-                triggers=['rate_limit_exceeded', 'invalid_tokens'],
-                actions=['block_ip', 'require_api_key'],
+            "suspicious_api": ThreatPattern(
+                pattern_id="suspicious_api",
+                description="Suspicious API access patterns",
+                severity="medium",
+                triggers=["rate_limit_exceeded", "invalid_tokens"],
+                actions=["block_ip", "require_api_key"],
                 rule_template={
-                    'action': 'deny',
-                    'protocol': 'tcp',
-                    'port': [3000, 8080],  # API ports
-                    'duration_hours': 6
+                    "action": "deny",
+                    "protocol": "tcp",
+                    "port": [3000, 8080],  # API ports
+                    "duration_hours": 6,
                 },
-                cooldown_period=1800
-            )
+                cooldown_period=1800,
+            ),
         }
 
-    def generate_rule_from_event(self, security_event: SecurityEvent) -> Optional[FirewallRule]:
+    def generate_rule_from_event(
+        self, security_event: SecurityEvent
+    ) -> Optional[FirewallRule]:
         """Generate firewall rule from security event"""
         matching_patterns = []
 
         # Find matching threat patterns
         for pattern in self.threat_patterns.values():
-            if any(trigger in security_event.event_type.lower() for trigger in pattern.triggers):
+            if any(
+                trigger in security_event.event_type.lower()
+                for trigger in pattern.triggers
+            ):
                 # Check cooldown period
-                if (pattern.last_triggered is None or
-                    time.time() - pattern.last_triggered > pattern.cooldown_period):
+                if (
+                    pattern.last_triggered is None
+                    or time.time() - pattern.last_triggered > pattern.cooldown_period
+                ):
                     matching_patterns.append(pattern)
 
         if not matching_patterns:
             return None
 
         # Use the highest severity pattern
-        pattern = max(matching_patterns, key=lambda p: self._get_severity_score(p.severity))
+        pattern = max(
+            matching_patterns, key=lambda p: self._get_severity_score(p.severity)
+        )
 
         # Create rule from template
         rule_id = f"auto_{pattern.pattern_id}_{int(time.time())}_{self.rule_counter}"
@@ -552,18 +581,18 @@ class DynamicFirewall:
 
         template = pattern.rule_template
         expires_at = None
-        if 'duration_hours' in template:
-            expires_at = time.time() + (template['duration_hours'] * 3600)
+        if "duration_hours" in template:
+            expires_at = time.time() + (template["duration_hours"] * 3600)
 
         rule = FirewallRule(
             rule_id=rule_id,
-            source_ip=security_event.source_ip or 'unknown',
-            action=template['action'],
-            protocol=template.get('protocol'),
-            port=template.get('port'),
+            source_ip=security_event.source_ip or "unknown",
+            action=template["action"],
+            protocol=template.get("protocol"),
+            port=template.get("port"),
             reason=f"Auto-generated from {pattern.description}",
             expires_at=expires_at,
-            priority=self._get_priority_from_severity(pattern.severity)
+            priority=self._get_priority_from_severity(pattern.severity),
         )
 
         # Update pattern last triggered
@@ -578,15 +607,17 @@ class DynamicFirewall:
 
     def _get_severity_score(self, severity: str) -> int:
         """Get numerical score for severity"""
-        scores = {'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
+        scores = {"low": 1, "medium": 2, "high": 3, "critical": 4}
         return scores.get(severity, 1)
 
     def _get_priority_from_severity(self, severity: str) -> int:
         """Get rule priority from severity"""
-        priorities = {'low': 200, 'medium': 150, 'high': 100, 'critical': 50}
+        priorities = {"low": 200, "medium": 150, "high": 100, "critical": 50}
         return priorities.get(severity, 200)
 
-    def check_traffic(self, source_ip: str, protocol: str = 'tcp', port: int = 0) -> str:
+    def check_traffic(
+        self, source_ip: str, protocol: str = "tcp", port: int = 0
+    ) -> str:
         """Check if traffic should be allowed based on rules"""
         applicable_rules = []
 
@@ -595,7 +626,7 @@ class DynamicFirewall:
                 if not rule.is_active:
                     continue
 
-                if rule.source_ip == source_ip or rule.source_ip == '0.0.0.0/0':
+                if rule.source_ip == source_ip or rule.source_ip == "0.0.0.0/0":
                     # Check protocol
                     if rule.protocol and rule.protocol != protocol:
                         continue
@@ -605,13 +636,13 @@ class DynamicFirewall:
                         if isinstance(rule.port, list):
                             if port not in rule.port:
                                 continue
-                        elif rule.port != port and rule.port != 'all':
+                        elif rule.port != port and rule.port != "all":
                             continue
 
                     applicable_rules.append(rule)
 
         if not applicable_rules:
-            return 'allow'
+            return "allow"
 
         # Apply highest priority rule (lowest priority number)
         rule = min(applicable_rules, key=lambda r: r.priority)
@@ -629,7 +660,7 @@ class DynamicFirewall:
         protocol: Optional[str] = None,
         port: Optional[int] = None,
         reason: str = "Manual rule",
-        duration_hours: Optional[int] = None
+        duration_hours: Optional[int] = None,
     ) -> str:
         """Add manual firewall rule"""
         rule_id = f"manual_{int(time.time())}_{self.rule_counter}"
@@ -647,7 +678,7 @@ class DynamicFirewall:
             port=port,
             reason=reason,
             expires_at=expires_at,
-            priority=10  # Manual rules have high priority
+            priority=10,  # Manual rules have high priority
         )
 
         with self.lock:
@@ -677,8 +708,7 @@ class DynamicFirewall:
 
         with self.lock:
             expired_rules = [
-                rule_id for rule_id, rule in self.rules.items()
-                if rule.is_expired
+                rule_id for rule_id, rule in self.rules.items() if rule.is_expired
             ]
 
             for rule_id in expired_rules:
@@ -699,23 +729,26 @@ class DynamicFirewall:
         for rule in active_rules:
             if rule.action not in actions:
                 actions[rule.action] = []
-            actions[rule.action].append({
-                'rule_id': rule.rule_id,
-                'source_ip': rule.source_ip,
-                'protocol': rule.protocol,
-                'port': rule.port,
-                'reason': rule.reason,
-                'hit_count': rule.hit_count,
-                'last_hit': rule.last_hit
-            })
+            actions[rule.action].append(
+                {
+                    "rule_id": rule.rule_id,
+                    "source_ip": rule.source_ip,
+                    "protocol": rule.protocol,
+                    "port": rule.port,
+                    "reason": rule.reason,
+                    "hit_count": rule.hit_count,
+                    "last_hit": rule.last_hit,
+                }
+            )
 
         return {
-            'timestamp': time.time(),
-            'total_active_rules': len(active_rules),
-            'rules_by_action': actions,
-            'threat_patterns': len(self.threat_patterns),
-            'last_cleanup': getattr(self, '_last_cleanup', None)
+            "timestamp": time.time(),
+            "total_active_rules": len(active_rules),
+            "rules_by_action": actions,
+            "threat_patterns": len(self.threat_patterns),
+            "last_cleanup": getattr(self, "_last_cleanup", None),
         }
+
 
 class RateLimiter:
     """Rate limiting implementation"""
@@ -758,6 +791,7 @@ class RateLimiter:
                 request_times.popleft()
 
             return max(0, self.max_requests - len(request_times))
+
 
 class EncryptionManager:
     """Advanced encryption management"""
@@ -826,13 +860,13 @@ class EncryptionManager:
         private_pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
+            encryption_algorithm=serialization.NoEncryption(),
         )
 
         public_key = private_key.public_key()
         public_pem = public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
         return private_pem, public_pem
@@ -847,11 +881,14 @@ class EncryptionManager:
         """Verify password against hash"""
         return bcrypt.checkpw(password.encode(), hashed.encode())
 
+
 class JWTManager:
     """JWT token management"""
 
     def __init__(self, secret_key: Optional[str] = None, algorithm: str = "HS256"):
-        self.secret_key = secret_key or os.getenv('JWT_SECRET', secrets.token_urlsafe(32))
+        self.secret_key = secret_key or os.getenv(
+            "JWT_SECRET", secrets.token_urlsafe(32)
+        )
         self.algorithm = algorithm
         self.active_tokens: Dict[str, AuthToken] = {}
         self.blacklisted_tokens: set = set()
@@ -861,18 +898,18 @@ class JWTManager:
         user_id: str,
         permissions: List[str] = None,
         expires_in: int = 3600,
-        **kwargs
+        **kwargs,
     ) -> AuthToken:
         """Create JWT token"""
         now = time.time()
         expires_at = now + expires_in
 
         payload = {
-            'user_id': user_id,
-            'permissions': permissions or [],
-            'iat': now,
-            'exp': expires_at,
-            **kwargs
+            "user_id": user_id,
+            "permissions": permissions or [],
+            "iat": now,
+            "exp": expires_at,
+            **kwargs,
         }
 
         token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
@@ -882,7 +919,7 @@ class JWTManager:
             user_id=user_id,
             expires_at=expires_at,
             permissions=permissions or [],
-            metadata=kwargs
+            metadata=kwargs,
         )
 
         self.active_tokens[token] = auth_token
@@ -905,11 +942,14 @@ class JWTManager:
             # Create token from payload if valid
             auth_token = AuthToken(
                 token=token,
-                user_id=payload.get('user_id', ''),
-                expires_at=payload.get('exp', 0),
-                permissions=payload.get('permissions', []),
-                metadata={k: v for k, v in payload.items()
-                         if k not in ['user_id', 'permissions', 'iat', 'exp']}
+                user_id=payload.get("user_id", ""),
+                expires_at=payload.get("exp", 0),
+                permissions=payload.get("permissions", []),
+                metadata={
+                    k: v
+                    for k, v in payload.items()
+                    if k not in ["user_id", "permissions", "iat", "exp"]
+                },
             )
 
             if not auth_token.is_expired:
@@ -941,7 +981,7 @@ class JWTManager:
             user_id=auth_token.user_id,
             permissions=auth_token.permissions,
             expires_in=expires_in,
-            **auth_token.metadata
+            **auth_token.metadata,
         )
 
     def cleanup_expired_tokens(self):
@@ -980,6 +1020,7 @@ class JWTManager:
 @dataclass
 class AuthToken:
     """Authentication token with enhanced security features"""
+
     token: str
     user_id: str
     expires_at: float
@@ -1029,7 +1070,12 @@ class SecurityAuditor:
         self.events: deque = deque(maxlen=max_events)
         self.lock = threading.Lock()
         self.event_counts: Dict[str, int] = {}
-        self.severity_counts: Dict[str, int] = {'low': 0, 'medium': 0, 'high': 0, 'critical': 0}
+        self.severity_counts: Dict[str, int] = {
+            "low": 0,
+            "medium": 0,
+            "high": 0,
+            "critical": 0,
+        }
         self.user_activity: Dict[str, List[SecurityEvent]] = {}
         self.ip_activity: Dict[str, List[SecurityEvent]] = {}
 
@@ -1040,7 +1086,7 @@ class SecurityAuditor:
         description: str,
         source_ip: Optional[str] = None,
         user_id: Optional[str] = None,
-        **metadata
+        **metadata,
     ):
         """Log security event with enhanced tracking"""
         event = SecurityEvent(
@@ -1049,15 +1095,15 @@ class SecurityAuditor:
             description=description,
             source_ip=source_ip,
             user_id=user_id,
-            metadata=metadata
+            metadata=metadata,
         )
 
         # Log to standard logger as well
         log_level = {
-            'low': logging.INFO,
-            'medium': logging.WARNING,
-            'high': logging.ERROR,
-            'critical': logging.CRITICAL
+            "low": logging.INFO,
+            "medium": logging.WARNING,
+            "high": logging.ERROR,
+            "critical": logging.CRITICAL,
         }.get(severity, logging.INFO)
 
         logger.log(log_level, f"Security Event [{event_type}]: {description}")
@@ -1069,7 +1115,7 @@ class SecurityAuditor:
         event_type: Optional[str] = None,
         severity: Optional[str] = None,
         since: Optional[float] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
     ) -> List[SecurityEvent]:
         """Get filtered security events"""
         with self.lock:
@@ -1104,16 +1150,17 @@ class SecurityAuditor:
         event_type_counts = defaultdict(int)
 
         for key, count in event_counts.items():
-            event_type, severity = key.split(':', 1)
+            event_type, severity = key.split(":", 1)
             severity_counts[severity] += count
             event_type_counts[event_type] += count
 
         return {
-            'total_events': total_events,
-            'severity_counts': dict(severity_counts),
-            'event_type_counts': dict(event_type_counts),
-            'recent_events': self.get_events(limit=10)
+            "total_events": total_events,
+            "severity_counts": dict(severity_counts),
+            "event_type_counts": dict(event_type_counts),
+            "recent_events": self.get_events(limit=10),
         }
+
 
 class UnifiedSecurityManager:
     """
@@ -1125,7 +1172,7 @@ class UnifiedSecurityManager:
         jwt_secret: Optional[str] = None,
         master_key: Optional[bytes] = None,
         rate_limit_requests: int = 100,
-        rate_limit_window: int = 60
+        rate_limit_window: int = 60,
     ):
         # Initialize components
         self.encryption = EncryptionManager(master_key)
@@ -1138,21 +1185,21 @@ class UnifiedSecurityManager:
 
         # Security policies
         self.policies = {
-            'password_min_length': 8,
-            'password_require_special': True,
-            'password_require_numbers': True,
-            'password_require_uppercase': True,
-            'max_login_attempts': 5,
-            'account_lockout_duration': 300,  # 5 minutes
-            'token_expiry_default': 3600,  # 1 hour
-            'allowed_ip_ranges': [],
-            'blocked_ip_addresses': set(),
-            'require_2fa': False,
-            'mfa_required_for_admin': True,  # Require MFA for admin users
-            'zkp_enabled': False,  # Enable ZKP authentication
-            'zkp_required_for_sensitive': False,  # Require ZKP for sensitive operations
-            'dynamic_firewall_enabled': True,  # Enable dynamic firewall
-            'auto_block_suspicious': True  # Auto-block suspicious IPs
+            "password_min_length": 8,
+            "password_require_special": True,
+            "password_require_numbers": True,
+            "password_require_uppercase": True,
+            "max_login_attempts": 5,
+            "account_lockout_duration": 300,  # 5 minutes
+            "token_expiry_default": 3600,  # 1 hour
+            "allowed_ip_ranges": [],
+            "blocked_ip_addresses": set(),
+            "require_2fa": False,
+            "mfa_required_for_admin": True,  # Require MFA for admin users
+            "zkp_enabled": False,  # Enable ZKP authentication
+            "zkp_required_for_sensitive": False,  # Require ZKP for sensitive operations
+            "dynamic_firewall_enabled": True,  # Enable dynamic firewall
+            "auto_block_suspicious": True,  # Auto-block suspicious IPs
         }
 
         # User session tracking
@@ -1169,7 +1216,7 @@ class UnifiedSecurityManager:
         username: str,
         password: str,
         source_ip: Optional[str] = None,
-        mfa_code: Optional[str] = None
+        mfa_code: Optional[str] = None,
     ) -> Tuple[Optional[AuthToken], Optional[str]]:
         """
         Authenticate user and return token
@@ -1179,33 +1226,33 @@ class UnifiedSecurityManager:
         # Check rate limiting
         if not self.rate_limiter.is_allowed(f"login:{username}"):
             self.auditor.log_event(
-                'authentication',
-                'medium',
-                f'Rate limit exceeded for user {username}',
+                "authentication",
+                "medium",
+                f"Rate limit exceeded for user {username}",
                 source_ip=source_ip,
-                user_id=username
+                user_id=username,
             )
             return None, None
 
         # Check account lockout
         if self.is_account_locked(username):
             self.auditor.log_event(
-                'authentication',
-                'medium',
-                f'Login attempt on locked account {username}',
+                "authentication",
+                "medium",
+                f"Login attempt on locked account {username}",
                 source_ip=source_ip,
-                user_id=username
+                user_id=username,
             )
             return None, None
 
         # Check IP restrictions
         if not self.is_ip_allowed(source_ip):
             self.auditor.log_event(
-                'authentication',
-                'high',
-                f'Login attempt from blocked IP {source_ip}',
+                "authentication",
+                "high",
+                f"Login attempt from blocked IP {source_ip}",
                 source_ip=source_ip,
-                user_id=username
+                user_id=username,
             )
             return None, None
 
@@ -1216,9 +1263,9 @@ class UnifiedSecurityManager:
                 del self.failed_login_attempts[username]
 
             # Check if MFA is required
-            requires_mfa = self.policies['require_2fa'] or (
-                self.policies['mfa_required_for_admin'] and
-                'admin' in self.get_user_permissions(username)
+            requires_mfa = self.policies["require_2fa"] or (
+                self.policies["mfa_required_for_admin"]
+                and "admin" in self.get_user_permissions(username)
             )
 
             if requires_mfa and self.mfa.is_mfa_enabled(username):
@@ -1230,36 +1277,36 @@ class UnifiedSecurityManager:
                         token = self.jwt_manager.create_token(
                             user_id=username,
                             permissions=self.get_user_permissions(username),
-                            expires_in=self.policies['token_expiry_default']
+                            expires_in=self.policies["token_expiry_default"],
                         )
 
                         self.auditor.log_event(
-                            'authentication',
-                            'low',
-                            f'Successful MFA login for user {username}',
+                            "authentication",
+                            "low",
+                            f"Successful MFA login for user {username}",
                             source_ip=source_ip,
-                            user_id=username
+                            user_id=username,
                         )
 
                         return token, None
                     else:
                         # MFA failed
                         self.auditor.log_event(
-                            'authentication',
-                            'medium',
-                            f'Failed MFA verification for user {username}',
+                            "authentication",
+                            "medium",
+                            f"Failed MFA verification for user {username}",
                             source_ip=source_ip,
-                            user_id=username
+                            user_id=username,
                         )
                         return None, None
                 else:
                     # MFA required but not provided - return challenge
                     self.auditor.log_event(
-                        'authentication',
-                        'low',
-                        f'MFA challenge sent to user {username}',
+                        "authentication",
+                        "low",
+                        f"MFA challenge sent to user {username}",
                         source_ip=source_ip,
-                        user_id=username
+                        user_id=username,
                     )
                     return None, "MFA_REQUIRED"
             else:
@@ -1267,15 +1314,15 @@ class UnifiedSecurityManager:
                 token = self.jwt_manager.create_token(
                     user_id=username,
                     permissions=self.get_user_permissions(username),
-                    expires_in=self.policies['token_expiry_default']
+                    expires_in=self.policies["token_expiry_default"],
                 )
 
                 self.auditor.log_event(
-                    'authentication',
-                    'low',
-                    f'Successful login for user {username}',
+                    "authentication",
+                    "low",
+                    f"Successful login for user {username}",
                     source_ip=source_ip,
-                    user_id=username
+                    user_id=username,
                 )
 
                 return token, None
@@ -1284,11 +1331,11 @@ class UnifiedSecurityManager:
             self.record_failed_login(username, source_ip)
 
             self.auditor.log_event(
-                'authentication',
-                'medium',
-                f'Failed login attempt for user {username}',
+                "authentication",
+                "medium",
+                f"Failed login attempt for user {username}",
                 source_ip=source_ip,
-                user_id=username
+                user_id=username,
             )
 
             return None, None
@@ -1297,22 +1344,18 @@ class UnifiedSecurityManager:
         """Verify user password (mock implementation)"""
         # TODO: Implement actual password verification against database
         # This is a placeholder for demonstration
-        test_passwords = {
-            'admin': 'admin123',
-            'test': 'test123',
-            'demo': 'demo123'
-        }
+        test_passwords = {"admin": "admin123", "test": "test123", "demo": "demo123"}
         return test_passwords.get(username) == password
 
     def get_user_permissions(self, username: str) -> List[str]:
         """Get user permissions (mock implementation)"""
         # TODO: Implement actual permission lookup
         permission_map = {
-            'admin': ['read', 'write', 'admin'],
-            'test': ['read'],
-            'demo': ['read', 'write']
+            "admin": ["read", "write", "admin"],
+            "test": ["read"],
+            "demo": ["read", "write"],
         }
-        return permission_map.get(username, ['read'])
+        return permission_map.get(username, ["read"])
 
     def verify_token(self, token: str) -> Optional[AuthToken]:
         """Verify authentication token"""
@@ -1322,41 +1365,44 @@ class UnifiedSecurityManager:
         """Revoke authentication token"""
         self.jwt_manager.revoke_token(token)
         self.auditor.log_event(
-            'authorization',
-            'low',
-            'Token revoked',
-            metadata={'token_prefix': token[:8] + '...'}
+            "authorization",
+            "low",
+            "Token revoked",
+            metadata={"token_prefix": token[:8] + "..."},
         )
 
     def record_failed_login(self, username: str, source_ip: Optional[str] = None):
         """Record failed login attempt"""
         current_time = time.time()
-        self.failed_login_attempts[username].append({
-            'timestamp': current_time,
-            'source_ip': source_ip
-        })
+        self.failed_login_attempts[username].append(
+            {"timestamp": current_time, "source_ip": source_ip}
+        )
 
         # Keep only recent attempts (last hour)
         cutoff_time = current_time - 3600
         self.failed_login_attempts[username] = [
-            attempt for attempt in self.failed_login_attempts[username]
-            if attempt['timestamp'] > cutoff_time
+            attempt
+            for attempt in self.failed_login_attempts[username]
+            if attempt["timestamp"] > cutoff_time
         ]
 
         # Check if account should be locked
-        if len(self.failed_login_attempts[username]) >= self.policies['max_login_attempts']:
+        if (
+            len(self.failed_login_attempts[username])
+            >= self.policies["max_login_attempts"]
+        ):
             self.lock_account(username)
 
     def lock_account(self, username: str):
         """Lock user account"""
-        lock_until = time.time() + self.policies['account_lockout_duration']
+        lock_until = time.time() + self.policies["account_lockout_duration"]
         self.locked_accounts[username] = lock_until
 
         self.auditor.log_event(
-            'security',
-            'high',
-            f'Account {username} locked due to failed login attempts',
-            user_id=username
+            "security",
+            "high",
+            f"Account {username} locked due to failed login attempts",
+            user_id=username,
         )
 
     def is_account_locked(self, username: str) -> bool:
@@ -1377,14 +1423,14 @@ class UnifiedSecurityManager:
             return True
 
         # Check blocked IPs
-        if ip_address in self.policies['blocked_ip_addresses']:
+        if ip_address in self.policies["blocked_ip_addresses"]:
             return False
 
         # Check allowed ranges (if configured)
-        if self.policies['allowed_ip_ranges']:
+        if self.policies["allowed_ip_ranges"]:
             try:
                 ip = ipaddress.ip_address(ip_address)
-                for range_str in self.policies['allowed_ip_ranges']:
+                for range_str in self.policies["allowed_ip_ranges"]:
                     if ip in ipaddress.ip_network(range_str):
                         return True
                 return False
@@ -1397,16 +1443,24 @@ class UnifiedSecurityManager:
         """Validate password strength"""
         issues = []
 
-        if len(password) < self.policies['password_min_length']:
-            issues.append(f"Password must be at least {self.policies['password_min_length']} characters")
+        if len(password) < self.policies["password_min_length"]:
+            issues.append(
+                f"Password must be at least {self.policies['password_min_length']} characters"
+            )
 
-        if self.policies['password_require_uppercase'] and not any(c.isupper() for c in password):
+        if self.policies["password_require_uppercase"] and not any(
+            c.isupper() for c in password
+        ):
             issues.append("Password must contain uppercase letters")
 
-        if self.policies['password_require_numbers'] and not any(c.isdigit() for c in password):
+        if self.policies["password_require_numbers"] and not any(
+            c.isdigit() for c in password
+        ):
             issues.append("Password must contain numbers")
 
-        if self.policies['password_require_special'] and not any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password):
+        if self.policies["password_require_special"] and not any(
+            c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password
+        ):
             issues.append("Password must contain special characters")
 
         return len(issues) == 0, issues
@@ -1422,18 +1476,19 @@ class UnifiedSecurityManager:
     def get_security_report(self) -> Dict[str, Any]:
         """Get comprehensive security report"""
         return {
-            'timestamp': time.time(),
-            'active_tokens': len(self.jwt_manager.active_tokens),
-            'blacklisted_tokens': len(self.jwt_manager.blacklisted_tokens),
-            'locked_accounts': len(self.locked_accounts),
-            'failed_login_attempts': len(self.failed_login_attempts),
-            'blocked_ips': len(self.policies['blocked_ip_addresses']),
-            'security_events': self.auditor.get_event_summary(),
-            'policies': self.policies.copy()
+            "timestamp": time.time(),
+            "active_tokens": len(self.jwt_manager.active_tokens),
+            "blacklisted_tokens": len(self.jwt_manager.blacklisted_tokens),
+            "locked_accounts": len(self.locked_accounts),
+            "failed_login_attempts": len(self.failed_login_attempts),
+            "blocked_ips": len(self.policies["blocked_ip_addresses"]),
+            "security_events": self.auditor.get_event_summary(),
+            "policies": self.policies.copy(),
         }
 
     def start_background_cleanup(self):
         """Start background cleanup thread"""
+
         def cleanup_loop():
             while not self.shutdown_event.is_set():
                 try:
@@ -1445,7 +1500,8 @@ class UnifiedSecurityManager:
                     # Cleanup expired account locks
                     current_time = time.time()
                     expired_locks = [
-                        username for username, unlock_time in self.locked_accounts.items()
+                        username
+                        for username, unlock_time in self.locked_accounts.items()
                         if current_time > unlock_time
                     ]
                     for username in expired_locks:
@@ -1461,9 +1517,7 @@ class UnifiedSecurityManager:
                 self.shutdown_event.wait(300)
 
         self.cleanup_thread = threading.Thread(
-            target=cleanup_loop,
-            name="SecurityCleanup",
-            daemon=True
+            target=cleanup_loop, name="SecurityCleanup", daemon=True
         )
         self.cleanup_thread.start()
 
@@ -1474,21 +1528,21 @@ class UnifiedSecurityManager:
             uri = self.mfa.get_totp_uri(user_id)
 
             self.auditor.log_event(
-                'security',
-                'low',
-                f'MFA setup initiated for user {user_id}',
-                user_id=user_id
+                "security",
+                "low",
+                f"MFA setup initiated for user {user_id}",
+                user_id=user_id,
             )
 
             return {
-                'success': True,
-                'secret': secret,
-                'uri': uri,
-                'backup_codes': self.mfa.secrets[user_id].backup_codes.copy()
+                "success": True,
+                "secret": secret,
+                "uri": uri,
+                "backup_codes": self.mfa.secrets[user_id].backup_codes.copy(),
             }
         except Exception as e:
             logger.error(f"MFA setup failed for user {user_id}: {e}")
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     def enable_mfa(self, user_id: str) -> bool:
         """Enable MFA for user"""
@@ -1498,11 +1552,15 @@ class UnifiedSecurityManager:
         """Disable MFA for user"""
         return self.mfa.disable_mfa(user_id)
 
-    def verify_mfa_code(self, user_id: str, code: str, ip_address: Optional[str] = None) -> bool:
+    def verify_mfa_code(
+        self, user_id: str, code: str, ip_address: Optional[str] = None
+    ) -> bool:
         """Verify MFA code"""
         return self.mfa.verify_totp(user_id, code, ip_address)
 
-    def verify_backup_code(self, user_id: str, code: str, ip_address: Optional[str] = None) -> bool:
+    def verify_backup_code(
+        self, user_id: str, code: str, ip_address: Optional[str] = None
+    ) -> bool:
         """Verify backup code"""
         return self.mfa.verify_backup_code(user_id, code, ip_address)
 
@@ -1521,7 +1579,7 @@ class UnifiedSecurityManager:
         description: str,
         source_ip: Optional[str] = None,
         user_id: Optional[str] = None,
-        **metadata
+        **metadata,
     ):
         """Log security event with dynamic firewall rule generation"""
         # Log to auditor
@@ -1531,11 +1589,13 @@ class UnifiedSecurityManager:
             description=description,
             source_ip=source_ip,
             user_id=user_id,
-            **metadata
+            **metadata,
         )
 
         # Generate dynamic firewall rule if enabled
-        if self.policies.get('dynamic_firewall_enabled', False) and self.policies.get('auto_block_suspicious', False):
+        if self.policies.get("dynamic_firewall_enabled", False) and self.policies.get(
+            "auto_block_suspicious", False
+        ):
             try:
                 event = SecurityEvent(
                     event_type=event_type,
@@ -1544,15 +1604,19 @@ class UnifiedSecurityManager:
                     source_ip=source_ip,
                     user_id=user_id,
                     timestamp=time.time(),
-                    metadata=metadata
+                    metadata=metadata,
                 )
                 rule = self.firewall.generate_rule_from_event(event)
                 if rule:
-                    logger.info(f"Generated firewall rule from security event: {rule.rule_id}")
+                    logger.info(
+                        f"Generated firewall rule from security event: {rule.rule_id}"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to generate firewall rule: {e}")
 
-    def check_firewall_traffic(self, source_ip: str, protocol: str = 'tcp', port: int = 0) -> str:
+    def check_firewall_traffic(
+        self, source_ip: str, protocol: str = "tcp", port: int = 0
+    ) -> str:
         """Check if traffic should be allowed by firewall"""
         return self.firewall.check_traffic(source_ip, protocol, port)
 
@@ -1563,10 +1627,12 @@ class UnifiedSecurityManager:
         protocol: Optional[str] = None,
         port: Optional[int] = None,
         reason: str = "Manual rule",
-        duration_hours: Optional[int] = None
+        duration_hours: Optional[int] = None,
     ) -> str:
         """Add manual firewall rule"""
-        return self.firewall.add_manual_rule(source_ip, action, protocol, port, reason, duration_hours)
+        return self.firewall.add_manual_rule(
+            source_ip, action, protocol, port, reason, duration_hours
+        )
 
     def remove_firewall_rule(self, rule_id: str) -> bool:
         """Remove firewall rule"""
@@ -1613,27 +1679,27 @@ class UnifiedSecurityManager:
         username: str,
         client_proof: str,
         challenge: str,
-        source_ip: Optional[str] = None
+        source_ip: Optional[str] = None,
     ) -> Optional[AuthToken]:
         """Authenticate user using ZKP"""
-        if not self.policies['zkp_enabled']:
+        if not self.policies["zkp_enabled"]:
             self.auditor.log_event(
-                'authentication',
-                'medium',
-                'ZKP authentication attempted but disabled',
+                "authentication",
+                "medium",
+                "ZKP authentication attempted but disabled",
                 source_ip=source_ip,
-                user_id=username
+                user_id=username,
             )
             return None
 
         # Check rate limiting
         if not self.rate_limiter.is_allowed(f"zkp:{username}"):
             self.auditor.log_event(
-                'authentication',
-                'medium',
-                f'ZKP rate limit exceeded for user {username}',
+                "authentication",
+                "medium",
+                f"ZKP rate limit exceeded for user {username}",
                 source_ip=source_ip,
-                user_id=username
+                user_id=username,
             )
             return None
 
@@ -1643,30 +1709,32 @@ class UnifiedSecurityManager:
             token = self.jwt_manager.create_token(
                 user_id=username,
                 permissions=self.get_user_permissions(username),
-                expires_in=self.policies['token_expiry_default']
+                expires_in=self.policies["token_expiry_default"],
             )
 
             self.auditor.log_event(
-                'authentication',
-                'low',
-                f'Successful ZKP authentication for user {username}',
+                "authentication",
+                "low",
+                f"Successful ZKP authentication for user {username}",
                 source_ip=source_ip,
-                user_id=username
+                user_id=username,
             )
 
             return token
         else:
             self.auditor.log_event(
-                'authentication',
-                'medium',
-                f'Failed ZKP authentication for user {username}',
+                "authentication",
+                "medium",
+                f"Failed ZKP authentication for user {username}",
                 source_ip=source_ip,
-                user_id=username
+                user_id=username,
             )
             return None
 
+
 # Global security manager instance
 _security_manager: Optional[UnifiedSecurityManager] = None
+
 
 def get_security_manager() -> UnifiedSecurityManager:
     """Get or create global security manager"""
@@ -1675,95 +1743,125 @@ def get_security_manager() -> UnifiedSecurityManager:
         _security_manager = UnifiedSecurityManager()
     return _security_manager
 
-def authenticate_user(username: str, password: str, source_ip: Optional[str] = None, mfa_code: Optional[str] = None) -> Tuple[Optional[AuthToken], Optional[str]]:
+
+def authenticate_user(
+    username: str,
+    password: str,
+    source_ip: Optional[str] = None,
+    mfa_code: Optional[str] = None,
+) -> Tuple[Optional[AuthToken], Optional[str]]:
     """Authenticate user with optional MFA"""
     manager = get_security_manager()
     return manager.authenticate_user(username, password, source_ip, mfa_code)
+
 
 def setup_mfa(user_id: str) -> Dict[str, Any]:
     """Setup MFA for user"""
     manager = get_security_manager()
     return manager.setup_mfa(user_id)
 
+
 def enable_mfa(user_id: str) -> bool:
     """Enable MFA for user"""
     manager = get_security_manager()
     return manager.enable_mfa(user_id)
+
 
 def disable_mfa(user_id: str) -> bool:
     """Disable MFA for user"""
     manager = get_security_manager()
     return manager.disable_mfa(user_id)
 
+
 def verify_mfa_code(user_id: str, code: str, ip_address: Optional[str] = None) -> bool:
     """Verify MFA code"""
     manager = get_security_manager()
     return manager.verify_mfa_code(user_id, code, ip_address)
 
-def verify_backup_code(user_id: str, code: str, ip_address: Optional[str] = None) -> bool:
+
+def verify_backup_code(
+    user_id: str, code: str, ip_address: Optional[str] = None
+) -> bool:
     """Verify backup code"""
     manager = get_security_manager()
     return manager.verify_backup_code(user_id, code, ip_address)
+
 
 def get_mfa_status(user_id: str) -> Dict[str, Any]:
     """Get MFA status for user"""
     manager = get_security_manager()
     return manager.get_mfa_status(user_id)
 
+
 def reset_mfa(user_id: str) -> bool:
     """Reset MFA for user"""
     manager = get_security_manager()
     return manager.reset_mfa(user_id)
 
-def get_mfa_attempts(user_id: Optional[str] = None, limit: int = 50) -> List[MFAAuthentication]:
+
+def get_mfa_attempts(
+    user_id: Optional[str] = None, limit: int = 50
+) -> List[MFAAuthentication]:
     """Get MFA authentication attempts"""
     manager = get_security_manager()
     return manager.get_mfa_attempts(user_id, limit)
+
 
 def register_zkp_user(user_id: str, password: str) -> bool:
     """Register user for ZKP authentication"""
     manager = get_security_manager()
     return manager.register_zkp_user(user_id, password)
 
+
 def initiate_zkp_authentication(user_id: str) -> Optional[str]:
     """Initiate ZKP authentication"""
     manager = get_security_manager()
     return manager.initiate_zkp_authentication(user_id)
+
 
 def verify_zkp_proof(user_id: str, client_proof: str, challenge: str) -> bool:
     """Verify ZKP proof"""
     manager = get_security_manager()
     return manager.verify_zkp_proof(user_id, client_proof, challenge)
 
-def authenticate_with_zkp(username: str, client_proof: str, challenge: str, source_ip: Optional[str] = None) -> Optional[AuthToken]:
+
+def authenticate_with_zkp(
+    username: str, client_proof: str, challenge: str, source_ip: Optional[str] = None
+) -> Optional[AuthToken]:
     """Authenticate user using ZKP"""
     manager = get_security_manager()
     return manager.authenticate_with_zkp(username, client_proof, challenge, source_ip)
+
 
 def enable_zkp(user_id: str) -> bool:
     """Enable ZKP authentication for user"""
     manager = get_security_manager()
     return manager.enable_zkp(user_id)
 
+
 def disable_zkp(user_id: str) -> bool:
     """Disable ZKP authentication for user"""
     manager = get_security_manager()
     return manager.disable_zkp(user_id)
+
 
 def is_zkp_enabled(user_id: str) -> bool:
     """Check if ZKP is enabled for user"""
     manager = get_security_manager()
     return manager.is_zkp_enabled(user_id)
 
+
 def reset_zkp(user_id: str) -> bool:
     """Reset ZKP credentials for user"""
     manager = get_security_manager()
     return manager.reset_zkp(user_id)
 
-def check_firewall_traffic(source_ip: str, protocol: str = 'tcp', port: int = 0) -> str:
+
+def check_firewall_traffic(source_ip: str, protocol: str = "tcp", port: int = 0) -> str:
     """Check if traffic should be allowed by firewall"""
     manager = get_security_manager()
     return manager.check_firewall_traffic(source_ip, protocol, port)
+
 
 def add_firewall_rule(
     source_ip: str,
@@ -1771,104 +1869,117 @@ def add_firewall_rule(
     protocol: Optional[str] = None,
     port: Optional[int] = None,
     reason: str = "Manual rule",
-    duration_hours: Optional[int] = None
+    duration_hours: Optional[int] = None,
 ) -> str:
     """Add manual firewall rule"""
     manager = get_security_manager()
-    return manager.add_firewall_rule(source_ip, action, protocol, port, reason, duration_hours)
+    return manager.add_firewall_rule(
+        source_ip, action, protocol, port, reason, duration_hours
+    )
+
 
 def remove_firewall_rule(rule_id: str) -> bool:
     """Remove firewall rule"""
     manager = get_security_manager()
     return manager.remove_firewall_rule(rule_id)
 
+
 def get_firewall_rules() -> List[FirewallRule]:
     """Get active firewall rules"""
     manager = get_security_manager()
     return manager.get_firewall_rules()
+
 
 def cleanup_firewall_rules() -> int:
     """Clean up expired firewall rules"""
     manager = get_security_manager()
     return manager.cleanup_firewall_rules()
 
+
 def get_firewall_report() -> Dict[str, Any]:
     """Get firewall status report"""
     manager = get_security_manager()
     return manager.firewall.get_firewall_report()
+
 
 def verify_token(token: str) -> Optional[AuthToken]:
     """Verify authentication token"""
     manager = get_security_manager()
     return manager.verify_token(token)
 
+
 def encrypt_data(data: str) -> str:
     """Encrypt sensitive data"""
     manager = get_security_manager()
     return manager.encrypt_sensitive_data(data)
+
 
 def decrypt_data(encrypted_data: str) -> str:
     """Decrypt sensitive data"""
     manager = get_security_manager()
     return manager.decrypt_sensitive_data(encrypted_data)
 
+
 def get_security_report() -> Dict[str, Any]:
     """Get security report"""
     manager = get_security_manager()
     return manager.get_security_report()
 
+
 # Cleanup on shutdown
 import atexit
+
+
 def _cleanup_security_manager():
-    global _security_manager
     if _security_manager:
         _security_manager.stop_background_cleanup()
+
 
 atexit.register(_cleanup_security_manager)
 
 __all__ = [
-    'UnifiedSecurityManager',
-    'SecurityEvent',
-    'AuthToken',
-    'MFASecret',
-    'MFAAuthentication',
-    'MultiFactorAuthenticator',
-    'ZKPChallenge',
-    'ZKPSecret',
-    'ZeroKnowledgeAuthenticator',
-    'FirewallRule',
-    'ThreatPattern',
-    'DynamicFirewall',
-    'RateLimiter',
-    'EncryptionManager',
-    'JWTManager',
-    'SecurityAuditor',
-    'get_security_manager',
-    'authenticate_user',
-    'setup_mfa',
-    'enable_mfa',
-    'disable_mfa',
-    'verify_mfa_code',
-    'verify_backup_code',
-    'get_mfa_status',
-    'reset_mfa',
-    'get_mfa_attempts',
-    'register_zkp_user',
-    'initiate_zkp_authentication',
-    'verify_zkp_proof',
-    'authenticate_with_zkp',
-    'enable_zkp',
-    'disable_zkp',
-    'is_zkp_enabled',
-    'reset_zkp',
-    'check_firewall_traffic',
-    'add_firewall_rule',
-    'remove_firewall_rule',
-    'get_firewall_rules',
-    'cleanup_firewall_rules',
-    'get_firewall_report',
-    'verify_token',
-    'encrypt_data',
-    'decrypt_data',
-    'get_security_report'
+    "UnifiedSecurityManager",
+    "SecurityEvent",
+    "AuthToken",
+    "MFASecret",
+    "MFAAuthentication",
+    "MultiFactorAuthenticator",
+    "ZKPChallenge",
+    "ZKPSecret",
+    "ZeroKnowledgeAuthenticator",
+    "FirewallRule",
+    "ThreatPattern",
+    "DynamicFirewall",
+    "RateLimiter",
+    "EncryptionManager",
+    "JWTManager",
+    "SecurityAuditor",
+    "get_security_manager",
+    "authenticate_user",
+    "setup_mfa",
+    "enable_mfa",
+    "disable_mfa",
+    "verify_mfa_code",
+    "verify_backup_code",
+    "get_mfa_status",
+    "reset_mfa",
+    "get_mfa_attempts",
+    "register_zkp_user",
+    "initiate_zkp_authentication",
+    "verify_zkp_proof",
+    "authenticate_with_zkp",
+    "enable_zkp",
+    "disable_zkp",
+    "is_zkp_enabled",
+    "reset_zkp",
+    "check_firewall_traffic",
+    "add_firewall_rule",
+    "remove_firewall_rule",
+    "get_firewall_rules",
+    "cleanup_firewall_rules",
+    "get_firewall_report",
+    "verify_token",
+    "encrypt_data",
+    "decrypt_data",
+    "get_security_report",
 ]

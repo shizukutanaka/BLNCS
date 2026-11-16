@@ -5,17 +5,18 @@ Automated compliance reporting for SOC2, GDPR, PCI-DSS standards
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class ComplianceStandard(Enum):
     """Supported compliance standards"""
+
     SOC2 = "soc2"
     GDPR = "gdpr"
     PCI_DSS = "pci_dss"
@@ -25,6 +26,7 @@ class ComplianceStandard(Enum):
 
 class ComplianceStatus(Enum):
     """Compliance status"""
+
     COMPLIANT = "compliant"
     NON_COMPLIANT = "non_compliant"
     PARTIAL = "partial"
@@ -34,6 +36,7 @@ class ComplianceStatus(Enum):
 @dataclass
 class ComplianceControl:
     """Compliance control/requirement"""
+
     control_id: str
     standard: str
     category: str
@@ -47,6 +50,7 @@ class ComplianceControl:
 @dataclass
 class ComplianceReport:
     """Compliance report"""
+
     report_id: str
     timestamp: str
     standard: str
@@ -75,7 +79,7 @@ class ComplianceReporter:
         self._controls: Dict[str, List[ComplianceControl]] = {
             ComplianceStandard.SOC2.value: self._init_soc2_controls(),
             ComplianceStandard.GDPR.value: self._init_gdpr_controls(),
-            ComplianceStandard.PCI_DSS.value: self._init_pci_controls()
+            ComplianceStandard.PCI_DSS.value: self._init_pci_controls(),
         }
 
     def _init_soc2_controls(self) -> List[ComplianceControl]:
@@ -88,7 +92,7 @@ class ComplianceReporter:
                 description="Logical and physical access controls restrict access",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["audit_logs", "access_control_lists"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="CC6.6",
@@ -97,7 +101,7 @@ class ComplianceReporter:
                 description="User access is removed when no longer authorized",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["user_access_reviews", "termination_procedures"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="CC7.2",
@@ -106,7 +110,7 @@ class ComplianceReporter:
                 description="System monitoring detects and alerts on anomalous behavior",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["monitoring_dashboards", "alert_logs"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="CC8.1",
@@ -115,7 +119,7 @@ class ComplianceReporter:
                 description="Changes to system components are authorized and tested",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["change_requests", "test_results"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="A1.2",
@@ -124,8 +128,8 @@ class ComplianceReporter:
                 description="System availability and performance is monitored",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["uptime_reports", "performance_metrics"],
-                last_verified=datetime.now(timezone.utc).isoformat()
-            )
+                last_verified=datetime.now(timezone.utc).isoformat(),
+            ),
         ]
 
     def _init_gdpr_controls(self) -> List[ComplianceControl]:
@@ -138,7 +142,7 @@ class ComplianceReporter:
                 description="Appropriate technical and organizational security measures",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["encryption_policies", "access_controls"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="Art.33",
@@ -147,7 +151,7 @@ class ComplianceReporter:
                 description="Data breach notification procedures",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["incident_response_plan", "notification_templates"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="Art.15",
@@ -156,7 +160,7 @@ class ComplianceReporter:
                 description="Right of access by data subject",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["data_access_procedures", "request_logs"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="Art.17",
@@ -165,7 +169,7 @@ class ComplianceReporter:
                 description="Right to erasure (right to be forgotten)",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["data_deletion_procedures", "deletion_logs"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="Art.25",
@@ -174,8 +178,8 @@ class ComplianceReporter:
                 description="Data protection by design and by default",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["system_design_docs", "privacy_impact_assessments"],
-                last_verified=datetime.now(timezone.utc).isoformat()
-            )
+                last_verified=datetime.now(timezone.utc).isoformat(),
+            ),
         ]
 
     def _init_pci_controls(self) -> List[ComplianceControl]:
@@ -188,7 +192,7 @@ class ComplianceReporter:
                 description="Install and maintain firewall configuration",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["firewall_rules", "network_diagrams"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="Req.2",
@@ -197,7 +201,7 @@ class ComplianceReporter:
                 description="Do not use vendor-supplied defaults",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["configuration_standards", "hardening_checklists"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="Req.3",
@@ -207,7 +211,7 @@ class ComplianceReporter:
                 status=ComplianceStatus.NOT_APPLICABLE.value,
                 evidence=[],
                 last_verified=datetime.now(timezone.utc).isoformat(),
-                notes="System does not store cardholder data"
+                notes="System does not store cardholder data",
             ),
             ComplianceControl(
                 control_id="Req.8",
@@ -216,7 +220,7 @@ class ComplianceReporter:
                 description="Identify and authenticate access",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["authentication_policies", "mfa_implementation"],
-                last_verified=datetime.now(timezone.utc).isoformat()
+                last_verified=datetime.now(timezone.utc).isoformat(),
             ),
             ComplianceControl(
                 control_id="Req.10",
@@ -225,14 +229,12 @@ class ComplianceReporter:
                 description="Track and monitor all access to network resources",
                 status=ComplianceStatus.COMPLIANT.value,
                 evidence=["audit_logs", "log_retention_policy"],
-                last_verified=datetime.now(timezone.utc).isoformat()
-            )
+                last_verified=datetime.now(timezone.utc).isoformat(),
+            ),
         ]
 
     def generate_report(
-        self,
-        standard: ComplianceStandard,
-        period_days: int = 30
+        self, standard: ComplianceStandard, period_days: int = 30
     ) -> ComplianceReport:
         """
         Generate compliance report
@@ -253,10 +255,18 @@ class ComplianceReporter:
 
         # Calculate summary statistics
         total_controls = len(controls)
-        compliant_count = sum(1 for c in controls if c.status == ComplianceStatus.COMPLIANT.value)
-        non_compliant_count = sum(1 for c in controls if c.status == ComplianceStatus.NON_COMPLIANT.value)
-        partial_count = sum(1 for c in controls if c.status == ComplianceStatus.PARTIAL.value)
-        na_count = sum(1 for c in controls if c.status == ComplianceStatus.NOT_APPLICABLE.value)
+        compliant_count = sum(
+            1 for c in controls if c.status == ComplianceStatus.COMPLIANT.value
+        )
+        non_compliant_count = sum(
+            1 for c in controls if c.status == ComplianceStatus.NON_COMPLIANT.value
+        )
+        partial_count = sum(
+            1 for c in controls if c.status == ComplianceStatus.PARTIAL.value
+        )
+        na_count = sum(
+            1 for c in controls if c.status == ComplianceStatus.NOT_APPLICABLE.value
+        )
 
         # Determine overall status
         if non_compliant_count > 0:
@@ -267,16 +277,19 @@ class ComplianceReporter:
             overall_status = ComplianceStatus.COMPLIANT.value
 
         summary = {
-            'total_controls': total_controls,
-            'compliant': compliant_count,
-            'non_compliant': non_compliant_count,
-            'partial': partial_count,
-            'not_applicable': na_count,
-            'compliance_percentage': round(
-                (compliant_count / (total_controls - na_count) * 100)
-                if (total_controls - na_count) > 0 else 0,
-                2
-            )
+            "total_controls": total_controls,
+            "compliant": compliant_count,
+            "non_compliant": non_compliant_count,
+            "partial": partial_count,
+            "not_applicable": na_count,
+            "compliance_percentage": round(
+                (
+                    (compliant_count / (total_controls - na_count) * 100)
+                    if (total_controls - na_count) > 0
+                    else 0
+                ),
+                2,
+            ),
         }
 
         report = ComplianceReport(
@@ -287,7 +300,7 @@ class ComplianceReporter:
             controls=controls,
             summary=summary,
             period_start=start_date.isoformat(),
-            period_end=end_date.isoformat()
+            period_end=end_date.isoformat(),
         )
 
         # Save report
@@ -297,7 +310,7 @@ class ComplianceReporter:
             "Compliance report generated for %s: %s (%d%% compliant)",
             standard.value,
             overall_status,
-            summary['compliance_percentage']
+            summary["compliance_percentage"],
         )
 
         return report
@@ -307,7 +320,7 @@ class ComplianceReporter:
         report_file = self.reports_dir / f"{report.standard}_{report.report_id}.json"
 
         try:
-            with open(report_file, 'w') as f:
+            with open(report_file, "w") as f:
                 json.dump(asdict(report), f, indent=2, default=str)
 
             logger.info("Compliance report saved: %s", report_file)
@@ -321,7 +334,7 @@ class ComplianceReporter:
         control_id: str,
         status: ComplianceStatus,
         evidence: Optional[List[str]] = None,
-        notes: Optional[str] = None
+        notes: Optional[str] = None,
     ):
         """
         Update compliance control status
@@ -350,13 +363,12 @@ class ComplianceReporter:
                     "Control %s (%s) updated: %s",
                     control_id,
                     standard.value,
-                    status.value
+                    status.value,
                 )
                 break
 
     def get_non_compliant_controls(
-        self,
-        standard: Optional[ComplianceStandard] = None
+        self, standard: Optional[ComplianceStandard] = None
     ) -> List[ComplianceControl]:
         """Get all non-compliant controls"""
         non_compliant = []
@@ -365,10 +377,13 @@ class ComplianceReporter:
 
         for std in standards:
             controls = self._controls.get(std, [])
-            non_compliant.extend([
-                c for c in controls
-                if c.status == ComplianceStatus.NON_COMPLIANT.value
-            ])
+            non_compliant.extend(
+                [
+                    c
+                    for c in controls
+                    if c.status == ComplianceStatus.NON_COMPLIANT.value
+                ]
+            )
 
         return non_compliant
 
@@ -378,21 +393,30 @@ class ComplianceReporter:
 
         for standard, controls in self._controls.items():
             total = len(controls)
-            compliant = sum(1 for c in controls if c.status == ComplianceStatus.COMPLIANT.value)
-            non_compliant = sum(1 for c in controls if c.status == ComplianceStatus.NON_COMPLIANT.value)
-            na = sum(1 for c in controls if c.status == ComplianceStatus.NOT_APPLICABLE.value)
+            compliant = sum(
+                1 for c in controls if c.status == ComplianceStatus.COMPLIANT.value
+            )
+            non_compliant = sum(
+                1 for c in controls if c.status == ComplianceStatus.NON_COMPLIANT.value
+            )
+            na = sum(
+                1 for c in controls if c.status == ComplianceStatus.NOT_APPLICABLE.value
+            )
 
             applicable = total - na
 
             dashboard[standard] = {
-                'total_controls': total,
-                'compliant': compliant,
-                'non_compliant': non_compliant,
-                'compliance_percentage': round(
-                    (compliant / applicable * 100) if applicable > 0 else 0,
-                    2
+                "total_controls": total,
+                "compliant": compliant,
+                "non_compliant": non_compliant,
+                "compliance_percentage": round(
+                    (compliant / applicable * 100) if applicable > 0 else 0, 2
                 ),
-                'status': ComplianceStatus.COMPLIANT.value if non_compliant == 0 else ComplianceStatus.NON_COMPLIANT.value
+                "status": (
+                    ComplianceStatus.COMPLIANT.value
+                    if non_compliant == 0
+                    else ComplianceStatus.NON_COMPLIANT.value
+                ),
             }
 
         return dashboard
@@ -413,10 +437,10 @@ def get_compliance_reporter() -> ComplianceReporter:
 
 
 __all__ = [
-    'ComplianceReporter',
-    'ComplianceReport',
-    'ComplianceControl',
-    'ComplianceStandard',
-    'ComplianceStatus',
-    'get_compliance_reporter'
+    "ComplianceReporter",
+    "ComplianceReport",
+    "ComplianceControl",
+    "ComplianceStandard",
+    "ComplianceStatus",
+    "get_compliance_reporter",
 ]

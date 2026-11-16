@@ -5,10 +5,13 @@ This module provides reusable UI components with Atlassian-inspired design
 for the BLNCS dashboard GUI.
 """
 
+import time
 import tkinter as tk
 from tkinter import ttk
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 from .gui_theme import AtlassianTheme, ModernFrame
+
 
 class Lozenge(tk.Frame):
     """
@@ -18,7 +21,7 @@ class Lozenge(tk.Frame):
     or other metadata with consistent styling and color coding.
     """
 
-    def __init__(self, parent, text: str, appearance: str = 'default', **kwargs):
+    def __init__(self, parent, text: str, appearance: str = "default", **kwargs):
         super().__init__(parent, **kwargs)
 
         # Configure appearance
@@ -27,53 +30,54 @@ class Lozenge(tk.Frame):
 
         # Create rounded rectangle background
         self.canvas = tk.Canvas(
-            self, width=1, height=1,
-            highlightthickness=0, bg=self.cget('bg')
+            self, width=1, height=1, highlightthickness=0, bg=self.cget("bg")
         )
-        self.canvas.pack(fill='both', expand=True)
+        self.canvas.pack(fill="both", expand=True)
 
         # Text label
         self.text_label = tk.Label(
-            self.canvas, text=text,
-            font=AtlassianTheme.FONTS['caption'],
-            bg=self.bg_color, fg=self.fg_color
+            self.canvas,
+            text=text,
+            font=AtlassianTheme.FONTS["caption"],
+            bg=self.bg_color,
+            fg=self.fg_color,
         )
 
         # Bind resize event
-        self.bind('<Configure>', self._on_resize)
+        self.bind("<Configure>", self._on_resize)
 
     def _configure_styling(self):
         """Configure colors and styling based on appearance."""
         color_map = {
-            'default': {
-                'bg': AtlassianTheme.COLORS['neutral_100'],
-                'fg': AtlassianTheme.COLORS['text_secondary']
+            "default": {
+                "bg": AtlassianTheme.COLORS["neutral_100"],
+                "fg": AtlassianTheme.COLORS["text_secondary"],
             },
-            'success': {
-                'bg': AtlassianTheme.COLORS['success_light'],
-                'fg': AtlassianTheme.COLORS['success']
+            "success": {
+                "bg": AtlassianTheme.COLORS["success_light"],
+                "fg": AtlassianTheme.COLORS["success"],
             },
-            'warning': {
-                'bg': AtlassianTheme.COLORS['warning_light'],
-                'fg': AtlassianTheme.COLORS['warning']
+            "warning": {
+                "bg": AtlassianTheme.COLORS["warning_light"],
+                "fg": AtlassianTheme.COLORS["warning"],
             },
-            'error': {
-                'bg': AtlassianTheme.COLORS['error_light'],
-                'fg': AtlassianTheme.COLORS['error']
+            "error": {
+                "bg": AtlassianTheme.COLORS["error_light"],
+                "fg": AtlassianTheme.COLORS["error"],
             },
-            'info': {
-                'bg': AtlassianTheme.COLORS['primary_light'],
-                'fg': AtlassianTheme.COLORS['primary']
+            "info": {
+                "bg": AtlassianTheme.COLORS["primary_light"],
+                "fg": AtlassianTheme.COLORS["primary"],
             },
-            'new': {
-                'bg': AtlassianTheme.COLORS['neutral_50'],
-                'fg': AtlassianTheme.COLORS['text_secondary']
-            }
+            "new": {
+                "bg": AtlassianTheme.COLORS["neutral_50"],
+                "fg": AtlassianTheme.COLORS["text_secondary"],
+            },
         }
 
-        colors = color_map.get(self.appearance, color_map['default'])
-        self.bg_color = colors['bg']
-        self.fg_color = colors['fg']
+        colors = color_map.get(self.appearance, color_map["default"])
+        self.bg_color = colors["bg"]
+        self.fg_color = colors["fg"]
 
     def _on_resize(self, event):
         """Handle resize to redraw the rounded background."""
@@ -84,29 +88,40 @@ class Lozenge(tk.Frame):
             return
 
         # Clear canvas
-        self.canvas.delete('all')
+        self.canvas.delete("all")
 
         # Draw rounded rectangle background
         radius = min(4, height // 2)  # Corner radius
 
         # Create rounded rectangle
-        self.canvas.create_oval(0, 0, radius*2, radius*2,
-                               fill=self.bg_color, outline='')
-        self.canvas.create_oval(width-radius*2, 0, width, radius*2,
-                               fill=self.bg_color, outline='')
-        self.canvas.create_oval(0, height-radius*2, radius*2, height,
-                               fill=self.bg_color, outline='')
-        self.canvas.create_oval(width-radius*2, height-radius*2, width, height,
-                               fill=self.bg_color, outline='')
+        self.canvas.create_oval(
+            0, 0, radius * 2, radius * 2, fill=self.bg_color, outline=""
+        )
+        self.canvas.create_oval(
+            width - radius * 2, 0, width, radius * 2, fill=self.bg_color, outline=""
+        )
+        self.canvas.create_oval(
+            0, height - radius * 2, radius * 2, height, fill=self.bg_color, outline=""
+        )
+        self.canvas.create_oval(
+            width - radius * 2,
+            height - radius * 2,
+            width,
+            height,
+            fill=self.bg_color,
+            outline="",
+        )
 
         # Fill center
-        self.canvas.create_rectangle(radius, 0, width-radius, height,
-                                   fill=self.bg_color, outline='')
-        self.canvas.create_rectangle(0, radius, width, height-radius,
-                                   fill=self.bg_color, outline='')
+        self.canvas.create_rectangle(
+            radius, 0, width - radius, height, fill=self.bg_color, outline=""
+        )
+        self.canvas.create_rectangle(
+            0, radius, width, height - radius, fill=self.bg_color, outline=""
+        )
 
         # Position text label
-        self.canvas.create_window(width//2, height//2, window=self.text_label)
+        self.canvas.create_window(width // 2, height // 2, window=self.text_label)
 
     def set_text(self, text: str):
         """Update lozenge text."""
@@ -117,7 +132,13 @@ class Lozenge(tk.Frame):
         self.appearance = appearance
         self._configure_styling()
         self.text_label.config(bg=self.bg_color, fg=self.fg_color)
-        self._on_resize(type('Event', (), {'width': self.winfo_width(), 'height': self.winfo_height()})())
+        self._on_resize(
+            type(
+                "Event",
+                (),
+                {"width": self.winfo_width(), "height": self.winfo_height()},
+            )()
+        )
 
 
 class Tag(tk.Frame):
@@ -128,8 +149,15 @@ class Tag(tk.Frame):
     more flexible styling for content organization.
     """
 
-    def __init__(self, parent, text: str, appearance: str = 'default',
-                 removable: bool = False, on_remove=None, **kwargs):
+    def __init__(
+        self,
+        parent,
+        text: str,
+        appearance: str = "default",
+        removable: bool = False,
+        on_remove=None,
+        **kwargs,
+    ):
         super().__init__(parent, **kwargs)
 
         self.appearance = appearance
@@ -144,55 +172,66 @@ class Tag(tk.Frame):
 
         # Text label
         self.text_label = tk.Label(
-            self, text=text,
-            font=AtlassianTheme.FONTS['caption'],
-            bg=self.bg_color, fg=self.fg_color,
-            padx=AtlassianTheme.SPACING['xs']
+            self,
+            text=text,
+            font=AtlassianTheme.FONTS["caption"],
+            bg=self.bg_color,
+            fg=self.fg_color,
+            padx=AtlassianTheme.SPACING["xs"],
         )
-        self.text_label.pack(side='left')
+        self.text_label.pack(side="left")
 
         # Remove button if removable
         if removable:
             self.remove_btn = tk.Button(
-                self, text='×',
-                font=('Arial', 10, 'bold'),
-                bg=self.bg_color, fg=self.fg_color,
-                relief='flat', borderwidth=0,
-                padx=2, pady=0,
-                command=self._on_remove_click
+                self,
+                text="×",
+                font=("Arial", 10, "bold"),
+                bg=self.bg_color,
+                fg=self.fg_color,
+                relief="flat",
+                borderwidth=0,
+                padx=2,
+                pady=0,
+                command=self._on_remove_click,
             )
-            self.remove_btn.pack(side='right')
-            self.remove_btn.bind('<Enter>', lambda e: self.remove_btn.config(fg=AtlassianTheme.COLORS['error']))
-            self.remove_btn.bind('<Leave>', lambda e: self.remove_btn.config(fg=self.fg_color))
+            self.remove_btn.pack(side="right")
+            self.remove_btn.bind(
+                "<Enter>",
+                lambda e: self.remove_btn.config(fg=AtlassianTheme.COLORS["error"]),
+            )
+            self.remove_btn.bind(
+                "<Leave>", lambda e: self.remove_btn.config(fg=self.fg_color)
+            )
 
     def _configure_styling(self):
         """Configure tag styling."""
         color_map = {
-            'default': {
-                'bg': AtlassianTheme.COLORS['neutral_100'],
-                'fg': AtlassianTheme.COLORS['text_secondary']
+            "default": {
+                "bg": AtlassianTheme.COLORS["neutral_100"],
+                "fg": AtlassianTheme.COLORS["text_secondary"],
             },
-            'success': {
-                'bg': AtlassianTheme.COLORS['success_light'],
-                'fg': AtlassianTheme.COLORS['success']
+            "success": {
+                "bg": AtlassianTheme.COLORS["success_light"],
+                "fg": AtlassianTheme.COLORS["success"],
             },
-            'warning': {
-                'bg': AtlassianTheme.COLORS['warning_light'],
-                'fg': AtlassianTheme.COLORS['warning']
+            "warning": {
+                "bg": AtlassianTheme.COLORS["warning_light"],
+                "fg": AtlassianTheme.COLORS["warning"],
             },
-            'error': {
-                'bg': AtlassianTheme.COLORS['error_light'],
-                'fg': AtlassianTheme.COLORS['error']
+            "error": {
+                "bg": AtlassianTheme.COLORS["error_light"],
+                "fg": AtlassianTheme.COLORS["error"],
             },
-            'info': {
-                'bg': AtlassianTheme.COLORS['primary_light'],
-                'fg': AtlassianTheme.COLORS['primary']
-            }
+            "info": {
+                "bg": AtlassianTheme.COLORS["primary_light"],
+                "fg": AtlassianTheme.COLORS["primary"],
+            },
         }
 
-        colors = color_map.get(self.appearance, color_map['default'])
-        self.bg_color = colors['bg']
-        self.fg_color = colors['fg']
+        colors = color_map.get(self.appearance, color_map["default"])
+        self.bg_color = colors["bg"]
+        self.fg_color = colors["fg"]
 
     def _on_remove_click(self):
         """Handle remove button click."""
@@ -223,8 +262,15 @@ class Banner(tk.Frame):
     that require user attention.
     """
 
-    def __init__(self, parent, message: str, appearance: str = 'info',
-                 dismissible: bool = True, on_dismiss=None, **kwargs):
+    def __init__(
+        self,
+        parent,
+        message: str,
+        appearance: str = "info",
+        dismissible: bool = True,
+        on_dismiss=None,
+        **kwargs,
+    ):
         super().__init__(parent, **kwargs)
 
         self.appearance = appearance
@@ -239,80 +285,87 @@ class Banner(tk.Frame):
 
         # Icon based on appearance
         self.icon_label = tk.Label(
-            self, text=self._get_icon(),
-            font=('Arial', 14, 'bold'),
-            bg=self.bg_color, fg=self.icon_color,
-            padx=AtlassianTheme.SPACING['sm']
+            self,
+            text=self._get_icon(),
+            font=("Arial", 14, "bold"),
+            bg=self.bg_color,
+            fg=self.icon_color,
+            padx=AtlassianTheme.SPACING["sm"],
         )
-        self.icon_label.pack(side='left')
+        self.icon_label.pack(side="left")
 
         # Message text
         self.message_label = tk.Label(
-            self, text=message,
-            font=AtlassianTheme.FONTS['body_md'],
-            bg=self.bg_color, fg=self.fg_color,
-            wraplength=600, justify='left'
+            self,
+            text=message,
+            font=AtlassianTheme.FONTS["body_md"],
+            bg=self.bg_color,
+            fg=self.fg_color,
+            wraplength=600,
+            justify="left",
         )
-        self.message_label.pack(side='left', fill='x', expand=True)
+        self.message_label.pack(side="left", fill="x", expand=True)
 
         # Dismiss button if dismissible
         if dismissible:
             self.dismiss_btn = tk.Button(
-                self, text='×',
-                font=('Arial', 16, 'bold'),
-                bg=self.bg_color, fg=self.fg_color,
-                relief='flat', borderwidth=0,
-                padx=AtlassianTheme.SPACING['sm'],
-                command=self._on_dismiss
+                self,
+                text="×",
+                font=("Arial", 16, "bold"),
+                bg=self.bg_color,
+                fg=self.fg_color,
+                relief="flat",
+                borderwidth=0,
+                padx=AtlassianTheme.SPACING["sm"],
+                command=self._on_dismiss,
             )
-            self.dismiss_btn.pack(side='right')
-            self.dismiss_btn.bind('<Enter>', lambda e: self.dismiss_btn.config(bg=self.hover_color))
-            self.dismiss_btn.bind('<Leave>', lambda e: self.dismiss_btn.config(bg=self.bg_color))
+            self.dismiss_btn.pack(side="right")
+            self.dismiss_btn.bind(
+                "<Enter>", lambda e: self.dismiss_btn.config(bg=self.hover_color)
+            )
+            self.dismiss_btn.bind(
+                "<Leave>", lambda e: self.dismiss_btn.config(bg=self.bg_color)
+            )
 
     def _configure_styling(self):
         """Configure banner styling based on appearance."""
         color_map = {
-            'info': {
-                'bg': AtlassianTheme.COLORS['primary_light'],
-                'fg': AtlassianTheme.COLORS['primary'],
-                'icon': AtlassianTheme.COLORS['primary'],
-                'hover': '#DEEBFF'
+            "info": {
+                "bg": AtlassianTheme.COLORS["primary_light"],
+                "fg": AtlassianTheme.COLORS["primary"],
+                "icon": AtlassianTheme.COLORS["primary"],
+                "hover": "#DEEBFF",
             },
-            'success': {
-                'bg': AtlassianTheme.COLORS['success_light'],
-                'fg': AtlassianTheme.COLORS['success'],
-                'icon': AtlassianTheme.COLORS['success'],
-                'hover': '#E3FCEF'
+            "success": {
+                "bg": AtlassianTheme.COLORS["success_light"],
+                "fg": AtlassianTheme.COLORS["success"],
+                "icon": AtlassianTheme.COLORS["success"],
+                "hover": "#E3FCEF",
             },
-            'warning': {
-                'bg': AtlassianTheme.COLORS['warning_light'],
-                'fg': AtlassianTheme.COLORS['warning'],
-                'icon': AtlassianTheme.COLORS['warning'],
-                'hover': '#FFFAE6'
+            "warning": {
+                "bg": AtlassianTheme.COLORS["warning_light"],
+                "fg": AtlassianTheme.COLORS["warning"],
+                "icon": AtlassianTheme.COLORS["warning"],
+                "hover": "#FFFAE6",
             },
-            'error': {
-                'bg': AtlassianTheme.COLORS['error_light'],
-                'fg': AtlassianTheme.COLORS['error'],
-                'icon': AtlassianTheme.COLORS['error'],
-                'hover': '#FFEBE6'
-            }
+            "error": {
+                "bg": AtlassianTheme.COLORS["error_light"],
+                "fg": AtlassianTheme.COLORS["error"],
+                "icon": AtlassianTheme.COLORS["error"],
+                "hover": "#FFEBE6",
+            },
         }
 
-        colors = color_map.get(self.appearance, color_map['info'])
-        self.bg_color = colors['bg']
-        self.fg_color = colors['fg']
-        self.icon_color = colors['icon']
-        self.hover_color = colors['hover']
+        colors = color_map.get(self.appearance, color_map["info"])
+        self.bg_color = colors["bg"]
+        self.fg_color = colors["fg"]
+        self.icon_color = colors["icon"]
+        self.hover_color = colors["hover"]
 
     def _get_icon(self):
         """Get appropriate icon based on appearance."""
-        icons = {
-            'info': 'ℹ',
-            'success': '✓',
-            'warning': '⚠',
-            'error': '✗'
-        }
-        return icons.get(self.appearance, 'ℹ')
+        icons = {"info": "ℹ", "success": "✓", "warning": "⚠", "error": "✗"}
+        return icons.get(self.appearance, "ℹ")
 
     def _on_dismiss(self):
         """Handle dismiss button click."""
@@ -327,12 +380,15 @@ class Banner(tk.Frame):
 
 class StatusIndicator(tk.Frame):
     """A small visual indicator for status (e.g., connected, disconnected)."""
+
     def __init__(self, parent, size=12, **kwargs):
         super().__init__(parent, **kwargs)
         self.size = size
-        self.status = 'unknown'
-        self.configure(bg=parent.cget('bg'))
-        self.canvas = tk.Canvas(self, width=size, height=size, bg=parent.cget('bg'), highlightthickness=0)
+        self.status = "unknown"
+        self.configure(bg=parent.cget("bg"))
+        self.canvas = tk.Canvas(
+            self, width=size, height=size, bg=parent.cget("bg"), highlightthickness=0
+        )
         self.canvas.pack()
         self._draw_indicator()
 
@@ -345,13 +401,15 @@ class StatusIndicator(tk.Frame):
         """Draw the indicator circle based on the current status."""
         self.canvas.delete("all")
         color_map = {
-            'success': AtlassianTheme.COLORS['success'],
-            'warning': AtlassianTheme.COLORS['warning'],
-            'error': AtlassianTheme.COLORS['error'],
-            'unknown': AtlassianTheme.COLORS['neutral_300']
+            "success": AtlassianTheme.COLORS["success"],
+            "warning": AtlassianTheme.COLORS["warning"],
+            "error": AtlassianTheme.COLORS["error"],
+            "unknown": AtlassianTheme.COLORS["neutral_300"],
         }
-        color = color_map.get(self.status, AtlassianTheme.COLORS['neutral_300'])
-        self.canvas.create_oval(2, 2, self.size-2, self.size-2, fill=color, outline="")
+        color = color_map.get(self.status, AtlassianTheme.COLORS["neutral_300"])
+        self.canvas.create_oval(
+            2, 2, self.size - 2, self.size - 2, fill=color, outline=""
+        )
 
 
 class Flag(tk.Frame):
@@ -362,8 +420,15 @@ class Flag(tk.Frame):
     and are typically displayed using a flag group.
     """
 
-    def __init__(self, parent, title: str, description: str = '',
-                 appearance: str = 'info', actions=None, **kwargs):
+    def __init__(
+        self,
+        parent,
+        title: str,
+        description: str = "",
+        appearance: str = "info",
+        actions=None,
+        **kwargs,
+    ):
         super().__init__(parent, **kwargs)
 
         self.appearance = appearance
@@ -373,94 +438,106 @@ class Flag(tk.Frame):
         self._configure_styling()
 
         # Configure flag background and border
-        self.configure(bg=self.bg_color, relief='solid', borderwidth=1)
+        self.configure(bg=self.bg_color, relief="solid", borderwidth=1)
 
         # Icon
         self.icon_label = tk.Label(
-            self, text=self._get_icon(),
-            font=('Arial', 16, 'bold'),
-            bg=self.bg_color, fg=self.icon_color
+            self,
+            text=self._get_icon(),
+            font=("Arial", 16, "bold"),
+            bg=self.bg_color,
+            fg=self.icon_color,
         )
-        self.icon_label.pack(side='left', padx=AtlassianTheme.SPACING['md'], pady=AtlassianTheme.SPACING['md'])
+        self.icon_label.pack(
+            side="left",
+            padx=AtlassianTheme.SPACING["md"],
+            pady=AtlassianTheme.SPACING["md"],
+        )
 
         # Content area
         content_frame = tk.Frame(self, bg=self.bg_color)
-        content_frame.pack(side='left', fill='both', expand=True, pady=AtlassianTheme.SPACING['md'])
+        content_frame.pack(
+            side="left", fill="both", expand=True, pady=AtlassianTheme.SPACING["md"]
+        )
 
         # Title
         self.title_label = tk.Label(
-            content_frame, text=title,
-            font=AtlassianTheme.FONTS['body_md'],
-            bg=self.bg_color, fg=self.fg_color,
-            anchor='w'
+            content_frame,
+            text=title,
+            font=AtlassianTheme.FONTS["body_md"],
+            bg=self.bg_color,
+            fg=self.fg_color,
+            anchor="w",
         )
-        self.title_label.pack(fill='x')
+        self.title_label.pack(fill="x")
 
         # Description (if provided)
         if description:
             self.desc_label = tk.Label(
-                content_frame, text=description,
-                font=AtlassianTheme.FONTS['body_sm'],
-                bg=self.bg_color, fg=AtlassianTheme.COLORS['text_secondary'],
-                anchor='w', wraplength=400, justify='left'
+                content_frame,
+                text=description,
+                font=AtlassianTheme.FONTS["body_sm"],
+                bg=self.bg_color,
+                fg=AtlassianTheme.COLORS["text_secondary"],
+                anchor="w",
+                wraplength=400,
+                justify="left",
             )
-            self.desc_label.pack(fill='x', pady=(AtlassianTheme.SPACING['xs'], 0))
+            self.desc_label.pack(fill="x", pady=(AtlassianTheme.SPACING["xs"], 0))
 
         # Actions (if provided)
         if self.actions:
             actions_frame = tk.Frame(content_frame, bg=self.bg_color)
-            actions_frame.pack(fill='x', pady=(AtlassianTheme.SPACING['sm'], 0))
+            actions_frame.pack(fill="x", pady=(AtlassianTheme.SPACING["sm"], 0))
 
             for action_text, action_command in self.actions:
                 action_btn = tk.Button(
-                    actions_frame, text=action_text,
-                    font=AtlassianTheme.FONTS['body_sm'],
-                    bg=self.bg_color, fg=self.fg_color,
-                    relief='flat', borderwidth=0,
-                    padx=AtlassianTheme.SPACING['sm'],
-                    command=action_command
+                    actions_frame,
+                    text=action_text,
+                    font=AtlassianTheme.FONTS["body_sm"],
+                    bg=self.bg_color,
+                    fg=self.fg_color,
+                    relief="flat",
+                    borderwidth=0,
+                    padx=AtlassianTheme.SPACING["sm"],
+                    command=action_command,
                 )
-                action_btn.pack(side='left', padx=(0, AtlassianTheme.SPACING['sm']))
+                action_btn.pack(side="left", padx=(0, AtlassianTheme.SPACING["sm"]))
 
     def _configure_styling(self):
         """Configure flag styling based on appearance."""
         color_map = {
-            'info': {
-                'bg': AtlassianTheme.COLORS['bg_elevated'],
-                'fg': AtlassianTheme.COLORS['text_primary'],
-                'icon': AtlassianTheme.COLORS['primary']
+            "info": {
+                "bg": AtlassianTheme.COLORS["bg_elevated"],
+                "fg": AtlassianTheme.COLORS["text_primary"],
+                "icon": AtlassianTheme.COLORS["primary"],
             },
-            'success': {
-                'bg': AtlassianTheme.COLORS['success_light'],
-                'fg': AtlassianTheme.COLORS['text_primary'],
-                'icon': AtlassianTheme.COLORS['success']
+            "success": {
+                "bg": AtlassianTheme.COLORS["success_light"],
+                "fg": AtlassianTheme.COLORS["text_primary"],
+                "icon": AtlassianTheme.COLORS["success"],
             },
-            'warning': {
-                'bg': AtlassianTheme.COLORS['warning_light'],
-                'fg': AtlassianTheme.COLORS['text_primary'],
-                'icon': AtlassianTheme.COLORS['warning']
+            "warning": {
+                "bg": AtlassianTheme.COLORS["warning_light"],
+                "fg": AtlassianTheme.COLORS["text_primary"],
+                "icon": AtlassianTheme.COLORS["warning"],
             },
-            'error': {
-                'bg': AtlassianTheme.COLORS['error_light'],
-                'fg': AtlassianTheme.COLORS['text_primary'],
-                'icon': AtlassianTheme.COLORS['error']
-            }
+            "error": {
+                "bg": AtlassianTheme.COLORS["error_light"],
+                "fg": AtlassianTheme.COLORS["text_primary"],
+                "icon": AtlassianTheme.COLORS["error"],
+            },
         }
 
-        colors = color_map.get(self.appearance, color_map['info'])
-        self.bg_color = colors['bg']
-        self.fg_color = colors['fg']
-        self.icon_color = colors['icon']
+        colors = color_map.get(self.appearance, color_map["info"])
+        self.bg_color = colors["bg"]
+        self.fg_color = colors["fg"]
+        self.icon_color = colors["icon"]
 
     def _get_icon(self):
         """Get appropriate icon based on appearance."""
-        icons = {
-            'info': 'ℹ',
-            'success': '✓',
-            'warning': '⚠',
-            'error': '✗'
-        }
-        return icons.get(self.appearance, 'ℹ')
+        icons = {"info": "ℹ", "success": "✓", "warning": "⚠", "error": "✗"}
+        return icons.get(self.appearance, "ℹ")
 
 
 class MetricCard(ModernFrame):
@@ -470,32 +547,48 @@ class MetricCard(ModernFrame):
 
     def __init__(self, parent, title: str, **kwargs):
         super().__init__(parent, **kwargs)
-        self.configure(padding=AtlassianTheme.SPACING['md'])
+        self.configure(padding=AtlassianTheme.SPACING["md"])
         self.history = []
         self.max_history = 50
 
         # Header
-        header_frame = tk.Frame(self, bg=self.cget('background'))
-        header_frame.pack(fill='x', pady=(0, AtlassianTheme.SPACING['sm']))
-        title_label = tk.Label(header_frame, text=title, font=AtlassianTheme.FONTS['heading_sm'], fg=AtlassianTheme.COLORS['text_secondary'], bg=self.cget('background'))
-        title_label.pack(side='left')
-        self.status_lozenge = Lozenge(header_frame, "Unknown", 'default')
-        self.status_lozenge.pack(side='right')
+        header_frame = tk.Frame(self, bg=self.cget("background"))
+        header_frame.pack(fill="x", pady=(0, AtlassianTheme.SPACING["sm"]))
+        title_label = tk.Label(
+            header_frame,
+            text=title,
+            font=AtlassianTheme.FONTS["heading_sm"],
+            fg=AtlassianTheme.COLORS["text_secondary"],
+            bg=self.cget("background"),
+        )
+        title_label.pack(side="left")
+        self.status_lozenge = Lozenge(header_frame, "Unknown", "default")
+        self.status_lozenge.pack(side="right")
 
         # Value
-        self.value_var = tk.StringVar(value='--')
-        self.value_label = tk.Label(self, textvariable=self.value_var, font=AtlassianTheme.FONTS['heading_lg'], fg=AtlassianTheme.COLORS['text_primary'], bg=self.cget('background'))
-        self.value_label.pack(anchor='w')
+        self.value_var = tk.StringVar(value="--")
+        self.value_label = tk.Label(
+            self,
+            textvariable=self.value_var,
+            font=AtlassianTheme.FONTS["heading_lg"],
+            fg=AtlassianTheme.COLORS["text_primary"],
+            bg=self.cget("background"),
+        )
+        self.value_label.pack(anchor="w")
 
         # Sparkline
-        self.sparkline_canvas = tk.Canvas(self, height=40, bg=self.cget('background'), highlightthickness=0)
-        self.sparkline_canvas.pack(fill='x', pady=(AtlassianTheme.SPACING['sm'], 0))
+        self.sparkline_canvas = tk.Canvas(
+            self, height=40, bg=self.cget("background"), highlightthickness=0
+        )
+        self.sparkline_canvas.pack(fill="x", pady=(AtlassianTheme.SPACING["sm"], 0))
 
         # Info area
-        self.info_frame = tk.Frame(self, bg=self.cget('background'))
-        self.info_frame.pack(fill='x', pady=(AtlassianTheme.SPACING['xs'], 0))
+        self.info_frame = tk.Frame(self, bg=self.cget("background"))
+        self.info_frame.pack(fill="x", pady=(AtlassianTheme.SPACING["xs"], 0))
 
-    def update_value(self, value: str, status: str = 'unknown', history_value: Optional[float] = None):
+    def update_value(
+        self, value: str, status: str = "unknown", history_value: Optional[float] = None
+    ):
         """Update displayed value, status, and sparkline."""
         self.value_var.set(value)
         self._update_status(status)
@@ -513,7 +606,7 @@ class MetricCard(ModernFrame):
 
         w = self.sparkline_canvas.winfo_width()
         h = self.sparkline_canvas.winfo_height()
-        if w <= 1 or h <= 1: # Not visible yet
+        if w <= 1 or h <= 1:  # Not visible yet
             self.sparkline_canvas.after(100, self._draw_sparkline)
             return
 
@@ -524,29 +617,31 @@ class MetricCard(ModernFrame):
         points = []
         for i, val in enumerate(self.history):
             x = (i / (len(self.history) - 1)) * w
-            y = h - ((val - min_val) / range_val) * (h - 4) - 2 # Padding
+            y = h - ((val - min_val) / range_val) * (h - 4) - 2  # Padding
             points.extend([x, y])
 
-        self.sparkline_canvas.create_line(points, fill=AtlassianTheme.COLORS['primary'], width=2)
+        self.sparkline_canvas.create_line(
+            points, fill=AtlassianTheme.COLORS["primary"], width=2
+        )
 
     def _update_status(self, status: str):
         """Update status lozenge based on status."""
         status_map = {
-            'success': ('Healthy', 'success'),
-            'warning': ('Warning', 'warning'),
-            'error': ('Error', 'error'),
-            'unknown': ('Unknown', 'default'),
-            'info': ('Info', 'info')
+            "success": ("Healthy", "success"),
+            "warning": ("Warning", "warning"),
+            "error": ("Error", "error"),
+            "unknown": ("Unknown", "default"),
+            "info": ("Info", "info"),
         }
 
-        text, appearance = status_map.get(status, ('Unknown', 'default'))
+        text, appearance = status_map.get(status, ("Unknown", "default"))
         self.status_lozenge.set_text(text)
         self.status_lozenge.set_appearance(appearance)
 
-    def add_tag(self, text: str, appearance: str = 'default'):
+    def add_tag(self, text: str, appearance: str = "default"):
         """Add a tag to the card."""
         tag = Tag(self.info_frame, text, appearance)
-        tag.pack(side='left', padx=(0, AtlassianTheme.SPACING['xs']))
+        tag.pack(side="left", padx=(0, AtlassianTheme.SPACING["xs"]))
         return tag
 
 
@@ -558,8 +653,14 @@ class Skeleton(tk.Frame):
     design patterns for loading states.
     """
 
-    def __init__(self, parent, width: int = None, height: int = None,
-                 shape: str = 'rectangle', **kwargs):
+    def __init__(
+        self,
+        parent,
+        width: int = None,
+        height: int = None,
+        shape: str = "rectangle",
+        **kwargs,
+    ):
         super().__init__(parent, **kwargs)
 
         self.shape = shape
@@ -567,21 +668,24 @@ class Skeleton(tk.Frame):
         self.height = height or 20
 
         # Configure styling
-        self.bg_color = AtlassianTheme.COLORS['neutral_100']
+        self.bg_color = AtlassianTheme.COLORS["neutral_100"]
 
         # Create canvas for drawing
         self.canvas = tk.Canvas(
-            self, width=self.width, height=self.height,
-            highlightthickness=0, bg=self.cget('bg')
+            self,
+            width=self.width,
+            height=self.height,
+            highlightthickness=0,
+            bg=self.cget("bg"),
         )
-        self.canvas.pack(fill='both', expand=True)
+        self.canvas.pack(fill="both", expand=True)
 
         # Start animation
         self._animate()
 
     def _animate(self):
         """Animate the skeleton loading effect."""
-        self.canvas.delete('skeleton')
+        self.canvas.delete("skeleton")
 
         # Create gradient effect by drawing multiple rectangles
         for i in range(10):
@@ -591,20 +695,23 @@ class Skeleton(tk.Frame):
             x1 = (self.width // 10) * i
             x2 = (self.width // 10) * (i + 1)
 
-            if self.shape == 'circle':
+            if self.shape == "circle":
                 # Draw circular skeleton
                 center_x, center_y = self.width // 2, self.height // 2
                 radius = min(self.width, self.height) // 2
                 self.canvas.create_oval(
-                    center_x - radius, center_y - radius,
-                    center_x + radius, center_y + radius,
-                    fill=color, outline='', tags='skeleton'
+                    center_x - radius,
+                    center_y - radius,
+                    center_x + radius,
+                    center_y + radius,
+                    fill=color,
+                    outline="",
+                    tags="skeleton",
                 )
             else:
                 # Draw rectangular skeleton
                 self.canvas.create_rectangle(
-                    x1, 0, x2, self.height,
-                    fill=color, outline='', tags='skeleton'
+                    x1, 0, x2, self.height, fill=color, outline="", tags="skeleton"
                 )
 
         # Schedule next animation frame
@@ -613,7 +720,7 @@ class Skeleton(tk.Frame):
     def _adjust_brightness(self, color: str, factor: float) -> str:
         """Adjust color brightness for gradient effect."""
         # Simple color adjustment - in practice you'd use a proper color library
-        if color.startswith('#'):
+        if color.startswith("#"):
             try:
                 r = int(color[1:3], 16)
                 g = int(color[3:5], 16)
@@ -623,7 +730,7 @@ class Skeleton(tk.Frame):
                 g = min(255, int(g + (255 - g) * factor))
                 b = min(255, int(b + (255 - b) * factor))
 
-                return f'#{r:02x}{g:02x}{b:02x}'
+                return f"#{r:02x}{g:02x}{b:02x}"
             except ValueError:
                 pass
 
@@ -638,8 +745,9 @@ class LoadingSpinner(tk.Canvas):
     """
 
     def __init__(self, parent, size: int = 32, **kwargs):
-        super().__init__(parent, width=size, height=size,
-                         highlightthickness=0, **kwargs)
+        super().__init__(
+            parent, width=size, height=size, highlightthickness=0, **kwargs
+        )
 
         self.size = size
         self.angle = 0
@@ -649,7 +757,7 @@ class LoadingSpinner(tk.Canvas):
 
     def _animate(self):
         """Animate the loading spinner."""
-        self.delete('spinner')
+        self.delete("spinner")
 
         center_x, center_y = self.size // 2, self.size // 2
         radius = (self.size - 8) // 2
@@ -664,10 +772,15 @@ class LoadingSpinner(tk.Canvas):
             color = self._get_spinner_color(intensity)
 
             self.create_arc(
-                center_x - radius, center_y - radius,
-                center_x + radius, center_y + radius,
-                start=start_angle, extent=extent,
-                fill=color, outline='', tags='spinner'
+                center_x - radius,
+                center_y - radius,
+                center_x + radius,
+                center_y + radius,
+                start=start_angle,
+                extent=extent,
+                fill=color,
+                outline="",
+                tags="spinner",
             )
 
         # Update angle for next frame
@@ -678,8 +791,8 @@ class LoadingSpinner(tk.Canvas):
 
     def _get_spinner_color(self, intensity: float) -> str:
         """Get spinner color with varying intensity."""
-        base_color = AtlassianTheme.COLORS['primary']
-        if base_color.startswith('#'):
+        base_color = AtlassianTheme.COLORS["primary"]
+        if base_color.startswith("#"):
             try:
                 r = int(base_color[1:3], 16)
                 g = int(base_color[3:5], 16)
@@ -689,7 +802,7 @@ class LoadingSpinner(tk.Canvas):
                 g = int(g * intensity)
                 b = int(b * intensity)
 
-                return f'#{r:02x}{g:02x}{b:02x}'
+                return f"#{r:02x}{g:02x}{b:02x}"
             except ValueError:
                 pass
 
@@ -703,17 +816,17 @@ class ProgressIndicator(tk.Frame):
     Shows progress as a bar, circle, or step indicator.
     """
 
-    def __init__(self, parent, mode: str = 'bar', size: int = None, **kwargs):
+    def __init__(self, parent, mode: str = "bar", size: int = None, **kwargs):
         super().__init__(parent, **kwargs)
 
         self.mode = mode  # 'bar', 'circle', 'steps'
-        self.size = size or (200 if mode == 'bar' else 60)
+        self.size = size or (200 if mode == "bar" else 60)
         self.progress = 0.0
         self.max_value = 100.0
 
-        if mode == 'circle':
+        if mode == "circle":
             self._create_circular_indicator()
-        elif mode == 'steps':
+        elif mode == "steps":
             self._create_step_indicator()
         else:
             self._create_bar_indicator()
@@ -721,30 +834,40 @@ class ProgressIndicator(tk.Frame):
     def _create_bar_indicator(self):
         """Create progress bar indicator."""
         self.canvas = tk.Canvas(
-            self, width=self.size, height=8,
-            highlightthickness=0, bg=self.cget('bg')
+            self, width=self.size, height=8, highlightthickness=0, bg=self.cget("bg")
         )
-        self.canvas.pack(fill='x', expand=True)
+        self.canvas.pack(fill="x", expand=True)
 
         # Background bar
         self.canvas.create_rectangle(
-            0, 0, self.size, 8,
-            fill=AtlassianTheme.COLORS['neutral_100'],
-            outline='', tags='background'
+            0,
+            0,
+            self.size,
+            8,
+            fill=AtlassianTheme.COLORS["neutral_100"],
+            outline="",
+            tags="background",
         )
 
         # Progress bar
         self.progress_rect = self.canvas.create_rectangle(
-            0, 0, 0, 8,
-            fill=AtlassianTheme.COLORS['primary'],
-            outline='', tags='progress'
+            0,
+            0,
+            0,
+            8,
+            fill=AtlassianTheme.COLORS["primary"],
+            outline="",
+            tags="progress",
         )
 
     def _create_circular_indicator(self):
         """Create circular progress indicator."""
         self.canvas = tk.Canvas(
-            self, width=self.size, height=self.size,
-            highlightthickness=0, bg=self.cget('bg')
+            self,
+            width=self.size,
+            height=self.size,
+            highlightthickness=0,
+            bg=self.cget("bg"),
         )
         self.canvas.pack()
 
@@ -753,29 +876,38 @@ class ProgressIndicator(tk.Frame):
 
         # Background circle
         self.canvas.create_oval(
-            center_x - radius, center_y - radius,
-            center_x + radius, center_y + radius,
-            outline=AtlassianTheme.COLORS['neutral_100'],
-            width=3, tags='background'
+            center_x - radius,
+            center_y - radius,
+            center_x + radius,
+            center_y + radius,
+            outline=AtlassianTheme.COLORS["neutral_100"],
+            width=3,
+            tags="background",
         )
 
         # Progress arc
         self.progress_arc = self.canvas.create_arc(
-            center_x - radius, center_y - radius,
-            center_x + radius, center_y + radius,
-            start=90, extent=0,
-            outline=AtlassianTheme.COLORS['primary'],
-            width=3, style='arc', tags='progress'
+            center_x - radius,
+            center_y - radius,
+            center_x + radius,
+            center_y + radius,
+            start=90,
+            extent=0,
+            outline=AtlassianTheme.COLORS["primary"],
+            width=3,
+            style="arc",
+            tags="progress",
         )
 
     def _create_step_indicator(self):
         """Create step-based progress indicator."""
         # This would show numbered steps - simplified for now
         self.label = tk.Label(
-            self, text="0/0",
-            font=AtlassianTheme.FONTS['body_sm'],
-            fg=AtlassianTheme.COLORS['text_secondary'],
-            bg=self.cget('bg')
+            self,
+            text="0/0",
+            font=AtlassianTheme.FONTS["body_sm"],
+            fg=AtlassianTheme.COLORS["text_secondary"],
+            bg=self.cget("bg"),
         )
         self.label.pack()
 
@@ -787,20 +919,17 @@ class ProgressIndicator(tk.Frame):
         self.progress = max(0, min(value, self.max_value))
         percentage = self.progress / self.max_value
 
-        if self.mode == 'bar':
+        if self.mode == "bar":
             self._update_bar_progress(percentage)
-        elif self.mode == 'circle':
+        elif self.mode == "circle":
             self._update_circle_progress(percentage)
-        elif self.mode == 'steps':
+        elif self.mode == "steps":
             self._update_step_progress()
 
     def _update_bar_progress(self, percentage: float):
         """Update progress bar."""
         progress_width = int(self.size * percentage)
-        self.canvas.coords(
-            self.progress_rect,
-            0, 0, progress_width, 8
-        )
+        self.canvas.coords(self.progress_rect, 0, 0, progress_width, 8)
 
     def _update_circle_progress(self, percentage: float):
         """Update circular progress."""
@@ -817,62 +946,66 @@ class LogManager:
     Enhanced logging manager with levels and filtering.
     """
 
-    LOG_LEVELS = {
-        'DEBUG': 0,
-        'INFO': 1,
-        'WARNING': 2,
-        'ERROR': 3,
-        'CRITICAL': 4
-    }
+    LOG_LEVELS = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
 
     def __init__(self, max_lines: int = 1000):
         self.max_lines = max_lines
         self.log_entries = []
-        self.filters = {
-            'level': None,
-            'source': None,
-            'message_contains': None
-        }
+        self.filters = {"level": None, "source": None, "message_contains": None}
 
     def log(self, level: str, message: str, source: str = None):
         """Log a message with level and source."""
         if level not in self.LOG_LEVELS:
-            level = 'INFO'
+            level = "INFO"
 
         entry = {
-            'timestamp': time.time(),
-            'level': level,
-            'message': message,
-            'source': source or 'system'
+            "timestamp": time.time(),
+            "level": level,
+            "message": message,
+            "source": source or "system",
         }
 
         self.log_entries.append(entry)
 
         # Trim old entries
         if len(self.log_entries) > self.max_lines:
-            self.log_entries = self.log_entries[-self.max_lines:]
+            self.log_entries = self.log_entries[-self.max_lines :]
 
-    def set_filter(self, level: str = None, source: str = None, message_contains: str = None):
+    def set_filter(
+        self, level: str = None, source: str = None, message_contains: str = None
+    ):
         """Set log filters."""
         self.filters = {
-            'level': level,
-            'source': source,
-            'message_contains': message_contains
+            "level": level,
+            "source": source,
+            "message_contains": message_contains,
         }
 
     def get_filtered_logs(self) -> List[Dict[str, Any]]:
         """Get filtered log entries."""
         filtered = self.log_entries
 
-        if self.filters['level']:
-            min_level = self.LOG_LEVELS.get(self.filters['level'], 0)
-            filtered = [entry for entry in filtered if self.LOG_LEVELS.get(entry['level'], 0) >= min_level]
+        if self.filters["level"]:
+            min_level = self.LOG_LEVELS.get(self.filters["level"], 0)
+            filtered = [
+                entry
+                for entry in filtered
+                if self.LOG_LEVELS.get(entry["level"], 0) >= min_level
+            ]
 
-        if self.filters['source']:
-            filtered = [entry for entry in filtered if self.filters['source'].lower() in entry['source'].lower()]
+        if self.filters["source"]:
+            filtered = [
+                entry
+                for entry in filtered
+                if self.filters["source"].lower() in entry["source"].lower()
+            ]
 
-        if self.filters['message_contains']:
-            filtered = [entry for entry in filtered if self.filters['message_contains'].lower() in entry['message'].lower()]
+        if self.filters["message_contains"]:
+            filtered = [
+                entry
+                for entry in filtered
+                if self.filters["message_contains"].lower() in entry["message"].lower()
+            ]
 
         return filtered
 
@@ -883,9 +1016,11 @@ class LogManager:
     def export_logs(self, filename: str):
         """Export logs to a file."""
         try:
-            with open(filename, 'w') as f:
+            with open(filename, "w") as f:
                 for entry in self.log_entries:
-                    f.write(f"[{entry['level']}] {entry['source']}: {entry['message']}\n")
+                    f.write(
+                        f"[{entry['level']}] {entry['source']}: {entry['message']}\n"
+                    )
         except Exception as e:
             print(f"Failed to export logs: {e}")
 
@@ -900,72 +1035,123 @@ class EnhancedLogViewer(tk.Frame):
         self.log_manager = log_manager
 
         # Filter controls
-        filter_frame = tk.Frame(self, bg=self.cget('bg'))
-        filter_frame.pack(fill='x', pady=(0, AtlassianTheme.SPACING['sm']))
+        filter_frame = tk.Frame(self, bg=self.cget("bg"))
+        filter_frame.pack(fill="x", pady=(0, AtlassianTheme.SPACING["sm"]))
 
         # Level filter
-        level_label = tk.Label(filter_frame, text="Level:", font=AtlassianTheme.FONTS['body_sm'],
-                              bg=self.cget('bg'), fg=AtlassianTheme.COLORS['text_secondary'])
-        level_label.pack(side='left')
+        level_label = tk.Label(
+            filter_frame,
+            text="Level:",
+            font=AtlassianTheme.FONTS["body_sm"],
+            bg=self.cget("bg"),
+            fg=AtlassianTheme.COLORS["text_secondary"],
+        )
+        level_label.pack(side="left")
 
-        self.level_var = tk.StringVar(value='All')
-        level_combo = ttk.Combobox(filter_frame, textvariable=self.level_var,
-                                 values=['All', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-                                 state='readonly', width=10)
-        level_combo.pack(side='left', padx=(AtlassianTheme.SPACING['xs'], AtlassianTheme.SPACING['sm']))
-        level_combo.bind('<<ComboboxSelected>>', self._apply_filters)
+        self.level_var = tk.StringVar(value="All")
+        level_combo = ttk.Combobox(
+            filter_frame,
+            textvariable=self.level_var,
+            values=["All", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            state="readonly",
+            width=10,
+        )
+        level_combo.pack(
+            side="left",
+            padx=(AtlassianTheme.SPACING["xs"], AtlassianTheme.SPACING["sm"]),
+        )
+        level_combo.bind("<<ComboboxSelected>>", self._apply_filters)
 
         # Source filter
-        source_label = tk.Label(filter_frame, text="Source:", font=AtlassianTheme.FONTS['body_sm'],
-                               bg=self.cget('bg'), fg=AtlassianTheme.COLORS['text_secondary'])
-        source_label.pack(side='left')
+        source_label = tk.Label(
+            filter_frame,
+            text="Source:",
+            font=AtlassianTheme.FONTS["body_sm"],
+            bg=self.cget("bg"),
+            fg=AtlassianTheme.COLORS["text_secondary"],
+        )
+        source_label.pack(side="left")
 
         self.source_var = tk.StringVar()
-        source_entry = tk.Entry(filter_frame, textvariable=self.source_var, width=15,
-                               font=AtlassianTheme.FONTS['body_sm'])
-        source_entry.pack(side='left', padx=(AtlassianTheme.SPACING['xs'], AtlassianTheme.SPACING['sm']))
-        source_entry.bind('<KeyRelease>', self._apply_filters)
+        source_entry = tk.Entry(
+            filter_frame,
+            textvariable=self.source_var,
+            width=15,
+            font=AtlassianTheme.FONTS["body_sm"],
+        )
+        source_entry.pack(
+            side="left",
+            padx=(AtlassianTheme.SPACING["xs"], AtlassianTheme.SPACING["sm"]),
+        )
+        source_entry.bind("<KeyRelease>", self._apply_filters)
 
         # Search filter
-        search_label = tk.Label(filter_frame, text="Search:", font=AtlassianTheme.FONTS['body_sm'],
-                               bg=self.cget('bg'), fg=AtlassianTheme.COLORS['text_secondary'])
-        search_label.pack(side='left')
+        search_label = tk.Label(
+            filter_frame,
+            text="Search:",
+            font=AtlassianTheme.FONTS["body_sm"],
+            bg=self.cget("bg"),
+            fg=AtlassianTheme.COLORS["text_secondary"],
+        )
+        search_label.pack(side="left")
 
         self.search_var = tk.StringVar()
-        search_entry = tk.Entry(filter_frame, textvariable=self.search_var, width=20,
-                               font=AtlassianTheme.FONTS['body_sm'])
-        search_entry.pack(side='left', padx=(AtlassianTheme.SPACING['xs'], AtlassianTheme.SPACING['sm']))
-        search_entry.bind('<KeyRelease>', self._apply_filters)
+        search_entry = tk.Entry(
+            filter_frame,
+            textvariable=self.search_var,
+            width=20,
+            font=AtlassianTheme.FONTS["body_sm"],
+        )
+        search_entry.pack(
+            side="left",
+            padx=(AtlassianTheme.SPACING["xs"], AtlassianTheme.SPACING["sm"]),
+        )
+        search_entry.bind("<KeyRelease>", self._apply_filters)
 
         # Clear button
-        clear_btn = tk.Button(filter_frame, text="Clear", font=AtlassianTheme.FONTS['body_sm'],
-                             fg=AtlassianTheme.COLORS['text_inverse'], bg=AtlassianTheme.COLORS['warning'],
-                             relief='flat', borderwidth=0, command=self._clear_logs)
-        clear_btn.pack(side='right')
+        clear_btn = tk.Button(
+            filter_frame,
+            text="Clear",
+            font=AtlassianTheme.FONTS["body_sm"],
+            fg=AtlassianTheme.COLORS["text_inverse"],
+            bg=AtlassianTheme.COLORS["warning"],
+            relief="flat",
+            borderwidth=0,
+            command=self._clear_logs,
+        )
+        clear_btn.pack(side="right")
 
         # Log text area
-        self.log_text = tk.Text(self, height=15, font=AtlassianTheme.FONTS['code'],
-                               bg=AtlassianTheme.COLORS['neutral_50'], fg=AtlassianTheme.COLORS['text_primary'],
-                               wrap='word', state='disabled')
+        self.log_text = tk.Text(
+            self,
+            height=15,
+            font=AtlassianTheme.FONTS["code"],
+            bg=AtlassianTheme.COLORS["neutral_50"],
+            fg=AtlassianTheme.COLORS["text_primary"],
+            wrap="word",
+            state="disabled",
+        )
         scrollbar = ttk.Scrollbar(self, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
 
-        self.log_text.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
+        self.log_text.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
         # Color coding for log levels
-        self.log_text.tag_configure('DEBUG', foreground='#2196F3')
-        self.log_text.tag_configure('INFO', foreground='#4CAF50')
-        self.log_text.tag_configure('WARNING', foreground='#FF9800')
-        self.log_text.tag_configure('ERROR', foreground='#F44336')
-        self.log_text.tag_configure('CRITICAL', foreground='#9C27B0', font=AtlassianTheme.FONTS['code_bold'])
+        self.log_text.tag_configure("DEBUG", foreground="#2196F3")
+        self.log_text.tag_configure("INFO", foreground="#4CAF50")
+        self.log_text.tag_configure("WARNING", foreground="#FF9800")
+        self.log_text.tag_configure("ERROR", foreground="#F44336")
+        self.log_text.tag_configure(
+            "CRITICAL", foreground="#9C27B0", font=AtlassianTheme.FONTS["code_bold"]
+        )
 
         # Initial load
         self._refresh_logs()
 
     def _apply_filters(self, event=None):
         """Apply current filters and refresh display."""
-        level = self.level_var.get() if self.level_var.get() != 'All' else None
+        level = self.level_var.get() if self.level_var.get() != "All" else None
         source = self.source_var.get().strip() if self.source_var.get() else None
         search = self.search_var.get().strip() if self.search_var.get() else None
 
@@ -974,18 +1160,18 @@ class EnhancedLogViewer(tk.Frame):
 
     def _refresh_logs(self):
         """Refresh the log display."""
-        self.log_text.configure(state='normal')
-        self.log_text.delete('1.0', 'end')
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
 
         for entry in self.log_manager.get_filtered_logs():
-            level = entry['level']
-            message = entry['message']
-            source = entry['source']
+            level = entry["level"]
+            message = entry["message"]
+            source = entry["source"]
 
-            self.log_text.insert('end', f"[{level}] {source}: {message}\n", level)
+            self.log_text.insert("end", f"[{level}] {source}: {message}\n", level)
 
-        self.log_text.configure(state='disabled')
-        self.log_text.see('end')
+        self.log_text.configure(state="disabled")
+        self.log_text.see("end")
 
     def _clear_logs(self):
         """Clear all logs."""

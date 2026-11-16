@@ -3,10 +3,10 @@ Fast Startup Optimization for BLNCS
 Ultra-lightweight initialization with lazy loading
 """
 
-import time
 import os
-from typing import Dict, Any, Optional, Callable
 import threading
+import time
+from typing import Any, Callable, Dict, Optional
 
 
 class LazyLoader:
@@ -23,8 +23,15 @@ class LazyLoader:
             with self._lock:
                 if self._cached is None:
                     try:
-                        module = __import__(self.module_name, fromlist=[self.attr_name] if self.attr_name else [])
-                        self._cached = getattr(module, self.attr_name) if self.attr_name else module
+                        module = __import__(
+                            self.module_name,
+                            fromlist=[self.attr_name] if self.attr_name else [],
+                        )
+                        self._cached = (
+                            getattr(module, self.attr_name)
+                            if self.attr_name
+                            else module
+                        )
                     except ImportError:
                         # Return a no-op function for optional dependencies
                         self._cached = lambda *a, **kw: None
@@ -46,10 +53,10 @@ class FastStartup:
     def _setup_lazy_imports(self):
         """Setup lazy imports for optional dependencies"""
         self.lazy_modules = {
-            'psutil': LazyLoader('psutil'),
-            'flask': LazyLoader('flask'),
-            'websockets': LazyLoader('websockets'),
-            'grpcio': LazyLoader('grpc'),
+            "psutil": LazyLoader("psutil"),
+            "flask": LazyLoader("flask"),
+            "websockets": LazyLoader("websockets"),
+            "grpcio": LazyLoader("grpc"),
         }
 
     def get_module(self, name: str):
@@ -63,9 +70,9 @@ class FastStartup:
 
         # Only essential components
         components = {
-            'cache': get_simple_cache(),
-            'lightning': SimpleLightningClient(),
-            'startup_time': time.time() - self.start_time
+            "cache": get_simple_cache(),
+            "lightning": SimpleLightningClient(),
+            "startup_time": time.time() - self.start_time,
         }
 
         return components
@@ -75,13 +82,15 @@ class FastStartup:
         components = self.minimal_init()
 
         # Add core features
-        from ..core.logger import get_logger
         from ..core.data_validator import get_validator
+        from ..core.logger import get_logger
 
-        components.update({
-            'logger': get_logger('BLNCS'),
-            'validator': get_validator(),
-        })
+        components.update(
+            {
+                "logger": get_logger("BLNCS"),
+                "validator": get_validator(),
+            }
+        )
 
         return components
 
@@ -91,13 +100,15 @@ class FastStartup:
 
         # Add advanced features only if needed
         try:
-            from ..core.health_monitor import get_health_monitor
             from ..core.auto_recovery import get_auto_recovery
+            from ..core.health_monitor import get_health_monitor
 
-            components.update({
-                'health_monitor': get_health_monitor(),
-                'auto_recovery': get_auto_recovery(),
-            })
+            components.update(
+                {
+                    "health_monitor": get_health_monitor(),
+                    "auto_recovery": get_auto_recovery(),
+                }
+            )
         except ImportError:
             pass
 
@@ -106,14 +117,15 @@ class FastStartup:
     def get_startup_stats(self) -> Dict[str, Any]:
         """Get startup performance statistics"""
         return {
-            'total_time': time.time() - self.start_time,
-            'initialized': self.initialized,
-            'available_modules': list(self.lazy_modules.keys()),
-            'environment': {
-                'python_version': os.sys.version_info[:2],
-                'platform': os.name,
-                'fast_mode': os.environ.get('BLNCS_FAST_MODE', 'false').lower() == 'true'
-            }
+            "total_time": time.time() - self.start_time,
+            "initialized": self.initialized,
+            "available_modules": list(self.lazy_modules.keys()),
+            "environment": {
+                "python_version": os.sys.version_info[:2],
+                "platform": os.name,
+                "fast_mode": os.environ.get("BLNCS_FAST_MODE", "false").lower()
+                == "true",
+            },
         }
 
 
@@ -131,8 +143,9 @@ class PerformanceOptimizer:
         # Pre-compile frequently used modules
         try:
             import json
-            import time
             import threading
+            import time
+
             self.optimizations.append("imports_preloaded")
         except:
             pass
@@ -140,6 +153,7 @@ class PerformanceOptimizer:
     def optimize_memory(self):
         """Optimize memory usage"""
         import gc
+
         # Force garbage collection
         collected = gc.collect()
 
@@ -163,7 +177,7 @@ class PerformanceOptimizer:
         import io
 
         # Set default buffer size (64KB instead of 8KB)
-        if hasattr(io, 'DEFAULT_BUFFER_SIZE') and io.DEFAULT_BUFFER_SIZE < 65536:
+        if hasattr(io, "DEFAULT_BUFFER_SIZE") and io.DEFAULT_BUFFER_SIZE < 65536:
             if not self._io_buffer_adjusted:
                 self._original_io_buffer_size = io.DEFAULT_BUFFER_SIZE
                 self._io_buffer_adjusted = True
@@ -180,9 +194,9 @@ class PerformanceOptimizer:
         self.optimize_io()
 
         return {
-            'optimizations_applied': self.optimizations,
-            'gc_objects_collected': collected,
-            'optimization_time': time.time() - start_time
+            "optimizations_applied": self.optimizations,
+            "gc_objects_collected": collected,
+            "optimization_time": time.time() - start_time,
         }
 
 
@@ -207,15 +221,15 @@ def get_optimizer() -> PerformanceOptimizer:
     return _optimizer
 
 
-def quick_start(mode: str = 'fast') -> Dict[str, Any]:
+def quick_start(mode: str = "fast") -> Dict[str, Any]:
     """Quick start BLNCS with specified mode"""
     startup = get_fast_startup()
 
-    if mode == 'minimal':
+    if mode == "minimal":
         return startup.minimal_init()
-    elif mode == 'fast':
+    elif mode == "fast":
         return startup.fast_init()
-    elif mode == 'full':
+    elif mode == "full":
         return startup.full_init()
     else:
         raise ValueError(f"Unknown mode: {mode}. Use 'minimal', 'fast', or 'full'")
@@ -233,6 +247,7 @@ def ultra_fast_startup() -> Dict[str, Any]:
 
     # Apply immediate optimizations
     from .quick_performance_boosts import apply_quick_performance_boosts
+
     perf_results = apply_quick_performance_boosts()
 
     # Initialize only essential components
@@ -240,8 +255,8 @@ def ultra_fast_startup() -> Dict[str, Any]:
     components = startup.minimal_init()
 
     # Add startup time
-    components['ultra_startup_time'] = time.time() - start_time
-    components['performance_boosts'] = perf_results
+    components["ultra_startup_time"] = time.time() - start_time
+    components["performance_boosts"] = perf_results
 
     return components
 
@@ -258,36 +273,46 @@ def intelligent_startup(requirements: list = None) -> Dict[str, Any]:
     components.update(startup.minimal_init())
 
     # Load components based on requirements
-    if 'logging' in requirements:
+    if "logging" in requirements:
         from ..core.logger import get_logger
-        components['logger'] = get_logger('BLNCS')
 
-    if 'validation' in requirements:
+        components["logger"] = get_logger("BLNCS")
+
+    if "validation" in requirements:
         from ..core.data_validator import get_validator
-        components['validator'] = get_validator()
 
-    if 'health' in requirements:
+        components["validator"] = get_validator()
+
+    if "health" in requirements:
         try:
             from ..core.health_monitor import get_health_monitor
-            components['health_monitor'] = get_health_monitor()
+
+            components["health_monitor"] = get_health_monitor()
         except ImportError:
             pass
 
-    if 'recovery' in requirements:
+    if "recovery" in requirements:
         try:
             from ..core.simple_error_recovery import get_error_recovery
-            components['error_recovery'] = get_error_recovery()
+
+            components["error_recovery"] = get_error_recovery()
         except ImportError:
             pass
 
-    components['intelligent_startup_time'] = time.time() - start_time
-    components['loaded_requirements'] = requirements
+    components["intelligent_startup_time"] = time.time() - start_time
+    components["loaded_requirements"] = requirements
 
     return components
 
 
 __all__ = [
-    'LazyLoader', 'FastStartup', 'PerformanceOptimizer',
-    'get_fast_startup', 'get_optimizer', 'quick_start', 'optimize_runtime',
-    'ultra_fast_startup', 'intelligent_startup'
+    "LazyLoader",
+    "FastStartup",
+    "PerformanceOptimizer",
+    "get_fast_startup",
+    "get_optimizer",
+    "quick_start",
+    "optimize_runtime",
+    "ultra_fast_startup",
+    "intelligent_startup",
 ]

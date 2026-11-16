@@ -11,35 +11,38 @@ Consolidates functionality from:
 - ultra_performance_system.py
 """
 
+import asyncio
+import gc
+import json
+import logging
 import os
 import sys
-import time
-import psutil
-import asyncio
 import threading
-from collections import defaultdict, deque
+import time
+import tracemalloc
+import weakref
+from collections import Counter, defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Callable, Union
-import logging
-import json
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import weakref
-import gc
-import tracemalloc
-from collections import Counter
+from typing import Any, Callable, Dict, List, Optional, Union
+
+import psutil
 
 try:
     import GPUtil
+
     HAS_GPU = True
 except ImportError:
     GPUtil = None
     HAS_GPU = False
 
+
 @dataclass
 class PerformanceMetrics:
     """Unified performance metrics collection"""
+
     operation_name: str = ""
     start_time: float = 0.0
     end_time: float = 0.0
@@ -71,6 +74,7 @@ class PerformanceMetrics:
                 for before, after in zip(self.gpu_usage_before, self.gpu_usage_after)
             ]
         return []
+
 
 class PerformanceProfiler:
     """Advanced performance profiler with context management"""
@@ -148,7 +152,9 @@ class PerformanceProfiler:
 
         # Keep operation stats reasonable in size
         if len(self.operation_stats[operation_name]) > 100:
-            self.operation_stats[operation_name] = self.operation_stats[operation_name][-50:]
+            self.operation_stats[operation_name] = self.operation_stats[operation_name][
+                -50:
+            ]
 
         return metrics
 
@@ -168,23 +174,24 @@ class PerformanceProfiler:
             return {}
 
         return {
-            'count': len(durations),
-            'total_time': sum(durations),
-            'avg_time': sum(durations) / len(durations),
-            'min_time': min(durations),
-            'max_time': max(durations),
-            'latest_time': durations[-1] if durations else 0
+            "count": len(durations),
+            "total_time": sum(durations),
+            "avg_time": sum(durations) / len(durations),
+            "min_time": min(durations),
+            "max_time": max(durations),
+            "latest_time": durations[-1] if durations else 0,
         }
 
     def get_all_stats(self) -> Dict[str, Dict[str, float]]:
         """Get statistics for all operations"""
         return {op: self.get_operation_stats(op) for op in self.operation_stats.keys()}
 
+
 class CacheOptimizer:
     """Advanced cache optimization"""
 
     def __init__(self):
-        self.cache_stats = defaultdict(lambda: {'hits': 0, 'misses': 0, 'size': 0})
+        self.cache_stats = defaultdict(lambda: {"hits": 0, "misses": 0, "size": 0})
         self.cache_references = weakref.WeakSet()
 
     def register_cache(self, cache_instance: Any):
@@ -197,51 +204,57 @@ class CacheOptimizer:
 
         for cache in list(self.cache_references):
             try:
-                cache_name = getattr(cache, 'name', str(type(cache).__name__))
+                cache_name = getattr(cache, "name", str(type(cache).__name__))
 
                 # Get cache statistics
-                if hasattr(cache, 'size'):
+                if hasattr(cache, "size"):
                     size = cache.size()
-                elif hasattr(cache, '__len__'):
+                elif hasattr(cache, "__len__"):
                     size = len(cache)
                 else:
-                    size = 'unknown'
+                    size = "unknown"
 
                 # Basic optimization
-                if hasattr(cache, 'clear'):
+                if hasattr(cache, "clear"):
                     # Clear cache if it's getting too large
                     if isinstance(size, int) and size > 10000:
                         cache.clear()
-                        results[cache_name] = 'cleared_oversized'
+                        results[cache_name] = "cleared_oversized"
                     else:
-                        results[cache_name] = f'size_{size}'
+                        results[cache_name] = f"size_{size}"
 
             except Exception as e:
                 logger.warning(f"Failed to optimize cache: {e}")
 
         return results
 
+
 class DatabaseOptimizer:
     """Database performance optimization"""
 
     def __init__(self):
-        self.query_stats = defaultdict(lambda: {'count': 0, 'total_time': 0, 'avg_time': 0})
+        self.query_stats = defaultdict(
+            lambda: {"count": 0, "total_time": 0, "avg_time": 0}
+        )
 
     def track_query(self, query: str, duration: float):
         """Track query performance"""
         # Simple query normalization
-        normalized_query = query.strip().split()[0].upper() if query.strip() else 'UNKNOWN'
+        normalized_query = (
+            query.strip().split()[0].upper() if query.strip() else "UNKNOWN"
+        )
 
         stats = self.query_stats[normalized_query]
-        stats['count'] += 1
-        stats['total_time'] += duration
-        stats['avg_time'] = stats['total_time'] / stats['count']
+        stats["count"] += 1
+        stats["total_time"] += duration
+        stats["avg_time"] = stats["total_time"] / stats["count"]
 
     def get_slow_queries(self, threshold: float = 1.0) -> Dict[str, Dict]:
         """Get queries slower than threshold"""
         return {
-            query: stats for query, stats in self.query_stats.items()
-            if stats['avg_time'] > threshold
+            query: stats
+            for query, stats in self.query_stats.items()
+            if stats["avg_time"] > threshold
         }
 
     def optimize_recommendations(self) -> List[str]:
@@ -250,13 +263,18 @@ class DatabaseOptimizer:
 
         slow_queries = self.get_slow_queries()
         if slow_queries:
-            recommendations.append(f"Consider optimizing {len(slow_queries)} slow query types")
+            recommendations.append(
+                f"Consider optimizing {len(slow_queries)} slow query types"
+            )
 
-        total_queries = sum(stats['count'] for stats in self.query_stats.values())
+        total_queries = sum(stats["count"] for stats in self.query_stats.values())
         if total_queries > 10000:
-            recommendations.append("High query volume detected, consider connection pooling")
+            recommendations.append(
+                "High query volume detected, consider connection pooling"
+            )
 
         return recommendations
+
 
 class UnifiedPerformanceOptimizer:
     """
@@ -267,7 +285,7 @@ class UnifiedPerformanceOptimizer:
         self,
         enable_profiling: bool = True,
         max_history: int = 1000,
-        optimization_interval: int = 300  # 5 minutes
+        optimization_interval: int = 300,  # 5 minutes
     ):
         self.enabled = enable_profiling
         self.profiler = PerformanceProfiler(max_history)
@@ -292,10 +310,10 @@ class UnifiedPerformanceOptimizer:
 
         # System metrics
         self.system_metrics = {
-            'cpu_count': psutil.cpu_count(),
-            'memory_total': psutil.virtual_memory().total,
-            'disk_usage': {},
-            'network_stats': {}
+            "cpu_count": psutil.cpu_count(),
+            "memory_total": psutil.virtual_memory().total,
+            "disk_usage": {},
+            "network_stats": {},
         }
 
         self._update_system_metrics()
@@ -311,11 +329,11 @@ class UnifiedPerformanceOptimizer:
             for disk in psutil.disk_partitions():
                 try:
                     usage = psutil.disk_usage(disk.mountpoint)
-                    self.system_metrics['disk_usage'][disk.device] = {
-                        'total': usage.total,
-                        'used': usage.used,
-                        'free': usage.free,
-                        'percent': usage.used / usage.total * 100
+                    self.system_metrics["disk_usage"][disk.device] = {
+                        "total": usage.total,
+                        "used": usage.used,
+                        "free": usage.free,
+                        "percent": usage.used / usage.total * 100,
                     }
                 except (PermissionError, FileNotFoundError):
                     pass
@@ -323,11 +341,11 @@ class UnifiedPerformanceOptimizer:
             # Network stats
             net_stats = psutil.net_io_counters()
             if net_stats:
-                self.system_metrics['network_stats'] = {
-                    'bytes_sent': net_stats.bytes_sent,
-                    'bytes_recv': net_stats.bytes_recv,
-                    'packets_sent': net_stats.packets_sent,
-                    'packets_recv': net_stats.packets_recv
+                self.system_metrics["network_stats"] = {
+                    "bytes_sent": net_stats.bytes_sent,
+                    "bytes_recv": net_stats.bytes_recv,
+                    "packets_sent": net_stats.packets_sent,
+                    "packets_recv": net_stats.packets_recv,
                 }
 
         except Exception as e:
@@ -350,43 +368,45 @@ class UnifiedPerformanceOptimizer:
     def optimize_system(self) -> Dict[str, Any]:
         """Run comprehensive system optimization"""
         if not self.enabled:
-            return {'status': 'disabled'}
+            return {"status": "disabled"}
 
         results = {
-            'timestamp': time.time(),
-            'cache_optimization': {},
-            'database_recommendations': [],
-            'system_health': {},
-            'performance_summary': {}
+            "timestamp": time.time(),
+            "cache_optimization": {},
+            "database_recommendations": [],
+            "system_health": {},
+            "performance_summary": {},
         }
 
         # Cache optimization
         try:
-            results['cache_optimization'] = self.cache_optimizer.optimize_caches()
+            results["cache_optimization"] = self.cache_optimizer.optimize_caches()
         except Exception as e:
             logger.error(f"Cache optimization failed: {e}")
-            results['cache_optimization'] = {'error': str(e)}
+            results["cache_optimization"] = {"error": str(e)}
 
         # Database recommendations
         try:
-            results['database_recommendations'] = self.database_optimizer.optimize_recommendations()
+            results["database_recommendations"] = (
+                self.database_optimizer.optimize_recommendations()
+            )
         except Exception as e:
             logger.error(f"Database optimization failed: {e}")
-            results['database_recommendations'] = [f"Error: {e}"]
+            results["database_recommendations"] = [f"Error: {e}"]
 
         # System health
         try:
-            results['system_health'] = self.get_system_health()
+            results["system_health"] = self.get_system_health()
         except Exception as e:
             logger.error(f"System health check failed: {e}")
-            results['system_health'] = {'error': str(e)}
+            results["system_health"] = {"error": str(e)}
 
         # Performance summary
         try:
-            results['performance_summary'] = self.profiler.get_all_stats()
+            results["performance_summary"] = self.profiler.get_all_stats()
         except Exception as e:
             logger.error(f"Performance summary failed: {e}")
-            results['performance_summary'] = {'error': str(e)}
+            results["performance_summary"] = {"error": str(e)}
 
         self.last_optimization = time.time()
         return results
@@ -396,19 +416,19 @@ class UnifiedPerformanceOptimizer:
         try:
             cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
-            disk_usage = psutil.disk_usage('/')
+            disk_usage = psutil.disk_usage("/")
 
             health_data = {
-                'cpu_percent': cpu_percent,
-                'cpu_healthy': cpu_percent < 80,
-                'memory_percent': memory.percent,
-                'memory_healthy': memory.percent < 85,
-                'memory_available_gb': memory.available / (1024**3),
-                'disk_percent': disk_usage.percent,
-                'disk_healthy': disk_usage.percent < 90,
-                'disk_free_gb': disk_usage.free / (1024**3),
-                'load_average': os.getloadavg() if hasattr(os, 'getloadavg') else None,
-                'uptime_seconds': time.time() - psutil.boot_time()
+                "cpu_percent": cpu_percent,
+                "cpu_healthy": cpu_percent < 80,
+                "memory_percent": memory.percent,
+                "memory_healthy": memory.percent < 85,
+                "memory_available_gb": memory.available / (1024**3),
+                "disk_percent": disk_usage.percent,
+                "disk_healthy": disk_usage.percent < 90,
+                "disk_free_gb": disk_usage.free / (1024**3),
+                "load_average": os.getloadavg() if hasattr(os, "getloadavg") else None,
+                "uptime_seconds": time.time() - psutil.boot_time(),
             }
 
             # Add GPU health if available
@@ -418,42 +438,42 @@ class UnifiedPerformanceOptimizer:
                     gpu_health = []
                     for i, gpu in enumerate(gpus):
                         gpu_data = {
-                            'id': i,
-                            'name': gpu.name,
-                            'usage': gpu.load * 100,
-                            'memory_used': gpu.memoryUsed,
-                            'memory_total': gpu.memoryTotal,
-                            'temperature': gpu.temperature,
-                            'healthy': gpu.load < 90  # GPU usage below 90%
+                            "id": i,
+                            "name": gpu.name,
+                            "usage": gpu.load * 100,
+                            "memory_used": gpu.memoryUsed,
+                            "memory_total": gpu.memoryTotal,
+                            "temperature": gpu.temperature,
+                            "healthy": gpu.load < 90,  # GPU usage below 90%
                         }
                         gpu_health.append(gpu_data)
 
-                    health_data['gpu_health'] = gpu_health
-                    health_data['gpu_available'] = True
+                    health_data["gpu_health"] = gpu_health
+                    health_data["gpu_available"] = True
                 except Exception as e:
-                    health_data['gpu_health'] = []
-                    health_data['gpu_available'] = False
-                    health_data['gpu_error'] = str(e)
+                    health_data["gpu_health"] = []
+                    health_data["gpu_available"] = False
+                    health_data["gpu_error"] = str(e)
             else:
-                health_data['gpu_available'] = False
+                health_data["gpu_available"] = False
 
             return health_data
         except Exception as e:
             logger.error(f"Failed to get system health: {e}")
-            return {'error': str(e)}
+            return {"error": str(e)}
 
     def get_performance_report(self) -> Dict[str, Any]:
         """Get comprehensive performance report"""
         return {
-            'timestamp': time.time(),
-            'enabled': self.enabled,
-            'profiler_stats': self.profiler.get_all_stats(),
-            'system_health': self.get_system_health(),
-            'system_metrics': self.system_metrics,
-            'database_stats': dict(self.database_optimizer.query_stats),
-            'cache_stats': dict(self.cache_optimizer.cache_stats),
-            'last_optimization': self.last_optimization,
-            'metrics_history_size': len(self.profiler.metrics_history)
+            "timestamp": time.time(),
+            "enabled": self.enabled,
+            "profiler_stats": self.profiler.get_all_stats(),
+            "system_health": self.get_system_health(),
+            "system_metrics": self.system_metrics,
+            "database_stats": dict(self.database_optimizer.query_stats),
+            "cache_stats": dict(self.cache_optimizer.cache_stats),
+            "last_optimization": self.last_optimization,
+            "metrics_history_size": len(self.profiler.metrics_history),
         }
 
     def start_async_monitoring(self, interval: float = 1.0):
@@ -539,13 +559,15 @@ class UnifiedPerformanceOptimizer:
                     gpu_usage = []
 
             # Update system health
-            self.system_metrics.update({
-                'cpu_percent_async': cpu_percent,
-                'memory_percent_async': memory.percent,
-                'memory_available_async': memory.available,
-                'gpu_usage_async': gpu_usage,
-                'last_async_update': time.time()
-            })
+            self.system_metrics.update(
+                {
+                    "cpu_percent_async": cpu_percent,
+                    "memory_percent_async": memory.percent,
+                    "memory_available_async": memory.available,
+                    "gpu_usage_async": gpu_usage,
+                    "last_async_update": time.time(),
+                }
+            )
 
         except Exception as e:
             logger.warning(f"Failed to collect async metrics: {e}")
@@ -561,26 +583,38 @@ class UnifiedPerformanceOptimizer:
 
             # Memory leak detection snapshot
             if self.memory_traces_enabled:
-                await asyncio.get_event_loop().run_in_executor(None, self.take_memory_snapshot)
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self.take_memory_snapshot
+                )
 
             # Network stats collection
             if self.network_monitoring_enabled:
-                await asyncio.get_event_loop().run_in_executor(None, self._collect_network_stats)
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self._collect_network_stats
+                )
 
             # Check for optimization triggers
             current_time = time.time()
             if current_time - self.last_optimization > self.optimization_interval:
-                await asyncio.get_event_loop().run_in_executor(None, self.optimize_system)
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self.optimize_system
+                )
 
         except Exception as e:
             logger.warning(f"Failed to run async optimizations: {e}")
 
     def start_background_optimization(self):
         """Start background optimization thread"""
-        if hasattr(self, '_background_thread') and self._background_thread and self._background_thread.is_alive():
+        if (
+            hasattr(self, "_background_thread")
+            and self._background_thread
+            and self._background_thread.is_alive()
+        ):
             return
 
-        self._background_thread = threading.Thread(target=self._background_optimization_loop, daemon=True)
+        self._background_thread = threading.Thread(
+            target=self._background_optimization_loop, daemon=True
+        )
         self._background_thread.start()
         logger.info("Started background performance optimization")
 
@@ -639,19 +673,19 @@ class UnifiedPerformanceOptimizer:
             net_stats = psutil.net_io_counters()
             if net_stats:
                 stats = {
-                    'timestamp': time.time(),
-                    'bytes_sent': net_stats.bytes_sent,
-                    'bytes_recv': net_stats.bytes_recv,
-                    'packets_sent': net_stats.packets_sent,
-                    'packets_recv': net_stats.packets_recv,
-                    'errin': getattr(net_stats, 'errin', 0),
-                    'errout': getattr(net_stats, 'errout', 0),
-                    'dropin': getattr(net_stats, 'dropin', 0),
-                    'dropout': getattr(net_stats, 'dropout', 0)
+                    "timestamp": time.time(),
+                    "bytes_sent": net_stats.bytes_sent,
+                    "bytes_recv": net_stats.bytes_recv,
+                    "packets_sent": net_stats.packets_sent,
+                    "packets_recv": net_stats.packets_recv,
+                    "errin": getattr(net_stats, "errin", 0),
+                    "errout": getattr(net_stats, "errout", 0),
+                    "dropin": getattr(net_stats, "dropin", 0),
+                    "dropout": getattr(net_stats, "dropout", 0),
                 }
 
                 self.network_stats_history.append(stats)
-                self.system_metrics['network_stats'] = stats
+                self.system_metrics["network_stats"] = stats
 
         except Exception as e:
             logger.warning(f"Failed to collect network stats: {e}")
@@ -659,29 +693,45 @@ class UnifiedPerformanceOptimizer:
     def get_network_performance_report(self) -> Dict[str, Any]:
         """Get network performance analysis"""
         if not self.network_monitoring_enabled or len(self.network_stats_history) < 2:
-            return {'error': 'Network monitoring not enabled or insufficient data'}
+            return {"error": "Network monitoring not enabled or insufficient data"}
 
         try:
             # Calculate rates and trends
-            recent_stats = list(self.network_stats_history)[-10:]  # Last 10 measurements
+            recent_stats = list(self.network_stats_history)[
+                -10:
+            ]  # Last 10 measurements
 
             if len(recent_stats) < 2:
-                return {'error': 'Need more data points for analysis'}
+                return {"error": "Need more data points for analysis"}
 
             # Calculate throughput rates
-            time_diff = recent_stats[-1]['timestamp'] - recent_stats[0]['timestamp']
+            time_diff = recent_stats[-1]["timestamp"] - recent_stats[0]["timestamp"]
             if time_diff > 0:
-                bytes_sent_rate = (recent_stats[-1]['bytes_sent'] - recent_stats[0]['bytes_sent']) / time_diff
-                bytes_recv_rate = (recent_stats[-1]['bytes_recv'] - recent_stats[0]['bytes_recv']) / time_diff
-                packets_sent_rate = (recent_stats[-1]['packets_sent'] - recent_stats[0]['packets_sent']) / time_diff
-                packets_recv_rate = (recent_stats[-1]['packets_recv'] - recent_stats[0]['packets_recv']) / time_diff
+                bytes_sent_rate = (
+                    recent_stats[-1]["bytes_sent"] - recent_stats[0]["bytes_sent"]
+                ) / time_diff
+                bytes_recv_rate = (
+                    recent_stats[-1]["bytes_recv"] - recent_stats[0]["bytes_recv"]
+                ) / time_diff
+                packets_sent_rate = (
+                    recent_stats[-1]["packets_sent"] - recent_stats[0]["packets_sent"]
+                ) / time_diff
+                packets_recv_rate = (
+                    recent_stats[-1]["packets_recv"] - recent_stats[0]["packets_recv"]
+                ) / time_diff
             else:
-                bytes_sent_rate = bytes_recv_rate = packets_sent_rate = packets_recv_rate = 0
+                bytes_sent_rate = bytes_recv_rate = packets_sent_rate = (
+                    packets_recv_rate
+                ) = 0
 
             # Error rates
-            total_packets = sum(stat['packets_sent'] + stat['packets_recv'] for stat in recent_stats)
-            total_errors = sum(stat['errin'] + stat['errout'] for stat in recent_stats)
-            error_rate = (total_errors / total_packets * 100) if total_packets > 0 else 0
+            total_packets = sum(
+                stat["packets_sent"] + stat["packets_recv"] for stat in recent_stats
+            )
+            total_errors = sum(stat["errin"] + stat["errout"] for stat in recent_stats)
+            error_rate = (
+                (total_errors / total_packets * 100) if total_packets > 0 else 0
+            )
 
             # Network health assessment
             health_score = 100
@@ -697,44 +747,54 @@ class UnifiedPerformanceOptimizer:
 
             # Detect network congestion
             if len(recent_stats) >= 5:
-                recent_drops = sum(stat['dropin'] + stat['dropout'] for stat in recent_stats[-5:])
+                recent_drops = sum(
+                    stat["dropin"] + stat["dropout"] for stat in recent_stats[-5:]
+                )
                 if recent_drops > 10:
                     health_score -= 15
                     issues.append("Network packet drops detected")
 
             return {
-                'health_score': max(0, health_score),
-                'throughput_mbps': {
-                    'send': bytes_sent_rate * 8 / (1024 * 1024),
-                    'receive': bytes_recv_rate * 8 / (1024 * 1024)
+                "health_score": max(0, health_score),
+                "throughput_mbps": {
+                    "send": bytes_sent_rate * 8 / (1024 * 1024),
+                    "receive": bytes_recv_rate * 8 / (1024 * 1024),
                 },
-                'packet_rate_pps': {
-                    'send': packets_sent_rate,
-                    'receive': packets_recv_rate
+                "packet_rate_pps": {
+                    "send": packets_sent_rate,
+                    "receive": packets_recv_rate,
                 },
-                'error_rate_percent': error_rate,
-                'issues': issues,
-                'recommendations': self._get_network_recommendations(issues),
-                'sample_count': len(self.network_stats_history)
+                "error_rate_percent": error_rate,
+                "issues": issues,
+                "recommendations": self._get_network_recommendations(issues),
+                "sample_count": len(self.network_stats_history),
             }
 
         except Exception as e:
             logger.error(f"Failed to generate network report: {e}")
-            return {'error': str(e)}
+            return {"error": str(e)}
 
     def _get_network_recommendations(self, issues: List[str]) -> List[str]:
         """Generate network optimization recommendations"""
         recommendations = []
 
         if any("error rate" in issue.lower() for issue in issues):
-            recommendations.append("Consider checking network cable quality and connections")
-            recommendations.append("Review network interface settings and MTU configuration")
+            recommendations.append(
+                "Consider checking network cable quality and connections"
+            )
+            recommendations.append(
+                "Review network interface settings and MTU configuration"
+            )
 
         if any("utilization" in issue.lower() for issue in issues):
-            recommendations.append("Network bandwidth may be underutilized - consider connection pooling")
+            recommendations.append(
+                "Network bandwidth may be underutilized - consider connection pooling"
+            )
 
         if any("drops" in issue.lower() for issue in issues):
-            recommendations.append("Packet drops detected - check for network congestion or buffer issues")
+            recommendations.append(
+                "Packet drops detected - check for network congestion or buffer issues"
+            )
             recommendations.append("Consider increasing socket buffer sizes")
 
         if not recommendations:
@@ -746,11 +806,11 @@ class UnifiedPerformanceOptimizer:
         """Register a connection pool for monitoring"""
         try:
             self.connection_pool_stats[pool_name] = {
-                'instance': weakref.ref(pool_instance),
-                'connections_created': 0,
-                'connections_active': 0,
-                'connections_idle': 0,
-                'last_updated': time.time()
+                "instance": weakref.ref(pool_instance),
+                "connections_created": 0,
+                "connections_active": 0,
+                "connections_idle": 0,
+                "last_updated": time.time(),
             }
             logger.info(f"Registered connection pool: {pool_name}")
         except Exception as e:
@@ -759,10 +819,9 @@ class UnifiedPerformanceOptimizer:
     def update_connection_pool_stats(self, pool_name: str, stats: Dict[str, Any]):
         """Update connection pool statistics"""
         if pool_name in self.connection_pool_stats:
-            self.connection_pool_stats[pool_name].update({
-                **stats,
-                'last_updated': time.time()
-            })
+            self.connection_pool_stats[pool_name].update(
+                {**stats, "last_updated": time.time()}
+            )
 
     def get_connection_pool_report(self) -> Dict[str, Any]:
         """Get connection pool utilization report"""
@@ -770,16 +829,16 @@ class UnifiedPerformanceOptimizer:
 
         for pool_name, pool_data in self.connection_pool_stats.items():
             try:
-                pool_ref = pool_data.get('instance')
+                pool_ref = pool_data.get("instance")
                 if pool_ref and pool_ref():
                     # Pool still exists
-                    stats = {k: v for k, v in pool_data.items() if k != 'instance'}
+                    stats = {k: v for k, v in pool_data.items() if k != "instance"}
                     report[pool_name] = stats
                 else:
                     # Pool was garbage collected
-                    report[pool_name] = {'status': 'garbage_collected'}
+                    report[pool_name] = {"status": "garbage_collected"}
             except Exception as e:
-                report[pool_name] = {'error': str(e)}
+                report[pool_name] = {"error": str(e)}
 
         return report
 
@@ -826,7 +885,7 @@ class UnifiedPerformanceOptimizer:
     def detect_memory_leaks(self) -> Dict[str, Any]:
         """Detect potential memory leaks"""
         if not self.memory_traces_enabled or len(self.memory_snapshots) < 2:
-            return {'error': 'Memory tracing not enabled or insufficient snapshots'}
+            return {"error": "Memory tracing not enabled or insufficient snapshots"}
 
         try:
             # Compare latest snapshot with oldest
@@ -834,7 +893,7 @@ class UnifiedPerformanceOptimizer:
             latest = self.memory_snapshots[-1]
 
             # Get statistics
-            stats = latest.compare_to(oldest, 'lineno')
+            stats = latest.compare_to(oldest, "lineno")
 
             # Filter significant growth
             significant_growth = []
@@ -842,33 +901,35 @@ class UnifiedPerformanceOptimizer:
 
             for stat in stats:
                 if stat.size_diff > 1024 * 1024:  # More than 1MB growth
-                    significant_growth.append({
-                        'file': stat.traceback[0].filename,
-                        'line': stat.traceback[0].lineno,
-                        'size_diff': stat.size_diff,
-                        'size_diff_mb': stat.size_diff / (1024 * 1024),
-                        'count_diff': stat.count_diff
-                    })
+                    significant_growth.append(
+                        {
+                            "file": stat.traceback[0].filename,
+                            "line": stat.traceback[0].lineno,
+                            "size_diff": stat.size_diff,
+                            "size_diff_mb": stat.size_diff / (1024 * 1024),
+                            "count_diff": stat.count_diff,
+                        }
+                    )
                     total_growth += stat.size_diff
 
             leak_detected = total_growth > (self.leak_threshold_mb * 1024 * 1024)
 
             return {
-                'leak_detected': leak_detected,
-                'total_growth_mb': total_growth / (1024 * 1024),
-                'significant_growth': significant_growth,
-                'snapshot_count': len(self.memory_snapshots),
-                'threshold_mb': self.leak_threshold_mb
+                "leak_detected": leak_detected,
+                "total_growth_mb": total_growth / (1024 * 1024),
+                "significant_growth": significant_growth,
+                "snapshot_count": len(self.memory_snapshots),
+                "threshold_mb": self.leak_threshold_mb,
             }
 
         except Exception as e:
             logger.error(f"Failed to detect memory leaks: {e}")
-            return {'error': str(e)}
+            return {"error": str(e)}
 
     def get_memory_usage_report(self) -> Dict[str, Any]:
         """Get detailed memory usage report"""
         if not self.memory_traces_enabled:
-            return {'error': 'Memory tracing not enabled'}
+            return {"error": "Memory tracing not enabled"}
 
         try:
             # Get current memory usage
@@ -877,28 +938,30 @@ class UnifiedPerformanceOptimizer:
 
             # Get top memory consumers
             snapshot = tracemalloc.take_snapshot()
-            top_stats = snapshot.statistics('lineno')[:10]
+            top_stats = snapshot.statistics("lineno")[:10]
 
             top_consumers = []
             for stat in top_stats:
-                top_consumers.append({
-                    'file': stat.traceback[0].filename,
-                    'line': stat.traceback[0].lineno,
-                    'size': stat.size,
-                    'size_mb': stat.size / (1024 * 1024),
-                    'count': stat.count
-                })
+                top_consumers.append(
+                    {
+                        "file": stat.traceback[0].filename,
+                        "line": stat.traceback[0].lineno,
+                        "size": stat.size,
+                        "size_mb": stat.size / (1024 * 1024),
+                        "count": stat.count,
+                    }
+                )
 
             return {
-                'current_memory_mb': current[0] / (1024 * 1024),
-                'peak_memory_mb': peak[0] / (1024 * 1024),
-                'top_consumers': top_consumers,
-                'snapshot_count': len(self.memory_snapshots)
+                "current_memory_mb": current[0] / (1024 * 1024),
+                "peak_memory_mb": peak[0] / (1024 * 1024),
+                "top_consumers": top_consumers,
+                "snapshot_count": len(self.memory_snapshots),
             }
 
         except Exception as e:
             logger.error(f"Failed to get memory usage report: {e}")
-            return {'error': str(e)}
+            return {"error": str(e)}
 
     def clear_history(self):
         """Clear all performance history"""
@@ -909,30 +972,42 @@ class UnifiedPerformanceOptimizer:
         self.cache_optimizer.cache_stats.clear()
 
 
-def get_performance_monitor() -> 'PerformanceMonitor':
+def get_performance_monitor() -> "PerformanceMonitor":
     """Get global performance monitor instance"""
     global _performance_monitor
     if _performance_monitor is None:
         _performance_monitor = PerformanceMonitor()
     return _performance_monitor
 
+
 def get_performance_optimizer() -> UnifiedPerformanceOptimizer:
     """Get or create global performance optimizer"""
     global _performance_optimizer
     if _performance_optimizer is None:
-        enable_profiling = os.getenv('BLNCS_PERFORMANCE_PROFILING', 'true').lower() in ['true', '1', 'yes']
-        _performance_optimizer = UnifiedPerformanceOptimizer(enable_profiling=enable_profiling)
+        enable_profiling = os.getenv("BLNCS_PERFORMANCE_PROFILING", "true").lower() in [
+            "true",
+            "1",
+            "yes",
+        ]
+        _performance_optimizer = UnifiedPerformanceOptimizer(
+            enable_profiling=enable_profiling
+        )
     return _performance_optimizer
+
 
 def profile_operation(operation_name: str):
     """Decorator for profiling operations"""
+
     def decorator(func: Callable):
         def wrapper(*args, **kwargs):
             optimizer = get_performance_optimizer()
             with optimizer.profile(operation_name):
                 return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
+
 
 @contextmanager
 def performance_monitor(operation_name: str):
@@ -941,70 +1016,90 @@ def performance_monitor(operation_name: str):
     with optimizer.profile(operation_name) as metrics:
         yield metrics
 
+
 def track_database_query(query: str, duration: float):
     """Track database query performance"""
     optimizer = get_performance_optimizer()
     optimizer.track_database_query(query, duration)
+
 
 def register_cache(cache_instance: Any):
     """Register cache instance for optimization"""
     optimizer = get_performance_optimizer()
     optimizer.register_cache(cache_instance)
 
+
 def optimize_system() -> Dict[str, Any]:
     """Run system optimization"""
     optimizer = get_performance_optimizer()
     return optimizer.optimize_system()
+
 
 def get_performance_report() -> Dict[str, Any]:
     """Get performance report"""
     optimizer = get_performance_optimizer()
     return optimizer.get_performance_report()
 
+
 def get_system_health() -> Dict[str, Any]:
     """Get system health status"""
     optimizer = get_performance_optimizer()
     return optimizer.get_system_health()
+
 
 def stop_network_monitoring():
     """Stop network monitoring"""
     optimizer = get_performance_optimizer()
     optimizer.stop_network_monitoring()
 
+
 def get_network_performance_report() -> Dict[str, Any]:
     """Get network performance report"""
     optimizer = get_performance_optimizer()
     return optimizer.get_network_performance_report()
+
+
+def start_network_monitoring():
+    """Start network performance monitoring"""
+    optimizer = get_performance_optimizer()
+    optimizer.start_network_monitoring()
+
 
 def register_connection_pool(pool_name: str, pool_instance: Any):
     """Register connection pool for monitoring"""
     optimizer = get_performance_optimizer()
     optimizer.register_connection_pool(pool_name, pool_instance)
 
+
 def update_connection_pool_stats(pool_name: str, stats: Dict[str, Any]):
     """Update connection pool statistics"""
     optimizer = get_performance_optimizer()
     optimizer.update_connection_pool_stats(pool_name, stats)
+
 
 def get_connection_pool_report() -> Dict[str, Any]:
     """Get connection pool report"""
     optimizer = get_performance_optimizer()
     return optimizer.get_connection_pool_report()
 
+
 def start_memory_tracing():
     """Start memory leak detection"""
     optimizer = get_performance_optimizer()
     optimizer.start_memory_tracing()
+
 
 def stop_memory_tracing():
     """Stop memory leak detection"""
     optimizer = get_performance_optimizer()
     optimizer.stop_memory_tracing()
 
+
 def detect_memory_leaks() -> Dict[str, Any]:
     """Detect memory leaks"""
     optimizer = get_performance_optimizer()
     return optimizer.detect_memory_leaks()
+
 
 def get_memory_usage_report() -> Dict[str, Any]:
     """Get memory usage report"""
@@ -1013,31 +1108,31 @@ def get_memory_usage_report() -> Dict[str, Any]:
 
 
 __all__ = [
-    'UnifiedPerformanceOptimizer',
-    'PerformanceMetrics',
-    'PerformanceProfiler',
-    'CacheOptimizer',
-    'DatabaseOptimizer',
-    'PerformanceMonitor',
-    'get_performance_optimizer',
-    'get_performance_monitor',
-    'profile_operation',
-    'performance_monitor',
-    'track_database_query',
-    'register_cache',
-    'optimize_system',
-    'get_performance_report',
-    'get_system_health',
-    'start_network_monitoring',
-    'stop_network_monitoring',
-    'get_network_performance_report',
-    'register_connection_pool',
-    'update_connection_pool_stats',
-    'get_connection_pool_report',
-    'start_memory_tracing',
-    'stop_memory_tracing',
-    'detect_memory_leaks',
-    'get_memory_usage_report'
+    "UnifiedPerformanceOptimizer",
+    "PerformanceMetrics",
+    "PerformanceProfiler",
+    "CacheOptimizer",
+    "DatabaseOptimizer",
+    "PerformanceMonitor",
+    "get_performance_optimizer",
+    "get_performance_monitor",
+    "profile_operation",
+    "performance_monitor",
+    "track_database_query",
+    "register_cache",
+    "optimize_system",
+    "get_performance_report",
+    "get_system_health",
+    "start_network_monitoring",
+    "stop_network_monitoring",
+    "get_network_performance_report",
+    "register_connection_pool",
+    "update_connection_pool_stats",
+    "get_connection_pool_report",
+    "start_memory_tracing",
+    "stop_memory_tracing",
+    "detect_memory_leaks",
+    "get_memory_usage_report",
 ]
 
 
@@ -1071,9 +1166,13 @@ _performance_monitor: Optional[PerformanceMonitor] = None
 
 # Cleanup on shutdown
 import atexit
+
+logger = logging.getLogger(__name__)
+
+
 def _cleanup_performance_optimizer():
-    global _performance_optimizer
     if _performance_optimizer:
         _performance_optimizer.stop_background_optimization()
+
 
 atexit.register(_cleanup_performance_optimizer)

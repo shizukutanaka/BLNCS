@@ -4,10 +4,10 @@ Test New BLNCS Features
 Comprehensive testing of all new practical features
 """
 
-import sys
-import time
 import os
+import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Add project to path
@@ -19,8 +19,12 @@ def test_websocket_server():
     print("🌐 Testing WebSocket Server...")
 
     try:
-        from blncs.api.websocket_server import SimpleWebSocketServer, WSMessage
-        from blncs.api.websocket_server import WebSocketManager, get_websocket_manager
+        from blncs.api.websocket_server import (
+            SimpleWebSocketServer,
+            WebSocketManager,
+            WSMessage,
+            get_websocket_manager,
+        )
 
         # Test message creation
         message = WSMessage(type="test", data={"key": "value"})
@@ -55,27 +59,26 @@ def test_authentication_system():
     print("🔐 Testing Authentication System...")
 
     try:
-        from blncs.core.simple_auth import SimpleAuth, AuthToken, generate_api_key
         import tempfile
+
+        from blncs.core.simple_auth import AuthToken, SimpleAuth, generate_api_key
 
         with tempfile.TemporaryDirectory() as temp_dir:
             auth_file = os.path.join(temp_dir, "test_auth.json")
             auth = SimpleAuth(auth_file)
 
             # Test API key generation
-            api_key = auth.generate_api_key("test_key", permissions={
-                'read': True,
-                'write': True,
-                'admin': False
-            })
+            api_key = auth.generate_api_key(
+                "test_key", permissions={"read": True, "write": True, "admin": False}
+            )
             assert api_key.startswith("blncs_")
 
             # Test validation
             token = auth.validate_api_key(api_key)
             assert token is not None
-            assert token.has_permission('read')
-            assert token.has_permission('write')
-            assert not token.has_permission('admin')
+            assert token.has_permission("read")
+            assert token.has_permission("write")
+            assert not token.has_permission("admin")
 
             # Test token expiration
             expired_key = auth.generate_api_key("expired", expires_in=1)
@@ -107,9 +110,10 @@ def test_backup_manager():
     print("💾 Testing Backup Manager...")
 
     try:
-        from blncs.utils.backup_manager import BackupManager
         import sqlite3
         import tempfile
+
+        from blncs.utils.backup_manager import BackupManager
 
         with tempfile.TemporaryDirectory() as temp_dir:
             backup_manager = BackupManager(temp_dir)
@@ -132,8 +136,8 @@ def test_backup_manager():
 
             # Test backup info
             info = backup_manager.get_backup_size()
-            assert info['total_bytes'] > 0
-            assert info['file_count'] > 0
+            assert info["total_bytes"] > 0
+            assert info["file_count"] > 0
 
             print("   ✅ Database backup works")
             print("   ✅ Backup compression works")
@@ -151,30 +155,36 @@ def test_metrics_collection():
     print("📊 Testing Metrics Collection...")
 
     try:
-        from blncs.utils.simple_metrics import SimpleMetrics, TimingContext, get_metrics
-        from blncs.utils.simple_metrics import timing, counter_inc, gauge_set
+        from blncs.utils.simple_metrics import (
+            SimpleMetrics,
+            TimingContext,
+            counter_inc,
+            gauge_set,
+            get_metrics,
+            timing,
+        )
 
         # Test basic metrics
         metrics = SimpleMetrics()
 
         # Test counter
-        metrics.counter_inc('test.counter', 5)
+        metrics.counter_inc("test.counter", 5)
 
         # Test gauge
-        metrics.gauge_set('test.gauge', 42.5)
+        metrics.gauge_set("test.gauge", 42.5)
 
         # Test timer
-        metrics.timer_record('test.timer', 0.123)
+        metrics.timer_record("test.timer", 0.123)
 
         # Test histogram
-        metrics.histogram_record('test.histogram', 100.0)
+        metrics.histogram_record("test.histogram", 100.0)
 
         # Test timing context
-        with TimingContext(metrics, 'test.context'):
+        with TimingContext(metrics, "test.context"):
             time.sleep(0.01)
 
         # Test decorator
-        @timing('test.decorated')
+        @timing("test.decorated")
         def test_function():
             time.sleep(0.01)
             return True
@@ -183,20 +193,20 @@ def test_metrics_collection():
 
         # Get stats
         stats = metrics.get_stats()
-        assert 'counters' in stats
-        assert 'test.counter' in stats['counters']
-        assert stats['counters']['test.counter'] == 5
+        assert "counters" in stats
+        assert "test.counter" in stats["counters"]
+        assert stats["counters"]["test.counter"] == 5
 
-        assert 'gauges' in stats
-        assert 'test.gauge' in stats['gauges']
-        assert stats['gauges']['test.gauge'] == 42.5
+        assert "gauges" in stats
+        assert "test.gauge" in stats["gauges"]
+        assert stats["gauges"]["test.gauge"] == 42.5
 
         # Test global functions
-        counter_inc('global.counter', 1)
-        gauge_set('global.gauge', 123.0)
+        counter_inc("global.counter", 1)
+        gauge_set("global.gauge", 123.0)
 
         global_stats = get_metrics().get_stats()
-        assert 'global.counter' in global_stats['counters']
+        assert "global.counter" in global_stats["counters"]
 
         print("   ✅ Counter metrics work")
         print("   ✅ Gauge metrics work")
@@ -216,28 +226,29 @@ def test_log_manager():
     print("📝 Testing Log Manager...")
 
     try:
-        from blncs.utils.log_manager import LogManager
         import tempfile
+
+        from blncs.utils.log_manager import LogManager
 
         with tempfile.TemporaryDirectory() as temp_dir:
             log_manager = LogManager(temp_dir, max_size_mb=1)
 
             # Create test log file
             test_log = Path(temp_dir) / "test.log"
-            with open(test_log, 'w') as f:
+            with open(test_log, "w") as f:
                 f.write("2024-01-01 10:00:00 INFO Test message\n")
                 f.write("2024-01-01 10:01:00 ERROR Test error\n")
                 f.write("2024-01-01 10:02:00 INFO Another message\n")
 
             # Test log stats
             stats = log_manager.get_log_stats()
-            assert stats['total_files'] > 0
-            assert len(stats['active_logs']) > 0
+            assert stats["total_files"] > 0
+            assert len(stats["active_logs"]) > 0
 
             # Test log search
             results = log_manager.search_logs("error")
             assert len(results) > 0
-            assert "error" in results[0]['content'].lower()
+            assert "error" in results[0]["content"].lower()
 
             # Test tail
             lines = log_manager.tail_log("test.log", 2)
@@ -245,7 +256,7 @@ def test_log_manager():
 
             # Test error summary
             summary = log_manager.get_error_summary()
-            assert summary['total_errors'] > 0
+            assert summary["total_errors"] > 0
 
             print("   ✅ Log statistics work")
             print("   ✅ Log search works")
@@ -279,13 +290,13 @@ def test_api_endpoints():
 
         # Check for new endpoints
         expected_endpoints = [
-            '/health',
-            '/api/lightning/info',
-            '/api/lightning/balance',
-            '/api/lightning/invoice',
-            '/api/lightning/pay',
-            '/api/system/backup',
-            '/api/system/metrics'
+            "/health",
+            "/api/lightning/info",
+            "/api/lightning/balance",
+            "/api/lightning/invoice",
+            "/api/lightning/pay",
+            "/api/system/backup",
+            "/api/system/metrics",
         ]
 
         for endpoint in expected_endpoints:
@@ -311,15 +322,19 @@ def test_fast_launcher():
         import blncs_fast
 
         # Test that it has the expected functions
-        assert hasattr(blncs_fast, 'run_check')
-        assert hasattr(blncs_fast, 'run_cli')
-        assert hasattr(blncs_fast, 'run_api')
+        assert hasattr(blncs_fast, "run_check")
+        assert hasattr(blncs_fast, "run_cli")
+        assert hasattr(blncs_fast, "run_api")
 
         # Test check function
         import subprocess
-        result = subprocess.run([
-            sys.executable, 'blncs_fast.py', 'check'
-        ], capture_output=True, text=True, timeout=10)
+
+        result = subprocess.run(
+            [sys.executable, "blncs_fast.py", "check"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
 
         assert result.returncode == 0
         assert "System ready" in result.stdout or "checks failed" in result.stdout
@@ -377,5 +392,5 @@ def main():
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

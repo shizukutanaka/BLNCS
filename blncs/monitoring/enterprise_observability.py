@@ -4,26 +4,29 @@ National-grade monitoring with real-time alerting and deep analytics.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
-import time
-import threading
-from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Set, Union
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-from collections import defaultdict, deque
-import psutil
-import socket
-import hashlib
-from queue import Queue
+import os
 import smtplib
-from email.mime.text import MIMEText
+import socket
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from enum import Enum
+from queue import Queue
+from typing import Any, Callable, Dict, List, Optional, Set, Union
+
+import psutil
 
 
 class AlertSeverity(Enum):
     """Alert severity levels"""
+
     INFO = 1
     WARNING = 2
     ERROR = 3
@@ -32,6 +35,7 @@ class AlertSeverity(Enum):
 
 class MetricType(Enum):
     """Metric data types"""
+
     COUNTER = "counter"
     GAUGE = "gauge"
     HISTOGRAM = "histogram"
@@ -41,6 +45,7 @@ class MetricType(Enum):
 @dataclass
 class Metric:
     """Individual metric measurement"""
+
     name: str
     value: Union[int, float]
     metric_type: MetricType
@@ -52,6 +57,7 @@ class Metric:
 @dataclass
 class Alert:
     """Alert notification"""
+
     id: str
     severity: AlertSeverity
     title: str
@@ -65,6 +71,7 @@ class Alert:
 @dataclass
 class HealthStatus:
     """System health status"""
+
     component: str
     status: str  # "healthy", "degraded", "unhealthy"
     details: Dict[str, Any] = field(default_factory=dict)
@@ -96,25 +103,23 @@ class MetricsCollector:
                 self.metric_aggregates[metric.name].append(metric.value)
                 # Keep only recent values for aggregation
                 if len(self.metric_aggregates[metric.name]) > 1000:
-                    self.metric_aggregates[metric.name] = self.metric_aggregates[metric.name][-1000:]
+                    self.metric_aggregates[metric.name] = self.metric_aggregates[
+                        metric.name
+                    ][-1000:]
 
-    def increment_counter(self, name: str, value: float = 1, labels: Optional[Dict] = None):
+    def increment_counter(
+        self, name: str, value: float = 1, labels: Optional[Dict] = None
+    ):
         """Increment counter metric"""
         metric = Metric(
-            name=name,
-            value=value,
-            metric_type=MetricType.COUNTER,
-            labels=labels or {}
+            name=name, value=value, metric_type=MetricType.COUNTER, labels=labels or {}
         )
         self.record_metric(metric)
 
     def set_gauge(self, name: str, value: float, labels: Optional[Dict] = None):
         """Set gauge metric"""
         metric = Metric(
-            name=name,
-            value=value,
-            metric_type=MetricType.GAUGE,
-            labels=labels or {}
+            name=name, value=value, metric_type=MetricType.GAUGE, labels=labels or {}
         )
         self.record_metric(metric)
 
@@ -125,7 +130,7 @@ class MetricsCollector:
             value=duration,
             metric_type=MetricType.TIMER,
             labels=labels or {},
-            unit="seconds"
+            unit="seconds",
         )
         self.record_metric(metric)
 
@@ -143,26 +148,26 @@ class MetricsCollector:
             n = len(values)
 
             return {
-                'count': n,
-                'min': min(values),
-                'max': max(values),
-                'mean': sum(values) / n,
-                'median': values[n // 2],
-                'p95': values[int(0.95 * n)] if n > 0 else 0,
-                'p99': values[int(0.99 * n)] if n > 0 else 0
+                "count": n,
+                "min": min(values),
+                "max": max(values),
+                "mean": sum(values) / n,
+                "median": values[n // 2],
+                "p95": values[int(0.95 * n)] if n > 0 else 0,
+                "p99": values[int(0.99 * n)] if n > 0 else 0,
             }
 
     def get_current_values(self) -> Dict[str, Any]:
         """Get current metric values"""
         with self._lock:
             return {
-                'counters': dict(self.counters),
-                'gauges': dict(self.gauges),
-                'histogram_summaries': {
+                "counters": dict(self.counters),
+                "gauges": dict(self.gauges),
+                "histogram_summaries": {
                     name: self.get_summary(name)
                     for name in self.metric_aggregates
                     if self.get_summary(name) is not None
-                }
+                },
             }
 
 
@@ -208,31 +213,51 @@ class SystemMonitor:
             try:
                 # CPU metrics
                 cpu_percent = psutil.cpu_percent(interval=1)
-                self.metrics_collector.set_gauge("system.cpu.usage_percent", cpu_percent)
+                self.metrics_collector.set_gauge(
+                    "system.cpu.usage_percent", cpu_percent
+                )
 
                 # Memory metrics
                 memory = psutil.virtual_memory()
-                self.metrics_collector.set_gauge("system.memory.usage_percent", memory.percent)
-                self.metrics_collector.set_gauge("system.memory.available_gb", memory.available / (1024**3))
-                self.metrics_collector.set_gauge("system.memory.used_gb", memory.used / (1024**3))
+                self.metrics_collector.set_gauge(
+                    "system.memory.usage_percent", memory.percent
+                )
+                self.metrics_collector.set_gauge(
+                    "system.memory.available_gb", memory.available / (1024**3)
+                )
+                self.metrics_collector.set_gauge(
+                    "system.memory.used_gb", memory.used / (1024**3)
+                )
 
                 # Disk metrics
-                disk = psutil.disk_usage('/')
-                self.metrics_collector.set_gauge("system.disk.usage_percent", (disk.used / disk.total) * 100)
-                self.metrics_collector.set_gauge("system.disk.free_gb", disk.free / (1024**3))
+                disk = psutil.disk_usage("/")
+                self.metrics_collector.set_gauge(
+                    "system.disk.usage_percent", (disk.used / disk.total) * 100
+                )
+                self.metrics_collector.set_gauge(
+                    "system.disk.free_gb", disk.free / (1024**3)
+                )
 
                 # Network metrics
                 network = psutil.net_io_counters()
-                self.metrics_collector.increment_counter("system.network.bytes_sent", network.bytes_sent)
-                self.metrics_collector.increment_counter("system.network.bytes_recv", network.bytes_recv)
+                self.metrics_collector.increment_counter(
+                    "system.network.bytes_sent", network.bytes_sent
+                )
+                self.metrics_collector.increment_counter(
+                    "system.network.bytes_recv", network.bytes_recv
+                )
 
                 # Process metrics
                 process = psutil.Process()
-                self.metrics_collector.set_gauge("process.memory.rss_mb", process.memory_info().rss / (1024**2))
-                self.metrics_collector.set_gauge("process.cpu.percent", process.cpu_percent())
+                self.metrics_collector.set_gauge(
+                    "process.memory.rss_mb", process.memory_info().rss / (1024**2)
+                )
+                self.metrics_collector.set_gauge(
+                    "process.cpu.percent", process.cpu_percent()
+                )
 
                 # Load average (Unix-like systems)
-                if hasattr(os, 'getloadavg'):
+                if hasattr(os, "getloadavg"):
                     load1, load5, load15 = os.getloadavg()
                     self.metrics_collector.set_gauge("system.load.1m", load1)
                     self.metrics_collector.set_gauge("system.load.5m", load5)
@@ -249,7 +274,9 @@ class SystemMonitor:
             # Determine health based on resource usage
             cpu_percent = psutil.cpu_percent()
             memory_percent = psutil.virtual_memory().percent
-            disk_percent = (psutil.disk_usage('/').used / psutil.disk_usage('/').total) * 100
+            disk_percent = (
+                psutil.disk_usage("/").used / psutil.disk_usage("/").total
+            ) * 100
 
             # Health thresholds
             if cpu_percent > 90 or memory_percent > 90 or disk_percent > 95:
@@ -263,16 +290,14 @@ class SystemMonitor:
                 component="system",
                 status=status,
                 details={
-                    'cpu_percent': cpu_percent,
-                    'memory_percent': memory_percent,
-                    'disk_percent': disk_percent
-                }
+                    "cpu_percent": cpu_percent,
+                    "memory_percent": memory_percent,
+                    "disk_percent": disk_percent,
+                },
             )
         except Exception as e:
             return HealthStatus(
-                component="system",
-                status="unhealthy",
-                details={'error': str(e)}
+                component="system", status="unhealthy", details={"error": str(e)}
             )
 
 
@@ -374,9 +399,9 @@ class AlertManager:
                 severity_counts[alert.severity.name] += 1
 
             return {
-                'active_count': len(self.active_alerts),
-                'total_history': len(self.alert_history),
-                'by_severity': dict(severity_counts)
+                "active_count": len(self.active_alerts),
+                "total_history": len(self.alert_history),
+                "by_severity": dict(severity_counts),
             }
 
 
@@ -394,16 +419,12 @@ class LogAnalyzer:
         """Analyze log entry for patterns and anomalies"""
         with self._lock:
             timestamp = time.time()
-            entry = {
-                'timestamp': timestamp,
-                'level': level,
-                'message': log_entry
-            }
+            entry = {"timestamp": timestamp, "level": level, "message": log_entry}
 
             self.logs.append(entry)
 
             # Pattern detection
-            if level in ['ERROR', 'CRITICAL']:
+            if level in ["ERROR", "CRITICAL"]:
                 self._detect_error_patterns(log_entry)
 
             # Anomaly detection
@@ -413,7 +434,7 @@ class LogAnalyzer:
         """Detect common error patterns"""
         # Extract error signatures
         words = message.lower().split()
-        error_signature = ' '.join(words[:5])  # First 5 words as signature
+        error_signature = " ".join(words[:5])  # First 5 words as signature
 
         self.error_patterns[error_signature] += 1
 
@@ -424,7 +445,7 @@ class LogAnalyzer:
                 severity=AlertSeverity.WARNING,
                 title="Frequent Error Pattern Detected",
                 message=f"Error pattern '{error_signature}' occurred {self.error_patterns[error_signature]} times",
-                source="log_analyzer"
+                source="log_analyzer",
             )
             # This would be sent to AlertManager
             self.logger.warning(f"Error pattern detected: {error_signature}")
@@ -436,8 +457,10 @@ class LogAnalyzer:
 
         # Check error rate in last minute
         one_minute_ago = time.time() - 60
-        recent_logs = [log for log in self.logs if log['timestamp'] > one_minute_ago]
-        error_logs = [log for log in recent_logs if log['level'] in ['ERROR', 'CRITICAL']]
+        recent_logs = [log for log in self.logs if log["timestamp"] > one_minute_ago]
+        error_logs = [
+            log for log in recent_logs if log["level"] in ["ERROR", "CRITICAL"]
+        ]
 
         error_rate = len(error_logs) / len(recent_logs) if recent_logs else 0
 
@@ -450,12 +473,12 @@ class LogAnalyzer:
         with self._lock:
             level_counts = defaultdict(int)
             for log in self.logs:
-                level_counts[log['level']] += 1
+                level_counts[log["level"]] += 1
 
             return {
-                'total_logs': len(self.logs),
-                'by_level': dict(level_counts),
-                'top_error_patterns': dict(list(self.error_patterns.items())[:10])
+                "total_logs": len(self.logs),
+                "by_level": dict(level_counts),
+                "top_error_patterns": dict(list(self.error_patterns.items())[:10]),
             }
 
 
@@ -477,6 +500,7 @@ class EnterpriseObservability:
 
     def _setup_default_alerts(self):
         """Setup default system alerts"""
+
         def cpu_alert_rule():
             cpu_percent = psutil.cpu_percent()
             if cpu_percent > 90:
@@ -485,7 +509,7 @@ class EnterpriseObservability:
                     severity=AlertSeverity.WARNING,
                     title="High CPU Usage",
                     message=f"CPU usage at {cpu_percent:.1f}%",
-                    source="system_monitor"
+                    source="system_monitor",
                 )
             return None
 
@@ -497,7 +521,7 @@ class EnterpriseObservability:
                     severity=AlertSeverity.CRITICAL,
                     title="High Memory Usage",
                     message=f"Memory usage at {memory_percent:.1f}%",
-                    source="system_monitor"
+                    source="system_monitor",
                 )
             return None
 
@@ -519,8 +543,9 @@ class EnterpriseObservability:
 
     def _start_alert_monitoring(self):
         """Start automated alert monitoring"""
+
         def monitor_alerts():
-            while getattr(self, '_alert_monitoring', True):
+            while getattr(self, "_alert_monitoring", True):
                 try:
                     for rule in self._alert_rules:
                         alert = rule()
@@ -539,7 +564,7 @@ class EnterpriseObservability:
     def _stop_alert_monitoring(self):
         """Stop alert monitoring"""
         self._alert_monitoring = False
-        if hasattr(self, '_alert_thread'):
+        if hasattr(self, "_alert_thread"):
             self._alert_thread.join(timeout=5)
 
     def register_health_check(self, name: str, check_func: Callable):
@@ -549,11 +574,7 @@ class EnterpriseObservability:
 
     def create_dashboard(self, name: str, metrics: List[str]):
         """Create monitoring dashboard"""
-        self.dashboards[name] = {
-            'created': time.time(),
-            'metrics': metrics,
-            'views': 0
-        }
+        self.dashboards[name] = {"created": time.time(), "metrics": metrics, "views": 0}
         self.logger.info(f"Created dashboard: {name}")
 
     def get_dashboard_data(self, dashboard_name: str) -> Dict[str, Any]:
@@ -562,24 +583,20 @@ class EnterpriseObservability:
             return {}
 
         dashboard = self.dashboards[dashboard_name]
-        dashboard['views'] += 1
+        dashboard["views"] += 1
 
         # Collect metric data
         data = {}
         current_metrics = self.metrics_collector.get_current_values()
 
-        for metric_name in dashboard['metrics']:
+        for metric_name in dashboard["metrics"]:
             # Find metric in current values
             for category, metrics in current_metrics.items():
                 if metric_name in metrics:
                     data[metric_name] = metrics[metric_name]
                     break
 
-        return {
-            'dashboard': dashboard_name,
-            'data': data,
-            'timestamp': time.time()
-        }
+        return {"dashboard": dashboard_name, "data": data, "timestamp": time.time()}
 
     def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status"""
@@ -593,26 +610,26 @@ class EnterpriseObservability:
                 custom_health[name] = check()
             except Exception as e:
                 custom_health[name] = HealthStatus(
-                    component=name,
-                    status="unhealthy",
-                    details={'error': str(e)}
+                    component=name, status="unhealthy", details={"error": str(e)}
                 )
 
         return {
-            'system_health': asdict(system_health),
-            'custom_health': {name: asdict(status) for name, status in custom_health.items()},
-            'metrics': self.metrics_collector.get_current_values(),
-            'alerts': self.alert_manager.get_alert_summary(),
-            'logs': self.log_analyzer.get_analysis_summary(),
-            'dashboards': list(self.dashboards.keys())
+            "system_health": asdict(system_health),
+            "custom_health": {
+                name: asdict(status) for name, status in custom_health.items()
+            },
+            "metrics": self.metrics_collector.get_current_values(),
+            "alerts": self.alert_manager.get_alert_summary(),
+            "logs": self.log_analyzer.get_analysis_summary(),
+            "dashboards": list(self.dashboards.keys()),
         }
 
     def export_metrics(self, format: str = "json") -> str:
         """Export metrics in specified format"""
         data = {
-            'timestamp': time.time(),
-            'metrics': self.metrics_collector.get_current_values(),
-            'system_status': self.get_system_status()
+            "timestamp": time.time(),
+            "metrics": self.metrics_collector.get_current_values(),
+            "system_status": self.get_system_status(),
         }
 
         if format == "json":
@@ -620,8 +637,8 @@ class EnterpriseObservability:
         elif format == "prometheus":
             # Convert to Prometheus format
             lines = []
-            for metric_name, value in data['metrics']['gauges'].items():
+            for metric_name, value in data["metrics"]["gauges"].items():
                 lines.append(f"{metric_name.replace('.', '_')} {value}")
-            return '\n'.join(lines)
+            return "\n".join(lines)
         else:
             raise ValueError(f"Unsupported format: {format}")

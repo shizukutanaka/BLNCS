@@ -5,22 +5,24 @@
 
 import asyncio
 import json
-import time
-import shutil
-import threading
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
 import logging
-import sqlite3
 import os
+import shutil
+import sqlite3
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class FailoverStatus(Enum):
     """フェイルオーバーステータス"""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     FAILED = "failed"
@@ -29,6 +31,7 @@ class FailoverStatus(Enum):
 
 class BackupType(Enum):
     """バックアップタイプ"""
+
     FULL = "full"
     INCREMENTAL = "incremental"
     DIFFERENTIAL = "differential"
@@ -37,6 +40,7 @@ class BackupType(Enum):
 @dataclass
 class SystemNode:
     """システムノード情報"""
+
     node_id: str
     node_type: str  # 'primary', 'secondary', 'backup'
     address: str
@@ -51,6 +55,7 @@ class SystemNode:
 @dataclass
 class BackupJob:
     """バックアップジョブ情報"""
+
     job_id: str
     backup_type: BackupType
     source_paths: List[str]
@@ -67,6 +72,7 @@ class BackupJob:
 @dataclass
 class FailoverEvent:
     """フェイルオーバーイベント情報"""
+
     event_id: str
     timestamp: float
     failed_node: str
@@ -120,6 +126,7 @@ class HealthMonitor:
         """
         try:
             import socket
+
             import requests
 
             # ソケット接続チェック
@@ -133,7 +140,9 @@ class HealthMonitor:
 
             # HTTPヘルスチェック（オプション）
             try:
-                response = requests.get(f"http://{node.address}:{node.port}/health", timeout=self.timeout)
+                response = requests.get(
+                    f"http://{node.address}:{node.port}/health", timeout=self.timeout
+                )
                 if response.status_code != 200:
                     return FailoverStatus.DEGRADED
             except:
@@ -150,7 +159,9 @@ class HealthMonitor:
         """ヘルス監視を開始"""
         if not self.is_monitoring:
             self.is_monitoring = True
-            self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+            self.monitor_thread = threading.Thread(
+                target=self._monitor_loop, daemon=True
+            )
             self.monitor_thread.start()
 
     def stop_monitoring(self):
@@ -179,7 +190,9 @@ class HealthMonitor:
                         node.status = new_status
                         node.last_heartbeat = time.time()
 
-                        logger.warning(f"ノードステータス変更: {node_id} {old_status.value} -> {new_status.value}")
+                        logger.warning(
+                            f"ノードステータス変更: {node_id} {old_status.value} -> {new_status.value}"
+                        )
 
                         # コールバック実行
                         for callback in self.health_callbacks:
@@ -232,7 +245,8 @@ class AutoFailoverManager:
             フェイルオーバー対象ノードID（見つからない場合はNone）
         """
         available_nodes = [
-            node for node_id, node in self.health_monitor.nodes.items()
+            node
+            for node_id, node in self.health_monitor.nodes.items()
             if node_id != failed_node_id and node.status == FailoverStatus.HEALTHY
         ]
 
@@ -266,7 +280,7 @@ class AutoFailoverManager:
                 failover_node=target_node_id,
                 reason="自動ヘルスチェックによる検知",
                 duration=duration,
-                success=success
+                success=success,
             )
 
             self.failover_events.append(event)
@@ -279,7 +293,9 @@ class AutoFailoverManager:
                     logger.error(f"フェイルオーバーコールバックエラー: {e}")
 
             if success:
-                logger.info(f"フェイルオーバー成功: {failed_node_id} -> {target_node_id}")
+                logger.info(
+                    f"フェイルオーバー成功: {failed_node_id} -> {target_node_id}"
+                )
             else:
                 logger.error(f"フェイルオーバー失敗: {failed_node_id}")
 
@@ -306,7 +322,9 @@ class AutoFailoverManager:
 
             # ターゲットノードの負荷を更新
             if target_node_id in self.health_monitor.nodes:
-                self.health_monitor.nodes[target_node_id].current_load += 0.3  # 負荷増加をシミュレーション
+                self.health_monitor.nodes[
+                    target_node_id
+                ].current_load += 0.3  # 負荷増加をシミュレーション
 
             return True
 
@@ -372,14 +390,16 @@ class IntelligentBackupManager:
             success = self._perform_backup(job)
 
             # 履歴記録
-            self.backup_history.append({
-                "job_id": job_id,
-                "timestamp": start_time,
-                "duration": time.time() - start_time,
-                "success": success,
-                "backup_type": job.backup_type.value,
-                "size": self._get_backup_size(job)
-            })
+            self.backup_history.append(
+                {
+                    "job_id": job_id,
+                    "timestamp": start_time,
+                    "duration": time.time() - start_time,
+                    "success": success,
+                    "backup_type": job.backup_type.value,
+                    "size": self._get_backup_size(job),
+                }
+            )
 
             job.last_run = start_time
 
@@ -401,7 +421,7 @@ class IntelligentBackupManager:
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_name = f"{job.backup_type.value}_{timestamp}"
-            backup_path = self.backup_root / job_id / backup_name
+            backup_path = self.backup_root / job.job_id / backup_name
 
             # ディレクトリ作成
             backup_path.mkdir(parents=True, exist_ok=True)
@@ -422,10 +442,10 @@ class IntelligentBackupManager:
                 "timestamp": time.time(),
                 "source_paths": job.source_paths,
                 "compression": job.compression,
-                "encryption": job.encryption
+                "encryption": job.encryption,
             }
 
-            with open(backup_path / "metadata.json", 'w') as f:
+            with open(backup_path / "metadata.json", "w") as f:
                 json.dump(metadata, f, indent=2)
 
             return True
@@ -444,7 +464,9 @@ class IntelligentBackupManager:
             total_size = 0
             for backup_dir in job_path.iterdir():
                 if backup_dir.is_dir():
-                    total_size += sum(f.stat().st_size for f in backup_dir.rglob('*') if f.is_file())
+                    total_size += sum(
+                        f.stat().st_size for f in backup_dir.rglob("*") if f.is_file()
+                    )
 
             return total_size
         except Exception:
@@ -466,7 +488,7 @@ class IntelligentBackupManager:
             backup_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
 
             # 保持数を越えるバックアップを削除
-            for old_backup in backup_dirs[job.retention_count:]:
+            for old_backup in backup_dirs[job.retention_count :]:
                 shutil.rmtree(old_backup)
                 logger.info(f"古いバックアップを削除: {old_backup.name}")
 
@@ -477,7 +499,9 @@ class IntelligentBackupManager:
         """スケジューラーを開始"""
         if not self.is_scheduling:
             self.is_scheduling = True
-            self.scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
+            self.scheduler_thread = threading.Thread(
+                target=self._scheduler_loop, daemon=True
+            )
             self.scheduler_thread.start()
 
     def stop_scheduler(self):
@@ -523,7 +547,9 @@ class HighAvailabilityManager:
 
         self.is_ha_active = False
 
-    def initialize_ha_system(self, primary_node: SystemNode, secondary_nodes: List[SystemNode]):
+    def initialize_ha_system(
+        self, primary_node: SystemNode, secondary_nodes: List[SystemNode]
+    ):
         """
         高可用性システムを初期化
         Args:
@@ -554,7 +580,7 @@ class HighAvailabilityManager:
             schedule="0 2 * * *",  # 毎日午前2時
             compression=True,
             encryption=False,
-            retention_count=30  # 30日保持
+            retention_count=30,  # 30日保持
         )
 
         self.backup_manager.create_backup_job(backup_job)
@@ -584,7 +610,13 @@ class HighAvailabilityManager:
 
     def get_system_status(self) -> Dict[str, Any]:
         """システムステータスを取得"""
-        healthy_nodes = len([node for node in self.health_monitor.nodes.values() if node.status == FailoverStatus.HEALTHY])
+        healthy_nodes = len(
+            [
+                node
+                for node in self.health_monitor.nodes.values()
+                if node.status == FailoverStatus.HEALTHY
+            ]
+        )
         total_nodes = len(self.health_monitor.nodes)
 
         return {
@@ -594,7 +626,7 @@ class HighAvailabilityManager:
             "failed_nodes": total_nodes - healthy_nodes,
             "recent_failovers": len(self.failover_manager.get_failover_history(10)),
             "backup_jobs": len(self.backup_manager.backup_jobs),
-            "recent_backups": len(self.backup_manager.backup_history[-10:])
+            "recent_backups": len(self.backup_manager.backup_history[-10:]),
         }
 
 
@@ -608,7 +640,7 @@ def example_usage():
         node_type="primary",
         address="127.0.0.1",
         port=8080,
-        priority=100
+        priority=100,
     )
 
     secondary1 = SystemNode(
@@ -616,7 +648,7 @@ def example_usage():
         node_type="secondary",
         address="127.0.0.1",
         port=8081,
-        priority=50
+        priority=50,
     )
 
     secondary2 = SystemNode(
@@ -624,7 +656,7 @@ def example_usage():
         node_type="secondary",
         address="127.0.0.1",
         port=8082,
-        priority=30
+        priority=30,
     )
 
     # システム初期化

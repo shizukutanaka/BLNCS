@@ -9,21 +9,24 @@ This module provides comprehensive multi-blockchain support including:
 - Decentralized finance (DeFi) integrations
 """
 
-import time
-import json
-import logging
-import threading
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, asdict
-from collections import defaultdict
 import hashlib
 import hmac
+import json
+import logging
+import secrets
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class BlockchainConfig:
     """Blockchain configuration."""
+
     chain_id: str
     name: str
     rpc_url: str
@@ -33,9 +36,11 @@ class BlockchainConfig:
     fee_estimation: Dict[str, Any] = None
     api_keys: Dict[str, str] = None
 
+
 @dataclass
 class Wallet:
     """Multi-chain wallet."""
+
     wallet_id: str
     name: str
     supported_chains: List[str]
@@ -43,9 +48,11 @@ class Wallet:
     balances: Dict[str, float] = None  # chain_id -> balance
     created_at: float = None
 
+
 @dataclass
 class Transaction:
     """Blockchain transaction."""
+
     tx_id: str
     wallet_id: str
     chain_id: str
@@ -58,9 +65,11 @@ class Transaction:
     confirmations: int = 0
     metadata: Dict[str, Any] = None
 
+
 @dataclass
 class CrossChainBridge:
     """Cross-chain bridge configuration."""
+
     bridge_id: str
     name: str
     source_chain: str
@@ -70,6 +79,7 @@ class CrossChainBridge:
     fees: Dict[str, float]
     min_amount: float
     max_amount: float
+
 
 class BitcoinIntegration:
     """Bitcoin blockchain integration."""
@@ -83,6 +93,7 @@ class BitcoinIntegration:
         # In a real implementation, query Bitcoin node or API
         # For demo, simulate balance
         import random
+
         return random.uniform(0.001, 10.0)
 
     def estimate_fee(self, tx_size: int = 250) -> float:
@@ -90,7 +101,9 @@ class BitcoinIntegration:
         # Simulate fee estimation
         return 0.0001  # 0.0001 BTC
 
-    def send_transaction(self, from_address: str, to_address: str, amount: float, fee: float) -> str:
+    def send_transaction(
+        self, from_address: str, to_address: str, amount: float, fee: float
+    ) -> str:
         """Send Bitcoin transaction."""
         tx_id = f"btc_tx_{int(time.time())}_{secrets.token_hex(8)}"
 
@@ -104,11 +117,12 @@ class BitcoinIntegration:
             fee=fee,
             to_address=to_address,
             status="pending",
-            timestamp=time.time()
+            timestamp=time.time(),
         )
 
         self.logger.info(f"Bitcoin transaction created: {tx_id}")
         return tx_id
+
 
 class LightningIntegration:
     """Lightning Network integration."""
@@ -123,11 +137,11 @@ class LightningIntegration:
         """Get Lightning node information."""
         # Simulate node info
         return {
-            'node_id': '03a7c6f...',
-            'alias': 'BLNCS_Node',
-            'channels': 5,
-            'capacity': 1000000,
-            'status': 'online'
+            "node_id": "03a7c6f...",
+            "alias": "BLNCS_Node",
+            "channels": 5,
+            "capacity": 1000000,
+            "status": "online",
         }
 
     def open_channel(self, node_id: str, amount: int, fee_rate: int = 1) -> str:
@@ -135,12 +149,12 @@ class LightningIntegration:
         channel_id = f"ln_channel_{int(time.time())}_{secrets.token_hex(4)}"
 
         channel = {
-            'channel_id': channel_id,
-            'node_id': node_id,
-            'amount': amount,
-            'fee_rate': fee_rate,
-            'status': 'pending',
-            'opened_at': time.time()
+            "channel_id": channel_id,
+            "node_id": node_id,
+            "amount": amount,
+            "fee_rate": fee_rate,
+            "status": "pending",
+            "opened_at": time.time(),
         }
 
         self.channels[channel_id] = channel
@@ -153,15 +167,16 @@ class LightningIntegration:
         payment_id = f"ln_payment_{int(time.time())}_{secrets.token_hex(8)}"
 
         payment = {
-            'payment_id': payment_id,
-            'invoice': invoice,
-            'amount': amount,
-            'status': 'pending',
-            'timestamp': time.time()
+            "payment_id": payment_id,
+            "invoice": invoice,
+            "amount": amount,
+            "status": "pending",
+            "timestamp": time.time(),
         }
 
         self.logger.info(f"Lightning payment sent: {payment_id}")
         return payment_id
+
 
 class EthereumIntegration:
     """Ethereum blockchain integration."""
@@ -174,13 +189,16 @@ class EthereumIntegration:
         """Get Ethereum balance."""
         # Simulate balance
         import random
+
         return random.uniform(0.1, 5.0)
 
     def estimate_gas(self, to_address: str, value: int, data: str = "") -> int:
         """Estimate gas for transaction."""
         return 21000  # Standard ETH transfer gas
 
-    def send_transaction(self, from_address: str, to_address: str, value: float, gas_price: int) -> str:
+    def send_transaction(
+        self, from_address: str, to_address: str, value: float, gas_price: int
+    ) -> str:
         """Send Ethereum transaction."""
         tx_id = f"eth_tx_{int(time.time())}_{secrets.token_hex(8)}"
 
@@ -193,11 +211,12 @@ class EthereumIntegration:
             fee=gas_price * 21000 / 1e18,  # Convert to ETH
             to_address=to_address,
             status="pending",
-            timestamp=time.time()
+            timestamp=time.time(),
         )
 
         self.logger.info(f"Ethereum transaction created: {tx_id}")
         return tx_id
+
 
 class CrossChainBridgeManager:
     """Cross-chain bridge management."""
@@ -211,8 +230,16 @@ class CrossChainBridgeManager:
         """Register cross-chain bridge."""
         self.bridges[bridge.bridge_id] = bridge
 
-    def initiate_bridge_transfer(self, bridge_id: str, from_chain: str, to_chain: str,
-                              asset: str, amount: float, from_address: str, to_address: str) -> str:
+    def initiate_bridge_transfer(
+        self,
+        bridge_id: str,
+        from_chain: str,
+        to_chain: str,
+        asset: str,
+        amount: float,
+        from_address: str,
+        to_address: str,
+    ) -> str:
         """Initiate cross-chain transfer."""
         if bridge_id not in self.bridges:
             raise ValueError(f"Bridge not found: {bridge_id}")
@@ -228,23 +255,24 @@ class CrossChainBridgeManager:
         transfer_id = f"bridge_tx_{int(time.time())}_{secrets.token_hex(8)}"
 
         transaction = {
-            'transfer_id': transfer_id,
-            'bridge_id': bridge_id,
-            'from_chain': from_chain,
-            'to_chain': to_chain,
-            'asset': asset,
-            'amount': amount,
-            'from_address': from_address,
-            'to_address': to_address,
-            'status': 'initiated',
-            'timestamp': time.time(),
-            'fees': bridge.fees
+            "transfer_id": transfer_id,
+            "bridge_id": bridge_id,
+            "from_chain": from_chain,
+            "to_chain": to_chain,
+            "asset": asset,
+            "amount": amount,
+            "from_address": from_address,
+            "to_address": to_address,
+            "status": "initiated",
+            "timestamp": time.time(),
+            "fees": bridge.fees,
         }
 
         self.bridge_transactions[bridge_id].append(transaction)
 
         self.logger.info(f"Cross-chain transfer initiated: {transfer_id}")
         return transfer_id
+
 
 class BlockchainAnalytics:
     """Blockchain analytics and monitoring."""
@@ -260,9 +288,9 @@ class BlockchainAnalytics:
 
         # Update chain statistics
         chain_stats = self.analytics_data[tx.chain_id]
-        chain_stats['total_transactions'] = chain_stats.get('total_transactions', 0) + 1
-        chain_stats['total_volume'] = chain_stats.get('total_volume', 0) + tx.amount
-        chain_stats['last_transaction'] = tx.timestamp
+        chain_stats["total_transactions"] = chain_stats.get("total_transactions", 0) + 1
+        chain_stats["total_volume"] = chain_stats.get("total_volume", 0) + tx.amount
+        chain_stats["last_transaction"] = tx.timestamp
 
     def get_chain_statistics(self, chain_id: str) -> Dict[str, Any]:
         """Get statistics for blockchain."""
@@ -279,6 +307,7 @@ class BlockchainAnalytics:
 
         return volume
 
+
 class DeFiIntegration:
     """Decentralized Finance integration."""
 
@@ -288,14 +317,16 @@ class DeFiIntegration:
         self.liquidity_pools = {}
         self.staking_positions = {}
 
-    def add_liquidity_pool(self, pool_id: str, protocol: str, assets: List[str], apy: float):
+    def add_liquidity_pool(
+        self, pool_id: str, protocol: str, assets: List[str], apy: float
+    ):
         """Add liquidity pool."""
         self.liquidity_pools[pool_id] = {
-            'protocol': protocol,
-            'assets': assets,
-            'apy': apy,
-            'tvl': 0.0,  # Total Value Locked
-            'created_at': time.time()
+            "protocol": protocol,
+            "assets": assets,
+            "apy": apy,
+            "tvl": 0.0,  # Total Value Locked
+            "created_at": time.time(),
         }
 
     def stake_tokens(self, pool_id: str, amount: float, user_address: str) -> str:
@@ -303,12 +334,12 @@ class DeFiIntegration:
         stake_id = f"stake_{int(time.time())}_{secrets.token_hex(4)}"
 
         stake = {
-            'stake_id': stake_id,
-            'pool_id': pool_id,
-            'amount': amount,
-            'user_address': user_address,
-            'staked_at': time.time(),
-            'rewards': 0.0
+            "stake_id": stake_id,
+            "pool_id": pool_id,
+            "amount": amount,
+            "user_address": user_address,
+            "staked_at": time.time(),
+            "rewards": 0.0,
         }
 
         self.staking_positions[stake_id] = stake
@@ -322,16 +353,17 @@ class DeFiIntegration:
             return 0.0
 
         stake = self.staking_positions[stake_id]
-        pool = self.liquidity_pools.get(stake['pool_id'], {})
+        pool = self.liquidity_pools.get(stake["pool_id"], {})
 
         # Calculate rewards based on APY and time
-        staked_time = time.time() - stake['staked_at']
-        apy = pool.get('apy', 0.0)
+        staked_time = time.time() - stake["staked_at"]
+        apy = pool.get("apy", 0.0)
 
-        rewards = stake['amount'] * (apy / 100) * (staked_time / (365 * 24 * 3600))
-        stake['rewards'] = rewards
+        rewards = stake["amount"] * (apy / 100) * (staked_time / (365 * 24 * 3600))
+        stake["rewards"] = rewards
 
         return rewards
+
 
 class MultiBlockchainManager:
     """Main multi-blockchain integration system."""
@@ -356,11 +388,11 @@ class MultiBlockchainManager:
         self.blockchains[config.chain_id] = config
 
         # Initialize blockchain integration
-        if config.chain_type == 'bitcoin':
+        if config.chain_type == "bitcoin":
             self.bitcoin_integration = BitcoinIntegration(config)
-        elif config.chain_type == 'lightning':
+        elif config.chain_type == "lightning":
             self.lightning_integration = LightningIntegration(config)
-        elif config.chain_type == 'ethereum':
+        elif config.chain_type == "ethereum":
             self.ethereum_integration = EthereumIntegration(config)
 
     def create_wallet(self, name: str, supported_chains: List[str]) -> str:
@@ -373,7 +405,7 @@ class MultiBlockchainManager:
             supported_chains=supported_chains,
             addresses={},
             balances={},
-            created_at=time.time()
+            created_at=time.time(),
         )
 
         self.wallets[wallet_id] = wallet
@@ -382,7 +414,9 @@ class MultiBlockchainManager:
         for chain_id in supported_chains:
             if chain_id in self.blockchains:
                 # In real implementation, generate actual addresses
-                wallet.addresses[chain_id] = f"{chain_id}_address_{secrets.token_hex(8)}"
+                wallet.addresses[chain_id] = (
+                    f"{chain_id}_address_{secrets.token_hex(8)}"
+                )
                 wallet.balances[chain_id] = 0.0
 
         self.logger.info(f"Created wallet: {wallet_id}")
@@ -401,9 +435,9 @@ class MultiBlockchainManager:
         address = wallet.addresses[chain_id]
 
         # Get balance from blockchain integration
-        if chain_id == 'bitcoin' and self.bitcoin_integration:
+        if chain_id == "bitcoin" and self.bitcoin_integration:
             balance = self.bitcoin_integration.get_balance(address)
-        elif chain_id == 'ethereum' and self.ethereum_integration:
+        elif chain_id == "ethereum" and self.ethereum_integration:
             balance = self.ethereum_integration.get_balance(address)
         else:
             balance = 0.0
@@ -411,7 +445,9 @@ class MultiBlockchainManager:
         wallet.balances[chain_id] = balance
         return balance
 
-    def send_transaction(self, wallet_id: str, chain_id: str, to_address: str, amount: float) -> str:
+    def send_transaction(
+        self, wallet_id: str, chain_id: str, to_address: str, amount: float
+    ) -> str:
         """Send transaction from wallet."""
         if wallet_id not in self.wallets:
             raise ValueError(f"Wallet not found: {wallet_id}")
@@ -435,18 +471,22 @@ class MultiBlockchainManager:
             fee=0.0,  # Would be calculated
             to_address=to_address,
             status="pending",
-            timestamp=time.time()
+            timestamp=time.time(),
         )
 
         self.transactions[tx_id] = transaction
 
         # Execute transaction based on chain type
-        if chain_id == 'bitcoin' and self.bitcoin_integration:
-            actual_tx_id = self.bitcoin_integration.send_transaction(from_address, to_address, amount, transaction.fee)
+        if chain_id == "bitcoin" and self.bitcoin_integration:
+            actual_tx_id = self.bitcoin_integration.send_transaction(
+                from_address, to_address, amount, transaction.fee
+            )
             transaction.tx_id = actual_tx_id
-        elif chain_id == 'ethereum' and self.ethereum_integration:
+        elif chain_id == "ethereum" and self.ethereum_integration:
             gas_price = 20  # gwei
-            actual_tx_id = self.ethereum_integration.send_transaction(from_address, to_address, amount, gas_price)
+            actual_tx_id = self.ethereum_integration.send_transaction(
+                from_address, to_address, amount, gas_price
+            )
             transaction.tx_id = actual_tx_id
             transaction.fee = gas_price * 21000 / 1e18
 
@@ -468,7 +508,7 @@ class MultiBlockchainManager:
             supported_assets=["BTC", "WBTC"],
             fees={"BTC": 0.0001, "WBTC": 0.0001},
             min_amount=0.001,
-            max_amount=1.0
+            max_amount=1.0,
         )
 
         self.bridge_manager.register_bridge(btc_eth_bridge)
@@ -479,7 +519,9 @@ class MultiBlockchainManager:
             return
 
         self.blockchain_monitoring_active = True
-        self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
+        self.monitoring_thread = threading.Thread(
+            target=self._monitoring_loop, daemon=True
+        )
         self.monitoring_thread.start()
         self.logger.info("Blockchain monitoring started")
 
@@ -498,16 +540,21 @@ class MultiBlockchainManager:
                 for wallet in self.wallets.values():
                     for chain_id in wallet.supported_chains:
                         try:
-                            balance = self.get_wallet_balance(wallet.wallet_id, chain_id)
+                            balance = self.get_wallet_balance(
+                                wallet.wallet_id, chain_id
+                            )
                             wallet.balances[chain_id] = balance
                         except Exception as e:
-                            self.logger.error(f"Balance update failed for {wallet.wallet_id}/{chain_id}: {e}")
+                            self.logger.error(
+                                f"Balance update failed for {wallet.wallet_id}/{chain_id}: {e}"
+                            )
 
                 # Update transaction statuses
                 for tx in self.transactions.values():
                     if tx.status == "pending":
                         # Simulate confirmation
                         import random
+
                         if random.random() > 0.8:  # 20% chance of confirmation
                             tx.status = "confirmed"
                             tx.confirmations += 1
@@ -521,18 +568,20 @@ class MultiBlockchainManager:
     def get_multi_chain_status(self) -> Dict[str, Any]:
         """Get multi-chain system status."""
         return {
-            'supported_chains': len(self.blockchains),
-            'wallets': len(self.wallets),
-            'transactions': len(self.transactions),
-            'bridges': len(self.bridge_manager.bridges),
-            'liquidity_pools': len(self.defi_integration.liquidity_pools),
-            'staking_positions': len(self.defi_integration.staking_positions),
-            'monitoring_active': self.blockchain_monitoring_active
+            "supported_chains": len(self.blockchains),
+            "wallets": len(self.wallets),
+            "transactions": len(self.transactions),
+            "bridges": len(self.bridge_manager.bridges),
+            "liquidity_pools": len(self.defi_integration.liquidity_pools),
+            "staking_positions": len(self.defi_integration.staking_positions),
+            "monitoring_active": self.blockchain_monitoring_active,
         }
+
 
 def create_multi_blockchain_manager() -> MultiBlockchainManager:
     """Factory function to create multi-blockchain manager."""
     return MultiBlockchainManager()
+
 
 # Example usage
 if __name__ == "__main__":
@@ -545,7 +594,7 @@ if __name__ == "__main__":
         name="Bitcoin",
         rpc_url="http://localhost:8332",
         chain_type="bitcoin",
-        network="mainnet"
+        network="mainnet",
     )
 
     lightning_config = BlockchainConfig(
@@ -553,7 +602,7 @@ if __name__ == "__main__":
         name="Lightning Network",
         rpc_url="http://localhost:9735",
         chain_type="lightning",
-        network="mainnet"
+        network="mainnet",
     )
 
     ethereum_config = BlockchainConfig(
@@ -561,7 +610,7 @@ if __name__ == "__main__":
         name="Ethereum",
         rpc_url="http://localhost:8545",
         chain_type="ethereum",
-        network="mainnet"
+        network="mainnet",
     )
 
     blockchain_manager.add_blockchain(bitcoin_config)
@@ -569,7 +618,9 @@ if __name__ == "__main__":
     blockchain_manager.add_blockchain(ethereum_config)
 
     # Create wallet
-    wallet_id = blockchain_manager.create_wallet("Main Wallet", ["bitcoin", "lightning", "ethereum"])
+    wallet_id = blockchain_manager.create_wallet(
+        "Main Wallet", ["bitcoin", "lightning", "ethereum"]
+    )
     print(f"Created wallet: {wallet_id}")
 
     # Get balances
@@ -583,7 +634,9 @@ if __name__ == "__main__":
     print(f"Sent transaction: {tx_id}")
 
     # Set up DeFi
-    blockchain_manager.defi_integration.add_liquidity_pool("pool_1", "uniswap", ["ETH", "USDC"], 5.2)
+    blockchain_manager.defi_integration.add_liquidity_pool(
+        "pool_1", "uniswap", ["ETH", "USDC"], 5.2
+    )
     stake_id = blockchain_manager.defi_integration.stake_tokens("pool_1", 1.0, "0x...")
     print(f"Staked tokens: {stake_id}")
 

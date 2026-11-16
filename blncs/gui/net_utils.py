@@ -5,10 +5,18 @@ This module provides robust networking components optimized for the native GUI,
 including proxy-aware WebSocket connections and resilient HTTP sessions.
 """
 
+import logging
+import os
 import random
-import time
 import threading
-from typing import Callable, Optional, Dict, Any
+import time
+from typing import Any, Callable, Dict, Optional, Tuple
+from urllib.parse import urljoin, urlparse, urlunparse
+
+import requests
+import websocket
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -25,15 +33,15 @@ class NetworkUtils:
     def __init__(self):
         """Initialize network utilities with sensible defaults."""
         self._session_defaults = {
-            'timeout': 30,
-            'user_agent': 'BLNCS-GUI/2.0',
-            'verify_ssl': True,
-            'max_retries': 3,
-            'backoff_factor': 0.3,
-            'status_forcelist': (500, 502, 503, 504)
+            "timeout": 30,
+            "user_agent": "BLNCS-GUI/2.0",
+            "verify_ssl": True,
+            "max_retries": 3,
+            "backoff_factor": 0.3,
+            "status_forcelist": (500, 502, 503, 504),
         }
 
-    def build_ws_url(self, base_url: str, endpoint: str = '/ws/dashboard') -> str:
+    def build_ws_url(self, base_url: str, endpoint: str = "/ws/dashboard") -> str:
         """
         Build WebSocket URL with scheme conversion and path handling.
 
@@ -54,17 +62,19 @@ class NetworkUtils:
                 raise ValueError(f"Invalid base URL: {base_url}")
 
             # Convert http/https to ws/wss
-            ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
+            ws_scheme = "wss" if parsed.scheme == "https" else "ws"
 
             # Build WebSocket URL
-            ws_url = urlunparse((
-                ws_scheme,
-                parsed.netloc,
-                endpoint,
-                None,  # params
-                None,  # query
-                None   # fragment
-            ))
+            ws_url = urlunparse(
+                (
+                    ws_scheme,
+                    parsed.netloc,
+                    endpoint,
+                    None,  # params
+                    None,  # query
+                    None,  # fragment
+                )
+            )
 
             logger.debug(f"Built WebSocket URL: {ws_url}")
             return ws_url
@@ -81,7 +91,7 @@ class NetworkUtils:
         proxies: Optional[Dict[str, str]] = None,
         headers: Optional[Dict[str, str]] = None,
         max_retries: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> requests.Session:
         """
         Create a robust HTTP session with Atlassian-inspired reliability.
@@ -99,10 +109,14 @@ class NetworkUtils:
             Configured requests.Session with retry strategy and adapters
         """
         # Use defaults or provided values
-        timeout = timeout or self._session_defaults['timeout']
-        user_agent = user_agent or self._session_defaults['user_agent']
-        verify_ssl = verify_ssl if verify_ssl is not None else self._session_defaults['verify_ssl']
-        max_retries = max_retries or self._session_defaults['max_retries']
+        timeout = timeout or self._session_defaults["timeout"]
+        user_agent = user_agent or self._session_defaults["user_agent"]
+        verify_ssl = (
+            verify_ssl
+            if verify_ssl is not None
+            else self._session_defaults["verify_ssl"]
+        )
+        max_retries = max_retries or self._session_defaults["max_retries"]
 
         # Create session with modern configuration
         session = requests.Session()
@@ -110,9 +124,17 @@ class NetworkUtils:
         # Configure retry strategy (Atlassian-inspired resilience)
         retry_strategy = Retry(
             total=max_retries,
-            backoff_factor=self._session_defaults['backoff_factor'],
-            status_forcelist=self._session_defaults['status_forcelist'],
-            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+            backoff_factor=self._session_defaults["backoff_factor"],
+            status_forcelist=self._session_defaults["status_forcelist"],
+            allowed_methods=[
+                "HEAD",
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE",
+                "OPTIONS",
+                "TRACE",
+            ],
         )
 
         # Mount adapters with retry strategy
@@ -121,14 +143,16 @@ class NetworkUtils:
         session.mount("https://", adapter)
 
         # Set default headers
-        session.headers.update({
-            'User-Agent': user_agent,
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        })
+        session.headers.update(
+            {
+                "User-Agent": user_agent,
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            }
+        )
 
         # Add custom headers
         if headers:
@@ -141,14 +165,14 @@ class NetworkUtils:
         original_request = session.request
 
         def request_with_timeout(method, url, **request_kwargs):
-            if 'timeout' not in request_kwargs:
-                request_kwargs['timeout'] = timeout
+            if "timeout" not in request_kwargs:
+                request_kwargs["timeout"] = timeout
             return original_request(method, url, **request_kwargs)
 
         session.request = request_with_timeout  # type: ignore[assignment]
 
         # Handle proxy configuration with environment fallback
-        if proxies is None and not os.getenv('BLNCS_GUI_NO_PROXY'):
+        if proxies is None and not os.getenv("BLNCS_GUI_NO_PROXY"):
             proxies = self._get_system_proxies()
 
         if proxies:
@@ -173,13 +197,13 @@ class NetworkUtils:
 
         # Check for explicit proxy environment variables
         proxy_vars = {
-            'http': os.getenv('HTTP_PROXY', os.getenv('http_proxy')),
-            'https': os.getenv('HTTPS_PROXY', os.getenv('https_proxy')),
-            'no_proxy': os.getenv('NO_PROXY', os.getenv('no_proxy'))
+            "http": os.getenv("HTTP_PROXY", os.getenv("http_proxy")),
+            "https": os.getenv("HTTPS_PROXY", os.getenv("https_proxy")),
+            "no_proxy": os.getenv("NO_PROXY", os.getenv("no_proxy")),
         }
 
         for protocol, proxy_url in proxy_vars.items():
-            if protocol == 'no_proxy' and proxy_url:
+            if protocol == "no_proxy" and proxy_url:
                 # Handle no_proxy list (not used in session.proxies)
                 continue
             elif proxy_url:
@@ -202,7 +226,7 @@ class NetworkUtils:
             session = self.create_http_session(timeout=timeout)
 
             # Test basic connectivity with health endpoint
-            health_url = urljoin(base_url, '/health')
+            health_url = urljoin(base_url, "/health")
             response = session.get(health_url, timeout=timeout)
 
             if response.status_code == 200:
@@ -224,7 +248,7 @@ class NetworkUtils:
         ws_url: str,
         header: Optional[Dict[str, str]] = None,
         cookie: Optional[str] = None,
-        enable_trace: bool = False
+        enable_trace: bool = False,
     ) -> websocket.WebSocket:
         """
         Create WebSocket connection with modern configuration.
@@ -266,10 +290,17 @@ class ResilientWebSocket:
     Resilient WebSocket connection with jittered exponential backoff.
     """
 
-    def __init__(self, url: str, on_message: Callable, on_error: Callable = None,
-                 on_close: Callable = None, on_open: Callable = None,
-                 max_reconnect_attempts: int = 10, base_delay: float = 1.0,
-                 max_delay: float = 60.0):
+    def __init__(
+        self,
+        url: str,
+        on_message: Callable,
+        on_error: Callable = None,
+        on_close: Callable = None,
+        on_open: Callable = None,
+        max_reconnect_attempts: int = 10,
+        base_delay: float = 1.0,
+        max_delay: float = 60.0,
+    ):
         """
         Initialize resilient WebSocket connection.
 
@@ -300,10 +331,16 @@ class ResilientWebSocket:
 
     def connect(self):
         """Start WebSocket connection with resilient reconnection."""
-        if self.is_connected or self._reconnect_thread and self._reconnect_thread.is_alive():
+        if (
+            self.is_connected
+            or self._reconnect_thread
+            and self._reconnect_thread.is_alive()
+        ):
             return
 
-        self._reconnect_thread = threading.Thread(target=self._connection_loop, daemon=True)
+        self._reconnect_thread = threading.Thread(
+            target=self._connection_loop, daemon=True
+        )
         self._reconnect_thread.start()
 
     def disconnect(self):
@@ -327,15 +364,21 @@ class ResilientWebSocket:
                 if self.reconnect_attempts >= self.max_reconnect_attempts:
                     logger.error("Max reconnection attempts reached")
                     if self.on_error:
-                        self.on_error(f"Max reconnection attempts ({self.max_reconnect_attempts}) reached")
+                        self.on_error(
+                            f"Max reconnection attempts ({self.max_reconnect_attempts}) reached"
+                        )
                     break
 
                 # Calculate delay with jittered exponential backoff
-                delay = min(self.base_delay * (2 ** self.reconnect_attempts), self.max_delay)
+                delay = min(
+                    self.base_delay * (2**self.reconnect_attempts), self.max_delay
+                )
                 jitter = random.uniform(0.5, 1.5) * delay
                 actual_delay = min(jitter, self.max_delay)
 
-                logger.info(f"Reconnecting in {actual_delay:.2f} seconds (attempt {self.reconnect_attempts + 1}/{self.max_reconnect_attempts})")
+                logger.info(
+                    f"Reconnecting in {actual_delay:.2f} seconds (attempt {self.reconnect_attempts + 1}/{self.max_reconnect_attempts})"
+                )
 
                 if self._stop_event.wait(actual_delay):
                     break  # Stop requested

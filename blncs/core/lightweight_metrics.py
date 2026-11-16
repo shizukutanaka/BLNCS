@@ -4,24 +4,27 @@ Lightweight Performance Metrics Collector for BLNCS
 Real-time system and application performance monitoring
 """
 
-import time
-import threading
-import psutil
-from typing import Dict, List, Any, Optional, Callable
-from collections import defaultdict, deque
-from datetime import datetime, timedelta
 import json
 import os
+import threading
+import time
+from collections import defaultdict, deque
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+import psutil
 
 try:
     import resource
+
     HAS_RESOURCE = True
 except ImportError:
     HAS_RESOURCE = False
 
 try:
     import gc
+
     HAS_GC = True
 except ImportError:
     HAS_GC = False
@@ -64,11 +67,11 @@ class RealtimeMetricsCollector:
 
         # Thresholds for alerting
         self.alert_thresholds = {
-            'cpu_percent': 80.0,
-            'memory_percent': 85.0,
-            'disk_percent': 90.0,
-            'api_response_time': 1.0,  # seconds
-            'db_query_time': 0.1  # seconds
+            "cpu_percent": 80.0,
+            "memory_percent": 85.0,
+            "disk_percent": 90.0,
+            "api_response_time": 1.0,  # seconds
+            "db_query_time": 0.1,  # seconds
         }
 
         # Alert callbacks
@@ -113,7 +116,7 @@ class RealtimeMetricsCollector:
             # CPU metrics
             cpu_percent = psutil.cpu_percent(interval=1)
             cpu_count = psutil.cpu_count()
-            load_avg = psutil.getloadavg() if hasattr(psutil, 'getloadavg') else None
+            load_avg = psutil.getloadavg() if hasattr(psutil, "getloadavg") else None
 
             # Memory metrics
             memory = psutil.virtual_memory()
@@ -122,7 +125,7 @@ class RealtimeMetricsCollector:
             memory_total_gb = memory.total / (1024**3)
 
             # Disk metrics
-            disk = psutil.disk_usage('/')
+            disk = psutil.disk_usage("/")
             disk_percent = disk.percent
             disk_used_gb = disk.used / (1024**3)
             disk_total_gb = disk.total / (1024**3)
@@ -138,7 +141,11 @@ class RealtimeMetricsCollector:
             if HAS_RESOURCE:
                 try:
                     rusage = resource.getrusage(resource.RUSAGE_SELF)
-                    process_memory_mb = rusage.ru_maxrss / 1024 if rusage.ru_maxrss > 100000 else rusage.ru_maxrss / 1024 / 1024
+                    process_memory_mb = (
+                        rusage.ru_maxrss / 1024
+                        if rusage.ru_maxrss > 100000
+                        else rusage.ru_maxrss / 1024 / 1024
+                    )
                 except:
                     pass
 
@@ -148,30 +155,28 @@ class RealtimeMetricsCollector:
                 pass
 
             metrics = {
-                'timestamp': timestamp,
-                'cpu': {
-                    'percent': cpu_percent,
-                    'count': cpu_count,
-                    'load_avg': load_avg
+                "timestamp": timestamp,
+                "cpu": {
+                    "percent": cpu_percent,
+                    "count": cpu_count,
+                    "load_avg": load_avg,
                 },
-                'memory': {
-                    'percent': memory_percent,
-                    'used_gb': round(memory_used_gb, 2),
-                    'total_gb': round(memory_total_gb, 2),
-                    'process_mb': round(process_memory_mb, 2)
+                "memory": {
+                    "percent": memory_percent,
+                    "used_gb": round(memory_used_gb, 2),
+                    "total_gb": round(memory_total_gb, 2),
+                    "process_mb": round(process_memory_mb, 2),
                 },
-                'disk': {
-                    'percent': disk_percent,
-                    'used_gb': round(disk_used_gb, 2),
-                    'total_gb': round(disk_total_gb, 2)
+                "disk": {
+                    "percent": disk_percent,
+                    "used_gb": round(disk_used_gb, 2),
+                    "total_gb": round(disk_total_gb, 2),
                 },
-                'network': {
-                    'bytes_sent_mb': round(bytes_sent_mb, 2),
-                    'bytes_recv_mb': round(bytes_recv_mb, 2)
+                "network": {
+                    "bytes_sent_mb": round(bytes_sent_mb, 2),
+                    "bytes_recv_mb": round(bytes_recv_mb, 2),
                 },
-                'process': {
-                    'cpu_percent': process_cpu_percent
-                }
+                "process": {"cpu_percent": process_cpu_percent},
             }
 
             with self._lock:
@@ -189,12 +194,12 @@ class RealtimeMetricsCollector:
             stats = cache.stats()
 
             metrics = {
-                'timestamp': time.time(),
-                'cache_size': stats.get('size', 0),
-                'cache_max_size': stats.get('max_size', 1000),
-                'cache_hit_rate': stats.get('hit_rate', 0),
-                'cache_hits': getattr(self, 'cache_hits', 0),
-                'cache_misses': getattr(self, 'cache_misses', 0)
+                "timestamp": time.time(),
+                "cache_size": stats.get("size", 0),
+                "cache_max_size": stats.get("max_size", 1000),
+                "cache_hit_rate": stats.get("hit_rate", 0),
+                "cache_hits": getattr(self, "cache_hits", 0),
+                "cache_misses": getattr(self, "cache_misses", 0),
             }
 
             with self._lock:
@@ -204,7 +209,9 @@ class RealtimeMetricsCollector:
             # Cache might not be available
             pass
 
-    def record_api_request(self, endpoint: str, method: str, response_time: float, status_code: int):
+    def record_api_request(
+        self, endpoint: str, method: str, response_time: float, status_code: int
+    ):
         """Record API request metrics"""
         with self._lock:
             self.api_requests_total += 1
@@ -214,17 +221,19 @@ class RealtimeMetricsCollector:
                 self.api_requests_error += 1
 
             metrics = {
-                'timestamp': time.time(),
-                'endpoint': endpoint,
-                'method': method,
-                'response_time': response_time,
-                'status_code': status_code,
-                'success': 200 <= status_code < 400
+                "timestamp": time.time(),
+                "endpoint": endpoint,
+                "method": method,
+                "response_time": response_time,
+                "status_code": status_code,
+                "success": 200 <= status_code < 400,
             }
 
             self.api_metrics[endpoint].append(metrics)
 
-    def record_database_query(self, operation: str, table: str, query_time: float, success: bool):
+    def record_database_query(
+        self, operation: str, table: str, query_time: float, success: bool
+    ):
         """Record database query metrics"""
         with self._lock:
             self.database_queries_total += 1
@@ -234,11 +243,11 @@ class RealtimeMetricsCollector:
                 self.database_queries_error += 1
 
             metrics = {
-                'timestamp': time.time(),
-                'operation': operation,
-                'table': table,
-                'query_time': query_time,
-                'success': success
+                "timestamp": time.time(),
+                "operation": operation,
+                "table": table,
+                "query_time": query_time,
+                "success": success,
             }
 
             self.database_metrics[operation].append(metrics)
@@ -265,56 +274,97 @@ class RealtimeMetricsCollector:
 
         with self._lock:
             # Filter recent metrics
-            recent_system = [m for m in self.system_metrics if m['timestamp'] > cutoff_time]
-            recent_cache = [m for m in self.cache_metrics if m['timestamp'] > cutoff_time]
+            recent_system = [
+                m for m in self.system_metrics if m["timestamp"] > cutoff_time
+            ]
+            recent_cache = [
+                m for m in self.cache_metrics if m["timestamp"] > cutoff_time
+            ]
 
             if not recent_system:
-                return {'error': 'No recent metrics available'}
+                return {"error": "No recent metrics available"}
 
             summary = {
-                'time_range': {
-                    'start': datetime.fromtimestamp(recent_system[0]['timestamp']).isoformat(),
-                    'end': datetime.fromtimestamp(recent_system[-1]['timestamp']).isoformat(),
-                    'hours': hours
+                "time_range": {
+                    "start": datetime.fromtimestamp(
+                        recent_system[0]["timestamp"]
+                    ).isoformat(),
+                    "end": datetime.fromtimestamp(
+                        recent_system[-1]["timestamp"]
+                    ).isoformat(),
+                    "hours": hours,
                 },
-                'system': {
-                    'cpu_avg_percent': round(sum(m['cpu']['percent'] for m in recent_system) / len(recent_system), 2),
-                    'cpu_peak_percent': max(m['cpu']['percent'] for m in recent_system),
-                    'memory_avg_percent': round(sum(m['memory']['percent'] for m in recent_system) / len(recent_system), 2),
-                    'memory_peak_percent': max(m['memory']['percent'] for m in recent_system),
-                    'disk_percent': recent_system[-1]['disk']['percent']
+                "system": {
+                    "cpu_avg_percent": round(
+                        sum(m["cpu"]["percent"] for m in recent_system)
+                        / len(recent_system),
+                        2,
+                    ),
+                    "cpu_peak_percent": max(m["cpu"]["percent"] for m in recent_system),
+                    "memory_avg_percent": round(
+                        sum(m["memory"]["percent"] for m in recent_system)
+                        / len(recent_system),
+                        2,
+                    ),
+                    "memory_peak_percent": max(
+                        m["memory"]["percent"] for m in recent_system
+                    ),
+                    "disk_percent": recent_system[-1]["disk"]["percent"],
                 },
-                'performance': {
-                    'api_requests_total': self.api_requests_total,
-                    'api_requests_success': self.api_requests_success,
-                    'api_requests_error': self.api_requests_error,
-                    'api_success_rate': round((self.api_requests_success / max(self.api_requests_total, 1)) * 100, 2),
-                    'db_queries_total': self.database_queries_total,
-                    'db_queries_success': self.database_queries_success,
-                    'db_queries_error': self.database_queries_error,
-                    'db_success_rate': round((self.database_queries_success / max(self.database_queries_total, 1)) * 100, 2)
-                }
+                "performance": {
+                    "api_requests_total": self.api_requests_total,
+                    "api_requests_success": self.api_requests_success,
+                    "api_requests_error": self.api_requests_error,
+                    "api_success_rate": round(
+                        (self.api_requests_success / max(self.api_requests_total, 1))
+                        * 100,
+                        2,
+                    ),
+                    "db_queries_total": self.database_queries_total,
+                    "db_queries_success": self.database_queries_success,
+                    "db_queries_error": self.database_queries_error,
+                    "db_success_rate": round(
+                        (
+                            self.database_queries_success
+                            / max(self.database_queries_total, 1)
+                        )
+                        * 100,
+                        2,
+                    ),
+                },
             }
 
             # Cache metrics if available
             if recent_cache:
-                summary['cache'] = {
-                    'avg_hit_rate': round(sum(m.get('cache_hit_rate', 0) for m in recent_cache) / len(recent_cache), 2),
-                    'current_size': recent_cache[-1].get('cache_size', 0),
-                    'max_size': recent_cache[-1].get('cache_max_size', 1000)
+                summary["cache"] = {
+                    "avg_hit_rate": round(
+                        sum(m.get("cache_hit_rate", 0) for m in recent_cache)
+                        / len(recent_cache),
+                        2,
+                    ),
+                    "current_size": recent_cache[-1].get("cache_size", 0),
+                    "max_size": recent_cache[-1].get("cache_max_size", 1000),
                 }
 
             # API response time statistics
             api_times = []
             for endpoint_metrics in self.api_metrics.values():
-                api_times.extend([m['response_time'] for m in endpoint_metrics if m['timestamp'] > cutoff_time])
+                api_times.extend(
+                    [
+                        m["response_time"]
+                        for m in endpoint_metrics
+                        if m["timestamp"] > cutoff_time
+                    ]
+                )
 
             if api_times:
-                summary['api_performance'] = {
-                    'avg_response_time': round(sum(api_times) / len(api_times), 4),
-                    'min_response_time': round(min(api_times), 4),
-                    'max_response_time': round(max(api_times), 4),
-                    'p95_response_time': round(sorted(api_times)[int(len(api_times) * 0.95)], 4)
+                summary["api_performance"] = {
+                    "avg_response_time": round(sum(api_times) / len(api_times), 4),
+                    "min_response_time": round(min(api_times), 4),
+                    "max_response_time": round(max(api_times), 4),
+                    "p95_response_time": round(
+                        sorted(api_times)[int(len(api_times) * 0.95)], 4
+                    ),
                 }
 
             return summary
@@ -328,34 +378,40 @@ class RealtimeMetricsCollector:
             return alerts
 
         # CPU alert
-        if current['cpu']['percent'] > self.alert_thresholds['cpu_percent']:
-            alerts.append({
-                'type': 'cpu_high',
-                'level': 'warning',
-                'message': f"CPU usage is {current['cpu']['percent']:.1f}% (threshold: {self.alert_thresholds['cpu_percent']}%)",
-                'value': current['cpu']['percent'],
-                'threshold': self.alert_thresholds['cpu_percent']
-            })
+        if current["cpu"]["percent"] > self.alert_thresholds["cpu_percent"]:
+            alerts.append(
+                {
+                    "type": "cpu_high",
+                    "level": "warning",
+                    "message": f"CPU usage is {current['cpu']['percent']:.1f}% (threshold: {self.alert_thresholds['cpu_percent']}%)",
+                    "value": current["cpu"]["percent"],
+                    "threshold": self.alert_thresholds["cpu_percent"],
+                }
+            )
 
         # Memory alert
-        if current['memory']['percent'] > self.alert_thresholds['memory_percent']:
-            alerts.append({
-                'type': 'memory_high',
-                'level': 'warning',
-                'message': f"Memory usage is {current['memory']['percent']:.1f}% (threshold: {self.alert_thresholds['memory_percent']}%)",
-                'value': current['memory']['percent'],
-                'threshold': self.alert_thresholds['memory_percent']
-            })
+        if current["memory"]["percent"] > self.alert_thresholds["memory_percent"]:
+            alerts.append(
+                {
+                    "type": "memory_high",
+                    "level": "warning",
+                    "message": f"Memory usage is {current['memory']['percent']:.1f}% (threshold: {self.alert_thresholds['memory_percent']}%)",
+                    "value": current["memory"]["percent"],
+                    "threshold": self.alert_thresholds["memory_percent"],
+                }
+            )
 
         # Disk alert
-        if current['disk']['percent'] > self.alert_thresholds['disk_percent']:
-            alerts.append({
-                'type': 'disk_high',
-                'level': 'critical',
-                'message': f"Disk usage is {current['disk']['percent']:.1f}% (threshold: {self.alert_thresholds['disk_percent']}%)",
-                'value': current['disk']['percent'],
-                'threshold': self.alert_thresholds['disk_percent']
-            })
+        if current["disk"]["percent"] > self.alert_thresholds["disk_percent"]:
+            alerts.append(
+                {
+                    "type": "disk_high",
+                    "level": "critical",
+                    "message": f"Disk usage is {current['disk']['percent']:.1f}% (threshold: {self.alert_thresholds['disk_percent']}%)",
+                    "value": current["disk"]["percent"],
+                    "threshold": self.alert_thresholds["disk_percent"],
+                }
+            )
 
         return alerts
 
@@ -378,13 +434,13 @@ class RealtimeMetricsCollector:
     def export_metrics(self, file_path: str):
         """Export metrics to JSON file"""
         data = {
-            'summary': self.get_metrics_summary(),
-            'current': self.get_current_metrics(),
-            'alerts': self.get_alerts(),
-            'exported_at': datetime.now().isoformat()
+            "summary": self.get_metrics_summary(),
+            "current": self.get_current_metrics(),
+            "alerts": self.get_alerts(),
+            "exported_at": datetime.now().isoformat(),
         }
 
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             json.dump(data, f, indent=2, default=str)
 
     def __repr__(self) -> str:
@@ -397,6 +453,7 @@ class RealtimeMetricsCollector:
 # Global instance
 _metrics_collector = None
 
+
 def get_metrics_collector() -> RealtimeMetricsCollector:
     """Get global metrics collector instance"""
     global _metrics_collector
@@ -404,41 +461,47 @@ def get_metrics_collector() -> RealtimeMetricsCollector:
         _metrics_collector = RealtimeMetricsCollector()
     return _metrics_collector
 
+
 def start_system_monitoring():
     """Start system monitoring"""
     collector = get_metrics_collector()
     collector.start_collection()
+
 
 def stop_system_monitoring():
     """Stop system monitoring"""
     collector = get_metrics_collector()
     collector.stop_collection()
 
+
 def record_metric(name: str, value: Any, tags: Optional[Dict] = None):
     """Record a custom metric"""
     # Placeholder for custom metrics
     pass
+
 
 def increment_counter(name: str, value: int = 1, tags: Optional[Dict] = None):
     """Increment a counter metric"""
     # Placeholder for counter metrics
     pass
 
+
 def get_metric(name: str):
     """Get metric value"""
     # Placeholder for metric retrieval
     return None
 
+
 # Compatibility aliases
 LightweightMetrics = RealtimeMetricsCollector
 
 __all__ = [
-    'RealtimeMetricsCollector',
-    'get_metrics_collector',
-    'start_system_monitoring',
-    'stop_system_monitoring',
-    'record_metric',
-    'increment_counter',
-    'get_metric',
-    'LightweightMetrics'
+    "RealtimeMetricsCollector",
+    "get_metrics_collector",
+    "start_system_monitoring",
+    "stop_system_monitoring",
+    "record_metric",
+    "increment_counter",
+    "get_metric",
+    "LightweightMetrics",
 ]

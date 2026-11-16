@@ -18,12 +18,12 @@ BUILD_DATE = "2024-10-09"
 BUILD_TYPE = "production"
 
 __all__ = [
-    '__version__',
-    '__author__',
-    '__description__',
-    'VERSION_MAJOR',
-    'VERSION_MINOR',
-    'VERSION_PATCH',
-    'BUILD_DATE',
-    'BUILD_TYPE'
+    "__version__",
+    "__author__",
+    "__description__",
+    "VERSION_MAJOR",
+    "VERSION_MINOR",
+    "VERSION_PATCH",
+    "BUILD_DATE",
+    "BUILD_TYPE",
 ]

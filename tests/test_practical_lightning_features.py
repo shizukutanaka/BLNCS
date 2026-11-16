@@ -6,12 +6,13 @@ Test all newly implemented practical Lightning Network features
 
 import os
 import sys
-import time
 import tempfile
+import time
 from pathlib import Path
 
 # Add BLNCS to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "."))
+
 
 def test_invoice_manager():
     """Test Lightning invoice management"""
@@ -26,15 +27,15 @@ def test_invoice_manager():
         invoice = manager.create_invoice(
             amount_sats=100000,
             description="Test Lightning invoice",
-            expiry_seconds=3600
+            expiry_seconds=3600,
         )
 
         # Test invoice properties
         valid_properties = (
-            invoice.amount_sats == 100000 and
-            invoice.description == "Test Lightning invoice" and
-            len(invoice.payment_hash) == 64 and
-            invoice.status == "pending"
+            invoice.amount_sats == 100000
+            and invoice.description == "Test Lightning invoice"
+            and len(invoice.payment_hash) == 64
+            and invoice.status == "pending"
         )
 
         # Test payment
@@ -45,17 +46,21 @@ def test_invoice_manager():
 
         print(f"  📋 Invoice created: {'✅' if valid_properties else '❌'}")
         print(f"  💳 Payment processed: {'✅' if payment_success else '❌'}")
-        print(f"  📊 Statistics: {stats['total']} invoices, {stats['paid_amount_sats']} sats paid")
+        print(
+            f"  📊 Statistics: {stats['total']} invoices, {stats['paid_amount_sats']} sats paid"
+        )
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_data", ignore_errors=True)
 
-        return valid_properties and payment_success and stats['total'] > 0
+        return valid_properties and payment_success and stats["total"] > 0
 
     except Exception as e:
         print(f"  ❌ Invoice manager test failed: {e}")
         return False
+
 
 def test_channel_manager():
     """Test Lightning channel management"""
@@ -72,14 +77,14 @@ def test_channel_manager():
             remote_pubkey="0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
             capacity_sats=1000000,
             local_balance_sats=600000,
-            remote_balance_sats=400000
+            remote_balance_sats=400000,
         )
 
         # Test channel properties
         valid_channel = (
-            channel.capacity_sats == 1000000 and
-            channel.local_balance_sats == 600000 and
-            channel.balance_ratio() == 0.6
+            channel.capacity_sats == 1000000
+            and channel.local_balance_sats == 600000
+            and channel.balance_ratio() == 0.6
         )
 
         # Test capacity statistics
@@ -98,13 +103,15 @@ def test_channel_manager():
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_data", ignore_errors=True)
 
-        return valid_channel and capacity_stats['total_capacity_sats'] > 0
+        return valid_channel and capacity_stats["total_capacity_sats"] > 0
 
     except Exception as e:
         print(f"  ❌ Channel manager test failed: {e}")
         return False
+
 
 def test_routing_manager():
     """Test Lightning routing management"""
@@ -118,16 +125,18 @@ def test_routing_manager():
         # Add test nodes
         node1 = manager.add_network_node(
             "0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
-            "TestNode1"
+            "TestNode1",
         )
 
         node2 = manager.add_network_node(
             "0345678901bcdef01234567890abcdef1234567890abcdef1234567890abcdef123",
-            "TestNode2"
+            "TestNode2",
         )
 
         # Add test channel
-        manager.update_channel_info("test_channel_route", node1.pubkey, node2.pubkey, 1000000, 0.001)
+        manager.update_channel_info(
+            "test_channel_route", node1.pubkey, node2.pubkey, 1000000, 0.001
+        )
 
         # Test route finding
         route = manager.find_route(node1.pubkey, node2.pubkey, 100000)
@@ -145,13 +154,15 @@ def test_routing_manager():
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_data", ignore_errors=True)
 
-        return stats['total_nodes'] >= 2 and stats['total_channels'] >= 1
+        return stats["total_nodes"] >= 2 and stats["total_channels"] >= 1
 
     except Exception as e:
         print(f"  ❌ Routing manager test failed: {e}")
         return False
+
 
 def test_practical_monitor():
     """Test practical Lightning monitoring"""
@@ -177,7 +188,9 @@ def test_practical_monitor():
         # Export metrics
         metrics_export = monitor.export_metrics(1)
 
-        print(f"  🏥 System health: {health['status']} (score: {health['health_score']})")
+        print(
+            f"  🏥 System health: {health['status']} (score: {health['health_score']})"
+        )
         print(f"  📈 Recent payments: {health['recent_payments']}")
         print(f"  ✅ Success rate: {health['payment_success_rate']:.1f}%")
         print(f"  📤 Metrics exported: {len(metrics_export['metrics'])} types")
@@ -187,21 +200,22 @@ def test_practical_monitor():
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_data", ignore_errors=True)
 
-        return health['recent_payments'] > 0 and len(metrics_export['metrics']) > 0
+        return health["recent_payments"] > 0 and len(metrics_export["metrics"]) > 0
 
     except Exception as e:
         print(f"  ❌ Practical monitor test failed: {e}")
         return False
+
 
 def test_auto_recovery():
     """Test auto-recovery system"""
     print("🔧 Testing Auto-Recovery System...")
 
     try:
-        from blncs.core.auto_recovery import get_auto_recovery
-        from blncs.core.auto_recovery import RecoveryAction
+        from blncs.core.auto_recovery import RecoveryAction, get_auto_recovery
 
         recovery = get_auto_recovery()
 
@@ -225,6 +239,7 @@ def test_auto_recovery():
         print(f"  ❌ Auto-recovery test failed: {e}")
         return False
 
+
 def test_lightning_optimizer():
     """Test Lightning Network optimizer"""
     print("⚡ Testing Lightning Network Optimizer...")
@@ -241,7 +256,7 @@ def test_lightning_optimizer():
                 success=(i % 3 != 0),  # 67% success rate
                 fee_rate=0.001 + (i % 2) * 0.0005,
                 hops=2 + (i % 2),
-                duration_ms=1000 + i * 50
+                duration_ms=1000 + i * 50,
             )
 
         # Simulate channel data
@@ -250,7 +265,7 @@ def test_lightning_optimizer():
                 f"channel_{i}",
                 local_balance=600000 + i * 50000,
                 remote_balance=400000 - i * 20000,
-                capacity=1000000
+                capacity=1000000,
             )
 
         # Simulate fee data
@@ -259,7 +274,7 @@ def test_lightning_optimizer():
                 f"channel_{i % 2}",
                 fee_rate=0.001 + (i % 3) * 0.0003,
                 routing_count=5 + i,
-                revenue_sats=500 + i * 100
+                revenue_sats=500 + i * 100,
             )
 
         # Run optimizations
@@ -270,21 +285,33 @@ def test_lightning_optimizer():
         # Get summary
         summary = optimizer.get_optimization_summary()
 
-        print(f"  🛣️ Routing optimization: {'✅' if routing_result.success else '❌'} ({routing_result.improvement_percent:.1f}%)")
-        print(f"  ⚖️ Balance optimization: {'✅' if balance_result.success else '❌'} ({balance_result.improvement_percent:.1f}%)")
-        print(f"  💰 Fee optimization: {'✅' if fee_result.success else '❌'} ({fee_result.improvement_percent:.1f}%)")
+        print(
+            f"  🛣️ Routing optimization: {'✅' if routing_result.success else '❌'} ({routing_result.improvement_percent:.1f}%)"
+        )
+        print(
+            f"  ⚖️ Balance optimization: {'✅' if balance_result.success else '❌'} ({balance_result.improvement_percent:.1f}%)"
+        )
+        print(
+            f"  💰 Fee optimization: {'✅' if fee_result.success else '❌'} ({fee_result.improvement_percent:.1f}%)"
+        )
         print(f"  📊 Total optimizations: {summary['total_optimizations']}")
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_data", ignore_errors=True)
 
-        return (routing_result.success and balance_result.success and
-                fee_result.success and summary['total_optimizations'] >= 3)
+        return (
+            routing_result.success
+            and balance_result.success
+            and fee_result.success
+            and summary["total_optimizations"] >= 3
+        )
 
     except Exception as e:
         print(f"  ❌ Lightning optimizer test failed: {e}")
         return False
+
 
 def test_integration():
     """Test integration between all practical features"""
@@ -292,11 +319,11 @@ def test_integration():
 
     try:
         # Test that components can work together
-        from blncs.lightning.invoice_manager import create_invoice_manager
+        from blncs.core.auto_recovery import get_auto_recovery
         from blncs.lightning.channel_manager import create_channel_manager
+        from blncs.lightning.invoice_manager import create_invoice_manager
         from blncs.lightning.routing_manager import create_routing_manager
         from blncs.monitoring.practical_monitor import create_practical_monitor
-        from blncs.core.auto_recovery import get_auto_recovery
 
         # Create all managers
         invoice_mgr = create_invoice_manager("test_integration")
@@ -310,7 +337,9 @@ def test_integration():
         channel = channel_mgr.add_channel(
             "integration_channel_12345678901234567890123456789012345678901234567890",
             "0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
-            1000000, 500000, 500000
+            1000000,
+            500000,
+            500000,
         )
 
         # 2. Create an invoice
@@ -322,10 +351,13 @@ def test_integration():
 
         # 4. Add routing info
         node = routing_mgr.add_network_node(channel.remote_pubkey, "IntegrationNode")
-        routing_mgr.update_channel_info(channel.channel_id, "source_node", channel.remote_pubkey, 1000000)
+        routing_mgr.update_channel_info(
+            channel.channel_id, "source_node", channel.remote_pubkey, 1000000
+        )
 
         # 5. Test recovery
         from blncs.core.auto_recovery import RecoveryAction
+
         recovery_result = recovery.manual_recovery(RecoveryAction.CLEAR_CACHE)
 
         # Verify integration
@@ -335,10 +367,10 @@ def test_integration():
         health = monitor.get_system_health()
 
         integration_success = (
-            channel_stats['total_channels'] >= 1 and
-            invoice_stats['total'] >= 1 and
-            health['recent_payments'] >= 1 and
-            recovery_result.success
+            channel_stats["total_channels"] >= 1
+            and invoice_stats["total"] >= 1
+            and health["recent_payments"] >= 1
+            and recovery_result.success
         )
 
         print(f"  📊 Channels: {channel_stats['total_channels']}")
@@ -350,6 +382,7 @@ def test_integration():
 
         # Cleanup
         import shutil
+
         shutil.rmtree("test_integration", ignore_errors=True)
 
         return integration_success
@@ -357,6 +390,7 @@ def test_integration():
     except Exception as e:
         print(f"  ❌ Integration test failed: {e}")
         return False
+
 
 def main():
     """Run all practical Lightning feature tests"""
@@ -418,6 +452,7 @@ def main():
     else:
         print(f"⚠️ {len(tests) - passed_tests} tests failed")
         return False
+
 
 if __name__ == "__main__":
     success = main()

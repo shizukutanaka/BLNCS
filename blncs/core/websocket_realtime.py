@@ -9,17 +9,18 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Dict, Set, Callable, Optional, Any, Awaitable
-from dataclasses import dataclass, field, asdict
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from abc import ABC, abstractmethod
+from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 
 class MessageType(Enum):
     """WebSocket message types"""
+
     PING = "ping"
     PONG = "pong"
     MESSAGE = "message"
@@ -33,6 +34,7 @@ class MessageType(Enum):
 @dataclass
 class WSMessage:
     """WebSocket message structure"""
+
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     type: MessageType = MessageType.MESSAGE
     channel: str = ""
@@ -45,14 +47,14 @@ class WSMessage:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'message_id': self.message_id,
-            'type': self.type.value,
-            'channel': self.channel,
-            'sender_id': self.sender_id,
-            'recipient_id': self.recipient_id,
-            'payload': self.payload,
-            'timestamp': self.timestamp.isoformat(),
-            'compression': self.compression
+            "message_id": self.message_id,
+            "type": self.type.value,
+            "channel": self.channel,
+            "sender_id": self.sender_id,
+            "recipient_id": self.recipient_id,
+            "payload": self.payload,
+            "timestamp": self.timestamp.isoformat(),
+            "compression": self.compression,
         }
 
     def to_json(self) -> str:
@@ -60,18 +62,19 @@ class WSMessage:
         return json.dumps(self.to_dict(), default=str)
 
     @classmethod
-    def from_json(cls, data: str) -> 'WSMessage':
+    def from_json(cls, data: str) -> "WSMessage":
         """Create from JSON"""
         msg_dict = json.loads(data)
-        if isinstance(msg_dict.get('timestamp'), str):
-            msg_dict['timestamp'] = datetime.fromisoformat(msg_dict['timestamp'])
-        msg_dict['type'] = MessageType(msg_dict['type'])
+        if isinstance(msg_dict.get("timestamp"), str):
+            msg_dict["timestamp"] = datetime.fromisoformat(msg_dict["timestamp"])
+        msg_dict["type"] = MessageType(msg_dict["type"])
         return cls(**msg_dict)
 
 
 @dataclass
 class ClientConnection:
     """Represents a WebSocket client connection"""
+
     client_id: str
     user_id: str
     subscribed_channels: Set[str] = field(default_factory=set)
@@ -102,13 +105,13 @@ class ClientConnection:
     def get_stats(self) -> Dict[str, Any]:
         """Get connection statistics"""
         return {
-            'client_id': self.client_id,
-            'user_id': self.user_id,
-            'subscribed_channels': len(self.subscribed_channels),
-            'message_count': self.message_count,
-            'bytes_received': self.bytes_received,
-            'bytes_sent': self.bytes_sent,
-            'connection_duration_seconds': self.get_connection_duration()
+            "client_id": self.client_id,
+            "user_id": self.user_id,
+            "subscribed_channels": len(self.subscribed_channels),
+            "message_count": self.message_count,
+            "bytes_received": self.bytes_received,
+            "bytes_sent": self.bytes_sent,
+            "connection_duration_seconds": self.get_connection_duration(),
         }
 
 
@@ -116,7 +119,9 @@ class MessageHandler(ABC):
     """Base handler for message processing"""
 
     @abstractmethod
-    async def handle(self, message: WSMessage, client: ClientConnection) -> Optional[WSMessage]:
+    async def handle(
+        self, message: WSMessage, client: ClientConnection
+    ) -> Optional[WSMessage]:
         """Handle message and optionally return response"""
         pass
 
@@ -149,7 +154,7 @@ class Channel:
         if self.allow_history:
             self.message_history.append(message)
             if len(self.message_history) > self.max_history:
-                self.message_history = self.message_history[-self.max_history:]
+                self.message_history = self.message_history[-self.max_history :]
 
     def get_history(self) -> list:
         """Get message history"""
@@ -174,7 +179,9 @@ class WebSocketManager:
         self.total_messages: int = 0
         self.rejected_connections: int = 0
 
-    def register_handler(self, message_type: MessageType, handler: MessageHandler) -> None:
+    def register_handler(
+        self, message_type: MessageType, handler: MessageHandler
+    ) -> None:
         """Register message handler"""
         self.message_handlers[message_type] = handler
         logger.debug(f"Registered handler for message type: {message_type.value}")
@@ -200,7 +207,9 @@ class WebSocketManager:
                 await self.unsubscribe_channel(client_id, channel_name)
 
             del self.connections[client_id]
-            logger.info(f"Client {client_id} disconnected (total: {len(self.connections)})")
+            logger.info(
+                f"Client {client_id} disconnected (total: {len(self.connections)})"
+            )
 
     async def publish_message(self, message: WSMessage) -> None:
         """Publish message to channel"""
@@ -263,7 +272,9 @@ class WebSocketManager:
         self.total_messages += 1
         return count
 
-    async def send_direct_message(self, from_client: str, to_client: str, message: WSMessage) -> bool:
+    async def send_direct_message(
+        self, from_client: str, to_client: str, message: WSMessage
+    ) -> bool:
         """Send direct message to specific client"""
         if to_client not in self.connections:
             logger.warning(f"Target client {to_client} not connected")
@@ -277,7 +288,9 @@ class WebSocketManager:
         logger.debug(f"Direct message from {from_client} to {to_client}")
         return True
 
-    async def process_message(self, client_id: str, raw_message: str) -> Optional[WSMessage]:
+    async def process_message(
+        self, client_id: str, raw_message: str
+    ) -> Optional[WSMessage]:
         """Process incoming message"""
         if client_id not in self.connections:
             raise ValueError(f"Unknown client: {client_id}")
@@ -312,26 +325,27 @@ class WebSocketManager:
     def get_global_stats(self) -> Dict[str, Any]:
         """Get global WebSocket statistics"""
         return {
-            'total_connections': len(self.connections),
-            'max_connections': self.max_connections,
-            'total_channels': len(self.channels),
-            'total_messages_processed': self.total_messages,
-            'rejected_connections': self.rejected_connections,
-            'channels': {
+            "total_connections": len(self.connections),
+            "max_connections": self.max_connections,
+            "total_channels": len(self.channels),
+            "total_messages_processed": self.total_messages,
+            "rejected_connections": self.rejected_connections,
+            "channels": {
                 name: {
-                    'subscribers': channel.get_subscriber_count(),
-                    'has_history': channel.allow_history,
-                    'history_size': len(channel.message_history)
+                    "subscribers": channel.get_subscriber_count(),
+                    "has_history": channel.allow_history,
+                    "history_size": len(channel.message_history),
                 }
                 for name, channel in self.channels.items()
-            }
+            },
         }
 
     def cleanup_stale_connections(self, timeout_seconds: int = 300) -> int:
         """Remove stale connections"""
         now = datetime.utcnow()
         stale_clients = [
-            client_id for client_id, conn in self.connections.items()
+            client_id
+            for client_id, conn in self.connections.items()
             if (now - conn.last_ping).total_seconds() > timeout_seconds
         ]
 
@@ -356,11 +370,11 @@ def get_websocket_manager() -> WebSocketManager:
 
 
 __all__ = [
-    'MessageType',
-    'WSMessage',
-    'ClientConnection',
-    'MessageHandler',
-    'Channel',
-    'WebSocketManager',
-    'get_websocket_manager',
+    "MessageType",
+    "WSMessage",
+    "ClientConnection",
+    "MessageHandler",
+    "Channel",
+    "WebSocketManager",
+    "get_websocket_manager",
 ]

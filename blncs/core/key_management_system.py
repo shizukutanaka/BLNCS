@@ -5,22 +5,24 @@
 政府機関対応の暗号化キー管理
 """
 
-import os
-import json
-import hmac
 import hashlib
-import secrets
+import hmac
+import json
 import logging
-from typing import Dict, Optional, Tuple
-from pathlib import Path
+import os
+import secrets
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
 from cryptography.fernet import Fernet
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from cryptography.hazmat.backends import default_backend
 
 logger = logging.getLogger(__name__)
+
 
 class EnterpriseKeyManager:
     """エンタープライズレベルキー管理システム"""
@@ -43,7 +45,7 @@ class EnterpriseKeyManager:
                 "encryption_algorithm": "AES-256-GCM",
                 "key_derivation": "Scrypt",
                 "keys": {},
-                "rotation_history": []
+                "rotation_history": [],
             }
             self._write_metadata(metadata)
             logger.info("🔐 新しいキーストアを初期化しました")
@@ -53,8 +55,8 @@ class EnterpriseKeyManager:
         metadata_file = self.key_store_path / "metadata.json"
 
         # 一時ファイルに書き込み後、アトミックに移動
-        temp_file = metadata_file.with_suffix('.tmp')
-        with open(temp_file, 'w') as f:
+        temp_file = metadata_file.with_suffix(".tmp")
+        with open(temp_file, "w") as f:
             json.dump(metadata, f, indent=2)
 
         # WSL環境対応: 直接移動
@@ -64,11 +66,13 @@ class EnterpriseKeyManager:
         """メタデータの読み込み"""
         metadata_file = self.key_store_path / "metadata.json"
         if metadata_file.exists():
-            with open(metadata_file, 'r') as f:
+            with open(metadata_file, "r") as f:
                 return json.load(f)
         return {}
 
-    def generate_master_key(self, key_id: str = "master", force_regenerate: bool = False) -> str:
+    def generate_master_key(
+        self, key_id: str = "master", force_regenerate: bool = False
+    ) -> str:
         """マスターキーの生成"""
         metadata = self._read_metadata()
 
@@ -85,7 +89,7 @@ class EnterpriseKeyManager:
             "strength": "256-bit",
             "usage": "master_encryption",
             "rotation_due": (datetime.now() + timedelta(days=90)).isoformat(),
-            "active": True
+            "active": True,
         }
 
         # キーの保存
@@ -104,14 +108,14 @@ class EnterpriseKeyManager:
         key_file = self.key_store_path / f"{key_id}.key"
 
         # 環境変数からのパスフレーズ
-        passphrase = os.getenv('BLNCS_KEY_PASSPHRASE', '').encode()
+        passphrase = os.getenv("BLNCS_KEY_PASSPHRASE", "").encode()
         if not passphrase:
             passphrase = self._generate_system_passphrase()
 
         # キーの暗号化保存
         encrypted_key = self._encrypt_key_with_passphrase(key, passphrase)
 
-        with open(key_file, 'wb') as f:
+        with open(key_file, "wb") as f:
             f.write(encrypted_key)
 
         # メタデータ更新
@@ -134,9 +138,9 @@ class EnterpriseKeyManager:
             length=32,
             salt=salt,
             n=2**14,  # CPUコスト
-            r=8,      # メモリコスト
-            p=1,      # 並列度
-            backend=default_backend()
+            r=8,  # メモリコスト
+            p=1,  # 並列度
+            backend=default_backend(),
         )
 
         derived_key = kdf.derive(passphrase)
@@ -148,7 +152,9 @@ class EnterpriseKeyManager:
         # 形式: salt(32) + fernet_key(44) + encrypted_key(variable)
         return salt + fernet.key + encrypted_key
 
-    def _decrypt_key_with_passphrase(self, encrypted_data: bytes, passphrase: bytes) -> bytes:
+    def _decrypt_key_with_passphrase(
+        self, encrypted_data: bytes, passphrase: bytes
+    ) -> bytes:
         """パスフレーズによるキー復号化"""
         salt = encrypted_data[:32]
         fernet_key = encrypted_data[32:76]
@@ -162,7 +168,7 @@ class EnterpriseKeyManager:
             n=2**14,
             r=8,
             p=1,
-            backend=default_backend()
+            backend=default_backend(),
         )
 
         try:
@@ -181,6 +187,7 @@ class EnterpriseKeyManager:
         # ホスト名
         try:
             import socket
+
             system_info.append(socket.gethostname())
         except:
             system_info.append("unknown_host")
@@ -188,6 +195,7 @@ class EnterpriseKeyManager:
         # MAC アドレス
         try:
             import uuid
+
             system_info.append(str(uuid.getnode()))
         except:
             system_info.append("unknown_mac")
@@ -200,7 +208,9 @@ class EnterpriseKeyManager:
         combined = ":".join(system_info)
         hash_obj = hashlib.sha256(combined.encode())
 
-        logger.warning("⚠️  システム生成パスフレーズを使用中 - 本番環境では BLNCS_KEY_PASSPHRASE を設定してください")
+        logger.warning(
+            "⚠️  システム生成パスフレーズを使用中 - 本番環境では BLNCS_KEY_PASSPHRASE を設定してください"
+        )
         return hash_obj.digest()
 
     def _load_key(self, key_id: str) -> Optional[str]:
@@ -221,11 +231,11 @@ class EnterpriseKeyManager:
             return None
 
         # キーファイルの読み込み
-        with open(key_file, 'rb') as f:
+        with open(key_file, "rb") as f:
             encrypted_data = f.read()
 
         # パスフレーズの取得
-        passphrase = os.getenv('BLNCS_KEY_PASSPHRASE', '').encode()
+        passphrase = os.getenv("BLNCS_KEY_PASSPHRASE", "").encode()
         if not passphrase:
             passphrase = self._generate_system_passphrase()
 
@@ -275,7 +285,7 @@ class EnterpriseKeyManager:
 
             rotation_due = key_info.get("rotation_due")
             if rotation_due:
-                due_date = datetime.fromisoformat(rotation_due.replace('Z', '+00:00'))
+                due_date = datetime.fromisoformat(rotation_due.replace("Z", "+00:00"))
                 rotation_needed[key_id] = datetime.now() > due_date
             else:
                 rotation_needed[key_id] = True  # 期限未設定は要ローテーション
@@ -291,7 +301,7 @@ class EnterpriseKeyManager:
             "total_keys": len(metadata.get("keys", {})),
             "active_keys": 0,
             "rotation_needed": {},
-            "security_recommendations": []
+            "security_recommendations": [],
         }
 
         # アクティブキーのカウント
@@ -303,7 +313,7 @@ class EnterpriseKeyManager:
         report["rotation_needed"] = self.check_rotation_needed()
 
         # セキュリティ推奨事項
-        if not os.getenv('BLNCS_KEY_PASSPHRASE'):
+        if not os.getenv("BLNCS_KEY_PASSPHRASE"):
             report["security_recommendations"].append(
                 "本番環境では BLNCS_KEY_PASSPHRASE 環境変数を設定してください"
             )
@@ -327,11 +337,19 @@ class EnterpriseKeyManager:
 
             # tarコマンドでバックアップ（暗号化オプション付き）
             import subprocess
-            result = subprocess.run([
-                'tar', 'czf', str(backup_file),
-                '-C', str(self.key_store_path.parent),
-                str(self.key_store_path.name)
-            ], capture_output=True, text=True)
+
+            result = subprocess.run(
+                [
+                    "tar",
+                    "czf",
+                    str(backup_file),
+                    "-C",
+                    str(self.key_store_path.parent),
+                    str(self.key_store_path.name),
+                ],
+                capture_output=True,
+                text=True,
+            )
 
             if result.returncode == 0:
                 logger.info(f"✅ キーストアバックアップ完了: {backup_file}")
@@ -343,6 +361,7 @@ class EnterpriseKeyManager:
         except Exception as e:
             logger.error(f"❌ バックアップエラー: {e}")
             return False
+
 
 # 使用例とテスト
 def main():
@@ -361,13 +380,13 @@ def main():
         print(f"  📁 総キー数: {report['total_keys']}")
         print(f"  🔑 アクティブキー: {report['active_keys']}")
 
-        if report['security_recommendations']:
+        if report["security_recommendations"]:
             print("⚠️  セキュリティ推奨事項:")
-            for rec in report['security_recommendations']:
+            for rec in report["security_recommendations"]:
                 print(f"  • {rec}")
 
         # ローテーション状況
-        rotation_needed = report['rotation_needed']
+        rotation_needed = report["rotation_needed"]
         if any(rotation_needed.values()):
             print("🔄 ローテーション必要:")
             for key_id, needed in rotation_needed.items():
@@ -380,6 +399,7 @@ def main():
     except Exception as e:
         print(f"❌ エラー: {e}")
         return False
+
 
 if __name__ == "__main__":
     main()

@@ -3,26 +3,29 @@
 大規模データ処理と分析パイプライン機能を提供
 """
 
-import time
+import asyncio
 import json
+import logging
+import multiprocessing
+import queue
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable, Generator
+import time
+from collections import deque
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
-import asyncio
-import queue
-import multiprocessing
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-import pandas as pd
+from typing import Any, Callable, Dict, Generator, List, Optional
+
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 class DataSourceType(Enum):
     """データソースタイプ"""
+
     DATABASE = "database"
     FILE_SYSTEM = "file_system"
     STREAM = "stream"
@@ -33,6 +36,7 @@ class DataSourceType(Enum):
 
 class ProcessingEngine(Enum):
     """処理エンジン"""
+
     SPARK = "spark"
     FLINK = "flink"
     STORM = "storm"
@@ -42,6 +46,7 @@ class ProcessingEngine(Enum):
 
 class DataFormat(Enum):
     """データフォーマット"""
+
     CSV = "csv"
     JSON = "json"
     PARQUET = "parquet"
@@ -53,6 +58,7 @@ class DataFormat(Enum):
 @dataclass
 class DataPipeline:
     """データパイプライン情報"""
+
     pipeline_id: str
     name: str
     description: str
@@ -68,6 +74,7 @@ class DataPipeline:
 @dataclass
 class BatchJob:
     """バッチジョブ情報"""
+
     job_id: str
     pipeline_id: str
     status: str = "pending"
@@ -109,7 +116,9 @@ class DataIngestionEngine:
         """データインジェストを開始"""
         if not self.is_ingesting:
             self.is_ingesting = True
-            self.ingestion_thread = threading.Thread(target=self._ingestion_loop, daemon=True)
+            self.ingestion_thread = threading.Thread(
+                target=self._ingestion_loop, daemon=True
+            )
             self.ingestion_thread.start()
 
     def stop_ingestion(self):
@@ -143,8 +152,12 @@ class DataIngestionEngine:
                     source_id, data = self.ingestion_queue.get_nowait()
 
                     # 非同期でデータ処理を実行
-                    future = self.executor.submit(self._process_ingested_data, source_id, data)
-                    future.add_done_callback(lambda f: logger.info(f"データ処理完了: {source_id}"))
+                    future = self.executor.submit(
+                        self._process_ingested_data, source_id, data
+                    )
+                    future.add_done_callback(
+                        lambda f: logger.info(f"データ処理完了: {source_id}")
+                    )
 
                 time.sleep(0.1)  # 短い待機時間
 
@@ -166,7 +179,7 @@ class DataIngestionEngine:
                 "source_id": source_id,
                 "processed_data": processed_data,
                 "quality_score": quality_score,
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
 
         except Exception as e:
@@ -199,7 +212,9 @@ class DataIngestionEngine:
             # データの完全性をチェック
             if isinstance(data, dict):
                 total_fields = len(data)
-                filled_fields = sum(1 for v in data.values() if v is not None and v != "")
+                filled_fields = sum(
+                    1 for v in data.values() if v is not None and v != ""
+                )
                 completeness = filled_fields / total_fields if total_fields > 0 else 1.0
 
             return (completeness + accuracy + consistency) / 3.0
@@ -233,11 +248,7 @@ class BatchProcessingEngine:
         """
         job_id = f"batch_{int(time.time() * 1000000)}"
 
-        job = BatchJob(
-            job_id=job_id,
-            pipeline_id=pipeline_id,
-            data_size=data_size
-        )
+        job = BatchJob(job_id=job_id, pipeline_id=pipeline_id, data_size=data_size)
 
         self.batch_jobs[job_id] = job
         self.job_queue.append(job)
@@ -261,7 +272,7 @@ class BatchProcessingEngine:
             job.results = {
                 "processed_records": job.data_size,
                 "processing_time": job.completed_at - job.started_at,
-                "throughput": job.data_size / (job.completed_at - job.started_at)
+                "throughput": job.data_size / (job.completed_at - job.started_at),
             }
 
             logger.info(f"バッチジョブ完了: {job.job_id}")
@@ -329,7 +340,7 @@ class BatchProcessingEngine:
             "started_at": job.started_at,
             "completed_at": job.completed_at,
             "results": job.results,
-            "error_message": job.error_message
+            "error_message": job.error_message,
         }
 
 
@@ -349,7 +360,9 @@ class StreamProcessingEngine:
         self.is_streaming_active = False
         self.streaming_thread: Optional[threading.Thread] = None
 
-    def register_window_processor(self, processor_id: str, processor: Callable, window_size: int = 100):
+    def register_window_processor(
+        self, processor_id: str, processor: Callable, window_size: int = 100
+    ):
         """
         ウィンドウプロセッサを登録
         Args:
@@ -360,7 +373,7 @@ class StreamProcessingEngine:
         self.window_processors[processor_id] = {
             "processor": processor,
             "window_size": window_size,
-            "window_buffer": deque(maxlen=window_size)
+            "window_buffer": deque(maxlen=window_size),
         }
 
     def add_data_to_stream(self, data: Any):
@@ -396,7 +409,9 @@ class StreamProcessingEngine:
         """ストリーム処理を開始"""
         if not self.is_streaming_active:
             self.is_streaming_active = True
-            self.streaming_thread = threading.Thread(target=self._streaming_loop, daemon=True)
+            self.streaming_thread = threading.Thread(
+                target=self._streaming_loop, daemon=True
+            )
             self.streaming_thread.start()
 
     def stop_stream_processing(self):
@@ -488,17 +503,26 @@ class AnalyticsPipeline:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO data_pipelines
                     (pipeline_id, name, description, source_config, processing_steps, sink_config,
                      schedule, is_active, created_at, last_run)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    pipeline.pipeline_id, pipeline.name, pipeline.description,
-                    json.dumps(pipeline.source_config), json.dumps(pipeline.processing_steps),
-                    json.dumps(pipeline.sink_config), pipeline.schedule, 1 if pipeline.is_active else 0,
-                    pipeline.created_at, pipeline.last_run
-                ))
+                """,
+                    (
+                        pipeline.pipeline_id,
+                        pipeline.name,
+                        pipeline.description,
+                        json.dumps(pipeline.source_config),
+                        json.dumps(pipeline.processing_steps),
+                        json.dumps(pipeline.sink_config),
+                        pipeline.schedule,
+                        1 if pipeline.is_active else 0,
+                        pipeline.created_at,
+                        pipeline.last_run,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -520,14 +544,18 @@ class AnalyticsPipeline:
         pipeline = self.pipelines[pipeline_id]
 
         # バッチジョブとして実行
-        execution_id = self.batch_engine.submit_batch_job(pipeline_id, 1000000)  # 1Mレコードを仮定
+        execution_id = self.batch_engine.submit_batch_job(
+            pipeline_id, 1000000
+        )  # 1Mレコードを仮定
 
         # パイプラインの最終実行時間を更新
         pipeline.last_run = time.time()
 
         return execution_id
 
-    def add_stream_processor(self, processor_id: str, window_processor: Callable, window_size: int = 100):
+    def add_stream_processor(
+        self, processor_id: str, window_processor: Callable, window_size: int = 100
+    ):
         """
         ストリームプロセッサを追加
         Args:
@@ -535,7 +563,9 @@ class AnalyticsPipeline:
             window_processor: ウィンドウ処理関数
             window_size: ウィンドウサイズ
         """
-        self.stream_engine.register_window_processor(processor_id, window_processor, window_size)
+        self.stream_engine.register_window_processor(
+            processor_id, window_processor, window_size
+        )
 
     def process_stream_data(self, data: Any):
         """
@@ -576,20 +606,20 @@ class BigDataProcessingManager:
                 "type": "log_file",
                 "format": "json",
                 "path": "/var/log/user_activity.json",
-                "encoding": "utf-8"
+                "encoding": "utf-8",
             },
             "sensor_data_stream": {
                 "type": "stream",
                 "format": "json",
                 "endpoint": "tcp://localhost:9999",
-                "protocol": "tcp"
+                "protocol": "tcp",
             },
             "transaction_database": {
                 "type": "database",
                 "format": "json",
                 "connection_string": "postgresql://localhost/transactions",
-                "table": "transactions"
-            }
+                "table": "transactions",
+            },
         }
 
         for source_id, config in data_sources.items():
@@ -602,33 +632,30 @@ class BigDataProcessingManager:
             pipeline_id="user_analytics_pipeline",
             name="ユーザー行動分析",
             description="ユーザーログから行動パターンを分析",
-            source_config={
-                "source_id": "user_activity_logs",
-                "type": "log_file"
-            },
+            source_config={"source_id": "user_activity_logs", "type": "log_file"},
             processing_steps=[
                 {
                     "step": "filter",
                     "type": "data_filter",
-                    "config": {"filter_criteria": "active_users"}
+                    "config": {"filter_criteria": "active_users"},
                 },
                 {
                     "step": "aggregate",
                     "type": "data_aggregation",
-                    "config": {"group_by": "user_id", "metrics": ["page_views", "session_duration"]}
+                    "config": {
+                        "group_by": "user_id",
+                        "metrics": ["page_views", "session_duration"],
+                    },
                 },
                 {
                     "step": "analyze",
                     "type": "pattern_analysis",
-                    "config": {"algorithm": "clustering"}
-                }
+                    "config": {"algorithm": "clustering"},
+                },
             ],
-            sink_config={
-                "type": "database",
-                "table": "user_analytics_results"
-            },
+            sink_config={"type": "database", "table": "user_analytics_results"},
             schedule="0 */6 * * *",  # 6時間ごと
-            is_active=True
+            is_active=True,
         )
 
         self.analytics_pipeline.create_pipeline(user_analytics_pipeline)
@@ -692,8 +719,10 @@ class BigDataProcessingManager:
             "data_sources": len(self.ingestion_engine.data_sources),
             "pipelines": len(self.analytics_pipeline.pipelines),
             "batch_jobs": len(self.analytics_pipeline.batch_engine.batch_jobs),
-            "stream_processors": len(self.analytics_pipeline.stream_engine.window_processors),
-            "data_buffer_size": len(self.analytics_pipeline.stream_engine.data_buffer)
+            "stream_processors": len(
+                self.analytics_pipeline.stream_engine.window_processors
+            ),
+            "data_buffer_size": len(self.analytics_pipeline.stream_engine.data_buffer),
         }
 
 
@@ -714,7 +743,7 @@ def example_usage():
             "user_id": f"user_{i % 10}",
             "action": "page_view",
             "timestamp": time.time(),
-            "page": f"/page/{i % 5}"
+            "page": f"/page/{i % 5}",
         }
 
         manager.ingest_data("user_activity_logs", user_data)
@@ -731,7 +760,7 @@ def example_usage():
         stream_data = {
             "sensor_id": f"sensor_{i % 3}",
             "value": 20.0 + i * 0.1,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
         manager.process_streaming_data(stream_data)

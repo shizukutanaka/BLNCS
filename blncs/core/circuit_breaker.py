@@ -3,27 +3,29 @@ Circuit Breaker Pattern Implementation for BLNCS
 Provides fault tolerance and prevents cascading failures
 """
 
-import time
-import threading
 import logging
-from typing import Callable, Any, Optional, Dict
-from enum import Enum
+import threading
+import time
 from dataclasses import dataclass
+from enum import Enum
 from functools import wraps
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class CircuitState(Enum):
     """Circuit breaker states"""
+
     CLOSED = "closed"  # Normal operation
-    OPEN = "open"      # Failures detected, rejecting calls
+    OPEN = "open"  # Failures detected, rejecting calls
     HALF_OPEN = "half_open"  # Testing if service recovered
 
 
 @dataclass
 class CircuitBreakerConfig:
     """Circuit breaker configuration"""
+
     failure_threshold: int = 5  # Number of failures before opening
     recovery_timeout: float = 60.0  # Seconds before attempting recovery
     expected_exception: type = Exception  # Exception type to catch
@@ -32,6 +34,7 @@ class CircuitBreakerConfig:
 
 class CircuitBreakerOpenError(Exception):
     """Raised when circuit breaker is open"""
+
     pass
 
 
@@ -51,7 +54,7 @@ class CircuitBreaker:
         failure_threshold: int = 5,
         recovery_timeout: float = 60.0,
         expected_exception: type = Exception,
-        success_threshold: int = 2
+        success_threshold: int = 2,
     ):
         self.name = name
         self.failure_threshold = failure_threshold
@@ -68,10 +71,10 @@ class CircuitBreaker:
         logger.info(
             f"Initialized circuit breaker: {name}",
             extra={
-                'failure_threshold': failure_threshold,
-                'recovery_timeout': recovery_timeout,
-                'success_threshold': success_threshold
-            }
+                "failure_threshold": failure_threshold,
+                "recovery_timeout": recovery_timeout,
+                "success_threshold": success_threshold,
+            },
         )
 
     @property
@@ -146,13 +149,15 @@ class CircuitBreaker:
 
             if self._state == CircuitState.HALF_OPEN:
                 self._state = CircuitState.OPEN
-                logger.warning(f"Circuit breaker {self.name} reopened after failed recovery attempt")
+                logger.warning(
+                    f"Circuit breaker {self.name} reopened after failed recovery attempt"
+                )
 
             elif self._failure_count >= self.failure_threshold:
                 self._state = CircuitState.OPEN
                 logger.error(
                     f"Circuit breaker {self.name} opened",
-                    extra={'failure_count': self._failure_count}
+                    extra={"failure_count": self._failure_count},
                 )
 
     def reset(self):
@@ -168,15 +173,16 @@ class CircuitBreaker:
         """Get circuit breaker statistics"""
         with self._lock:
             return {
-                'name': self.name,
-                'state': self._state.value,
-                'failure_count': self._failure_count,
-                'success_count': self._success_count,
-                'last_failure_time': self._last_failure_time,
-                'time_since_last_failure': (
+                "name": self.name,
+                "state": self._state.value,
+                "failure_count": self._failure_count,
+                "success_count": self._success_count,
+                "last_failure_time": self._last_failure_time,
+                "time_since_last_failure": (
                     time.time() - self._last_failure_time
-                    if self._last_failure_time else None
-                )
+                    if self._last_failure_time
+                    else None
+                ),
             }
 
 
@@ -184,7 +190,7 @@ def circuit_breaker(
     name: str,
     failure_threshold: int = 5,
     recovery_timeout: float = 60.0,
-    expected_exception: type = Exception
+    expected_exception: type = Exception,
 ):
     """
     Circuit breaker decorator
@@ -205,7 +211,7 @@ def circuit_breaker(
         name=name,
         failure_threshold=failure_threshold,
         recovery_timeout=recovery_timeout,
-        expected_exception=expected_exception
+        expected_exception=expected_exception,
     )
 
     def decorator(func: Callable) -> Callable:
@@ -229,7 +235,7 @@ def get_circuit_breaker(
     name: str,
     failure_threshold: int = 5,
     recovery_timeout: float = 60.0,
-    expected_exception: type = Exception
+    expected_exception: type = Exception,
 ) -> CircuitBreaker:
     """
     Get or create a circuit breaker
@@ -249,7 +255,7 @@ def get_circuit_breaker(
                 name=name,
                 failure_threshold=failure_threshold,
                 recovery_timeout=recovery_timeout,
-                expected_exception=expected_exception
+                expected_exception=expected_exception,
             )
         return _circuit_breakers[name]
 
@@ -269,11 +275,11 @@ def reset_all_circuit_breakers():
 
 
 __all__ = [
-    'CircuitBreaker',
-    'CircuitState',
-    'CircuitBreakerOpenError',
-    'circuit_breaker',
-    'get_circuit_breaker',
-    'get_all_circuit_breakers',
-    'reset_all_circuit_breakers'
+    "CircuitBreaker",
+    "CircuitState",
+    "CircuitBreakerOpenError",
+    "circuit_breaker",
+    "get_circuit_breaker",
+    "get_all_circuit_breakers",
+    "reset_all_circuit_breakers",
 ]

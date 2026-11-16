@@ -5,8 +5,8 @@ BLNCS - Bitcoin Lightning Network Control System
 Enterprise-grade Lightning Network management with proper dependency injection.
 """
 
-import os
 import gettext
+import os
 from pathlib import Path
 
 __version__ = "2.0.0"
@@ -15,6 +15,7 @@ __description__ = "Bitcoin Lightning Network Control System"
 
 # Initialize internationalization system
 _i18n_manager = None
+
 
 class I18NManager:
     """Simplified i18n manager for basic functionality"""
@@ -28,7 +29,7 @@ class I18NManager:
             self.localedir = localedir
 
         self._translation = None
-        self._current_locale = 'en'
+        self._current_locale = "en"
 
         # Try to setup translations
         self._setup_translations()
@@ -39,10 +40,7 @@ class I18NManager:
             # Try to load specific translation if available
             try:
                 self._translation = gettext.translation(
-                    self.domain,
-                    self.localedir,
-                    languages=['en', 'ja'],
-                    fallback=True
+                    self.domain, self.localedir, languages=["en", "ja"], fallback=True
                 )
             except Exception:
                 # Use null translation as fallback
@@ -64,30 +62,36 @@ class I18NManager:
         except Exception:
             return message % args if args else message
 
+
 # Initialize i18n manager
 _i18n_manager = I18NManager()
+
 
 # Global translation function
 def _(message: str, *args) -> str:
     """Global translation function"""
     return _i18n_manager.get_text(message, *args)
 
+
 # Simplified direct imports for memory efficiency
 def get_config():
     """Get configuration manager"""
     from .core import get_config
+
     return get_config()
 
 
 def get_logger():
     """Get logger"""
     from .core import get_logger
+
     return get_logger()
 
 
 def get_cache_manager():
     """Get cache manager"""
     from .core import get_cache
+
     return get_cache()
 
 
@@ -95,6 +99,7 @@ def get_lightning_client():
     """Get Lightning client"""
     try:
         from .lightning import get_lightning_client
+
         return get_lightning_client()
     except ImportError:
         raise ImportError("Lightning client not available. Check installation.")
@@ -104,6 +109,7 @@ def get_api_server(config=None):
     """Get API server"""
     try:
         from .api import get_api_server
+
         return get_api_server()
     except ImportError:
         raise ImportError("API server not configured. Check installation.")
@@ -115,12 +121,12 @@ def get_i18n_manager():
 
 
 __all__ = [
-    'get_config',
-    'get_logger',
-    'get_cache_manager',
-    'get_lightning_client',
-    'get_api_server',
-    'get_i18n_manager',
-    '_',
-    '__version__'
+    "get_config",
+    "get_logger",
+    "get_cache_manager",
+    "get_lightning_client",
+    "get_api_server",
+    "get_i18n_manager",
+    "_",
+    "__version__",
 ]

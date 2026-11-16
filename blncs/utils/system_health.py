@@ -4,13 +4,15 @@ BLNCS System Health Monitor
 Lightweight system monitoring and health checks
 """
 
-import os
-import sys
-import psutil
-import sqlite3
 import json
+import os
+import sqlite3
+import sys
 from datetime import datetime
 from pathlib import Path
+
+import psutil
+
 
 def check_system_health():
     """Lightweight system health check"""
@@ -19,7 +21,7 @@ def check_system_health():
 
     try:
         # Check disk space
-        disk_usage = psutil.disk_usage('/')
+        disk_usage = psutil.disk_usage("/")
         disk_percent = (disk_usage.used / disk_usage.total) * 100
 
         if disk_percent > 95:
@@ -36,10 +38,7 @@ def check_system_health():
             health_score -= 15
 
         # Check critical files
-        critical_files = [
-            'blncs_main.py',
-            'config/blncs.json'
-        ]
+        critical_files = ["blncs_main.py", "config/blncs.json"]
 
         for file_path in critical_files:
             if not Path(file_path).exists():
@@ -47,7 +46,7 @@ def check_system_health():
                 health_score -= 25
 
         # Check database
-        db_path = 'data/blncs.db'
+        db_path = "data/blncs.db"
         if Path(db_path).exists():
             try:
                 conn = sqlite3.connect(db_path)
@@ -55,7 +54,7 @@ def check_system_health():
                 result = cursor.fetchone()[0]
                 conn.close()
 
-                if result != 'ok':
+                if result != "ok":
                     issues.append(f"Database integrity issue: {result}")
                     health_score -= 30
             except Exception as e:
@@ -67,10 +66,11 @@ def check_system_health():
         health_score -= 5
 
     return {
-        'health_score': max(0, health_score),
-        'issues': issues,
-        'timestamp': datetime.now().isoformat()
+        "health_score": max(0, health_score),
+        "issues": issues,
+        "timestamp": datetime.now().isoformat(),
     }
+
 
 def optimize_system():
     """Lightweight system optimization"""
@@ -78,13 +78,20 @@ def optimize_system():
 
     try:
         # Clean up temporary files
-        temp_dirs = ['tmp', '/tmp']
+        temp_dirs = ["tmp", "/tmp"]
         cleaned_files = 0
 
         for temp_dir in temp_dirs:
             if Path(temp_dir).exists():
-                for file in Path(temp_dir).glob('*'):
-                    if file.is_file() and (datetime.now() - datetime.fromtimestamp(file.stat().st_mtime)).days > 1:
+                for file in Path(temp_dir).glob("*"):
+                    if (
+                        file.is_file()
+                        and (
+                            datetime.now()
+                            - datetime.fromtimestamp(file.stat().st_mtime)
+                        ).days
+                        > 1
+                    ):
                         try:
                             file.unlink()
                             cleaned_files += 1
@@ -95,12 +102,12 @@ def optimize_system():
             optimizations.append(f"Cleaned {cleaned_files} temporary files")
 
         # Optimize database if exists
-        db_path = 'data/blncs.db'
+        db_path = "data/blncs.db"
         if Path(db_path).exists():
             try:
                 conn = sqlite3.connect(db_path)
-                conn.execute('VACUUM')
-                conn.execute('REINDEX')
+                conn.execute("VACUUM")
+                conn.execute("REINDEX")
                 conn.close()
                 optimizations.append("Database optimized")
             except Exception as e:
@@ -111,9 +118,10 @@ def optimize_system():
 
     return optimizations
 
+
 def main():
     """Main health check function"""
-    if len(sys.argv) > 1 and sys.argv[1] == '--optimize':
+    if len(sys.argv) > 1 and sys.argv[1] == "--optimize":
         print("🔧 Running system optimization...")
         optimizations = optimize_system()
         for opt in optimizations:
@@ -127,23 +135,24 @@ def main():
 
         print(f"Health Score: {health['health_score']}/100")
 
-        if health['health_score'] >= 90:
+        if health["health_score"] >= 90:
             print("✅ EXCELLENT - System is healthy")
-        elif health['health_score'] >= 70:
+        elif health["health_score"] >= 70:
             print("⚠️  GOOD - Minor issues detected")
-        elif health['health_score'] >= 50:
+        elif health["health_score"] >= 50:
             print("⚠️  WARNING - Several issues need attention")
         else:
             print("❌ CRITICAL - Immediate action required")
 
-        if health['issues']:
+        if health["issues"]:
             print(f"\n🔧 Issues found ({len(health['issues'])}):")
-            for issue in health['issues']:
+            for issue in health["issues"]:
                 print(f"  • {issue}")
 
         # Output JSON for automation
-        if len(sys.argv) > 1 and sys.argv[1] == '--json':
+        if len(sys.argv) > 1 and sys.argv[1] == "--json":
             print(f"\n{json.dumps(health, indent=2)}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

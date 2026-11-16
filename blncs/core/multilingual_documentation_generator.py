@@ -4,13 +4,14 @@ BLNCS - Multilingual Documentation Generator
 多言語ドキュメント生成システム
 """
 
-import os
 import json
-import re
-from pathlib import Path
-from typing import Dict, List, Optional, Any
 import logging
+import os
+import re
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 
 class MultilingualDocumentationGenerator:
     """
@@ -34,9 +35,7 @@ class MultilingualDocumentationGenerator:
         self.templates = self._load_document_templates()
 
         # サポート言語
-        self.target_languages = [
-            'en', 'ja', 'es', 'fr', 'de', 'zh', 'ko'
-        ]
+        self.target_languages = ["en", "ja", "es", "fr", "de", "zh", "ko"]
 
     def _load_document_templates(self) -> Dict[str, str]:
         """ドキュメントテンプレートを読み込み"""
@@ -47,7 +46,7 @@ class MultilingualDocumentationGenerator:
 
         # デフォルトテンプレート
         return {
-            'readme': '''# {title}
+            "readme": """# {title}
 
 {description}
 
@@ -66,8 +65,8 @@ class MultilingualDocumentationGenerator:
 ## サポート / Support
 
 {support}
-''',
-            'api_guide': '''# {title}
+""",
+            "api_guide": """# {title}
 
 {description}
 
@@ -82,8 +81,8 @@ class MultilingualDocumentationGenerator:
 ## エラーハンドリング / Error Handling
 
 {error_handling}
-''',
-            'troubleshooting': '''# {title}
+""",
+            "troubleshooting": """# {title}
 
 {description}
 
@@ -98,7 +97,7 @@ class MultilingualDocumentationGenerator:
 ## サポート / Support
 
 {support}
-'''
+""",
         }
 
     def generate_multilingual_readme(self):
@@ -114,7 +113,7 @@ class MultilingualDocumentationGenerator:
 
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
-            with open(output_file, 'w', encoding='utf-8') as f:
+            with open(output_file, "w", encoding="utf-8") as f:
                 f.write(readme_content)
 
             self.logger.info(f"Generated README for {language}: {output_file}")
@@ -124,10 +123,14 @@ class MultilingualDocumentationGenerator:
 
     def _generate_readme_content(self, language: str) -> str:
         """READMEコンテンツを生成"""
-        title = self.i18n_manager.get_text("BLNCS – Bitcoin Lightning Network Control System")
-        description = self.i18n_manager.get_text("BLNCS is an integrated control system for Bitcoin Lightning Network infrastructure.")
+        title = self.i18n_manager.get_text(
+            "BLNCS – Bitcoin Lightning Network Control System"
+        )
+        description = self.i18n_manager.get_text(
+            "BLNCS is an integrated control system for Bitcoin Lightning Network infrastructure."
+        )
 
-        installation = f'''
+        installation = f"""
 ```bash
 # Clone repository
 git clone https://github.com/yourusername/BLNCS.git
@@ -146,9 +149,9 @@ export BLNCS_LOCALE={language}
 # Verify installation
 python blncs_main.py --version
 ```
-'''
+"""
 
-        configuration = f'''
+        configuration = f"""
 ```json
 {{
   "i18n": {{
@@ -163,9 +166,9 @@ python blncs_main.py --version
   }}
 }}
 ```
-'''
+"""
 
-        usage = f'''
+        usage = f"""
 ```bash
 # Start server
 python blncs_main.py server
@@ -176,17 +179,19 @@ python blncs_main.py status
 # Interactive mode
 python blncs_main.py --interactive
 ```
-'''
+"""
 
-        support = self.i18n_manager.get_text("For support, please visit our GitHub repository or join our community discussions.")
+        support = self.i18n_manager.get_text(
+            "For support, please visit our GitHub repository or join our community discussions."
+        )
 
-        return self.templates['readme'].format(
+        return self.templates["readme"].format(
             title=title,
             description=description,
             installation=installation,
             configuration=configuration,
             usage=usage,
-            support=support
+            support=support,
         )
 
     def generate_multilingual_api_docs(self):
@@ -199,7 +204,7 @@ python blncs_main.py --interactive
             api_content = self._generate_api_documentation(language)
             output_file = self.output_dir / f"API_GUIDE_{language.upper()}.md"
 
-            with open(output_file, 'w', encoding='utf-8') as f:
+            with open(output_file, "w", encoding="utf-8") as f:
                 f.write(api_content)
 
             self.logger.info(f"Generated API docs for {language}: {output_file}")
@@ -209,9 +214,11 @@ python blncs_main.py --interactive
     def _generate_api_documentation(self, language: str) -> str:
         """APIドキュメントを生成"""
         title = self.i18n_manager.get_text("BLNCS API Documentation")
-        description = self.i18n_manager.get_text("Complete API reference for BLNCS Lightning Network Control System")
+        description = self.i18n_manager.get_text(
+            "Complete API reference for BLNCS Lightning Network Control System"
+        )
 
-        endpoints = f'''
+        endpoints = f"""
 ### Lightning Network Operations
 
 #### Get Node Information
@@ -240,18 +247,18 @@ POST /api/lightning/pay
   "payment_request": "lnbc..."
 }}
 ```
-'''
+"""
 
-        authentication = f'''
+        authentication = f"""
 {self.i18n_manager.get_text("All API endpoints require JWT authentication:")}
 
 ```bash
 curl -H "Authorization: Bearer YOUR_TOKEN" \\
      http://localhost:3000/api/lightning/info
 ```
-'''
+"""
 
-        error_handling = f'''
+        error_handling = f"""
 ### {self.i18n_manager.get_text("Error Response Format")}
 
 ```json
@@ -268,14 +275,14 @@ curl -H "Authorization: Bearer YOUR_TOKEN" \\
 - `401`: {self.i18n_manager.get_text("Unauthorized")}
 - `404`: {self.i18n_manager.get_text("Not Found")}
 - `500`: {self.i18n_manager.get_text("Internal Server Error")}
-'''
+"""
 
-        return self.templates['api_guide'].format(
+        return self.templates["api_guide"].format(
             title=title,
             description=description,
             endpoints=endpoints,
             authentication=authentication,
-            error_handling=error_handling
+            error_handling=error_handling,
         )
 
     def generate_multilingual_troubleshooting(self):
@@ -288,19 +295,23 @@ curl -H "Authorization: Bearer YOUR_TOKEN" \\
             troubleshooting_content = self._generate_troubleshooting_content(language)
             output_file = self.output_dir / f"TROUBLESHOOTING_{language.upper()}.md"
 
-            with open(output_file, 'w', encoding='utf-8') as f:
+            with open(output_file, "w", encoding="utf-8") as f:
                 f.write(troubleshooting_content)
 
-            self.logger.info(f"Generated troubleshooting guide for {language}: {output_file}")
+            self.logger.info(
+                f"Generated troubleshooting guide for {language}: {output_file}"
+            )
 
         self.i18n_manager.set_language(self.i18n_manager.current_language)
 
     def _generate_troubleshooting_content(self, language: str) -> str:
         """トラブルシューティングコンテンツを生成"""
         title = self.i18n_manager.get_text("BLNCS Troubleshooting Guide")
-        description = self.i18n_manager.get_text("Common issues and solutions for BLNCS")
+        description = self.i18n_manager.get_text(
+            "Common issues and solutions for BLNCS"
+        )
 
-        issues = f'''
+        issues = f"""
 ## {self.i18n_manager.get_text("Connection Issues")}
 
 ### {self.i18n_manager.get_text("Connection Refused")}
@@ -326,9 +337,9 @@ echo $BLNCS_DATABASE_URL
 # Run migrations
 python blncs_main.py db migrate
 ```
-'''
+"""
 
-        troubleshooting = f'''
+        troubleshooting = f"""
 ## {self.i18n_manager.get_text("Performance Issues")}
 
 ### {self.i18n_manager.get_text("High Memory Usage")}
@@ -348,22 +359,22 @@ curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \\
 - {self.i18n_manager.get_text("Check network connectivity")}
 - {self.i18n_manager.get_text("Review server logs for errors")}
 - {self.i18n_manager.get_text("Consider upgrading hardware resources")}
-'''
+"""
 
-        support = f'''
+        support = f"""
 ## {self.i18n_manager.get_text("Getting Help")}
 
 - {self.i18n_manager.get_text("Check the documentation")}: [docs/](docs/)
 - {self.i18n_manager.get_text("Search existing issues")}: [GitHub Issues](https://github.com/yourusername/BLNCS/issues)
 - {self.i18n_manager.get_text("Join community discussions")}: [GitHub Discussions](https://github.com/yourusername/BLNCS/discussions)
-'''
+"""
 
-        return self.templates['troubleshooting'].format(
+        return self.templates["troubleshooting"].format(
             title=title,
             description=description,
             issues=issues,
             troubleshooting=troubleshooting,
-            support=support
+            support=support,
         )
 
     def generate_language_specific_guides(self):
@@ -371,25 +382,30 @@ curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \\
         self.logger.info("Generating language-specific guides...")
 
         for language in self.target_languages:
-            if language != 'en':  # 英語以外の場合
+            if language != "en":  # 英語以外の場合
                 self.i18n_manager.set_language(language)
 
                 guide_content = self._generate_language_specific_guide(language)
                 output_file = self.output_dir / f"{language.upper()}_USER_GUIDE.md"
 
-                with open(output_file, 'w', encoding='utf-8') as f:
+                with open(output_file, "w", encoding="utf-8") as f:
                     f.write(guide_content)
 
-                self.logger.info(f"Generated language guide for {language}: {output_file}")
+                self.logger.info(
+                    f"Generated language guide for {language}: {output_file}"
+                )
 
         self.i18n_manager.set_language(self.i18n_manager.current_language)
 
     def _generate_language_specific_guide(self, language: str) -> str:
         """言語別ガイドを生成"""
         title = self.i18n_manager.get_text(f"{language.upper()} User Guide")
-        description = self.i18n_manager.get_text("BLNCS user guide in") + f" {self.i18n_manager._get_language_name(language)}"
+        description = (
+            self.i18n_manager.get_text("BLNCS user guide in")
+            + f" {self.i18n_manager._get_language_name(language)}"
+        )
 
-        content = f'''# {title}
+        content = f"""# {title}
 
 {description}
 
@@ -457,7 +473,7 @@ python blncs_main.py channels
 
 - ドキュメント: [docs/](docs/)
 - コミュニティ: [GitHub Discussions](https://github.com/yourusername/BLNCS/discussions)
-'''
+"""
 
         return content
 
@@ -465,54 +481,54 @@ python blncs_main.py channels
         """ドキュメントインデックスを生成"""
         self.logger.info("Generating documentation index...")
 
-        index_content = f'''# BLNCS Multilingual Documentation
+        index_content = f"""# BLNCS Multilingual Documentation
 
 {self.i18n_manager.get_text("Complete documentation for BLNCS in multiple languages")}
 
 ## 対応言語 / Supported Languages
 
-'''
+"""
 
         for language in self.target_languages:
             lang_name = self.i18n_manager._get_language_name(language)
             index_content += f"- **{lang_name}** ({language.upper()})\n"
 
-        index_content += f'''
+        index_content += f"""
 
 ## ドキュメント一覧 / Documentation List
 
 ### README Files
-'''
+"""
 
         for language in self.target_languages:
             index_content += f"- [README_{language.upper()}.md](README_{language.upper()}.md) - {self.i18n_manager._get_language_name(language)}\n"
 
-        index_content += f'''
+        index_content += f"""
 
 ### API Documentation
-'''
+"""
 
         for language in self.target_languages:
             index_content += f"- [API_GUIDE_{language.upper()}.md](API_GUIDE_{language.upper()}.md) - {self.i18n_manager._get_language_name(language)}\n"
 
-        index_content += f'''
+        index_content += f"""
 
 ### Troubleshooting Guides
-'''
+"""
 
         for language in self.target_languages:
             index_content += f"- [TROUBLESHOOTING_{language.upper()}.md](TROUBLESHOOTING_{language.upper()}.md) - {self.i18n_manager._get_language_name(language)}\n"
 
-        index_content += f'''
+        index_content += f"""
 
 ### Language-Specific Guides
-'''
+"""
 
         for language in self.target_languages:
-            if language != 'en':
+            if language != "en":
                 index_content += f"- [{language.upper()}_USER_GUIDE.md]({language.upper()}_USER_GUIDE.md) - {self.i18n_manager._get_language_name(language)}\n"
 
-        index_content += f'''
+        index_content += f"""
 
 ## 翻訳統計 / Translation Statistics
 
@@ -530,10 +546,10 @@ python blncs_main.py channels
 
 ---
 {self.i18n_manager.get_text("Generated on")} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-'''
+"""
 
         index_file = self.output_dir / "README.md"
-        with open(index_file, 'w', encoding='utf-8') as f:
+        with open(index_file, "w", encoding="utf-8") as f:
             f.write(index_content)
 
         self.logger.info(f"Generated documentation index: {index_file}")
@@ -545,7 +561,7 @@ python blncs_main.py channels
 
         for language, language_stats in stats.items():
             lang_name = self.i18n_manager._get_language_name(language)
-            completion = language_stats['completion_rate']
+            completion = language_stats["completion_rate"]
             status = "🟢" if completion >= 90 else "🟡" if completion >= 70 else "🔴"
             result += f"- {status} {lang_name}: {completion:.1f}% ({language_stats['translated_entries']}/{language_stats['total_entries']} entries)\n"
 

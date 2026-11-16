@@ -5,19 +5,20 @@ Implements Rust FFI, WebAssembly, and NumPy optimization patterns
 Based on 2024-2025 research on Python performance enhancement
 """
 
+import ctypes
 import logging
 import math
-from typing import List, Dict, Any, Optional, Callable, Union
+import struct
 from dataclasses import dataclass
 from enum import Enum
-import struct
-import ctypes
+from typing import Any, Callable, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
 
 class AccelerationMethod(Enum):
     """Performance acceleration methods"""
+
     NATIVE_PYTHON = "native_python"
     CYTHON = "cython"
     NUMBA = "numba"
@@ -29,6 +30,7 @@ class AccelerationMethod(Enum):
 @dataclass
 class PerformanceMetrics:
     """Performance metrics for operations"""
+
     method: AccelerationMethod
     operation: str
     duration_ms: float
@@ -39,12 +41,12 @@ class PerformanceMetrics:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'method': self.method.value,
-            'operation': self.operation,
-            'duration_ms': self.duration_ms,
-            'throughput_ops_per_sec': self.throughput_ops_per_sec,
-            'speedup_factor': self.speedup_factor,
-            'memory_usage_mb': self.memory_usage_mb
+            "method": self.method.value,
+            "operation": self.operation,
+            "duration_ms": self.duration_ms,
+            "throughput_ops_per_sec": self.throughput_ops_per_sec,
+            "speedup_factor": self.speedup_factor,
+            "memory_usage_mb": self.memory_usage_mb,
         }
 
 
@@ -59,6 +61,7 @@ class NumpyOptimizer:
         """Check if NumPy is available"""
         try:
             import numpy
+
             return True
         except ImportError:
             return False
@@ -86,7 +89,9 @@ class NumpyOptimizer:
             return [operation(x) for x in data]
 
     @staticmethod
-    def matrix_multiplication(matrix_a: List[List[float]], matrix_b: List[List[float]]) -> List[List[float]]:
+    def matrix_multiplication(
+        matrix_a: List[List[float]], matrix_b: List[List[float]]
+    ) -> List[List[float]]:
         """
         Optimized matrix multiplication using NumPy
         Orders of magnitude faster than nested loops
@@ -115,7 +120,7 @@ class NumpyOptimizer:
             return result
 
     @staticmethod
-    def reduce_memory_usage(data: List[float], dtype='float32') -> bytes:
+    def reduce_memory_usage(data: List[float], dtype="float32") -> bytes:
         """
         Reduce memory footprint using appropriate data types
         float32 uses 50% less memory than float64
@@ -128,10 +133,10 @@ class NumpyOptimizer:
 
         except ImportError:
             # Fallback to struct packing
-            if dtype == 'float32':
-                return b''.join(struct.pack('f', x) for x in data)
+            if dtype == "float32":
+                return b"".join(struct.pack("f", x) for x in data)
             else:
-                return b''.join(struct.pack('d', x) for x in data)
+                return b"".join(struct.pack("d", x) for x in data)
 
 
 class RustFFIBridge:
@@ -207,11 +212,11 @@ class WebAssemblyBridge:
         if isinstance(data, list):
             # Serialize list of numbers
             if all(isinstance(x, float) for x in data):
-                return b''.join(struct.pack('d', x) for x in data)
+                return b"".join(struct.pack("d", x) for x in data)
             elif all(isinstance(x, int) for x in data):
-                return b''.join(struct.pack('i', x) for x in data)
+                return b"".join(struct.pack("i", x) for x in data)
 
-        return b''
+        return b""
 
     @staticmethod
     def deserialize_from_wasm(data: bytes, dtype: str) -> List[Union[int, float]]:
@@ -220,13 +225,13 @@ class WebAssemblyBridge:
         """
         result = []
 
-        if dtype == 'float':
+        if dtype == "float":
             for i in range(0, len(data), 8):
-                result.append(struct.unpack('d', data[i:i+8])[0])
+                result.append(struct.unpack("d", data[i : i + 8])[0])
 
-        elif dtype == 'int':
+        elif dtype == "int":
             for i in range(0, len(data), 4):
-                result.append(struct.unpack('i', data[i:i+4])[0])
+                result.append(struct.unpack("i", data[i : i + 4])[0])
 
         return result
 
@@ -259,10 +264,7 @@ class HybridExecutor:
         self.metrics_history: List[PerformanceMetrics] = []
 
     def select_acceleration_method(
-        self,
-        data_size: int,
-        operation_type: str,
-        available_libs: Dict[str, bool]
+        self, data_size: int, operation_type: str, available_libs: Dict[str, bool]
     ) -> AccelerationMethod:
         """
         Intelligently select acceleration method based on:
@@ -271,24 +273,21 @@ class HybridExecutor:
         - Available libraries
         """
         # Large numerical operations -> NumPy
-        if data_size > 10000 and 'numpy' in available_libs and available_libs['numpy']:
+        if data_size > 10000 and "numpy" in available_libs and available_libs["numpy"]:
             return AccelerationMethod.NUMPY
 
         # GPU-intensive ops -> WASM or Rust FFI
-        if operation_type in ['fft', 'matrix_mult', 'convolution']:
-            if available_libs.get('rust_ffi'):
+        if operation_type in ["fft", "matrix_mult", "convolution"]:
+            if available_libs.get("rust_ffi"):
                 return AccelerationMethod.RUST_FFI
-            elif available_libs.get('wasm'):
+            elif available_libs.get("wasm"):
                 return AccelerationMethod.WASM
 
         # Default to native
         return AccelerationMethod.NATIVE_PYTHON
 
     def execute_with_profiling(
-        self,
-        operation: Callable,
-        data: Any,
-        method: AccelerationMethod
+        self, operation: Callable, data: Any, method: AccelerationMethod
     ) -> tuple:
         """
         Execute operation with performance profiling
@@ -302,9 +301,7 @@ class HybridExecutor:
             duration_ms = (time.time() - start_time) * 1000
 
             metrics = PerformanceMetrics(
-                method=method,
-                operation=operation.__name__,
-                duration_ms=duration_ms
+                method=method, operation=operation.__name__, duration_ms=duration_ms
             )
 
             self.metrics_history.append(metrics)
@@ -319,7 +316,7 @@ class HybridExecutor:
         Generate performance analysis report
         """
         if not self.metrics_history:
-            return {'total_operations': 0}
+            return {"total_operations": 0}
 
         methods_used = {}
         total_time = 0.0
@@ -327,17 +324,17 @@ class HybridExecutor:
         for metric in self.metrics_history:
             method = metric.method.value
             if method not in methods_used:
-                methods_used[method] = {'count': 0, 'total_time': 0.0}
+                methods_used[method] = {"count": 0, "total_time": 0.0}
 
-            methods_used[method]['count'] += 1
-            methods_used[method]['total_time'] += metric.duration_ms
+            methods_used[method]["count"] += 1
+            methods_used[method]["total_time"] += metric.duration_ms
             total_time += metric.duration_ms
 
         return {
-            'total_operations': len(self.metrics_history),
-            'total_time_ms': total_time,
-            'methods_used': methods_used,
-            'average_operation_time_ms': total_time / len(self.metrics_history)
+            "total_operations": len(self.metrics_history),
+            "total_time_ms": total_time,
+            "methods_used": methods_used,
+            "average_operation_time_ms": total_time / len(self.metrics_history),
         }
 
     def detect_optimization_opportunities(self) -> List[str]:
@@ -360,9 +357,13 @@ class HybridExecutor:
         # Check for repeated operations
         operation_counts = {}
         for metric in self.metrics_history:
-            operation_counts[metric.operation] = operation_counts.get(metric.operation, 0) + 1
+            operation_counts[metric.operation] = (
+                operation_counts.get(metric.operation, 0) + 1
+            )
 
-        frequent_ops = {op: count for op, count in operation_counts.items() if count > 10}
+        frequent_ops = {
+            op: count for op, count in operation_counts.items() if count > 10
+        }
         if frequent_ops:
             opportunities.append(
                 f"Frequent operations detected: {list(frequent_ops.keys())}. "
@@ -399,30 +400,32 @@ class OptimizationStrategy:
         Reduces allocation overhead
         """
         return {
-            'pool_size_mb': (data_size * operation_count * 8) // (1024 * 1024),
-            'chunk_size': 1024,
-            'pre_allocated_chunks': (operation_count * data_size) // 1024
+            "pool_size_mb": (data_size * operation_count * 8) // (1024 * 1024),
+            "chunk_size": 1024,
+            "pre_allocated_chunks": (operation_count * data_size) // 1024,
         }
 
     @staticmethod
-    def vectorization_analysis(operation: Callable, data: List[float]) -> Dict[str, Any]:
+    def vectorization_analysis(
+        operation: Callable, data: List[float]
+    ) -> Dict[str, Any]:
         """
         Analyze if operation can be vectorized
         """
         return {
-            'vectorizable': True,
-            'estimated_speedup': '10-100x with NumPy',
-            'memory_reduction': '50% with float32',
-            'implementation': 'Use NumPy or Rust FFI'
+            "vectorizable": True,
+            "estimated_speedup": "10-100x with NumPy",
+            "memory_reduction": "50% with float32",
+            "implementation": "Use NumPy or Rust FFI",
         }
 
 
 __all__ = [
-    'AccelerationMethod',
-    'PerformanceMetrics',
-    'NumpyOptimizer',
-    'RustFFIBridge',
-    'WebAssemblyBridge',
-    'HybridExecutor',
-    'OptimizationStrategy',
+    "AccelerationMethod",
+    "PerformanceMetrics",
+    "NumpyOptimizer",
+    "RustFFIBridge",
+    "WebAssemblyBridge",
+    "HybridExecutor",
+    "OptimizationStrategy",
 ]

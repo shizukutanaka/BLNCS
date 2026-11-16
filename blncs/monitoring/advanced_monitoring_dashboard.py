@@ -5,21 +5,22 @@
 
 import asyncio
 import json
-import time
-import threading
-from typing import Any, Dict, List, Optional, Callable, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
 import logging
+import statistics
+import threading
+import time
 import uuid
 from collections import defaultdict, deque
-import statistics
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class AlertSeverity(Enum):
     """アラート重要度"""
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -29,6 +30,7 @@ class AlertSeverity(Enum):
 
 class AlertStatus(Enum):
     """アラートステータス"""
+
     ACTIVE = "active"
     ACKNOWLEDGED = "acknowledged"
     RESOLVED = "resolved"
@@ -37,6 +39,7 @@ class AlertStatus(Enum):
 @dataclass
 class MetricDataPoint:
     """メトリクスデータポイント"""
+
     metric_name: str
     value: float
     timestamp: float
@@ -47,6 +50,7 @@ class MetricDataPoint:
 @dataclass
 class AlertRule:
     """アラートルール情報"""
+
     rule_id: str
     name: str
     metric_name: str
@@ -62,6 +66,7 @@ class AlertRule:
 @dataclass
 class Alert:
     """アラート情報"""
+
     alert_id: str
     rule_id: str
     severity: AlertSeverity
@@ -100,9 +105,7 @@ class MetricsCollector:
         if not self.is_collecting:
             self.is_collecting = True
             self.collector_thread = threading.Thread(
-                target=self._collection_loop,
-                args=(interval,),
-                daemon=True
+                target=self._collection_loop, args=(interval,), daemon=True
             )
             self.collector_thread.start()
 
@@ -112,7 +115,13 @@ class MetricsCollector:
         if self.collector_thread:
             self.collector_thread.join()
 
-    def collect_metric(self, metric_name: str, value: float, tags: Dict[str, str] = None, unit: str = ""):
+    def collect_metric(
+        self,
+        metric_name: str,
+        value: float,
+        tags: Dict[str, str] = None,
+        unit: str = "",
+    ):
         """
         メトリクスを収集
         Args:
@@ -126,7 +135,7 @@ class MetricsCollector:
             value=value,
             timestamp=time.time(),
             tags=tags or {},
-            unit=unit
+            unit=unit,
         )
 
         self.metrics_buffer[metric_name].append(data_point)
@@ -134,7 +143,11 @@ class MetricsCollector:
         # 古いデータを削除
         cutoff_time = time.time() - self.retention_period
         self.metrics_buffer[metric_name] = deque(
-            [dp for dp in self.metrics_buffer[metric_name] if dp.timestamp > cutoff_time]
+            [
+                dp
+                for dp in self.metrics_buffer[metric_name]
+                if dp.timestamp > cutoff_time
+            ]
         )
 
         # 収集コールバック実行
@@ -144,7 +157,9 @@ class MetricsCollector:
             except Exception as e:
                 logger.error(f"収集コールバックエラー: {e}")
 
-    def get_metric_history(self, metric_name: str, limit: int = 100) -> List[MetricDataPoint]:
+    def get_metric_history(
+        self, metric_name: str, limit: int = 100
+    ) -> List[MetricDataPoint]:
         """
         メトリクス履歴を取得
         Args:
@@ -179,8 +194,8 @@ class MetricsCollector:
             "latest": values[-1] if values else None,
             "time_range": {
                 "start": data_points[0].timestamp if data_points else None,
-                "end": data_points[-1].timestamp if data_points else None
-            }
+                "end": data_points[-1].timestamp if data_points else None,
+            },
         }
 
     def add_collection_callback(self, callback: Callable):
@@ -215,18 +230,24 @@ class MetricsCollector:
             self.collect_metric("system.memory.usage", memory.percent, unit="%")
 
             # ディスク使用率
-            disk = psutil.disk_usage('/')
+            disk = psutil.disk_usage("/")
             self.collect_metric("system.disk.usage", disk.percent, unit="%")
 
             # ネットワークI/O
             net_io = psutil.net_io_counters()
-            self.collect_metric("system.network.bytes_sent", net_io.bytes_sent, unit="bytes")
-            self.collect_metric("system.network.bytes_recv", net_io.bytes_recv, unit="bytes")
+            self.collect_metric(
+                "system.network.bytes_sent", net_io.bytes_sent, unit="bytes"
+            )
+            self.collect_metric(
+                "system.network.bytes_recv", net_io.bytes_recv, unit="bytes"
+            )
 
         except ImportError:
             # psutilが利用できない場合はシミュレーションデータ
             self.collect_metric("system.cpu.usage", 50.0 + (time.time() % 20), unit="%")
-            self.collect_metric("system.memory.usage", 60.0 + (time.time() % 10), unit="%")
+            self.collect_metric(
+                "system.memory.usage", 60.0 + (time.time() % 10), unit="%"
+            )
 
 
 class AlertEngine:
@@ -255,9 +276,7 @@ class AlertEngine:
         if not self.is_evaluating:
             self.is_evaluating = True
             self.evaluator_thread = threading.Thread(
-                target=self._evaluation_loop,
-                args=(interval,),
-                daemon=True
+                target=self._evaluation_loop, args=(interval,), daemon=True
             )
             self.evaluator_thread.start()
 
@@ -304,7 +323,9 @@ class AlertEngine:
             return
 
         latest_value = history[-1].value
-        condition_met = self._check_condition(latest_value, rule.condition, rule.threshold)
+        condition_met = self._check_condition(
+            latest_value, rule.condition, rule.threshold
+        )
 
         if condition_met:
             self._trigger_alert(rule, latest_value)
@@ -338,7 +359,7 @@ class AlertEngine:
             metric_name=rule.metric_name,
             current_value=current_value,
             threshold=rule.threshold,
-            triggered_at=time.time()
+            triggered_at=time.time(),
         )
 
         self.active_alerts[alert_id] = alert
@@ -374,7 +395,11 @@ class AlertEngine:
 
     def get_active_alerts(self) -> List[Alert]:
         """アクティブアラートを取得"""
-        return [alert for alert in self.active_alerts.values() if alert.status == AlertStatus.ACTIVE]
+        return [
+            alert
+            for alert in self.active_alerts.values()
+            if alert.status == AlertStatus.ACTIVE
+        ]
 
     def get_alert_history(self, limit: int = 100) -> List[Alert]:
         """アラート履歴を取得"""
@@ -411,7 +436,9 @@ class VisualizationManager:
         self.dashboards: Dict[str, Dict[str, Any]] = {}
         self.chart_configs: Dict[str, Dict[str, Any]] = {}
 
-    def create_dashboard(self, dashboard_id: str, name: str, description: str = "") -> str:
+    def create_dashboard(
+        self, dashboard_id: str, name: str, description: str = ""
+    ) -> str:
         """
         ダッシュボードを作成
         Args:
@@ -427,7 +454,7 @@ class VisualizationManager:
             "description": description,
             "charts": [],
             "created_at": time.time(),
-            "updated_at": time.time()
+            "updated_at": time.time(),
         }
 
         return dashboard_id
@@ -462,10 +489,11 @@ class VisualizationManager:
         for chart in dashboard["charts"]:
             metric_name = chart.get("metric_name")
             if metric_name:
-                history = self.metrics_collector.get_metric_history(metric_name, limit=chart.get("data_points", 100))
+                history = self.metrics_collector.get_metric_history(
+                    metric_name, limit=chart.get("data_points", 100)
+                )
                 chart["data"] = [
-                    {"timestamp": dp.timestamp, "value": dp.value}
-                    for dp in history
+                    {"timestamp": dp.timestamp, "value": dp.value} for dp in history
                 ]
 
         return dashboard
@@ -486,7 +514,7 @@ class VisualizationManager:
         realtime_data = {
             "dashboard_id": dashboard_id,
             "timestamp": time.time(),
-            "charts": []
+            "charts": [],
         }
 
         for chart in dashboard_data["charts"]:
@@ -494,7 +522,7 @@ class VisualizationManager:
                 "chart_id": chart["id"],
                 "metric_name": chart.get("metric_name"),
                 "current_value": None,
-                "data_points": chart.get("data", [])
+                "data_points": chart.get("data", []),
             }
 
             # 最新値を取得
@@ -530,7 +558,9 @@ class MonitoringDashboard:
             self.metrics_collector.start_collection()
             self.alert_engine.start_evaluation()
 
-            self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
+            self.monitoring_thread = threading.Thread(
+                target=self._monitoring_loop, daemon=True
+            )
             self.monitoring_thread.start()
 
     def stop_monitoring(self):
@@ -542,7 +572,13 @@ class MonitoringDashboard:
         if self.monitoring_thread:
             self.monitoring_thread.join()
 
-    def add_alert_rule(self, metric_name: str, threshold: float, condition: str = "gt", severity: AlertSeverity = AlertSeverity.MEDIUM):
+    def add_alert_rule(
+        self,
+        metric_name: str,
+        threshold: float,
+        condition: str = "gt",
+        severity: AlertSeverity = AlertSeverity.MEDIUM,
+    ):
         """
         アラートルールを追加
         Args:
@@ -559,7 +595,7 @@ class MonitoringDashboard:
             condition=condition,
             threshold=threshold,
             severity=severity,
-            description=f"{metric_name}が{threshold}を{condition}した場合のアラート"
+            description=f"{metric_name}が{threshold}を{condition}した場合のアラート",
         )
 
         self.alert_engine.add_alert_rule(rule)
@@ -569,39 +605,48 @@ class MonitoringDashboard:
         dashboard_id = "system_overview"
 
         self.visualization_manager.create_dashboard(
-            dashboard_id,
-            "システム概要",
-            "システム全体のメトリクスとアラートを表示"
+            dashboard_id, "システム概要", "システム全体のメトリクスとアラートを表示"
         )
 
         # CPU使用率チャート
-        self.visualization_manager.add_chart_to_dashboard(dashboard_id, {
-            "title": "CPU使用率",
-            "type": "line",
-            "metric_name": "system.cpu.usage",
-            "color": "#ff6b6b",
-            "data_points": 100
-        })
+        self.visualization_manager.add_chart_to_dashboard(
+            dashboard_id,
+            {
+                "title": "CPU使用率",
+                "type": "line",
+                "metric_name": "system.cpu.usage",
+                "color": "#ff6b6b",
+                "data_points": 100,
+            },
+        )
 
         # メモリ使用率チャート
-        self.visualization_manager.add_chart_to_dashboard(dashboard_id, {
-            "title": "メモリ使用率",
-            "type": "line",
-            "metric_name": "system.memory.usage",
-            "color": "#4ecdc4",
-            "data_points": 100
-        })
+        self.visualization_manager.add_chart_to_dashboard(
+            dashboard_id,
+            {
+                "title": "メモリ使用率",
+                "type": "line",
+                "metric_name": "system.memory.usage",
+                "color": "#4ecdc4",
+                "data_points": 100,
+            },
+        )
 
         # ディスク使用率チャート
-        self.visualization_manager.add_chart_to_dashboard(dashboard_id, {
-            "title": "ディスク使用率",
-            "type": "line",
-            "metric_name": "system.disk.usage",
-            "color": "#45b7d1",
-            "data_points": 100
-        })
+        self.visualization_manager.add_chart_to_dashboard(
+            dashboard_id,
+            {
+                "title": "ディスク使用率",
+                "type": "line",
+                "metric_name": "system.disk.usage",
+                "color": "#45b7d1",
+                "data_points": 100,
+            },
+        )
 
-    def collect_custom_metric(self, name: str, value: float, tags: Dict[str, str] = None):
+    def collect_custom_metric(
+        self, name: str, value: float, tags: Dict[str, str] = None
+    ):
         """
         カスタムメトリクスを収集
         Args:
@@ -617,7 +662,12 @@ class MonitoringDashboard:
             "is_monitoring": self.is_monitoring,
             "active_alerts": len(self.alert_engine.get_active_alerts()),
             "total_metrics": len(self.metrics_collector.metrics_buffer),
-            "uptime": time.time() - (self.metrics_collector._start_time if hasattr(self.metrics_collector, '_start_time') else time.time())
+            "uptime": time.time()
+            - (
+                self.metrics_collector._start_time
+                if hasattr(self.metrics_collector, "_start_time")
+                else time.time()
+            ),
         }
 
     def _monitoring_loop(self):

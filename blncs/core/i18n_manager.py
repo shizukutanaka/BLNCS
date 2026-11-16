@@ -4,12 +4,14 @@ BLNCS - Internationalization (i18n) System
 国際化システム基盤
 """
 
-import os
 import gettext
 import locale
-from pathlib import Path
-from typing import Optional, Dict, Any
 import logging
+import os
+import re
+from pathlib import Path
+from typing import Any, Dict, Optional
+
 
 class I18NManager:
     """
@@ -41,7 +43,7 @@ class I18NManager:
         self._current_locale = None
 
         # フォールバック言語設定
-        self.fallback_languages = ['en', 'ja']
+        self.fallback_languages = ["en", "ja"]
         self.current_language = self._detect_system_locale()
 
         # 翻訳ファイルの自動作成ディレクトリ
@@ -53,12 +55,12 @@ class I18NManager:
             system_locale = locale.getlocale()[0]
             if system_locale:
                 # 言語コード部分を抽出 (例: 'ja_JP' -> 'ja')
-                lang = system_locale.split('_')[0]
-                return lang if self._is_supported_language(lang) else 'en'
+                lang = system_locale.split("_")[0]
+                return lang if self._is_supported_language(lang) else "en"
         except Exception as e:
             self.logger.warning(f"Failed to detect system locale: {e}")
 
-        return 'en'
+        return "en"
 
     def _is_supported_language(self, lang: str) -> bool:
         """言語がサポートされているかチェック"""
@@ -74,7 +76,10 @@ class I18NManager:
                 if item.is_dir():
                     # LC_MESSAGESディレクトリがあるかチェック
                     lc_messages = item / "LC_MESSAGES"
-                    if lc_messages.exists() and (lc_messages / f"{self.domain}.mo").exists():
+                    if (
+                        lc_messages.exists()
+                        and (lc_messages / f"{self.domain}.mo").exists()
+                    ):
                         languages.append(item.name)
 
         # フォールバックとして基本言語を追加
@@ -91,7 +96,16 @@ class I18NManager:
             self.logger.info(f"Created locale directory: {self.localedir}")
 
         # 各言語のディレクトリ構造を作成
-        for lang in self.fallback_languages + ['es', 'fr', 'de', 'zh', 'ko', 'pt', 'ru', 'ar']:
+        for lang in self.fallback_languages + [
+            "es",
+            "fr",
+            "de",
+            "zh",
+            "ko",
+            "pt",
+            "ru",
+            "ar",
+        ]:
             lang_dir = self.localedir / lang / "LC_MESSAGES"
             lang_dir.mkdir(parents=True, exist_ok=True)
 
@@ -104,7 +118,7 @@ class I18NManager:
         """POテンプレートファイルを作成"""
         po_file = lang_dir / f"{self.domain}.po"
 
-        template_content = f'''# {self.domain} translation file
+        template_content = f"""# {self.domain} translation file
 # Copyright (C) 2025 BLNCS
 # This file is distributed under the same license as the BLNCS package.
 #
@@ -445,9 +459,9 @@ msgstr ""
 
 msgid "Arabic"
 msgstr ""
-'''
+"""
 
-        with open(po_file, 'w', encoding='utf-8') as f:
+        with open(po_file, "w", encoding="utf-8") as f:
             f.write(template_content)
 
         self.logger.info(f"Created PO template: {po_file}")
@@ -472,7 +486,7 @@ msgstr ""
                 domain=self.domain,
                 localedir=self.localedir,
                 languages=[language],
-                fallback=True
+                fallback=True,
             )
 
             self._current_locale = language
@@ -556,25 +570,26 @@ msgstr ""
 
         try:
             # POファイルを更新
-            content = po_file.read_text(encoding='utf-8')
+            content = po_file.read_text(encoding="utf-8")
 
             # 既存の翻訳を更新、または新しい翻訳を追加
             if f'msgid "{key}"' in content:
                 # 既存の翻訳を更新
                 import re
+
                 pattern = f'(msgid "{re.escape(key)}"\\nmsgstr ")(\\"\\".*?"|".*?")'
                 replacement = f'\\1"{value}"'
                 content = re.sub(pattern, replacement, content)
             else:
                 # 新しい翻訳を追加
-                new_entry = f'''
+                new_entry = f"""
 
 msgid "{key}"
 msgstr "{value}"
-'''
+"""
                 content += new_entry
 
-            po_file.write_text(content, encoding='utf-8')
+            po_file.write_text(content, encoding="utf-8")
 
             # .moファイルを更新
             self._compile_translation(language)
@@ -597,11 +612,12 @@ msgstr "{value}"
 
             # msgfmtコマンドを使用（利用可能なら）
             import subprocess
+
             try:
                 result = subprocess.run(
-                    ['msgfmt', str(po_file), '-o', str(mo_file)],
+                    ["msgfmt", str(po_file), "-o", str(mo_file)],
                     capture_output=True,
-                    text=True
+                    text=True,
                 )
                 if result.returncode != 0:
                     self.logger.warning(f"msgfmt failed: {result.stderr}")
@@ -619,7 +635,7 @@ msgstr "{value}"
         try:
             import re
 
-            content = po_file.read_text(encoding='utf-8')
+            content = po_file.read_text(encoding="utf-8")
             translations = {}
 
             # 翻訳エントリを解析
@@ -630,11 +646,11 @@ msgstr "{value}"
                     translations[msgid] = msgstr
 
             # 簡易MO形式で保存（実際にはGNUTranslationsで読み込み）
-            import struct
             import pickle
+            import struct
 
             # 簡易的なバイナリ形式で保存
-            with open(mo_file, 'wb') as f:
+            with open(mo_file, "wb") as f:
                 pickle.dump(translations, f)
 
         except Exception as e:
@@ -651,24 +667,28 @@ msgstr "{value}"
             dict: 言語情報
         """
         info = {
-            'code': language,
-            'name': self.get_text(f"{language}_name").replace('_name', ''),
-            'supported': self._is_supported_language(language),
-            'completion': 0
+            "code": language,
+            "name": self.get_text(f"{language}_name").replace("_name", ""),
+            "supported": self._is_supported_language(language),
+            "completion": 0,
         }
 
         # 翻訳完了率を計算
         po_file = self.localedir / language / "LC_MESSAGES" / f"{self.domain}.po"
         if po_file.exists():
             try:
-                content = po_file.read_text(encoding='utf-8')
+                content = po_file.read_text(encoding="utf-8")
                 total_entries = len(re.findall(r'msgid\s+"[^"]*"\s+msgstr', content))
-                translated_entries = len(re.findall(r'msgid\s+"[^"]*"\s+msgstr\s+"[^"]+"', content))
+                translated_entries = len(
+                    re.findall(r'msgid\s+"[^"]*"\s+msgstr\s+"[^"]+"', content)
+                )
 
                 if total_entries > 0:
-                    info['completion'] = int((translated_entries / total_entries) * 100)
+                    info["completion"] = int((translated_entries / total_entries) * 100)
             except Exception as e:
-                self.logger.warning(f"Failed to calculate completion for {language}: {e}")
+                self.logger.warning(
+                    f"Failed to calculate completion for {language}: {e}"
+                )
 
         return info
 
@@ -695,23 +715,31 @@ msgstr "{value}"
             for language in self.get_supported_languages():
                 lang_translations = {}
 
-                po_file = self.localedir / language / "LC_MESSAGES" / f"{self.domain}.po"
+                po_file = (
+                    self.localedir / language / "LC_MESSAGES" / f"{self.domain}.po"
+                )
                 if po_file.exists():
                     try:
                         import re
-                        content = po_file.read_text(encoding='utf-8')
-                        entries = re.findall(r'msgid\s+"([^"]*)"\s+msgstr\s+"([^"]*)"', content)
+
+                        content = po_file.read_text(encoding="utf-8")
+                        entries = re.findall(
+                            r'msgid\s+"([^"]*)"\s+msgstr\s+"([^"]*)"', content
+                        )
 
                         for msgid, msgstr in entries:
                             if msgid and msgstr:
                                 lang_translations[msgid] = msgstr
                     except Exception as e:
-                        self.logger.warning(f"Failed to read translations for {language}: {e}")
+                        self.logger.warning(
+                            f"Failed to read translations for {language}: {e}"
+                        )
 
                 translations[language] = lang_translations
 
             import json
-            with open(output_path, 'w', encoding='utf-8') as f:
+
+            with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(translations, f, ensure_ascii=False, indent=2)
 
             self.logger.info(f"Exported translations to: {output_path}")
@@ -723,12 +751,14 @@ msgstr "{value}"
 # グローバルインスタンス
 _i18n_manager: Optional[I18NManager] = None
 
+
 def get_i18n_manager() -> I18NManager:
     """国際化マネージャーのインスタンスを取得"""
     global _i18n_manager
     if _i18n_manager is None:
         _i18n_manager = I18NManager()
     return _i18n_manager
+
 
 def _(message: str, *args) -> str:
     """
@@ -743,6 +773,7 @@ def _(message: str, *args) -> str:
     """
     manager = get_i18n_manager()
     return manager.get_text(message, *args)
+
 
 def ngettext(singular: str, plural: str, n: int) -> str:
     """
@@ -759,10 +790,12 @@ def ngettext(singular: str, plural: str, n: int) -> str:
     manager = get_i18n_manager()
     return manager.get_plural(singular, plural, n)
 
+
 # 便利な翻訳関数
 def tr(text: str, *args) -> str:
     """翻訳の別名"""
     return _(text, *args)
+
 
 def translate(text: str, *args) -> str:
     """翻訳の別名"""

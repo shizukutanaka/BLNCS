@@ -6,20 +6,21 @@ Based on 2024-2025 research on gRPC vs REST performance
 """
 
 import logging
-from typing import Dict, Any, Optional, List, Callable, TypeVar, Generic
-from dataclasses import dataclass, field, asdict
-from abc import ABC, abstractmethod
-from enum import Enum
 import struct
 import zlib
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class CompressionType(Enum):
     """Compression algorithms for gRPC"""
+
     NONE = "none"
     GZIP = "gzip"
     DEFLATE = "deflate"
@@ -28,6 +29,7 @@ class CompressionType(Enum):
 @dataclass
 class GRPCMetadata:
     """gRPC message metadata"""
+
     message_id: str = ""
     timestamp: int = 0
     compression: CompressionType = CompressionType.NONE
@@ -37,11 +39,11 @@ class GRPCMetadata:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'message_id': self.message_id,
-            'timestamp': self.timestamp,
-            'compression': self.compression.value,
-            'encoding': self.encoding,
-            'custom_metadata': self.custom_metadata
+            "message_id": self.message_id,
+            "timestamp": self.timestamp,
+            "compression": self.compression.value,
+            "encoding": self.encoding,
+            "custom_metadata": self.custom_metadata,
         }
 
 
@@ -85,7 +87,7 @@ class StreamMessage(ProtobufMessage):
     def serialize(self) -> bytes:
         """Serialize using simple binary format"""
         # Field 1: message_id (variable length)
-        msg_id_bytes = self.message_id.encode('utf-8')
+        msg_id_bytes = self.message_id.encode("utf-8")
         msg_id_len = len(msg_id_bytes)
 
         # Field 2: data (variable length)
@@ -96,9 +98,11 @@ class StreamMessage(ProtobufMessage):
 
         # Pack: [id_len][id_data][data_len][data][seq]
         return (
-            struct.pack('>H', msg_id_len) + msg_id_bytes +
-            struct.pack('>I', data_len) + self.data +
-            seq_bytes
+            struct.pack(">H", msg_id_len)
+            + msg_id_bytes
+            + struct.pack(">I", data_len)
+            + self.data
+            + seq_bytes
         )
 
     def deserialize(self, data: bytes) -> None:
@@ -106,15 +110,15 @@ class StreamMessage(ProtobufMessage):
         offset = 0
 
         # Read message_id
-        msg_id_len = struct.unpack_from('>H', data, offset)[0]
+        msg_id_len = struct.unpack_from(">H", data, offset)[0]
         offset += 2
-        self.message_id = data[offset:offset + msg_id_len].decode('utf-8')
+        self.message_id = data[offset : offset + msg_id_len].decode("utf-8")
         offset += msg_id_len
 
         # Read data
-        data_len = struct.unpack_from('>I', data, offset)[0]
+        data_len = struct.unpack_from(">I", data, offset)[0]
         offset += 4
-        self.data = data[offset:offset + data_len]
+        self.data = data[offset : offset + data_len]
         offset += data_len
 
         # Read sequence
@@ -123,9 +127,9 @@ class StreamMessage(ProtobufMessage):
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'message_id': self.message_id,
-            'data': self.data.hex(),
-            'sequence': self.sequence
+            "message_id": self.message_id,
+            "data": self.data.hex(),
+            "sequence": self.sequence,
         }
 
     @staticmethod
@@ -133,9 +137,9 @@ class StreamMessage(ProtobufMessage):
         """Encode integer as varint"""
         result = []
         while value > 127:
-            result.append((value & 0x7f) | 0x80)
+            result.append((value & 0x7F) | 0x80)
             value >>= 7
-        result.append(value & 0x7f)
+        result.append(value & 0x7F)
         return bytes(result)
 
     @staticmethod
@@ -144,7 +148,7 @@ class StreamMessage(ProtobufMessage):
         result = 0
         shift = 0
         for i, byte in enumerate(data):
-            result |= (byte & 0x7f) << shift
+            result |= (byte & 0x7F) << shift
             if not (byte & 0x80):
                 return result, i + 1
             shift += 7
@@ -212,13 +216,19 @@ class GRPCService(ABC, Generic[T]):
     def get_statistics(self) -> Dict[str, Any]:
         """Get service statistics"""
         return {
-            'request_count': self.request_count,
-            'bytes_received': self.bytes_received,
-            'bytes_sent': self.bytes_sent,
-            'compression_type': self.compression.value,
-            'compression_ratio_percent': self.get_compression_ratio(),
-            'avg_request_size': self.bytes_received / self.request_count if self.request_count > 0 else 0,
-            'avg_response_size': self.bytes_sent / self.request_count if self.request_count > 0 else 0
+            "request_count": self.request_count,
+            "bytes_received": self.bytes_received,
+            "bytes_sent": self.bytes_sent,
+            "compression_type": self.compression.value,
+            "compression_ratio_percent": self.get_compression_ratio(),
+            "avg_request_size": (
+                self.bytes_received / self.request_count
+                if self.request_count > 0
+                else 0
+            ),
+            "avg_response_size": (
+                self.bytes_sent / self.request_count if self.request_count > 0 else 0
+            ),
         }
 
 
@@ -234,7 +244,7 @@ class UnaryService(GRPCService[StreamMessage]):
         return StreamMessage(
             message_id=f"response_{request.message_id}",
             data=b"ACK",
-            sequence=request.sequence + 1
+            sequence=request.sequence + 1,
         )
 
 
@@ -248,7 +258,9 @@ class StreamingService(GRPCService[StreamMessage]):
         super().__init__(compression)
         self.stream_buffers: Dict[str, List[StreamMessage]] = {}
 
-    async def handle_stream(self, stream_id: str, messages: List[StreamMessage]) -> List[StreamMessage]:
+    async def handle_stream(
+        self, stream_id: str, messages: List[StreamMessage]
+    ) -> List[StreamMessage]:
         """Handle streaming messages"""
         if stream_id not in self.stream_buffers:
             self.stream_buffers[stream_id] = []
@@ -258,7 +270,7 @@ class StreamingService(GRPCService[StreamMessage]):
             response = StreamMessage(
                 message_id=f"response_{msg.message_id}",
                 data=msg.data,
-                sequence=msg.sequence + 1
+                sequence=msg.sequence + 1,
             )
             responses.append(response)
             self.stream_buffers[stream_id].append(response)
@@ -271,7 +283,7 @@ class StreamingService(GRPCService[StreamMessage]):
         return StreamMessage(
             message_id=f"response_{request.message_id}",
             data=request.data,
-            sequence=request.sequence + 1
+            sequence=request.sequence + 1,
         )
 
 
@@ -325,9 +337,9 @@ class GRPCLoadBalancer:
     def get_load_distribution(self) -> Dict[str, Any]:
         """Get load distribution across services"""
         return {
-            'total_requests': self.total_requests,
-            'service_loads': self.request_counts.copy(),
-            'available_services': len(self.services)
+            "total_requests": self.total_requests,
+            "service_loads": self.request_counts.copy(),
+            "available_services": len(self.services),
         }
 
 
@@ -353,7 +365,7 @@ class ProtobufSchema:
 
         schema = self.schemas[name]
         # Simple validation: check required fields
-        required_fields = schema.get('required_fields', [])
+        required_fields = schema.get("required_fields", [])
         return all(field in data for field in required_fields)
 
     def get_schema(self, name: str) -> Optional[Dict[str, Any]]:
@@ -362,13 +374,13 @@ class ProtobufSchema:
 
 
 __all__ = [
-    'CompressionType',
-    'GRPCMetadata',
-    'ProtobufMessage',
-    'StreamMessage',
-    'GRPCService',
-    'UnaryService',
-    'StreamingService',
-    'GRPCLoadBalancer',
-    'ProtobufSchema',
+    "CompressionType",
+    "GRPCMetadata",
+    "ProtobufMessage",
+    "StreamMessage",
+    "GRPCService",
+    "UnaryService",
+    "StreamingService",
+    "GRPCLoadBalancer",
+    "ProtobufSchema",
 ]

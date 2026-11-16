@@ -4,19 +4,20 @@ Simple Cache System for BLNCS
 シンプルなキャッシュシステム
 """
 
-import os
-import time
+import hashlib
 import json
+import logging
+import os
 import pickle
-from typing import Any, Optional, Union, Callable, Dict
+import time
 from collections import OrderedDict
 from threading import Lock
-import hashlib
-import logging
+from typing import Any, Callable, Dict, Optional, Union
 
 # Try to import Redis for distributed caching
 try:
     import redis
+
     HAS_REDIS = True
 except ImportError:
     HAS_REDIS = False
@@ -34,12 +35,18 @@ class SimpleCache:
         max_size: int = 1000,
         default_ttl: int = 3600,
         backend: str = "memory",
-        redis_url: Optional[str] = None
+        redis_url: Optional[str] = None,
+        ttl: Optional[int] = None,
     ):
         self.max_size = max_size
-        self.default_ttl = default_ttl
+        # `ttl` is accepted as an alias for `default_ttl`.
+        self.default_ttl = ttl if ttl is not None else default_ttl
         self.backend = backend
-        self.redis_url = redis_url or os.getenv('BLNCS_REDIS_URL', 'redis://localhost:6379')
+        self.redis_url = redis_url or os.getenv(
+            "BLNCS_REDIS_URL", "redis://localhost:6379"
+        )
+        self._hits = 0
+        self._misses = 0
 
         # Initialize backend
         if backend == "redis" and HAS_REDIS:
@@ -63,7 +70,9 @@ class SimpleCache:
             self.backend = "redis"
             logger.info(f"Initialized Redis cache at {self.redis_url}")
         except Exception as e:
-            logger.warning(f"Failed to connect to Redis: {e}, falling back to memory cache")
+            logger.warning(
+                f"Failed to connect to Redis: {e}, falling back to memory cache"
+            )
             self._init_memory()
 
     def _make_key(self, key: Union[str, tuple]) -> str:
@@ -93,12 +102,15 @@ class SimpleCache:
                         # Expired, remove it
                         del self.cache[key]
                         del self.expires[key]
+                        self._misses += 1
                         return default
 
                 # Move to end (LRU)
                 self.cache.move_to_end(key)
+                self._hits += 1
                 return self.cache[key]
 
+            self._misses += 1
             return default
 
     def _get_redis(self, key: str, default: Any) -> Any:
@@ -106,17 +118,17 @@ class SimpleCache:
         try:
             value = self.redis_client.get(f"blncs:{key}")
             if value:
+                self._hits += 1
                 return pickle.loads(value)
+            self._misses += 1
             return default
         except Exception as e:
             logger.error(f"Redis get error: {e}")
+            self._misses += 1
             return default
 
     def set(
-        self,
-        key: Union[str, tuple],
-        value: Any,
-        ttl: Optional[int] = None
+        self, key: Union[str, tuple], value: Any, ttl: Optional[int] = None
     ) -> bool:
         """Set value in cache"""
         key_str = self._make_key(key)
@@ -222,8 +234,46 @@ class SimpleCache:
             with self.lock:
                 return len(self.cache)
 
+    def stats(self) -> Dict[str, Any]:
+        """Get cache statistics (size, hit/miss counters, limits)"""
+        total_requests = self._hits + self._misses
+        return {
+            "size": self.size(),
+            "hits": self._hits,
+            "misses": self._misses,
+            "total_requests": total_requests,
+            "hit_rate": (self._hits / total_requests) if total_requests else 0.0,
+            "max_size": self.max_size,
+            "ttl": self.default_ttl,
+            "backend": self.backend,
+        }
+
+    def configure(
+        self,
+        max_size: Optional[int] = None,
+        default_ttl: Optional[int] = None,
+        ttl: Optional[int] = None,
+    ) -> None:
+        """Update cache limits at runtime.
+
+        Lowering ``max_size`` below the current number of entries evicts
+        the least recently used entries until the cache fits again.
+        """
+        if ttl is not None:
+            default_ttl = ttl
+        if default_ttl is not None:
+            self.default_ttl = default_ttl
+        if max_size is not None:
+            self.max_size = max_size
+            if self.backend == "memory":
+                with self.lock:
+                    while len(self.cache) > self.max_size:
+                        oldest_key, _ = self.cache.popitem(last=False)
+                        self.expires.pop(oldest_key, None)
+
     def cache_decorator(self, ttl: Optional[int] = None):
         """Decorator for caching function results"""
+
         def decorator(func: Callable):
             def wrapper(*args, **kwargs):
                 # Create cache key from function name and arguments
@@ -240,6 +290,7 @@ class SimpleCache:
                 return result
 
             return wrapper
+
         return decorator
 
 
@@ -266,14 +317,14 @@ class CacheManager:
         max_size: int = 1000,
         default_ttl: int = 3600,
         backend: str = "memory",
-        redis_url: Optional[str] = None
+        redis_url: Optional[str] = None,
     ) -> SimpleCache:
         """Create a new named cache"""
         cache = SimpleCache(
             max_size=max_size,
             default_ttl=default_ttl,
             backend=backend,
-            redis_url=redis_url
+            redis_url=redis_url,
         )
         self.caches[name] = cache
         return cache
@@ -288,19 +339,22 @@ class CacheManager:
 # Global cache manager instance
 _cache_manager = CacheManager()
 
+
 def get_simple_cache(name: str = "default") -> SimpleCache:
     """Get a cache instance by name"""
     return _cache_manager.get_cache(name)
+
 
 def create_cache(
     name: str,
     max_size: int = 1000,
     default_ttl: int = 3600,
     backend: str = "memory",
-    redis_url: Optional[str] = None
+    redis_url: Optional[str] = None,
 ) -> SimpleCache:
     """Create a new named cache"""
     return _cache_manager.create_cache(name, max_size, default_ttl, backend, redis_url)
+
 
 def clear_all_caches():
     """Clear all caches"""
@@ -340,10 +394,10 @@ class LightningCache:
 
 
 __all__ = [
-    'SimpleCache',
-    'CacheManager',
-    'LightningCache',
-    'get_simple_cache',
-    'create_cache',
-    'clear_all_caches'
+    "SimpleCache",
+    "CacheManager",
+    "LightningCache",
+    "get_simple_cache",
+    "create_cache",
+    "clear_all_caches",
 ]

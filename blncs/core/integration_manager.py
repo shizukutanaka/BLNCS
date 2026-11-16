@@ -9,29 +9,34 @@ This module provides comprehensive integration capabilities including:
 - Third-party service integrations
 """
 
-import time
-import json
-import logging
-import threading
 import asyncio
-import requests
-from typing import Dict, List, Optional, Any, Callable, Set, Tuple, Union
-from dataclasses import dataclass, asdict
-from collections import defaultdict, deque
 import importlib
 import inspect
+import json
+import logging
 import os
+import random
+import re
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+
+import requests
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class WebhookEndpoint:
     """Webhook endpoint configuration."""
+
     id: str
     name: str
     url: str
-    method: str = 'POST'
+    method: str = "POST"
     headers: Dict[str, str] = None
     events: List[str] = None  # Events that trigger this webhook
     enabled: bool = True
@@ -40,9 +45,11 @@ class WebhookEndpoint:
     success_count: int = 0
     failure_count: int = 0
 
+
 @dataclass
 class APIIntegration:
     """API integration configuration."""
+
     id: str
     name: str
     base_url: str
@@ -52,9 +59,11 @@ class APIIntegration:
     caching_config: Dict[str, Any] = None
     enabled: bool = True
 
+
 @dataclass
 class Plugin:
     """Plugin definition."""
+
     id: str
     name: str
     version: str
@@ -65,6 +74,7 @@ class Plugin:
     configuration: Dict[str, Any] = None
     enabled: bool = False
     loaded: bool = False
+
 
 class WebhookManager:
     """Webhook integration management."""
@@ -91,18 +101,21 @@ class WebhookManager:
         """Trigger webhooks for event."""
         # Find webhooks that should receive this event
         relevant_webhooks = [
-            webhook for webhook in self.webhooks.values()
+            webhook
+            for webhook in self.webhooks.values()
             if webhook.enabled and (not webhook.events or event_type in webhook.events)
         ]
 
         for webhook in relevant_webhooks:
             # Add to processing queue
-            self.event_queue.put_nowait({
-                'webhook': webhook,
-                'event_type': event_type,
-                'event_data': event_data,
-                'timestamp': time.time()
-            })
+            self.event_queue.put_nowait(
+                {
+                    "webhook": webhook,
+                    "event_type": event_type,
+                    "event_data": event_data,
+                    "timestamp": time.time(),
+                }
+            )
 
     async def start_webhook_processing(self):
         """Start webhook processing."""
@@ -142,25 +155,22 @@ class WebhookManager:
 
     async def _send_webhook(self, event: Dict[str, Any]):
         """Send webhook to endpoint."""
-        webhook = event['webhook']
+        webhook = event["webhook"]
 
         payload = {
-            'event_type': event['event_type'],
-            'timestamp': event['timestamp'],
-            'data': event['event_data'],
-            'source': 'blncs'
+            "event_type": event["event_type"],
+            "timestamp": event["timestamp"],
+            "data": event["event_data"],
+            "source": "blncs",
         }
 
         try:
             headers = webhook.headers or {}
-            headers['Content-Type'] = 'application/json'
-            headers['User-Agent'] = 'BLNCS-Webhook/1.0'
+            headers["Content-Type"] = "application/json"
+            headers["User-Agent"] = "BLNCS-Webhook/1.0"
 
             response = requests.post(
-                webhook.url,
-                json=payload,
-                headers=headers,
-                timeout=10
+                webhook.url, json=payload, headers=headers, timeout=10
             )
 
             response.raise_for_status()
@@ -173,6 +183,7 @@ class WebhookManager:
         except Exception as e:
             webhook.failure_count += 1
             self.logger.error(f"Webhook failed: {webhook.name} - {e}")
+
 
 class APIIntegrationManager:
     """API integration management."""
@@ -191,8 +202,11 @@ class APIIntegrationManager:
             # Initialize rate limiter if configured
             if integration.rate_limits:
                 from ..core.rate_limiter import RateLimiter
+
                 self.rate_limiters[integration.id] = RateLimiter(
-                    requests_per_minute=integration.rate_limits.get('requests_per_minute', 60)
+                    requests_per_minute=integration.rate_limits.get(
+                        "requests_per_minute", 60
+                    )
                 )
 
             self.logger.info(f"Added API integration: {integration.name}")
@@ -202,8 +216,9 @@ class APIIntegrationManager:
             self.logger.error(f"Failed to add integration: {e}")
             return False
 
-    def make_authenticated_request(self, integration_id: str, endpoint: str,
-                                 method: str = 'GET', **kwargs) -> Dict[str, Any]:
+    def make_authenticated_request(
+        self, integration_id: str, endpoint: str, method: str = "GET", **kwargs
+    ) -> Dict[str, Any]:
         """Make authenticated request to integrated API."""
         if integration_id not in self.integrations:
             raise ValueError(f"Integration not found: {integration_id}")
@@ -219,24 +234,29 @@ class APIIntegrationManager:
         url = f"{integration.base_url.rstrip('/')}{endpoint}"
 
         # Set up authentication headers
-        headers = kwargs.get('headers', {})
+        headers = kwargs.get("headers", {})
 
-        if integration.auth_type == 'bearer':
-            headers['Authorization'] = f"Bearer {integration.auth_config['token']}"
-        elif integration.auth_type == 'basic':
+        if integration.auth_type == "bearer":
+            headers["Authorization"] = f"Bearer {integration.auth_config['token']}"
+        elif integration.auth_type == "basic":
             import base64
+
             auth_string = base64.b64encode(
                 f"{integration.auth_config['username']}:{integration.auth_config['password']}".encode()
             ).decode()
-            headers['Authorization'] = f"Basic {auth_string}"
-        elif integration.auth_type == 'api_key':
-            if integration.auth_config.get('header_name'):
-                headers[integration.auth_config['header_name']] = integration.auth_config['api_key']
-            elif integration.auth_config.get('query_param'):
-                kwargs['params'] = kwargs.get('params', {})
-                kwargs['params'][integration.auth_config['query_param']] = integration.auth_config['api_key']
+            headers["Authorization"] = f"Basic {auth_string}"
+        elif integration.auth_type == "api_key":
+            if integration.auth_config.get("header_name"):
+                headers[integration.auth_config["header_name"]] = (
+                    integration.auth_config["api_key"]
+                )
+            elif integration.auth_config.get("query_param"):
+                kwargs["params"] = kwargs.get("params", {})
+                kwargs["params"][integration.auth_config["query_param"]] = (
+                    integration.auth_config["api_key"]
+                )
 
-        kwargs['headers'] = headers
+        kwargs["headers"] = headers
 
         # Make request
         try:
@@ -247,6 +267,7 @@ class APIIntegrationManager:
         except Exception as e:
             self.logger.error(f"API request failed: {e}")
             raise
+
 
 class PluginManager:
     """Plugin management and loading system."""
@@ -262,8 +283,8 @@ class PluginManager:
         """Discover available plugins."""
         plugins = []
 
-        for plugin_path in self.plugin_directory.rglob('*.py'):
-            if plugin_path.name.startswith('__'):
+        for plugin_path in self.plugin_directory.rglob("*.py"):
+            if plugin_path.name.startswith("__"):
                 continue
 
             try:
@@ -280,11 +301,11 @@ class PluginManager:
         """Analyze plugin file for plugin definition."""
         try:
             # Read plugin file
-            with open(plugin_path, 'r') as f:
+            with open(plugin_path, "r") as f:
                 content = f.read()
 
             # Look for plugin class definition
-            class_pattern = r'class\s+(\w+)\s*\([^)]*Plugin[^)]*\)'
+            class_pattern = r"class\s+(\w+)\s*\([^)]*Plugin[^)]*\)"
             match = re.search(class_pattern, content)
 
             if match:
@@ -299,7 +320,7 @@ class PluginManager:
                     author="Unknown",
                     plugin_class=f"{plugin_path.stem}.{class_name}",
                     dependencies=[],
-                    configuration={}
+                    configuration={},
                 )
 
         except Exception as e:
@@ -317,7 +338,7 @@ class PluginManager:
 
         try:
             # Import plugin module
-            module_name = plugin.plugin_class.split('.')[0]
+            module_name = plugin.plugin_class.split(".")[0]
             module_path = self.plugin_directory / f"{module_name}.py"
 
             if not module_path.exists():
@@ -326,6 +347,7 @@ class PluginManager:
 
             # Add to Python path
             import sys
+
             plugin_dir = str(self.plugin_directory)
             if plugin_dir not in sys.path:
                 sys.path.insert(0, plugin_dir)
@@ -334,7 +356,7 @@ class PluginManager:
             module = importlib.import_module(module_name)
 
             # Get plugin class
-            class_parts = plugin.plugin_class.split('.')
+            class_parts = plugin.plugin_class.split(".")
             plugin_class = module
             for part in class_parts[1:]:
                 plugin_class = getattr(plugin_class, part)
@@ -346,7 +368,7 @@ class PluginManager:
                 plugin_instance = plugin_class()
 
             # Initialize plugin
-            if hasattr(plugin_instance, 'initialize'):
+            if hasattr(plugin_instance, "initialize"):
                 plugin_instance.initialize()
 
             self.loaded_plugins[plugin_id] = plugin_instance
@@ -368,7 +390,7 @@ class PluginManager:
             plugin_instance = self.loaded_plugins[plugin_id]
 
             # Cleanup plugin
-            if hasattr(plugin_instance, 'cleanup'):
+            if hasattr(plugin_instance, "cleanup"):
                 plugin_instance.cleanup()
 
             del self.loaded_plugins[plugin_id]
@@ -384,7 +406,9 @@ class PluginManager:
             self.logger.error(f"Failed to unload plugin {plugin_id}: {e}")
             return False
 
-    def get_plugin_interface(self, plugin_id: str, interface_name: str) -> Optional[Callable]:
+    def get_plugin_interface(
+        self, plugin_id: str, interface_name: str
+    ) -> Optional[Callable]:
         """Get plugin interface method."""
         if plugin_id not in self.loaded_plugins:
             return None
@@ -395,6 +419,7 @@ class PluginManager:
             return getattr(plugin_instance, interface_name)
 
         return None
+
 
 class RealTimeSyncManager:
     """Real-time synchronization system."""
@@ -409,10 +434,10 @@ class RealTimeSyncManager:
     def add_sync_target(self, target_id: str, target_config: Dict[str, Any]):
         """Add synchronization target."""
         self.sync_targets[target_id] = {
-            'config': target_config,
-            'last_sync': 0,
-            'sync_interval': target_config.get('interval', 60),
-            'enabled': True
+            "config": target_config,
+            "last_sync": 0,
+            "sync_interval": target_config.get("interval", 60),
+            "enabled": True,
         }
 
     def start_sync(self):
@@ -439,10 +464,13 @@ class RealTimeSyncManager:
                 current_time = time.time()
 
                 for target_id, target_info in self.sync_targets.items():
-                    if not target_info['enabled']:
+                    if not target_info["enabled"]:
                         continue
 
-                    if current_time - target_info['last_sync'] >= target_info['sync_interval']:
+                    if (
+                        current_time - target_info["last_sync"]
+                        >= target_info["sync_interval"]
+                    ):
                         self._perform_sync(target_id, target_info)
 
                 time.sleep(10)  # Check every 10 seconds
@@ -454,17 +482,17 @@ class RealTimeSyncManager:
     def _perform_sync(self, target_id: str, target_info: Dict[str, Any]):
         """Perform synchronization with target."""
         try:
-            config = target_info['config']
-            sync_type = config.get('type', 'webhook')
+            config = target_info["config"]
+            sync_type = config.get("type", "webhook")
 
-            if sync_type == 'webhook':
+            if sync_type == "webhook":
                 self._sync_webhook(target_id, config)
-            elif sync_type == 'api':
+            elif sync_type == "api":
                 self._sync_api(target_id, config)
-            elif sync_type == 'database':
+            elif sync_type == "database":
                 self._sync_database(target_id, config)
 
-            target_info['last_sync'] = time.time()
+            target_info["last_sync"] = time.time()
             self.logger.info(f"Synchronized with {target_id}")
 
         except Exception as e:
@@ -472,18 +500,15 @@ class RealTimeSyncManager:
 
     def _sync_webhook(self, target_id: str, config: Dict[str, Any]):
         """Synchronize via webhook."""
-        webhook_url = config.get('webhook_url')
+        webhook_url = config.get("webhook_url")
         if not webhook_url:
             return
 
         # Send current system state
         system_state = {
-            'timestamp': time.time(),
-            'system_status': 'healthy',
-            'metrics': {
-                'cpu_usage': 45.0,
-                'memory_usage': 60.0
-            }
+            "timestamp": time.time(),
+            "system_status": "healthy",
+            "metrics": {"cpu_usage": 45.0, "memory_usage": 60.0},
         }
 
         try:
@@ -500,6 +525,7 @@ class RealTimeSyncManager:
         """Synchronize with external database."""
         # In a real implementation, sync data with external database
         pass
+
 
 class IntegrationManager:
     """Main integration management system."""
@@ -557,7 +583,9 @@ class IntegrationManager:
             return
 
         self.health_monitor_active = True
-        self.health_thread = threading.Thread(target=self._health_monitoring_loop, daemon=True)
+        self.health_thread = threading.Thread(
+            target=self._health_monitoring_loop, daemon=True
+        )
         self.health_thread.start()
 
     def _stop_health_monitoring(self):
@@ -574,11 +602,13 @@ class IntegrationManager:
                 for webhook in self.webhook_manager.webhooks.values():
                     if webhook.enabled:
                         # Simulate health check
-                        is_healthy = random.choice([True, True, True, False])  # 75% healthy
+                        is_healthy = random.choice(
+                            [True, True, True, False]
+                        )  # 75% healthy
                         self.integration_health[webhook.id] = {
-                            'type': 'webhook',
-                            'healthy': is_healthy,
-                            'last_check': time.time()
+                            "type": "webhook",
+                            "healthy": is_healthy,
+                            "last_check": time.time(),
                         }
 
                 # Check API integration health
@@ -587,9 +617,9 @@ class IntegrationManager:
                         # Simulate health check
                         is_healthy = random.choice([True, True, True, False])
                         self.integration_health[integration.id] = {
-                            'type': 'api',
-                            'healthy': is_healthy,
-                            'last_check': time.time()
+                            "type": "api",
+                            "healthy": is_healthy,
+                            "last_check": time.time(),
                         }
 
                 time.sleep(60)  # Check every minute
@@ -601,38 +631,39 @@ class IntegrationManager:
     def get_integration_status(self) -> Dict[str, Any]:
         """Get integration status."""
         return {
-            'webhooks': {
+            "webhooks": {
                 webhook_id: {
-                    'enabled': webhook.enabled,
-                    'success_count': webhook.success_count,
-                    'failure_count': webhook.failure_count,
-                    'last_triggered': webhook.last_triggered
+                    "enabled": webhook.enabled,
+                    "success_count": webhook.success_count,
+                    "failure_count": webhook.failure_count,
+                    "last_triggered": webhook.last_triggered,
                 }
                 for webhook_id, webhook in self.webhook_manager.webhooks.items()
             },
-            'api_integrations': {
+            "api_integrations": {
                 integration_id: {
-                    'enabled': integration.enabled,
-                    'healthy': self.integration_health.get(integration_id, {}).get('healthy', False)
+                    "enabled": integration.enabled,
+                    "healthy": self.integration_health.get(integration_id, {}).get(
+                        "healthy", False
+                    ),
                 }
                 for integration_id, integration in self.api_integration_manager.integrations.items()
             },
-            'plugins': {
-                plugin_id: {
-                    'loaded': plugin.loaded,
-                    'enabled': plugin.enabled
-                }
+            "plugins": {
+                plugin_id: {"loaded": plugin.loaded, "enabled": plugin.enabled}
                 for plugin_id, plugin in self.plugin_manager.plugin_metadata.items()
             },
-            'synchronization': {
-                'active': self.sync_manager.sync_active,
-                'targets': len(self.sync_manager.sync_targets)
-            }
+            "synchronization": {
+                "active": self.sync_manager.sync_active,
+                "targets": len(self.sync_manager.sync_targets),
+            },
         }
+
 
 def create_integration_manager() -> IntegrationManager:
     """Factory function to create integration manager."""
     return IntegrationManager()
+
 
 # Example usage
 if __name__ == "__main__":
@@ -648,7 +679,7 @@ if __name__ == "__main__":
         name="Slack Alerts",
         url="https://hooks.slack.com/services/...",
         events=["system_alert", "security_event"],
-        headers={"Content-Type": "application/json"}
+        headers={"Content-Type": "application/json"},
     )
     integration_manager.webhook_manager.register_webhook(webhook)
 
@@ -658,7 +689,7 @@ if __name__ == "__main__":
         name="GitHub API",
         base_url="https://api.github.com",
         auth_type="bearer",
-        auth_config={"token": "github_token_here"}
+        auth_config={"token": "github_token_here"},
     )
     integration_manager.api_integration_manager.add_integration(api_integration)
 
@@ -666,16 +697,15 @@ if __name__ == "__main__":
     integration_manager.sync_manager.add_sync_target(
         "external_monitoring",
         {
-            'type': 'webhook',
-            'webhook_url': 'https://external-system.com/webhook',
-            'interval': 300
-        }
+            "type": "webhook",
+            "webhook_url": "https://external-system.com/webhook",
+            "interval": 300,
+        },
     )
 
     # Trigger webhook
     integration_manager.webhook_manager.trigger_webhook(
-        "system_alert",
-        {"message": "High CPU usage detected", "severity": "high"}
+        "system_alert", {"message": "High CPU usage detected", "severity": "high"}
     )
 
     # Get integration status

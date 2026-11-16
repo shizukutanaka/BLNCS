@@ -4,8 +4,8 @@ Basic tests for BLNCS functionality
 Ultra-lightweight tests for core components.
 """
 
-import unittest
 import sys
+import unittest
 from pathlib import Path
 
 # Minimal path setup for speed
@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 try:
     from blncs.core.config import get_config
     from blncs.lightning.simple_client import SimpleLightningClient
+
     IMPORTS_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Core imports not available: {e}")
@@ -32,7 +33,7 @@ class TestBasicComponents(unittest.TestCase):
     @unittest.skipUnless(IMPORTS_AVAILABLE, "Imports not available")
     def test_lightning_client(self):
         """Test Lightning client"""
-        config = {'mock_mode': True, 'node_type': 'mock'}
+        config = {"mock_mode": True, "node_type": "mock"}
         client = SimpleLightningClient(config=config)
         self.assertIsNotNone(client)
 
@@ -43,5 +44,5 @@ class TestBasicComponents(unittest.TestCase):
         self.assertIsNotNone(info)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

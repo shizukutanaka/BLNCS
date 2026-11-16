@@ -3,32 +3,35 @@
 マルチリージョン展開と自動スケーリング機能を提供
 """
 
-import time
+import asyncio
 import json
+import logging
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-import logging
-import asyncio
-import aiohttp
+import time
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
 
 class ScalingStrategy(Enum):
     """スケーリング戦略"""
+
     HORIZONTAL = "horizontal"  # 水平スケーリング（インスタンス追加）
-    VERTICAL = "vertical"      # 垂直スケーリング（リソース増強）
-    AUTO = "auto"              # 自動スケーリング
-    MANUAL = "manual"          # 手動スケーリング
+    VERTICAL = "vertical"  # 垂直スケーリング（リソース増強）
+    AUTO = "auto"  # 自動スケーリング
+    MANUAL = "manual"  # 手動スケーリング
 
 
 class DeploymentRegion(Enum):
     """デプロイ地域"""
+
     NORTH_AMERICA = "north_america"
     EUROPE = "europe"
     ASIA_PACIFIC = "asia_pacific"
@@ -39,6 +42,7 @@ class DeploymentRegion(Enum):
 
 class ResourceType(Enum):
     """リソースタイプ"""
+
     CPU = "cpu"
     MEMORY = "memory"
     STORAGE = "storage"
@@ -49,6 +53,7 @@ class ResourceType(Enum):
 @dataclass
 class ScalingNode:
     """スケーリングノード情報"""
+
     node_id: str
     region: DeploymentRegion
     resource_type: ResourceType
@@ -64,6 +69,7 @@ class ScalingNode:
 @dataclass
 class ScalingPolicy:
     """スケーリングポリシー情報"""
+
     policy_id: str
     name: str
     target_metric: str  # 'cpu', 'memory', 'requests_per_second', etc.
@@ -79,6 +85,7 @@ class ScalingPolicy:
 @dataclass
 class ScalingEvent:
     """スケーリングイベント情報"""
+
     event_id: str
     timestamp: float
     scaling_type: str  # 'scale_out', 'scale_in'
@@ -94,11 +101,15 @@ class LoadBalancerManager:
 
     def __init__(self):
         """初期化"""
-        self.regional_load_balancers: Dict[DeploymentRegion, Dict[str, Any]] = defaultdict(dict)
+        self.regional_load_balancers: Dict[DeploymentRegion, Dict[str, Any]] = (
+            defaultdict(dict)
+        )
         self.global_routing_table: Dict[str, DeploymentRegion] = {}
         self.traffic_distribution: Dict[DeploymentRegion, float] = defaultdict(float)
 
-    def register_regional_load_balancer(self, region: DeploymentRegion, lb_config: Dict[str, Any]):
+    def register_regional_load_balancer(
+        self, region: DeploymentRegion, lb_config: Dict[str, Any]
+    ):
         """
         地域別ロードバランサーを登録
         Args:
@@ -107,7 +118,9 @@ class LoadBalancerManager:
         """
         self.regional_load_balancers[region] = lb_config
 
-    def update_traffic_distribution(self, region: DeploymentRegion, traffic_percentage: float):
+    def update_traffic_distribution(
+        self, region: DeploymentRegion, traffic_percentage: float
+    ):
         """
         トラフィック分散を更新
         Args:
@@ -116,7 +129,9 @@ class LoadBalancerManager:
         """
         self.traffic_distribution[region] = traffic_percentage
 
-    def get_optimal_region(self, user_location: str, service_type: str = "default") -> DeploymentRegion:
+    def get_optimal_region(
+        self, user_location: str, service_type: str = "default"
+    ) -> DeploymentRegion:
         """
         最適な地域を取得
         Args:
@@ -129,7 +144,7 @@ class LoadBalancerManager:
         location_mapping = {
             "north_america": ["US", "CA"],
             "europe": ["GB", "DE", "FR"],
-            "asia_pacific": ["JP", "KR", "SG", "AU"]
+            "asia_pacific": ["JP", "KR", "SG", "AU"],
         }
 
         for region, countries in location_mapping.items():
@@ -184,11 +199,15 @@ class AutoScalingEngine:
 
         # 簡易的なメトリクス生成（実際の実装では実際の監視データを使用）
         metrics = {
-            "cpu_utilization": 60.0 + 20.0 * (current_time % 100) / 100,  # 60-80%の範囲で変動
-            "memory_utilization": 70.0 + 15.0 * (current_time % 80) / 80,  # 70-85%の範囲で変動
-            "requests_per_second": 100 + 50 * (current_time % 60) / 60,  # 100-150の範囲で変動
-            "response_time_ms": 200 + 100 * (current_time % 40) / 40,  # 200-300msの範囲で変動
-            "error_rate": 0.02 + 0.01 * (current_time % 20) / 20  # 2-3%の範囲で変動
+            "cpu_utilization": 60.0
+            + 20.0 * (current_time % 100) / 100,  # 60-80%の範囲で変動
+            "memory_utilization": 70.0
+            + 15.0 * (current_time % 80) / 80,  # 70-85%の範囲で変動
+            "requests_per_second": 100
+            + 50 * (current_time % 60) / 60,  # 100-150の範囲で変動
+            "response_time_ms": 200
+            + 100 * (current_time % 40) / 40,  # 200-300msの範囲で変動
+            "error_rate": 0.02 + 0.01 * (current_time % 20) / 20,  # 2-3%の範囲で変動
         }
 
         self.metrics_cache[region.value] = metrics
@@ -222,7 +241,9 @@ class AutoScalingEngine:
 
         return events
 
-    def _evaluate_policy(self, policy: ScalingPolicy, metrics: Dict[str, float], region: DeploymentRegion) -> Optional[ScalingEvent]:
+    def _evaluate_policy(
+        self, policy: ScalingPolicy, metrics: Dict[str, float], region: DeploymentRegion
+    ) -> Optional[ScalingEvent]:
         """ポリシーを評価"""
         current_value = metrics.get(policy.target_metric, 0)
 
@@ -234,7 +255,7 @@ class AutoScalingEngine:
                 scaling_type="scale_out",
                 target_region=region,
                 resource_change={"instances": policy.scale_out_increment},
-                trigger_reason=f"{policy.target_metric}が上限閾値を超えました: {current_value:.2f} > {policy.threshold_max}"
+                trigger_reason=f"{policy.target_metric}が上限閾値を超えました: {current_value:.2f} > {policy.threshold_max}",
             )
 
         # スケールイン条件
@@ -245,7 +266,7 @@ class AutoScalingEngine:
                 scaling_type="scale_in",
                 target_region=region,
                 resource_change={"instances": -policy.scale_in_increment},
-                trigger_reason=f"{policy.target_metric}が下限閾値未満です: {current_value:.2f} < {policy.threshold_min}"
+                trigger_reason=f"{policy.target_metric}が下限閾値未満です: {current_value:.2f} < {policy.threshold_min}",
             )
 
         return None
@@ -259,15 +280,21 @@ class AutoScalingEngine:
             実行成功フラグ
         """
         try:
-            logger.info(f"スケーリング実行: {event.scaling_type} in {event.target_region.value}")
+            logger.info(
+                f"スケーリング実行: {event.scaling_type} in {event.target_region.value}"
+            )
 
             # 実際の実装ではクラウドプロバイダーのAPIを呼び出し
             if event.scaling_type == "scale_out":
                 # インスタンスを追加
-                self._add_instances(event.target_region, event.resource_change.get("instances", 1))
+                self._add_instances(
+                    event.target_region, event.resource_change.get("instances", 1)
+                )
             elif event.scaling_type == "scale_in":
                 # インスタンスを削除
-                self._remove_instances(event.target_region, abs(event.resource_change.get("instances", 1)))
+                self._remove_instances(
+                    event.target_region, abs(event.resource_change.get("instances", 1))
+                )
 
             # イベントを履歴に記録
             self.scaling_history.append(event)
@@ -290,7 +317,7 @@ class AutoScalingEngine:
                 resource_type=ResourceType.CPU,
                 current_capacity=100.0,
                 max_capacity=100.0,
-                cost_per_hour=0.10  # $0.10/時間
+                cost_per_hour=0.10,  # $0.10/時間
             )
 
             self.scaling_nodes[node_id] = node
@@ -298,7 +325,9 @@ class AutoScalingEngine:
     def _remove_instances(self, region: DeploymentRegion, count: int):
         """インスタンスを削除"""
         # その地域のノードを取得
-        region_nodes = [node for node in self.scaling_nodes.values() if node.region == region]
+        region_nodes = [
+            node for node in self.scaling_nodes.values() if node.region == region
+        ]
 
         # 負荷の低いノードから削除
         nodes_to_remove = sorted(region_nodes, key=lambda n: n.utilization_rate)[:count]
@@ -311,7 +340,9 @@ class AutoScalingEngine:
 class MultiRegionDeploymentManager:
     """マルチリージョンデプロイメントマネージャー"""
 
-    def __init__(self, load_balancer: LoadBalancerManager, scaling_engine: AutoScalingEngine):
+    def __init__(
+        self, load_balancer: LoadBalancerManager, scaling_engine: AutoScalingEngine
+    ):
         """
         初期化
         Args:
@@ -320,10 +351,14 @@ class MultiRegionDeploymentManager:
         """
         self.load_balancer = load_balancer
         self.scaling_engine = scaling_engine
-        self.regional_deployments: Dict[DeploymentRegion, Dict[str, Any]] = defaultdict(dict)
+        self.regional_deployments: Dict[DeploymentRegion, Dict[str, Any]] = defaultdict(
+            dict
+        )
         self.deployment_templates: Dict[str, Dict[str, Any]] = {}
 
-    def register_deployment_template(self, template_id: str, template_config: Dict[str, Any]):
+    def register_deployment_template(
+        self, template_id: str, template_config: Dict[str, Any]
+    ):
         """
         デプロイメントテンプレートを登録
         Args:
@@ -332,7 +367,12 @@ class MultiRegionDeploymentManager:
         """
         self.deployment_templates[template_id] = template_config
 
-    def deploy_to_region(self, region: DeploymentRegion, template_id: str, custom_config: Dict[str, Any] = None) -> str:
+    def deploy_to_region(
+        self,
+        region: DeploymentRegion,
+        template_id: str,
+        custom_config: Dict[str, Any] = None,
+    ) -> str:
         """
         地域にデプロイ
         Args:
@@ -358,7 +398,7 @@ class MultiRegionDeploymentManager:
             "config": base_config,
             "status": "deploying",
             "created_at": time.time(),
-            "nodes": []
+            "nodes": [],
         }
 
         self.regional_deployments[region][deployment_id] = deployment_info
@@ -386,7 +426,7 @@ class MultiRegionDeploymentManager:
                     resource_type=ResourceType.CPU,
                     current_capacity=100.0,
                     max_capacity=100.0,
-                    cost_per_hour=0.10
+                    cost_per_hour=0.10,
                 )
 
                 self.scaling_engine.register_scaling_node(node)
@@ -395,13 +435,17 @@ class MultiRegionDeploymentManager:
             deployment_info["status"] = "active"
             deployment_info["nodes"] = nodes_created
 
-            logger.info(f"地域デプロイ完了: {region.value} - {len(nodes_created)}ノード")
+            logger.info(
+                f"地域デプロイ完了: {region.value} - {len(nodes_created)}ノード"
+            )
 
         except Exception as e:
             deployment_info["status"] = "failed"
             logger.error(f"地域デプロイエラー: {e}")
 
-    def update_regional_traffic(self, region: DeploymentRegion, traffic_percentage: float):
+    def update_regional_traffic(
+        self, region: DeploymentRegion, traffic_percentage: float
+    ):
         """
         地域別トラフィックを更新
         Args:
@@ -424,7 +468,9 @@ class GlobalScalingManager:
         self._init_db()
         self.load_balancer = LoadBalancerManager()
         self.scaling_engine = AutoScalingEngine(self.load_balancer)
-        self.deployment_manager = MultiRegionDeploymentManager(self.load_balancer, self.scaling_engine)
+        self.deployment_manager = MultiRegionDeploymentManager(
+            self.load_balancer, self.scaling_engine
+        )
 
         self.is_scaling_active = False
         self.scaling_thread: Optional[threading.Thread] = None
@@ -481,7 +527,7 @@ class GlobalScalingManager:
                 threshold_max=80.0,
                 scale_out_increment=2,
                 scale_in_increment=1,
-                cooldown_period=300
+                cooldown_period=300,
             ),
             ScalingPolicy(
                 policy_id="memory_scaling_policy",
@@ -491,8 +537,8 @@ class GlobalScalingManager:
                 threshold_max=85.0,
                 scale_out_increment=1,
                 scale_in_increment=1,
-                cooldown_period=600
-            )
+                cooldown_period=600,
+            ),
         ]
 
         for policy in policies:
@@ -504,29 +550,15 @@ class GlobalScalingManager:
             "web_service_template": {
                 "service_type": "web",
                 "initial_nodes": 3,
-                "resource_requirements": {
-                    "cpu": 2,
-                    "memory": 4,
-                    "storage": 50
-                },
-                "scaling_config": {
-                    "min_nodes": 2,
-                    "max_nodes": 20
-                }
+                "resource_requirements": {"cpu": 2, "memory": 4, "storage": 50},
+                "scaling_config": {"min_nodes": 2, "max_nodes": 20},
             },
             "api_service_template": {
                 "service_type": "api",
                 "initial_nodes": 2,
-                "resource_requirements": {
-                    "cpu": 1,
-                    "memory": 2,
-                    "storage": 20
-                },
-                "scaling_config": {
-                    "min_nodes": 1,
-                    "max_nodes": 10
-                }
-            }
+                "resource_requirements": {"cpu": 1, "memory": 2, "storage": 20},
+                "scaling_config": {"min_nodes": 1, "max_nodes": 10},
+            },
         }
 
         for template_id, config in templates.items():
@@ -536,7 +568,9 @@ class GlobalScalingManager:
         """グローバルスケーリングを開始"""
         if not self.is_scaling_active:
             self.is_scaling_active = True
-            self.scaling_thread = threading.Thread(target=self._scaling_loop, daemon=True)
+            self.scaling_thread = threading.Thread(
+                target=self._scaling_loop, daemon=True
+            )
             self.scaling_thread.start()
 
     def stop_global_scaling(self):
@@ -545,7 +579,9 @@ class GlobalScalingManager:
         if self.scaling_thread:
             self.scaling_thread.join()
 
-    def deploy_service_globally(self, service_name: str, template_id: str) -> Dict[str, str]:
+    def deploy_service_globally(
+        self, service_name: str, template_id: str
+    ) -> Dict[str, str]:
         """
         サービスをグローバルにデプロイ
         Args:
@@ -559,16 +595,18 @@ class GlobalScalingManager:
         # 全地域にデプロイ
         for region in DeploymentRegion:
             try:
-                deployment_id = self.deployment_manager.deploy_to_region(region, template_id, {
-                    "service_name": service_name
-                })
+                deployment_id = self.deployment_manager.deploy_to_region(
+                    region, template_id, {"service_name": service_name}
+                )
                 deployment_ids[region.value] = deployment_id
             except Exception as e:
                 logger.error(f"地域デプロイエラー: {region.value} - {e}")
 
         return deployment_ids
 
-    def get_optimal_deployment_region(self, user_location: str, service_type: str = "default") -> DeploymentRegion:
+    def get_optimal_deployment_region(
+        self, user_location: str, service_type: str = "default"
+    ) -> DeploymentRegion:
         """
         最適なデプロイ地域を取得
         Args:
@@ -599,7 +637,7 @@ class GlobalScalingManager:
             "scaling_policies": len(self.scaling_engine.scaling_policies),
             "recent_scaling_events": len(self.scaling_engine.scaling_history[-10:]),
             "regional_metrics": region_metrics,
-            "traffic_distribution": dict(self.load_balancer.traffic_distribution)
+            "traffic_distribution": dict(self.load_balancer.traffic_distribution),
         }
 
     def _scaling_loop(self):
@@ -614,7 +652,9 @@ class GlobalScalingManager:
                         # スケーリングイベントを実行
                         success = self.scaling_engine.execute_scaling_event(event)
                         if success:
-                            logger.info(f"スケーリング実行完了: {event.scaling_type} in {event.target_region.value}")
+                            logger.info(
+                                f"スケーリング実行完了: {event.scaling_type} in {event.target_region.value}"
+                            )
 
                 time.sleep(60.0)  # 1分間隔でチェック
 
@@ -633,12 +673,18 @@ async def example_usage():
     manager.start_global_scaling()
 
     # サービスをグローバルにデプロイ
-    deployment_ids = manager.deploy_service_globally("web_service", "web_service_template")
+    deployment_ids = manager.deploy_service_globally(
+        "web_service", "web_service_template"
+    )
     print(f"グローバルデプロイ開始: {len(deployment_ids)}地域")
 
     # トラフィック分散を更新
-    manager.deployment_manager.update_regional_traffic(DeploymentRegion.NORTH_AMERICA, 40.0)
-    manager.deployment_manager.update_regional_traffic(DeploymentRegion.ASIA_PACIFIC, 35.0)
+    manager.deployment_manager.update_regional_traffic(
+        DeploymentRegion.NORTH_AMERICA, 40.0
+    )
+    manager.deployment_manager.update_regional_traffic(
+        DeploymentRegion.ASIA_PACIFIC, 35.0
+    )
     manager.deployment_manager.update_regional_traffic(DeploymentRegion.EUROPE, 25.0)
 
     # 最適な地域を取得
@@ -652,7 +698,7 @@ async def example_usage():
         scaling_type="scale_out",
         target_region=DeploymentRegion.ASIA_PACIFIC,
         resource_change={"instances": 2},
-        trigger_reason="手動スケーリングテスト"
+        trigger_reason="手動スケーリングテスト",
     )
 
     success = manager.scaling_engine.execute_scaling_event(scaling_event)

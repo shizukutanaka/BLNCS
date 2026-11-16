@@ -3,32 +3,36 @@
 APIゲートウェイ強化とレート制限最適化機能を提供
 """
 
-import time
+import asyncio
+import hashlib
 import json
+import logging
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-import logging
-import asyncio
-import aiohttp
+import time
 import uuid
 from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
 
 class RateLimitStrategy(Enum):
     """レート制限戦略"""
-    FIXED_WINDOW = "fixed_window"      # 固定ウィンドウ
+
+    FIXED_WINDOW = "fixed_window"  # 固定ウィンドウ
     SLIDING_WINDOW = "sliding_window"  # スライディングウィンドウ
-    TOKEN_BUCKET = "token_bucket"      # トークンバケット
-    LEAKY_BUCKET = "leaky_bucket"      # リーキーバケット
+    TOKEN_BUCKET = "token_bucket"  # トークンバケット
+    LEAKY_BUCKET = "leaky_bucket"  # リーキーバケット
 
 
 class APISecurityLevel(Enum):
     """APIセキュリティレベル"""
+
     PUBLIC = "public"
     AUTHENTICATED = "authenticated"
     AUTHORIZED = "authorized"
@@ -38,6 +42,7 @@ class APISecurityLevel(Enum):
 @dataclass
 class APIEndpoint:
     """APIエンドポイント情報"""
+
     endpoint_id: str
     path: str
     method: str
@@ -54,6 +59,7 @@ class APIEndpoint:
 @dataclass
 class RateLimitRule:
     """レート制限ルール情報"""
+
     rule_id: str
     endpoint_pattern: str
     strategy: RateLimitStrategy
@@ -67,6 +73,7 @@ class RateLimitRule:
 @dataclass
 class APIRequest:
     """APIリクエスト情報"""
+
     request_id: str
     endpoint: str
     method: str
@@ -83,6 +90,7 @@ class APIRequest:
 @dataclass
 class RateLimitStatus:
     """レート制限ステータス情報"""
+
     user_id: str
     endpoint: str
     current_requests: int
@@ -105,7 +113,9 @@ class EnhancedRateLimiter:
         self._init_db()
         self.rate_limit_rules: Dict[str, RateLimitRule] = {}
         self.request_counters: Dict[str, Dict[str, Any]] = defaultdict(dict)
-        self.buckets: Dict[str, Dict[str, float]] = defaultdict(dict)  # user_id -> endpoint -> tokens
+        self.buckets: Dict[str, Dict[str, float]] = defaultdict(
+            dict
+        )  # user_id -> endpoint -> tokens
 
     def _init_db(self):
         """データベースを初期化"""
@@ -148,16 +158,24 @@ class EnhancedRateLimiter:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO rate_limit_rules
                     (rule_id, endpoint_pattern, strategy, requests_per_window, window_size_seconds,
                      burst_limit, user_tier, is_active)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    rule.rule_id, rule.endpoint_pattern, rule.strategy.value,
-                    rule.requests_per_window, rule.window_size_seconds,
-                    rule.burst_limit, rule.user_tier, 1 if rule.is_active else 0
-                ))
+                """,
+                    (
+                        rule.rule_id,
+                        rule.endpoint_pattern,
+                        rule.strategy.value,
+                        rule.requests_per_window,
+                        rule.window_size_seconds,
+                        rule.burst_limit,
+                        rule.user_tier,
+                        1 if rule.is_active else 0,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -174,7 +192,9 @@ class EnhancedRateLimiter:
         current_time = time.time()
 
         # 該当するルールを取得
-        applicable_rules = self._get_applicable_rules(request.endpoint, request.user_tier)
+        applicable_rules = self._get_applicable_rules(
+            request.endpoint, request.user_tier
+        )
 
         if not applicable_rules:
             # ルールがない場合は許可
@@ -184,7 +204,7 @@ class EnhancedRateLimiter:
                 current_requests=0,
                 window_start=current_time,
                 window_end=current_time + 60,
-                is_allowed=True
+                is_allowed=True,
             )
 
         # 最も厳しいルールを選択
@@ -200,7 +220,9 @@ class EnhancedRateLimiter:
         else:
             return self._check_fixed_window(request, strictest_rule)  # デフォルト
 
-    def _get_applicable_rules(self, endpoint: str, user_tier: str) -> List[RateLimitRule]:
+    def _get_applicable_rules(
+        self, endpoint: str, user_tier: str
+    ) -> List[RateLimitRule]:
         """該当するルールを取得"""
         applicable = []
 
@@ -226,7 +248,9 @@ class EnhancedRateLimiter:
         else:
             return endpoint == pattern
 
-    def _check_fixed_window(self, request: APIRequest, rule: RateLimitRule) -> RateLimitStatus:
+    def _check_fixed_window(
+        self, request: APIRequest, rule: RateLimitRule
+    ) -> RateLimitStatus:
         """固定ウィンドウ方式でチェック"""
         user_key = f"{request.user_id or 'anonymous'}_{rule.endpoint_pattern}"
         current_time = time.time()
@@ -241,10 +265,13 @@ class EnhancedRateLimiter:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT request_count FROM rate_limit_counters
                     WHERE user_id = ? AND endpoint = ?
-                """, (user_key, rule.endpoint_pattern))
+                """,
+                    (user_key, rule.endpoint_pattern),
+                )
 
                 row = cursor.fetchone()
                 current_count = row[0] if row else 0
@@ -259,11 +286,21 @@ class EnhancedRateLimiter:
             # カウンターを更新
             try:
                 with sqlite3.connect(self.db_path) as conn:
-                    conn.execute("""
+                    conn.execute(
+                        """
                         INSERT OR REPLACE INTO rate_limit_counters
                         (user_id, endpoint, request_count, window_start, window_end, last_request)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (user_key, rule.endpoint_pattern, current_count + 1, window_start, window_end, current_time))
+                    """,
+                        (
+                            user_key,
+                            rule.endpoint_pattern,
+                            current_count + 1,
+                            window_start,
+                            window_end,
+                            current_time,
+                        ),
+                    )
                     conn.commit()
 
             except Exception as e:
@@ -276,10 +313,12 @@ class EnhancedRateLimiter:
             window_start=window_start,
             window_end=window_end,
             is_allowed=is_allowed,
-            retry_after=window_end - current_time if not is_allowed else None
+            retry_after=window_end - current_time if not is_allowed else None,
         )
 
-    def _check_sliding_window(self, request: APIRequest, rule: RateLimitRule) -> RateLimitStatus:
+    def _check_sliding_window(
+        self, request: APIRequest, rule: RateLimitRule
+    ) -> RateLimitStatus:
         """スライディングウィンドウ方式でチェック"""
         user_key = f"{request.user_id or 'anonymous'}_{rule.endpoint_pattern}"
         current_time = time.time()
@@ -289,10 +328,13 @@ class EnhancedRateLimiter:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT COUNT(*) FROM rate_limit_counters
                     WHERE user_id = ? AND endpoint = ? AND last_request > ?
-                """, (user_key, rule.endpoint_pattern, cutoff_time))
+                """,
+                    (user_key, rule.endpoint_pattern, cutoff_time),
+                )
 
                 current_count = cursor.fetchone()[0]
 
@@ -306,11 +348,20 @@ class EnhancedRateLimiter:
             # 新しいリクエストを記録
             try:
                 with sqlite3.connect(self.db_path) as conn:
-                    conn.execute("""
+                    conn.execute(
+                        """
                         INSERT INTO rate_limit_counters
                         (user_id, endpoint, request_count, window_start, window_end, last_request)
                         VALUES (?, ?, 1, ?, ?, ?)
-                    """, (user_key, rule.endpoint_pattern, cutoff_time, current_time + rule.window_size_seconds, current_time))
+                    """,
+                        (
+                            user_key,
+                            rule.endpoint_pattern,
+                            cutoff_time,
+                            current_time + rule.window_size_seconds,
+                            current_time,
+                        ),
+                    )
                     conn.commit()
 
             except Exception as e:
@@ -323,10 +374,12 @@ class EnhancedRateLimiter:
             window_start=cutoff_time,
             window_end=current_time + rule.window_size_seconds,
             is_allowed=is_allowed,
-            retry_after=rule.window_size_seconds if not is_allowed else None
+            retry_after=rule.window_size_seconds if not is_allowed else None,
         )
 
-    def _check_token_bucket(self, request: APIRequest, rule: RateLimitRule) -> RateLimitStatus:
+    def _check_token_bucket(
+        self, request: APIRequest, rule: RateLimitRule
+    ) -> RateLimitStatus:
         """トークンバケット方式でチェック"""
         user_key = f"{request.user_id or 'anonymous'}_{rule.endpoint_pattern}"
         current_time = time.time()
@@ -343,8 +396,12 @@ class EnhancedRateLimiter:
             self.buckets[user_key][rule.endpoint_pattern] = tokens - 1
 
             # トークン再充填（時間経過による）
-            time_passed = current_time - getattr(self, '_last_refill', {}).get(user_key, current_time)
-            tokens_to_add = (time_passed / rule.window_size_seconds) * rule.requests_per_window
+            time_passed = current_time - getattr(self, "_last_refill", {}).get(
+                user_key, current_time
+            )
+            tokens_to_add = (
+                time_passed / rule.window_size_seconds
+            ) * rule.requests_per_window
 
             if tokens_to_add > 0:
                 new_tokens = min(rule.requests_per_window, tokens + tokens_to_add)
@@ -357,7 +414,7 @@ class EnhancedRateLimiter:
                 current_requests=rule.requests_per_window - int(tokens),
                 window_start=current_time,
                 window_end=current_time + rule.window_size_seconds,
-                is_allowed=True
+                is_allowed=True,
             )
         else:
             return RateLimitStatus(
@@ -367,7 +424,7 @@ class EnhancedRateLimiter:
                 window_start=current_time,
                 window_end=current_time + rule.window_size_seconds,
                 is_allowed=False,
-                retry_after=rule.window_size_seconds
+                retry_after=rule.window_size_seconds,
             )
 
 
@@ -435,17 +492,27 @@ class EnhancedAPIGateway:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO api_endpoints
                     (endpoint_id, path, method, service_name, security_level, rate_limit_rules,
                      caching_config, timeout, retries, is_active, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    endpoint.endpoint_id, endpoint.path, endpoint.method, endpoint.service_name,
-                    endpoint.security_level.value, json.dumps(endpoint.rate_limit_rules),
-                    json.dumps(endpoint.caching_config), endpoint.timeout, endpoint.retries,
-                    1 if endpoint.is_active else 0, endpoint.created_at
-                ))
+                """,
+                    (
+                        endpoint.endpoint_id,
+                        endpoint.path,
+                        endpoint.method,
+                        endpoint.service_name,
+                        endpoint.security_level.value,
+                        json.dumps(endpoint.rate_limit_rules),
+                        json.dumps(endpoint.caching_config),
+                        endpoint.timeout,
+                        endpoint.retries,
+                        1 if endpoint.is_active else 0,
+                        endpoint.created_at,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -476,9 +543,11 @@ class EnhancedAPIGateway:
             if not rate_limit_status.is_allowed:
                 return {
                     "status_code": 429,
-                    "headers": {"Retry-After": str(rate_limit_status.retry_after or 60)},
+                    "headers": {
+                        "Retry-After": str(rate_limit_status.retry_after or 60)
+                    },
                     "body": {"error": "Rate limit exceeded"},
-                    "response_time": time.time() - start_time
+                    "response_time": time.time() - start_time,
                 }
 
             # セキュリティチェック
@@ -487,7 +556,7 @@ class EnhancedAPIGateway:
                 return {
                     "status_code": 403,
                     "body": {"error": security_check_result["reason"]},
-                    "response_time": time.time() - start_time
+                    "response_time": time.time() - start_time,
                 }
 
             # ミドルウェア実行
@@ -503,7 +572,9 @@ class EnhancedAPIGateway:
             response = await self._forward_request(request)
 
             # リクエストログを記録
-            self._log_api_request(request, response["status_code"], response["response_time"])
+            self._log_api_request(
+                request, response["status_code"], response["response_time"]
+            )
 
             return response
 
@@ -513,7 +584,7 @@ class EnhancedAPIGateway:
             return {
                 "status_code": 500,
                 "body": {"error": "Internal server error"},
-                "response_time": time.time() - start_time
+                "response_time": time.time() - start_time,
             }
 
     async def _perform_security_check(self, request: APIRequest) -> Dict[str, Any]:
@@ -563,24 +634,40 @@ class EnhancedAPIGateway:
         return {
             "status_code": 200,
             "headers": {"Content-Type": "application/json"},
-            "body": {"message": "Request processed successfully", "endpoint": request.endpoint},
-            "response_time": 0.1
+            "body": {
+                "message": "Request processed successfully",
+                "endpoint": request.endpoint,
+            },
+            "response_time": 0.1,
         }
 
-    def _log_api_request(self, request: APIRequest, status_code: int, response_time: float):
+    def _log_api_request(
+        self, request: APIRequest, status_code: int, response_time: float
+    ):
         """APIリクエストをログ記録"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO api_requests
                     (request_id, endpoint, method, user_id, api_key, user_tier, ip_address, user_agent,
                      status_code, response_time, timestamp)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    request.request_id, request.endpoint, request.method, request.user_id,
-                    request.api_key, request.user_tier, request.ip_address, request.user_agent,
-                    status_code, response_time, request.timestamp
-                ))
+                """,
+                    (
+                        request.request_id,
+                        request.endpoint,
+                        request.method,
+                        request.user_id,
+                        request.api_key,
+                        request.user_tier,
+                        request.ip_address,
+                        request.user_agent,
+                        status_code,
+                        response_time,
+                        request.timestamp,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -593,34 +680,44 @@ class EnhancedAPIGateway:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # リクエスト数の集計
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT COUNT(*) as total_requests,
                            AVG(response_time) as avg_response_time,
                            COUNT(CASE WHEN status_code >= 400 THEN 1 END) as error_count
                     FROM api_requests
                     WHERE timestamp > ?
-                """, (cutoff_time,))
+                """,
+                    (cutoff_time,),
+                )
 
                 row = cursor.fetchone()
 
                 # エンドポイント別統計
-                endpoint_stats = conn.execute("""
+                endpoint_stats = conn.execute(
+                    """
                     SELECT endpoint, COUNT(*) as requests, AVG(response_time) as avg_time
                     FROM api_requests
                     WHERE timestamp > ?
                     GROUP BY endpoint
                     ORDER BY requests DESC
-                """, (cutoff_time,)).fetchall()
+                """,
+                    (cutoff_time,),
+                ).fetchall()
 
                 return {
                     "total_requests": row[0],
                     "avg_response_time": row[1],
                     "error_rate": (row[2] / row[0] * 100) if row[0] > 0 else 0,
                     "endpoint_stats": [
-                        {"endpoint": stat[0], "requests": stat[1], "avg_response_time": stat[2]}
+                        {
+                            "endpoint": stat[0],
+                            "requests": stat[1],
+                            "avg_response_time": stat[2],
+                        }
                         for stat in endpoint_stats[:10]  # 上位10件
                     ],
-                    "period_hours": hours
+                    "period_hours": hours,
                 }
 
         except Exception as e:
@@ -661,7 +758,9 @@ class APIKeyManager:
 
             conn.commit()
 
-    def generate_api_key(self, user_id: str, tier: str = "free", permissions: List[str] = None) -> str:
+    def generate_api_key(
+        self, user_id: str, tier: str = "free", permissions: List[str] = None
+    ) -> str:
         """
         APIキーを生成
         Args:
@@ -687,22 +786,33 @@ class APIKeyManager:
             "is_active": True,
             "created_at": time.time(),
             "expires_at": None,  # 無期限
-            "last_used": None
+            "last_used": None,
         }
 
         self.api_keys[key_id] = key_info
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO api_keys
                     (key_id, api_key_hash, user_id, tier, permissions, rate_limits, is_active,
                      created_at, expires_at, last_used)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    key_id, api_key_hash, user_id, tier, json.dumps(permissions or ["read"]),
-                    json.dumps(key_info["rate_limits"]), 1, time.time(), None, None
-                ))
+                """,
+                    (
+                        key_id,
+                        api_key_hash,
+                        user_id,
+                        tier,
+                        json.dumps(permissions or ["read"]),
+                        json.dumps(key_info["rate_limits"]),
+                        1,
+                        time.time(),
+                        None,
+                        None,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -729,7 +839,7 @@ class APIKeyManager:
                     "user_id": key_info["user_id"],
                     "tier": key_info["tier"],
                     "permissions": key_info["permissions"],
-                    "rate_limits": key_info["rate_limits"]
+                    "rate_limits": key_info["rate_limits"],
                 }
 
         return None
@@ -747,7 +857,9 @@ class APIKeyManager:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("UPDATE api_keys SET is_active = 0 WHERE key_id = ?", (key_id,))
+                conn.execute(
+                    "UPDATE api_keys SET is_active = 0 WHERE key_id = ?", (key_id,)
+                )
                 conn.commit()
 
             return True
@@ -790,7 +902,7 @@ class AdvancedAPIManager:
                 service_name="user_service",
                 security_level=APISecurityLevel.AUTHENTICATED,
                 rate_limit_rules=[{"tier": "free", "requests_per_minute": 60}],
-                timeout=10.0
+                timeout=10.0,
             ),
             APIEndpoint(
                 endpoint_id="payment_api",
@@ -799,7 +911,7 @@ class AdvancedAPIManager:
                 service_name="payment_service",
                 security_level=APISecurityLevel.AUTHORIZED,
                 rate_limit_rules=[{"tier": "premium", "requests_per_minute": 100}],
-                timeout=15.0
+                timeout=15.0,
             ),
             APIEndpoint(
                 endpoint_id="analytics_api",
@@ -808,8 +920,8 @@ class AdvancedAPIManager:
                 service_name="analytics_service",
                 security_level=APISecurityLevel.ADMIN_ONLY,
                 rate_limit_rules=[{"tier": "enterprise", "requests_per_minute": 1000}],
-                timeout=30.0
-            )
+                timeout=30.0,
+            ),
         ]
 
         for endpoint in endpoints:
@@ -824,7 +936,7 @@ class AdvancedAPIManager:
                 strategy=RateLimitStrategy.SLIDING_WINDOW,
                 requests_per_window=60,
                 window_size_seconds=60,
-                user_tier="free"
+                user_tier="free",
             ),
             RateLimitRule(
                 rule_id="premium_tier_limit",
@@ -832,7 +944,7 @@ class AdvancedAPIManager:
                 strategy=RateLimitStrategy.TOKEN_BUCKET,
                 requests_per_window=1000,
                 window_size_seconds=60,
-                user_tier="premium"
+                user_tier="premium",
             ),
             RateLimitRule(
                 rule_id="enterprise_tier_limit",
@@ -840,8 +952,8 @@ class AdvancedAPIManager:
                 strategy=RateLimitStrategy.TOKEN_BUCKET,
                 requests_per_window=10000,
                 window_size_seconds=60,
-                user_tier="enterprise"
-            )
+                user_tier="enterprise",
+            ),
         ]
 
         for rule in rules:
@@ -869,9 +981,14 @@ class AdvancedAPIManager:
         """
         return self.api_key_manager.generate_api_key(user_id, tier)
 
-    async def handle_api_request(self, endpoint: str, method: str,
-                               headers: Dict[str, str] = None,
-                               body: Any = None, ip_address: str = "") -> Dict[str, Any]:
+    async def handle_api_request(
+        self,
+        endpoint: str,
+        method: str,
+        headers: Dict[str, str] = None,
+        body: Any = None,
+        ip_address: str = "",
+    ) -> Dict[str, Any]:
         """
         APIリクエストを処理
         Args:
@@ -889,7 +1006,9 @@ class AdvancedAPIManager:
         user_tier = "default"
 
         if headers:
-            api_key = headers.get("X-API-Key") or headers.get("Authorization", "").replace("Bearer ", "")
+            api_key = headers.get("X-API-Key") or headers.get(
+                "Authorization", ""
+            ).replace("Bearer ", "")
 
         if api_key:
             key_info = self.api_key_manager.validate_api_key(api_key)
@@ -907,7 +1026,7 @@ class AdvancedAPIManager:
             user_tier=user_tier,
             ip_address=ip_address,
             headers=headers or {},
-            body=body
+            body=body,
         )
 
         return await self.api_gateway.process_request(request)
@@ -923,7 +1042,7 @@ class AdvancedAPIManager:
             "total_endpoints": len(self.api_gateway.endpoints),
             "active_rate_limits": len(self.api_gateway.rate_limiter.rate_limit_rules),
             "total_api_keys": len(self.api_key_manager.api_keys),
-            "middleware_count": len(self.api_gateway.middleware_stack)
+            "middleware_count": len(self.api_gateway.middleware_stack),
         }
 
 
@@ -945,13 +1064,12 @@ async def example_usage():
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
 
     response = await manager.handle_api_request(
-        "/api/v1/users",
-        "GET",
-        headers=headers,
-        ip_address="192.168.1.100"
+        "/api/v1/users", "GET", headers=headers, ip_address="192.168.1.100"
     )
 
-    print(f"APIレスポンス: {response['status_code']} - {response['response_time']:.3f}s")
+    print(
+        f"APIレスポンス: {response['status_code']} - {response['response_time']:.3f}s"
+    )
 
     # API分析取得
     analytics = manager.get_api_analytics(hours=1)

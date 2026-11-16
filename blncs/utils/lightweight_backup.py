@@ -5,21 +5,23 @@ Efficient backup and recovery with minimal overhead
 Enhanced with integrity verification and encryption
 """
 
-import os
-import sys
-import json
-import time
-import shutil
 import hashlib
+import json
+import os
+import shutil
+import sys
 import tempfile
-from typing import Dict, Any, List, Optional, Iterable
-from pathlib import Path
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
 
 @dataclass
 class BackupInfo:
     """Backup information with integrity verification"""
+
     path: str
     timestamp: float
     size_bytes: int
@@ -38,7 +40,7 @@ class BackupInfo:
         """Calculate SHA256 checksum"""
         try:
             hash_sha256 = hashlib.sha256()
-            with open(self.path, 'rb') as f:
+            with open(self.path, "rb") as f:
                 for chunk in iter(lambda: f.read(4096), b""):
                     hash_sha256.update(chunk)
             return hash_sha256.hexdigest()
@@ -52,10 +54,13 @@ class BackupInfo:
         current_checksum = self._calculate_checksum()
         return current_checksum == self.checksum
 
+
 class LightweightBackupManager:
     """Lightweight backup management with enhanced features"""
 
-    def __init__(self, backup_dir: str = "backups", encryption_key: Optional[str] = None):
+    def __init__(
+        self, backup_dir: str = "backups", encryption_key: Optional[str] = None
+    ):
         self.backup_dir = Path(backup_dir)
         self.backup_dir.mkdir(exist_ok=True)
         self.max_backups = 10
@@ -71,9 +76,9 @@ class LightweightBackupManager:
         """Load backup manifest"""
         if self.manifest_file.exists():
             try:
-                with open(self.manifest_file, 'r') as f:
+                with open(self.manifest_file, "r") as f:
                     data = json.load(f)
-                    for item in data.get('backups', []):
+                    for item in data.get("backups", []):
                         backup = BackupInfo(**item)
                         if Path(backup.path).exists():
                             self.backups.append(backup)
@@ -84,19 +89,24 @@ class LightweightBackupManager:
         """Save backup manifest"""
         try:
             data = {
-                'version': '2.0',
-                'last_updated': datetime.now().isoformat(),
-                'backups': [vars(backup) for backup in self.backups]
+                "version": "2.0",
+                "last_updated": datetime.now().isoformat(),
+                "backups": [vars(backup) for backup in self.backups],
             }
 
-            with open(self.manifest_file, 'w') as f:
+            with open(self.manifest_file, "w") as f:
                 json.dump(data, f, indent=2, default=str)
 
         except Exception as e:
             print(f"Failed to save backup manifest: {e}")
 
-    def create_backup(self, source_path: str, backup_name: Optional[str] = None,
-                     backup_type: str = "manual", encrypt: bool = False) -> Optional[BackupInfo]:
+    def create_backup(
+        self,
+        source_path: str,
+        backup_name: Optional[str] = None,
+        backup_type: str = "manual",
+        encrypt: bool = False,
+    ) -> Optional[BackupInfo]:
         """Create a backup with integrity verification"""
         source = Path(source_path)
         if not source.exists():
@@ -104,7 +114,7 @@ class LightweightBackupManager:
 
         # Generate backup name
         if backup_name is None:
-            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
             backup_name = f"{source.name}_{timestamp}"
 
         backup_path = self.backup_dir / backup_name
@@ -125,7 +135,7 @@ class LightweightBackupManager:
                 backup_type=backup_type,
                 encrypted=encrypt,
                 compressed=self.compression_enabled,
-                metadata={'source': str(source), 'original_name': source.name}
+                metadata={"source": str(source), "original_name": source.name},
             )
 
             self.backups.append(backup_info)
@@ -148,9 +158,10 @@ class LightweightBackupManager:
         elif self.compression_enabled:
             # Compress the file
             import gzip
-            compressed_path = destination.with_suffix('.gz')
-            with open(source, 'rb') as f_in:
-                with gzip.open(compressed_path, 'wb') as f_out:
+
+            compressed_path = destination.with_suffix(".gz")
+            with open(source, "rb") as f_in:
+                with gzip.open(compressed_path, "wb") as f_out:
                     shutil.copyfileobj(f_in, f_out)
             return compressed_path
         else:
@@ -164,34 +175,42 @@ class LightweightBackupManager:
         import tarfile
 
         if self.compression_enabled:
-            archive_path = destination.with_suffix('.tar.gz')
-            mode = 'w:gz'
+            archive_path = destination.with_suffix(".tar.gz")
+            mode = "w:gz"
         else:
-            archive_path = destination.with_suffix('.tar')
-            mode = 'w'
+            archive_path = destination.with_suffix(".tar")
+            mode = "w"
 
         with tarfile.open(archive_path, mode) as tar:
             tar.add(source, arcname=source.name)
 
         if encrypt and self.encryption_key:
             # Encrypt the archive
-            return self._encrypt_file(archive_path, destination.with_suffix('.enc'))
+            return self._encrypt_file(archive_path, destination.with_suffix(".enc"))
         else:
             return archive_path
+
+    def restore_backup(self, backup_path: str, target_path: str) -> bool:
+        """Restore a backup file to the target path"""
+        backup_file = Path(backup_path)
+        target = Path(target_path)
+
         if not backup_file.exists():
             return False
 
         try:
-            if backup_file.suffix == '.gz':
+            if backup_file.suffix == ".gz":
                 # Decompress gzipped file
                 import gzip
-                with gzip.open(backup_file, 'rb') as f_in:
-                    with open(target, 'wb') as f_out:
+
+                with gzip.open(backup_file, "rb") as f_in:
+                    with open(target, "wb") as f_out:
                         shutil.copyfileobj(f_in, f_out)
-            elif backup_file.suffixes == ['.tar', '.gz']:
+            elif backup_file.suffixes == [".tar", ".gz"]:
                 # Extract tar.gz file
                 import tarfile
-                with tarfile.open(backup_file, 'r:gz') as tar:
+
+                with tarfile.open(backup_file, "r:gz") as tar:
                     tar.extractall(target.parent)
             else:
                 # Copy file directly
@@ -222,40 +241,52 @@ class LightweightBackupManager:
 
         backup_types = {}
         for backup in backups:
-            backup_types[backup.backup_type] = backup_types.get(backup.backup_type, 0) + 1
+            backup_types[backup.backup_type] = (
+                backup_types.get(backup.backup_type, 0) + 1
+            )
 
         return {
-            'total_backups': len(backups),
-            'total_size_bytes': total_size,
-            'backup_types': backup_types,
-            'oldest_backup': backups[-1].timestamp if backups else None,
-            'newest_backup': backups[0].timestamp if backups else None
+            "total_backups": len(backups),
+            "total_size_bytes": total_size,
+            "backup_types": backup_types,
+            "oldest_backup": backups[-1].timestamp if backups else None,
+            "newest_backup": backups[0].timestamp if backups else None,
         }
+
 
 # Global backup manager instance
 _backup_manager_instance = None
 
-def get_lightweight_backup_manager(backup_dir: str = "backups") -> LightweightBackupManager:
+
+def get_lightweight_backup_manager(
+    backup_dir: str = "backups",
+) -> LightweightBackupManager:
     """Get global backup manager instance"""
     global _backup_manager_instance
     if _backup_manager_instance is None:
         _backup_manager_instance = LightweightBackupManager(backup_dir)
     return _backup_manager_instance
 
-def create_backup(source_path: str, backup_name: Optional[str] = None, backup_type: str = "manual") -> Optional[BackupInfo]:
+
+def create_backup(
+    source_path: str, backup_name: Optional[str] = None, backup_type: str = "manual"
+) -> Optional[BackupInfo]:
     """Create a backup"""
     manager = get_lightweight_backup_manager()
     return manager.create_backup(source_path, backup_name, backup_type)
+
 
 def list_backups() -> List[BackupInfo]:
     """List all backups"""
     manager = get_lightweight_backup_manager()
     return manager.list_backups()
 
+
 def restore_backup(backup_path: str, target_path: str) -> bool:
     """Restore a backup"""
     manager = get_lightweight_backup_manager()
     return manager.restore_backup(backup_path, target_path)
+
 
 def get_backup_stats() -> Dict[str, Any]:
     """Get backup statistics"""
@@ -289,7 +320,8 @@ def auto_backup(
 
     return created_backups
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Test lightweight backup manager
     backup_manager = get_lightweight_backup_manager()
 

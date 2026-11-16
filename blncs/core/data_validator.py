@@ -3,17 +3,18 @@ Data Validation and Sanitization for BLNCS
 セキュアで実用的なデータ検証・無害化
 """
 
-import re
 import html
 import json
-from typing import Any, Dict, List, Optional, Union, Callable
+import logging
+import re
 from dataclasses import dataclass
 from enum import Enum
-import logging
+from typing import Any, Callable, Dict, List, Optional, Union
 
 
 class ValidationLevel(Enum):
     """Validation strictness levels"""
+
     LENIENT = "lenient"
     NORMAL = "normal"
     STRICT = "strict"
@@ -22,6 +23,7 @@ class ValidationLevel(Enum):
 @dataclass
 class ValidationRule:
     """Single validation rule"""
+
     name: str
     validator: Callable[[Any], bool]
     message: str
@@ -31,6 +33,7 @@ class ValidationRule:
 @dataclass
 class ValidationResult:
     """Validation result"""
+
     valid: bool
     sanitized_value: Any = None
     errors: List[str] = None
@@ -52,31 +55,48 @@ class DataValidator:
 
         # Common patterns
         self.patterns = {
-            'email': re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'),
-            'bitcoin_address': re.compile(r'^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$|^bc1[a-z0-9]{39,59}$'),
-            'lightning_invoice': re.compile(r'^ln[a-z]{2,5}[0-9]{1,}[a-z0-9]+$', re.IGNORECASE),
-            'payment_hash': re.compile(r'^[a-fA-F0-9]{64}$'),
-            'node_pubkey': re.compile(r'^[a-fA-F0-9]{66}$'),
-            'alphanumeric': re.compile(r'^[a-zA-Z0-9]+$'),
-            'safe_string': re.compile(r'^[a-zA-Z0-9\s\-_.,!?]+$'),
-            'sql_injection': re.compile(r'(\'|(\')\s*(or|and)\s*(\'|\')|\-\-|;|\*|\/\*|\*\/)', re.IGNORECASE),
-            'xss_pattern': re.compile(r'<[^>]*script[^>]*>|javascript:|on\w+\s*=', re.IGNORECASE)
+            "email": re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"),
+            "bitcoin_address": re.compile(
+                r"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$|^bc1[a-z0-9]{39,59}$"
+            ),
+            "lightning_invoice": re.compile(
+                r"^ln[a-z]{2,5}[0-9]{1,}[a-z0-9]+$", re.IGNORECASE
+            ),
+            "payment_hash": re.compile(r"^[a-fA-F0-9]{64}$"),
+            "node_pubkey": re.compile(r"^[a-fA-F0-9]{66}$"),
+            "alphanumeric": re.compile(r"^[a-zA-Z0-9]+$"),
+            "safe_string": re.compile(r"^[a-zA-Z0-9\s\-_.,!?]+$"),
+            "sql_injection": re.compile(
+                r"(\'|(\')\s*(or|and)\s*(\'|\')|\-\-|;|\*|\/\*|\*\/)", re.IGNORECASE
+            ),
+            "xss_pattern": re.compile(
+                r"<[^>]*script[^>]*>|javascript:|on\w+\s*=", re.IGNORECASE
+            ),
         }
 
-    def validate_amount(self, amount: Any, min_value: int = 1, max_value: int = 100000000) -> ValidationResult:
+    def validate_amount(
+        self, amount: Any, min_value: int = 1, max_value: int = 100000000
+    ) -> ValidationResult:
         """Validate Bitcoin/Lightning amount in satoshis"""
         try:
             if isinstance(amount, str):
                 amount = int(amount)
 
             if not isinstance(amount, int):
-                return ValidationResult(valid=False, errors=["Amount must be an integer"])
+                return ValidationResult(
+                    valid=False, errors=["Amount must be an integer"]
+                )
 
             if amount < min_value:
-                return ValidationResult(valid=False, errors=[f"Amount must be at least {min_value} satoshis"])
+                return ValidationResult(
+                    valid=False,
+                    errors=[f"Amount must be at least {min_value} satoshis"],
+                )
 
             if amount > max_value:
-                return ValidationResult(valid=False, errors=[f"Amount cannot exceed {max_value} satoshis"])
+                return ValidationResult(
+                    valid=False, errors=[f"Amount cannot exceed {max_value} satoshis"]
+                )
 
             return ValidationResult(valid=True, sanitized_value=amount)
 
@@ -97,22 +117,28 @@ class DataValidator:
         # Check length
         if len(sanitized) > max_length:
             if self.level == ValidationLevel.STRICT:
-                return ValidationResult(valid=False, errors=[f"Memo too long (max {max_length} characters)"])
+                return ValidationResult(
+                    valid=False, errors=[f"Memo too long (max {max_length} characters)"]
+                )
             else:
                 # Truncate in lenient/normal mode
                 sanitized = sanitized[:max_length]
 
         # Check for suspicious content
         warnings = []
-        if self.patterns['xss_pattern'].search(sanitized):
+        if self.patterns["xss_pattern"].search(sanitized):
             if self.level == ValidationLevel.STRICT:
-                return ValidationResult(valid=False, errors=["Memo contains potentially dangerous content"])
+                return ValidationResult(
+                    valid=False, errors=["Memo contains potentially dangerous content"]
+                )
             else:
                 # Further sanitize
-                sanitized = re.sub(r'<[^>]*>', '', sanitized)
+                sanitized = re.sub(r"<[^>]*>", "", sanitized)
                 warnings.append("HTML tags removed from memo")
 
-        return ValidationResult(valid=True, sanitized_value=sanitized, warnings=warnings)
+        return ValidationResult(
+            valid=True, sanitized_value=sanitized, warnings=warnings
+        )
 
     def validate_lightning_invoice(self, invoice: Any) -> ValidationResult:
         """Validate Lightning Network invoice"""
@@ -126,12 +152,16 @@ class DataValidator:
             return ValidationResult(valid=False, errors=["Invoice cannot be empty"])
 
         # Basic format check
-        if not self.patterns['lightning_invoice'].match(invoice):
-            return ValidationResult(valid=False, errors=["Invalid Lightning invoice format"])
+        if not self.patterns["lightning_invoice"].match(invoice):
+            return ValidationResult(
+                valid=False, errors=["Invalid Lightning invoice format"]
+            )
 
         # Length check (invoices are typically 200-400 characters)
         if len(invoice) < 100 or len(invoice) > 1000:
-            return ValidationResult(valid=False, errors=["Invoice length is suspicious"])
+            return ValidationResult(
+                valid=False, errors=["Invoice length is suspicious"]
+            )
 
         return ValidationResult(valid=True, sanitized_value=invoice)
 
@@ -146,30 +176,37 @@ class DataValidator:
             return ValidationResult(valid=False, errors=["API key cannot be empty"])
 
         # Check format (expecting blncs_xxxxx format)
-        if not api_key.startswith('blncs_'):
+        if not api_key.startswith("blncs_"):
             return ValidationResult(valid=False, errors=["Invalid API key format"])
 
         # Check length and character set
         key_part = api_key[6:]  # Remove 'blncs_' prefix
-        if len(key_part) != 32 or not re.match(r'^[a-fA-F0-9]+$', key_part):
+        if len(key_part) != 32 or not re.match(r"^[a-fA-F0-9]+$", key_part):
             return ValidationResult(valid=False, errors=["Invalid API key format"])
 
         return ValidationResult(valid=True, sanitized_value=api_key)
 
-    def validate_json_data(self, data: Any, schema: Optional[Dict[str, Any]] = None) -> ValidationResult:
+    def validate_json_data(
+        self, data: Any, schema: Optional[Dict[str, Any]] = None
+    ) -> ValidationResult:
         """Validate JSON data structure"""
         try:
             if isinstance(data, str):
                 data = json.loads(data)
 
             if not isinstance(data, (dict, list)):
-                return ValidationResult(valid=False, errors=["Data must be JSON object or array"])
+                return ValidationResult(
+                    valid=False, errors=["Data must be JSON object or array"]
+                )
 
             # Basic schema validation if provided
             if schema and isinstance(data, dict):
-                for required_field in schema.get('required', []):
+                for required_field in schema.get("required", []):
                     if required_field not in data:
-                        return ValidationResult(valid=False, errors=[f"Missing required field: {required_field}"])
+                        return ValidationResult(
+                            valid=False,
+                            errors=[f"Missing required field: {required_field}"],
+                        )
 
             # Sanitize recursive
             sanitized = self.sanitize_json(data)
@@ -179,7 +216,9 @@ class DataValidator:
         except json.JSONDecodeError as e:
             return ValidationResult(valid=False, errors=[f"Invalid JSON: {str(e)}"])
 
-    def validate_pagination(self, page: Any, per_page: Any, max_per_page: int = 100) -> ValidationResult:
+    def validate_pagination(
+        self, page: Any, per_page: Any, max_per_page: int = 100
+    ) -> ValidationResult:
         """Validate pagination parameters"""
         errors = []
         sanitized = {}
@@ -189,7 +228,7 @@ class DataValidator:
             page = int(page) if page is not None else 1
             if page < 1:
                 page = 1
-            sanitized['page'] = page
+            sanitized["page"] = page
         except ValueError:
             errors.append("Invalid page number")
 
@@ -200,7 +239,7 @@ class DataValidator:
                 per_page = 1
             elif per_page > max_per_page:
                 per_page = max_per_page
-            sanitized['per_page'] = per_page
+            sanitized["per_page"] = per_page
         except ValueError:
             errors.append("Invalid per_page value")
 
@@ -218,15 +257,15 @@ class DataValidator:
         text = html.escape(text)
 
         # Remove null bytes
-        text = text.replace('\x00', '')
+        text = text.replace("\x00", "")
 
         # Remove or replace dangerous characters
         if self.level == ValidationLevel.STRICT:
             # Only allow safe characters
-            text = re.sub(r'[^\w\s\-_.,!?@#$%^&*()+=\[\]{}|;:\'",.<>/?`~]', '', text)
+            text = re.sub(r'[^\w\s\-_.,!?@#$%^&*()+=\[\]{}|;:\'",.<>/?`~]', "", text)
 
         # Normalize whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
 
         return text
 
@@ -246,13 +285,15 @@ class DataValidator:
 
     def check_sql_injection(self, value: str) -> bool:
         """Check for SQL injection patterns"""
-        return bool(self.patterns['sql_injection'].search(value))
+        return bool(self.patterns["sql_injection"].search(value))
 
     def check_xss(self, value: str) -> bool:
         """Check for XSS patterns"""
-        return bool(self.patterns['xss_pattern'].search(value))
+        return bool(self.patterns["xss_pattern"].search(value))
 
-    def validate_batch(self, data: Dict[str, Any], rules: Dict[str, ValidationRule]) -> Dict[str, ValidationResult]:
+    def validate_batch(
+        self, data: Dict[str, Any], rules: Dict[str, ValidationRule]
+    ) -> Dict[str, ValidationResult]:
         """Validate multiple fields with different rules"""
         results = {}
 
@@ -266,12 +307,18 @@ class DataValidator:
                 if is_valid:
                     # Apply sanitizer if available
                     sanitized_value = rule.sanitizer(value) if rule.sanitizer else value
-                    results[field_name] = ValidationResult(valid=True, sanitized_value=sanitized_value)
+                    results[field_name] = ValidationResult(
+                        valid=True, sanitized_value=sanitized_value
+                    )
                 else:
-                    results[field_name] = ValidationResult(valid=False, errors=[rule.message])
+                    results[field_name] = ValidationResult(
+                        valid=False, errors=[rule.message]
+                    )
 
             except Exception as e:
-                results[field_name] = ValidationResult(valid=False, errors=[f"Validation error: {str(e)}"])
+                results[field_name] = ValidationResult(
+                    valid=False, errors=[f"Validation error: {str(e)}"]
+                )
 
         return results
 
@@ -290,52 +337,60 @@ class DataValidator:
             else:
                 # Basic validation - not empty and no dangerous characters
                 text = str(value)
-                return len(text) > 0 and not self.check_sql_injection(text) and not self.check_xss(text)
+                return (
+                    len(text) > 0
+                    and not self.check_sql_injection(text)
+                    and not self.check_xss(text)
+                )
         except Exception:
             return False
 
     def create_invoice_validator(self) -> Dict[str, ValidationRule]:
         """Create validation rules for invoice creation"""
         return {
-            'amount': ValidationRule(
-                name='amount',
+            "amount": ValidationRule(
+                name="amount",
                 validator=lambda x: isinstance(x, (int, str)) and int(x) > 0,
-                message='Amount must be a positive integer',
-                sanitizer=lambda x: int(x)
+                message="Amount must be a positive integer",
+                sanitizer=lambda x: int(x),
             ),
-            'memo': ValidationRule(
-                name='memo',
+            "memo": ValidationRule(
+                name="memo",
                 validator=lambda x: x is None or (isinstance(x, str) and len(x) <= 200),
-                message='Memo must be a string with max 200 characters',
-                sanitizer=self.sanitize_text
-            )
+                message="Memo must be a string with max 200 characters",
+                sanitizer=self.sanitize_text,
+            ),
         }
 
     def create_payment_validator(self) -> Dict[str, ValidationRule]:
         """Create validation rules for payments"""
         return {
-            'payment_request': ValidationRule(
-                name='payment_request',
-                validator=lambda x: isinstance(x, str) and self.patterns['lightning_invoice'].match(x.strip()),
-                message='Invalid Lightning invoice format',
-                sanitizer=lambda x: x.strip()
+            "payment_request": ValidationRule(
+                name="payment_request",
+                validator=lambda x: isinstance(x, str)
+                and self.patterns["lightning_invoice"].match(x.strip()),
+                message="Invalid Lightning invoice format",
+                sanitizer=lambda x: x.strip(),
             )
         }
 
 
 # Decorator for automatic validation
-def validate_request(validator_func: Callable[[DataValidator], Dict[str, ValidationRule]]):
+def validate_request(
+    validator_func: Callable[[DataValidator], Dict[str, ValidationRule]],
+):
     """Decorator to validate request data"""
+
     def decorator(func):
         def wrapper(*args, **kwargs):
             try:
-                from flask import request, jsonify
+                from flask import jsonify, request
 
                 validator = DataValidator()
                 rules = validator_func(validator)
 
                 # Get request data
-                if request.method in ['POST', 'PUT', 'PATCH']:
+                if request.method in ["POST", "PUT", "PATCH"]:
                     data = request.get_json() or {}
                 else:
                     data = dict(request.args)
@@ -354,16 +409,20 @@ def validate_request(validator_func: Callable[[DataValidator], Dict[str, Validat
                         sanitized_data[field] = result.sanitized_value
 
                 if errors:
-                    return jsonify({'error': 'Validation failed', 'details': errors}), 400
+                    return (
+                        jsonify({"error": "Validation failed", "details": errors}),
+                        400,
+                    )
 
                 # Add sanitized data to kwargs
-                kwargs['validated_data'] = sanitized_data
+                kwargs["validated_data"] = sanitized_data
                 return func(*args, **kwargs)
 
             except Exception as e:
-                return jsonify({'error': f'Validation error: {str(e)}'}), 500
+                return jsonify({"error": f"Validation error: {str(e)}"}), 500
 
         return wrapper
+
     return decorator
 
 
@@ -380,7 +439,9 @@ def get_validator(level: ValidationLevel = ValidationLevel.NORMAL) -> DataValida
 
 
 # Convenience functions
-def validate_amount(amount: Any, min_value: int = 1, max_value: int = 100000000) -> ValidationResult:
+def validate_amount(
+    amount: Any, min_value: int = 1, max_value: int = 100000000
+) -> ValidationResult:
     """Quick amount validation"""
     return get_validator().validate_amount(amount, min_value, max_value)
 
@@ -396,7 +457,13 @@ def validate_invoice(invoice: str) -> ValidationResult:
 
 
 __all__ = [
-    'DataValidator', 'ValidationRule', 'ValidationResult', 'ValidationLevel',
-    'validate_request', 'get_validator',
-    'validate_amount', 'sanitize_text', 'validate_invoice'
+    "DataValidator",
+    "ValidationRule",
+    "ValidationResult",
+    "ValidationLevel",
+    "validate_request",
+    "get_validator",
+    "validate_amount",
+    "sanitize_text",
+    "validate_invoice",
 ]

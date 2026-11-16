@@ -5,17 +5,18 @@
 
 import asyncio
 import json
-import time
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass
-from enum import Enum
 import logging
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class SyncStatus(Enum):
     """同期ステータス"""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -25,6 +26,7 @@ class SyncStatus(Enum):
 @dataclass
 class BatchJob:
     """バッチジョブ情報"""
+
     job_id: str
     operations: List[Dict[str, Any]]
     priority: int = 0
@@ -37,6 +39,7 @@ class BatchJob:
 @dataclass
 class SyncTask:
     """同期タスク情報"""
+
     task_id: str
     data_type: str
     data: Any
@@ -77,7 +80,9 @@ class BatchProcessor:
             except asyncio.CancelledError:
                 pass
 
-    async def submit_batch_job(self, operations: List[Dict[str, Any]], priority: int = 0) -> str:
+    async def submit_batch_job(
+        self, operations: List[Dict[str, Any]], priority: int = 0
+    ) -> str:
         """
         バッチジョブを送信
         Args:
@@ -87,11 +92,7 @@ class BatchProcessor:
             ジョブID
         """
         job_id = f"batch_{int(time.time() * 1000000)}"
-        job = BatchJob(
-            job_id=job_id,
-            operations=operations,
-            priority=priority
-        )
+        job = BatchJob(job_id=job_id, operations=operations, priority=priority)
         self.jobs[job_id] = job
         await self.job_queue.put(job)
         return job_id
@@ -114,7 +115,7 @@ class BatchProcessor:
             "created_at": job.created_at,
             "results_count": len(job.results),
             "errors_count": len(job.errors),
-            "progress": len(job.results) / len(job.operations) if job.operations else 0
+            "progress": len(job.results) / len(job.operations) if job.operations else 0,
         }
 
     async def _worker_loop(self):
@@ -202,11 +203,7 @@ class RealTimeDataSync:
             タスクID
         """
         task_id = f"sync_{int(time.time() * 1000000)}"
-        task = SyncTask(
-            task_id=task_id,
-            data_type=data_type,
-            data=data
-        )
+        task = SyncTask(task_id=task_id, data_type=data_type, data=data)
         self.sync_tasks[task_id] = task
         return task_id
 
@@ -252,7 +249,7 @@ class RealTimeDataSync:
             "status": task.status.value,
             "created_at": task.created_at,
             "completed_at": task.completed_at,
-            "error_message": task.error_message
+            "error_message": task.error_message,
         }
 
     async def _sync_loop(self):
@@ -329,7 +326,9 @@ class BatchAPI:
         await self.batch_processor.stop()
         await self.data_sync.stop()
 
-    async def submit_batch_request(self, operations: List[Dict[str, Any]], priority: int = 0) -> Dict[str, Any]:
+    async def submit_batch_request(
+        self, operations: List[Dict[str, Any]], priority: int = 0
+    ) -> Dict[str, Any]:
         """
         バッチリクエストを送信
         Args:
@@ -342,7 +341,7 @@ class BatchAPI:
         return {
             "status": "submitted",
             "job_id": job_id,
-            "message": "バッチジョブが送信されました"
+            "message": "バッチジョブが送信されました",
         }
 
     async def get_batch_status(self, job_id: str) -> Dict[str, Any]:
@@ -372,7 +371,7 @@ class BatchAPI:
         return {
             "status": "submitted",
             "task_id": task_id,
-            "message": "同期タスクが送信されました"
+            "message": "同期タスクが送信されました",
         }
 
     async def get_sync_status(self, task_id: str) -> Dict[str, Any]:
@@ -398,13 +397,15 @@ async def example_api_usage():
     # バッチリクエストの送信
     operations = [
         {"type": "process_data", "data": {"id": 1}},
-        {"type": "process_data", "data": {"id": 2}}
+        {"type": "process_data", "data": {"id": 2}},
     ]
     response = await api.submit_batch_request(operations, priority=1)
     print(f"バッチ送信: {response}")
 
     # 同期リクエストの送信
-    sync_response = await api.submit_sync_request("user_data", {"name": "テストユーザー"})
+    sync_response = await api.submit_sync_request(
+        "user_data", {"name": "テストユーザー"}
+    )
     print(f"同期送信: {sync_response}")
 
     # ステータス確認

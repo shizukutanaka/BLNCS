@@ -7,20 +7,21 @@ Based on 2024-2025 research on pytest and TDD best practices
 
 import logging
 import time
-from typing import Any, Callable, Optional, Dict, List, TypeVar, Generic
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from abc import ABC, abstractmethod
-from functools import wraps
 from enum import Enum
+from functools import wraps
+from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class TestResultStatus(Enum):
     """Test result status"""
+
     PASSED = "passed"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -30,6 +31,7 @@ class TestResultStatus(Enum):
 @dataclass
 class TestCase:
     """Represents a single test case"""
+
     name: str
     test_func: Callable
     setup_func: Optional[Callable] = None
@@ -42,6 +44,7 @@ class TestCase:
 @dataclass
 class TestMetrics:
     """Metrics for test execution"""
+
     test_name: str
     status: TestResultStatus
     duration_ms: float
@@ -53,13 +56,13 @@ class TestMetrics:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'test_name': self.test_name,
-            'status': self.status.value,
-            'duration_ms': self.duration_ms,
-            'memory_used_mb': self.memory_used_mb,
-            'assertions_count': self.assertions_count,
-            'error_message': self.error_message,
-            'timestamp': self.timestamp.isoformat()
+            "test_name": self.test_name,
+            "status": self.status.value,
+            "duration_ms": self.duration_ms,
+            "memory_used_mb": self.memory_used_mb,
+            "assertions_count": self.assertions_count,
+            "error_message": self.error_message,
+            "timestamp": self.timestamp.isoformat(),
         }
 
 
@@ -123,7 +126,9 @@ class AssertionHelper:
             logger.error(error)
             raise AssertionError(error)
 
-    def assert_raises(self, exception_type: type, func: Callable, *args, **kwargs) -> None:
+    def assert_raises(
+        self, exception_type: type, func: Callable, *args, **kwargs
+    ) -> None:
         """Assert that function raises exception"""
         self.assertion_count += 1
         try:
@@ -166,16 +171,13 @@ class MockObject(ABC):
         last_call = self.call_args_list[-1]
         if last_call != (args, kwargs):
             raise AssertionError(
-                f"Expected call with {(args, kwargs)}, "
-                f"got {last_call}"
+                f"Expected call with {(args, kwargs)}, " f"got {last_call}"
             )
 
     def assert_call_count(self, count: int) -> None:
         """Assert mock was called specific number of times"""
         if self.call_count != count:
-            raise AssertionError(
-                f"Expected {count} calls, got {self.call_count}"
-            )
+            raise AssertionError(f"Expected {count} calls, got {self.call_count}")
 
     def reset(self) -> None:
         """Reset mock state"""
@@ -255,7 +257,7 @@ class TestSuite:
                 test_name=test.name,
                 status=TestResultStatus.PASSED,
                 duration_ms=duration_ms,
-                assertions_count=assertions.assertion_count
+                assertions_count=assertions.assertion_count,
             )
             self.metrics.append(metric)
             self.passed_count += 1
@@ -268,7 +270,7 @@ class TestSuite:
                 status=TestResultStatus.FAILED,
                 duration_ms=duration_ms,
                 assertions_count=assertions.assertion_count,
-                error_message=str(e)
+                error_message=str(e),
             )
             self.metrics.append(metric)
             self.failed_count += 1
@@ -281,7 +283,7 @@ class TestSuite:
                 status=TestResultStatus.ERROR,
                 duration_ms=duration_ms,
                 assertions_count=assertions.assertion_count,
-                error_message=str(e)
+                error_message=str(e),
             )
             self.metrics.append(metric)
             self.error_count += 1
@@ -289,50 +291,57 @@ class TestSuite:
 
     def get_summary(self) -> Dict[str, Any]:
         """Get test execution summary"""
-        total = self.passed_count + self.failed_count + self.error_count + self.skipped_count
+        total = (
+            self.passed_count
+            + self.failed_count
+            + self.error_count
+            + self.skipped_count
+        )
         total_time = sum(m.duration_ms for m in self.metrics)
 
         return {
-            'suite_name': self.name,
-            'total_tests': total,
-            'passed': self.passed_count,
-            'failed': self.failed_count,
-            'error': self.error_count,
-            'skipped': self.skipped_count,
-            'success_rate': (
-                self.passed_count / total * 100 if total > 0 else 0
-            ),
-            'total_time_ms': total_time,
-            'metrics': [m.to_dict() for m in self.metrics]
+            "suite_name": self.name,
+            "total_tests": total,
+            "passed": self.passed_count,
+            "failed": self.failed_count,
+            "error": self.error_count,
+            "skipped": self.skipped_count,
+            "success_rate": (self.passed_count / total * 100 if total > 0 else 0),
+            "total_time_ms": total_time,
+            "metrics": [m.to_dict() for m in self.metrics],
         }
 
 
 def test_timeout(seconds: float) -> Callable:
     """Decorator to add timeout to test"""
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
             import asyncio
+
             try:
-                return await asyncio.wait_for(
-                    func(*args, **kwargs),
-                    timeout=seconds
-                )
+                return await asyncio.wait_for(func(*args, **kwargs), timeout=seconds)
             except asyncio.TimeoutError:
                 raise TimeoutError(f"Test exceeded {seconds}s timeout")
+
         return wrapper
+
     return decorator
 
 
 def parametrize(parameter_name: str, values: List[Any]) -> Callable:
     """Decorator for parametrized tests"""
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
             for value in values:
                 kwargs[parameter_name] = value
                 await func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -351,11 +360,13 @@ class BenchmarkHelper:
         result = func(*args, **kwargs)
         duration_ms = (time.time() - start_time) * 1000
 
-        self.benchmarks.append({
-            'operation': operation_name,
-            'duration_ms': duration_ms,
-            'timestamp': datetime.utcnow().isoformat()
-        })
+        self.benchmarks.append(
+            {
+                "operation": operation_name,
+                "duration_ms": duration_ms,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
         logger.info(f"Benchmark: {operation_name} - {duration_ms:.2f}ms")
         return duration_ms
@@ -366,11 +377,13 @@ class BenchmarkHelper:
         await coro
         duration_ms = (time.time() - start_time) * 1000
 
-        self.benchmarks.append({
-            'operation': operation_name,
-            'duration_ms': duration_ms,
-            'timestamp': datetime.utcnow().isoformat()
-        })
+        self.benchmarks.append(
+            {
+                "operation": operation_name,
+                "duration_ms": duration_ms,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
         logger.info(f"Benchmark: {operation_name} - {duration_ms:.2f}ms")
         return duration_ms
@@ -378,26 +391,26 @@ class BenchmarkHelper:
     def get_report(self) -> Dict[str, Any]:
         """Get benchmark report"""
         if not self.benchmarks:
-            return {'total_benchmarks': 0}
+            return {"total_benchmarks": 0}
 
-        durations = [b['duration_ms'] for b in self.benchmarks]
+        durations = [b["duration_ms"] for b in self.benchmarks]
         return {
-            'total_benchmarks': len(self.benchmarks),
-            'min_ms': min(durations),
-            'max_ms': max(durations),
-            'avg_ms': sum(durations) / len(durations),
-            'benchmarks': self.benchmarks
+            "total_benchmarks": len(self.benchmarks),
+            "min_ms": min(durations),
+            "max_ms": max(durations),
+            "avg_ms": sum(durations) / len(durations),
+            "benchmarks": self.benchmarks,
         }
 
 
 __all__ = [
-    'TestResultStatus',
-    'TestCase',
-    'TestMetrics',
-    'AssertionHelper',
-    'MockObject',
-    'TestSuite',
-    'test_timeout',
-    'parametrize',
-    'BenchmarkHelper',
+    "TestResultStatus",
+    "TestCase",
+    "TestMetrics",
+    "AssertionHelper",
+    "MockObject",
+    "TestSuite",
+    "test_timeout",
+    "parametrize",
+    "BenchmarkHelper",
 ]

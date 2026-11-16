@@ -9,22 +9,24 @@ This module provides cutting-edge UX improvements including:
 - Context-aware assistance
 """
 
-import time
+import asyncio
 import json
 import logging
-import threading
 import queue
-import asyncio
-from typing import Dict, List, Optional, Any, Callable, Set, Tuple, Union
-from dataclasses import dataclass, asdict
-from collections import defaultdict, deque
-import re
 import random
+import re
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 # Try to import voice and gesture libraries
 try:
-    import speech_recognition as sr
     import pyttsx3
+    import speech_recognition as sr
+
     HAS_VOICE = True
 except ImportError:
     HAS_VOICE = False
@@ -32,37 +34,45 @@ except ImportError:
 try:
     import cv2
     import mediapipe as mp
+
     HAS_GESTURE = True
 except ImportError:
     HAS_GESTURE = False
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class UserPreference:
     """User preference data."""
+
     user_id: str
     preference_type: str  # 'theme', 'layout', 'shortcuts', 'accessibility'
     preference_value: Any
     confidence: float  # 0.0 to 1.0
     last_updated: float
 
+
 @dataclass
 class VoiceCommand:
     """Voice command definition."""
+
     command: str
     patterns: List[str]  # Regex patterns to match
     action: Callable
     description: str
     examples: List[str]
 
+
 @dataclass
 class GesturePattern:
     """Gesture pattern definition."""
+
     gesture_name: str
     landmarks: List[Tuple[float, float, float]]  # Hand landmarks
     action: Callable
     confidence_threshold: float = 0.8
+
 
 class VoiceInterface:
     """Voice User Interface for hands-free operation."""
@@ -78,8 +88,8 @@ class VoiceInterface:
         if HAS_VOICE:
             try:
                 self.engine = pyttsx3.init()
-                self.engine.setProperty('rate', 150)
-                self.engine.setProperty('volume', 0.9)
+                self.engine.setProperty("rate", 150)
+                self.engine.setProperty("volume", 0.9)
                 self._load_voice_commands()
             except Exception as e:
                 self.logger.warning(f"Voice engine initialization failed: {e}")
@@ -92,29 +102,33 @@ class VoiceInterface:
                 patterns=[r"show dashboard", r"open dashboard", r"display dashboard"],
                 action=self._show_dashboard,
                 description="Show the main dashboard",
-                examples=["Show dashboard", "Open dashboard"]
+                examples=["Show dashboard", "Open dashboard"],
             ),
             VoiceCommand(
                 command="show_system_status",
-                patterns=[r"show system status", r"system status", r"how is the system"],
+                patterns=[
+                    r"show system status",
+                    r"system status",
+                    r"how is the system",
+                ],
                 action=self._show_system_status,
                 description="Show current system status",
-                examples=["Show system status", "How is the system?"]
+                examples=["Show system status", "How is the system?"],
             ),
             VoiceCommand(
                 command="refresh_data",
                 patterns=[r"refresh", r"update data", r"reload"],
                 action=self._refresh_data,
                 description="Refresh dashboard data",
-                examples=["Refresh", "Update data"]
+                examples=["Refresh", "Update data"],
             ),
             VoiceCommand(
                 command="show_help",
                 patterns=[r"help", r"show help", r"what can I do"],
                 action=self._show_help,
                 description="Show available voice commands",
-                examples=["Help", "What can I do?"]
-            )
+                examples=["Help", "What can I do?"],
+            ),
         ]
 
     def start_listening(self):
@@ -144,7 +158,9 @@ class VoiceInterface:
             try:
                 with sr.Microphone() as source:
                     self.logger.debug("Listening for voice commands...")
-                    audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
+                    audio = self.recognizer.listen(
+                        source, timeout=5, phrase_time_limit=5
+                    )
 
                 try:
                     text = self.recognizer.recognize_google(audio)
@@ -177,7 +193,9 @@ class VoiceInterface:
                         self.logger.error(f"Voice command execution failed: {e}")
                         self._speak_response("Sorry, I couldn't execute that command")
 
-        self._speak_response("I didn't understand that command. Say 'help' for available commands.")
+        self._speak_response(
+            "I didn't understand that command. Say 'help' for available commands."
+        )
 
     def _speak_response(self, text: str):
         """Speak response using TTS."""
@@ -205,10 +223,11 @@ class VoiceInterface:
 
     def _show_help(self):
         """Voice command: Show help."""
-        help_text = "Available voice commands: " + ", ".join([
-            cmd.description for cmd in self.voice_commands
-        ])
+        help_text = "Available voice commands: " + ", ".join(
+            [cmd.description for cmd in self.voice_commands]
+        )
         self._speak_response(help_text)
+
 
 class GestureInterface:
     """Gesture control interface."""
@@ -226,7 +245,7 @@ class GestureInterface:
                 self.hands = self.mp_hands.Hands(
                     max_num_hands=1,
                     min_detection_confidence=0.7,
-                    min_tracking_confidence=0.5
+                    min_tracking_confidence=0.5,
                 )
                 self._load_gesture_patterns()
             except Exception as e:
@@ -235,20 +254,24 @@ class GestureInterface:
     def _load_gesture_patterns(self):
         """Load predefined gesture patterns."""
         # Thumbs up gesture
-        self.gesture_patterns.append(GesturePattern(
-            gesture_name="thumbs_up",
-            landmarks=[(0.5, 0.8, 0.0)],  # Simplified landmark pattern
-            action=self._thumbs_up_action,
-            confidence_threshold=0.8
-        ))
+        self.gesture_patterns.append(
+            GesturePattern(
+                gesture_name="thumbs_up",
+                landmarks=[(0.5, 0.8, 0.0)],  # Simplified landmark pattern
+                action=self._thumbs_up_action,
+                confidence_threshold=0.8,
+            )
+        )
 
         # Swipe left gesture
-        self.gesture_patterns.append(GesturePattern(
-            gesture_name="swipe_left",
-            landmarks=[],  # Would be actual hand movement pattern
-            action=self._swipe_left_action,
-            confidence_threshold=0.7
-        ))
+        self.gesture_patterns.append(
+            GesturePattern(
+                gesture_name="swipe_left",
+                landmarks=[],  # Would be actual hand movement pattern
+                action=self._swipe_left_action,
+                confidence_threshold=0.7,
+            )
+        )
 
     def start_recognition(self):
         """Start gesture recognition."""
@@ -266,7 +289,9 @@ class GestureInterface:
             self.logger.error("Could not open camera for gesture recognition")
             return
 
-        self.recognition_thread = threading.Thread(target=self._recognition_loop, daemon=True)
+        self.recognition_thread = threading.Thread(
+            target=self._recognition_loop, daemon=True
+        )
         self.recognition_thread.start()
         self.logger.info("Gesture recognition started")
 
@@ -350,6 +375,7 @@ class GestureInterface:
         # In a real implementation, this would navigate or switch views
         self.logger.info("Gesture action: Swipe left - navigate back")
 
+
 class AdaptiveInterface:
     """Adaptive interface that learns user preferences."""
 
@@ -381,10 +407,10 @@ class AdaptiveInterface:
     def record_user_action(self, user_id: str, action: str, context: Dict[str, Any]):
         """Record user action for learning."""
         action_record = {
-            'user_id': user_id,
-            'action': action,
-            'context': context,
-            'timestamp': time.time()
+            "user_id": user_id,
+            "action": action,
+            "context": context,
+            "timestamp": time.time(),
         }
 
         self.usage_patterns[user_id].append(action_record)
@@ -418,10 +444,12 @@ class AdaptiveInterface:
             # Analyze action frequencies
             action_counts = defaultdict(int)
             for action in actions[-100:]:  # Last 100 actions
-                action_counts[action['action']] += 1
+                action_counts[action["action"]] += 1
 
             # Identify most frequent actions
-            sorted_actions = sorted(action_counts.items(), key=lambda x: x[1], reverse=True)
+            sorted_actions = sorted(
+                action_counts.items(), key=lambda x: x[1], reverse=True
+            )
 
             if sorted_actions:
                 most_frequent = sorted_actions[0][0]
@@ -429,15 +457,23 @@ class AdaptiveInterface:
                 # Create or update preference
                 preference = UserPreference(
                     user_id=user_id,
-                    preference_type='frequent_action',
+                    preference_type="frequent_action",
                     preference_value=most_frequent,
-                    confidence=min(action_counts[most_frequent] / 50.0, 1.0),  # Confidence based on frequency
-                    last_updated=time.time()
+                    confidence=min(
+                        action_counts[most_frequent] / 50.0, 1.0
+                    ),  # Confidence based on frequency
+                    last_updated=time.time(),
                 )
 
                 # Update or add preference
-                existing = next((p for p in self.user_preferences[user_id]
-                               if p.preference_type == 'frequent_action'), None)
+                existing = next(
+                    (
+                        p
+                        for p in self.user_preferences[user_id]
+                        if p.preference_type == "frequent_action"
+                    ),
+                    None,
+                )
 
                 if existing:
                     existing.preference_value = most_frequent
@@ -459,7 +495,7 @@ class AdaptiveInterface:
         preference_type = preference.preference_type
         preference_value = preference.preference_value
 
-        if preference_type == 'frequent_action':
+        if preference_type == "frequent_action":
             # Suggest adding shortcut or quick access for frequent action
             self.logger.info(f"User {user_id} frequently uses: {preference_value}")
             # In a real implementation, this would modify the UI
@@ -467,6 +503,7 @@ class AdaptiveInterface:
     def get_user_preferences(self, user_id: str) -> List[Dict[str, Any]]:
         """Get user preferences."""
         return [asdict(pref) for pref in self.user_preferences.get(user_id, [])]
+
 
 class ContextAwareAssistant:
     """Context-aware assistance system."""
@@ -478,28 +515,26 @@ class ContextAwareAssistant:
 
     def analyze_context(self, user_context: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze user context for assistance opportunities."""
-        assistance = {
-            'suggestions': [],
-            'warnings': [],
-            'automations': []
-        }
+        assistance = {"suggestions": [], "warnings": [], "automations": []}
 
         # Check for assistance opportunities
-        current_time = user_context.get('current_time', time.time())
-        user_activity = user_context.get('recent_activity', [])
-        system_status = user_context.get('system_status', {})
+        current_time = user_context.get("current_time", time.time())
+        user_activity = user_context.get("recent_activity", [])
+        system_status = user_context.get("system_status", {})
 
         # Time-based assistance
-        if self._is_peak_hours(current_time) and system_status.get('cpu_usage', 0) > 80:
-            assistance['warnings'].append("High CPU usage detected during peak hours")
+        if self._is_peak_hours(current_time) and system_status.get("cpu_usage", 0) > 80:
+            assistance["warnings"].append("High CPU usage detected during peak hours")
 
         # Activity-based assistance
-        if len(user_activity) > 10 and user_activity[-1]['type'] == 'error':
-            assistance['suggestions'].append("Consider reviewing recent errors in the logs")
+        if len(user_activity) > 10 and user_activity[-1]["type"] == "error":
+            assistance["suggestions"].append(
+                "Consider reviewing recent errors in the logs"
+            )
 
         # System health assistance
-        if system_status.get('disk_usage', 0) > 90:
-            assistance['warnings'].append("Disk usage is high - consider cleanup")
+        if system_status.get("disk_usage", 0) > 90:
+            assistance["warnings"].append("Disk usage is high - consider cleanup")
 
         return assistance
 
@@ -508,20 +543,23 @@ class ContextAwareAssistant:
         hour = datetime.fromtimestamp(timestamp).hour
         return 9 <= hour <= 17  # 9 AM to 5 PM
 
-    def provide_proactive_assistance(self, user_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    def provide_proactive_assistance(
+        self, user_id: str, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Provide proactive assistance based on context."""
         analysis = self.analyze_context(context)
 
         # Record assistance provided
         assistance_record = {
-            'user_id': user_id,
-            'timestamp': time.time(),
-            'context': context,
-            'assistance': analysis
+            "user_id": user_id,
+            "timestamp": time.time(),
+            "context": context,
+            "assistance": analysis,
         }
         self.assistance_history.append(assistance_record)
 
         return analysis
+
 
 class AdvancedUXManager:
     """Main advanced UX management system."""
@@ -534,15 +572,15 @@ class AdvancedUXManager:
         self.context_assistant = ContextAwareAssistant()
 
         self.ux_features_enabled = {
-            'voice_ui': HAS_VOICE,
-            'gesture_control': HAS_GESTURE,
-            'adaptive_interface': True,
-            'context_awareness': True
+            "voice_ui": HAS_VOICE,
+            "gesture_control": HAS_GESTURE,
+            "adaptive_interface": True,
+            "context_awareness": True,
         }
 
     def enable_voice_ui(self):
         """Enable voice user interface."""
-        if self.ux_features_enabled['voice_ui']:
+        if self.ux_features_enabled["voice_ui"]:
             self.voice_interface.start_listening()
 
     def disable_voice_ui(self):
@@ -551,7 +589,7 @@ class AdvancedUXManager:
 
     def enable_gesture_control(self):
         """Enable gesture control."""
-        if self.ux_features_enabled['gesture_control']:
+        if self.ux_features_enabled["gesture_control"]:
             self.gesture_interface.start_recognition()
 
     def disable_gesture_control(self):
@@ -566,27 +604,38 @@ class AdvancedUXManager:
         """Stop adaptive interface learning."""
         self.adaptive_interface.stop_learning()
 
-    def record_user_interaction(self, user_id: str, interaction_type: str, context: Dict[str, Any]):
+    def record_user_interaction(
+        self, user_id: str, interaction_type: str, context: Dict[str, Any]
+    ):
         """Record user interaction for adaptive learning."""
         self.adaptive_interface.record_user_action(user_id, interaction_type, context)
 
-    def get_contextual_assistance(self, user_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    def get_contextual_assistance(
+        self, user_id: str, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Get contextual assistance."""
         return self.context_assistant.provide_proactive_assistance(user_id, context)
 
     def get_ux_analytics(self) -> Dict[str, Any]:
         """Get UX analytics data."""
         return {
-            'voice_commands_recognized': len(self.voice_interface.voice_commands),
-            'gesture_patterns_loaded': len(self.gesture_interface.gesture_patterns),
-            'adaptive_preferences_count': sum(len(prefs) for prefs in self.adaptive_interface.user_preferences.values()),
-            'contextual_assistance_count': len(self.context_assistant.assistance_history),
-            'enabled_features': self.ux_features_enabled
+            "voice_commands_recognized": len(self.voice_interface.voice_commands),
+            "gesture_patterns_loaded": len(self.gesture_interface.gesture_patterns),
+            "adaptive_preferences_count": sum(
+                len(prefs)
+                for prefs in self.adaptive_interface.user_preferences.values()
+            ),
+            "contextual_assistance_count": len(
+                self.context_assistant.assistance_history
+            ),
+            "enabled_features": self.ux_features_enabled,
         }
+
 
 def create_advanced_ux_manager() -> AdvancedUXManager:
     """Factory function to create advanced UX manager."""
     return AdvancedUXManager()
+
 
 # Example usage
 if __name__ == "__main__":
@@ -594,14 +643,14 @@ if __name__ == "__main__":
     ux_manager = create_advanced_ux_manager()
 
     # Enable voice UI if available
-    if ux_manager.ux_features_enabled['voice_ui']:
+    if ux_manager.ux_features_enabled["voice_ui"]:
         ux_manager.enable_voice_ui()
         print("Voice UI enabled")
     else:
         print("Voice UI not available")
 
     # Enable gesture control if available
-    if ux_manager.ux_features_enabled['gesture_control']:
+    if ux_manager.ux_features_enabled["gesture_control"]:
         ux_manager.enable_gesture_control()
         print("Gesture control enabled")
     else:
@@ -614,14 +663,14 @@ if __name__ == "__main__":
     ux_manager.record_user_interaction(
         user_id="user_123",
         interaction_type="dashboard_view",
-        context={'section': 'system_overview', 'duration': 30}
+        context={"section": "system_overview", "duration": 30},
     )
 
     # Get contextual assistance
     context = {
-        'current_time': time.time(),
-        'recent_activity': [{'type': 'error', 'message': 'Connection failed'}],
-        'system_status': {'cpu_usage': 85, 'disk_usage': 92}
+        "current_time": time.time(),
+        "recent_activity": [{"type": "error", "message": "Connection failed"}],
+        "system_status": {"cpu_usage": 85, "disk_usage": 92},
     }
 
     assistance = ux_manager.get_contextual_assistance("user_123", context)

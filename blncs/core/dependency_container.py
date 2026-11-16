@@ -6,27 +6,29 @@ Based on 2025 Python best practices for dependency management
 """
 
 import logging
-from typing import Dict, Any, Type, TypeVar, Optional, Callable, Set
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from abc import ABC, abstractmethod
+from typing import Any, Callable, Dict, Optional, Set, Type, TypeVar
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class LifecycleScope(Enum):
     """Dependency lifecycle scope"""
-    SINGLETON = "singleton"        # Single instance for application lifetime
-    TRANSIENT = "transient"        # New instance every time
-    SCOPED = "scoped"             # Single instance per scope/request
-    LAZY = "lazy"                 # Instance created on first access
+
+    SINGLETON = "singleton"  # Single instance for application lifetime
+    TRANSIENT = "transient"  # New instance every time
+    SCOPED = "scoped"  # Single instance per scope/request
+    LAZY = "lazy"  # Instance created on first access
 
 
 @dataclass
 class ServiceDescriptor:
     """Describes a registered service"""
+
     interface: Type
     implementation: Optional[Type] = None
     factory: Optional[Callable] = None
@@ -57,7 +59,7 @@ class ServiceContainer:
         interface: Type[T],
         implementation: Optional[Type[T]] = None,
         instance: Optional[T] = None,
-        factory: Optional[Callable[[], T]] = None
+        factory: Optional[Callable[[], T]] = None,
     ) -> None:
         """
         Register a singleton service (single instance for lifetime)
@@ -73,7 +75,7 @@ class ServiceContainer:
             implementation=implementation,
             instance=instance,
             factory=factory,
-            scope=LifecycleScope.SINGLETON
+            scope=LifecycleScope.SINGLETON,
         )
         logger.debug(f"Registered singleton: {interface.__name__}")
 
@@ -81,7 +83,7 @@ class ServiceContainer:
         self,
         interface: Type[T],
         implementation: Optional[Type[T]] = None,
-        factory: Optional[Callable[[], T]] = None
+        factory: Optional[Callable[[], T]] = None,
     ) -> None:
         """
         Register a transient service (new instance every time)
@@ -95,7 +97,7 @@ class ServiceContainer:
             interface,
             implementation=implementation,
             factory=factory,
-            scope=LifecycleScope.TRANSIENT
+            scope=LifecycleScope.TRANSIENT,
         )
         logger.debug(f"Registered transient: {interface.__name__}")
 
@@ -103,7 +105,7 @@ class ServiceContainer:
         self,
         interface: Type[T],
         implementation: Optional[Type[T]] = None,
-        factory: Optional[Callable[[], T]] = None
+        factory: Optional[Callable[[], T]] = None,
     ) -> None:
         """
         Register a scoped service (single instance per scope/request)
@@ -117,7 +119,7 @@ class ServiceContainer:
             interface,
             implementation=implementation,
             factory=factory,
-            scope=LifecycleScope.SCOPED
+            scope=LifecycleScope.SCOPED,
         )
         logger.debug(f"Registered scoped: {interface.__name__}")
 
@@ -127,7 +129,7 @@ class ServiceContainer:
         implementation: Optional[Type] = None,
         instance: Optional[Any] = None,
         factory: Optional[Callable] = None,
-        scope: LifecycleScope = LifecycleScope.TRANSIENT
+        scope: LifecycleScope = LifecycleScope.TRANSIENT,
     ) -> None:
         """Internal registration method"""
         service_name = interface.__name__
@@ -137,7 +139,7 @@ class ServiceContainer:
             implementation=implementation or interface,
             instance=instance,
             factory=factory,
-            scope=scope
+            scope=scope,
         )
 
         self.services[service_name] = descriptor
@@ -272,8 +274,8 @@ class ServiceCollection:
         interface: Type[T],
         implementation: Optional[Type[T]] = None,
         instance: Optional[T] = None,
-        factory: Optional[Callable[[], T]] = None
-    ) -> 'ServiceCollection':
+        factory: Optional[Callable[[], T]] = None,
+    ) -> "ServiceCollection":
         """Add singleton and return self for chaining"""
         self.container.register_singleton(interface, implementation, instance, factory)
         return self
@@ -282,8 +284,8 @@ class ServiceCollection:
         self,
         interface: Type[T],
         implementation: Optional[Type[T]] = None,
-        factory: Optional[Callable[[], T]] = None
-    ) -> 'ServiceCollection':
+        factory: Optional[Callable[[], T]] = None,
+    ) -> "ServiceCollection":
         """Add transient and return self for chaining"""
         self.container.register_transient(interface, implementation, factory)
         return self
@@ -292,8 +294,8 @@ class ServiceCollection:
         self,
         interface: Type[T],
         implementation: Optional[Type[T]] = None,
-        factory: Optional[Callable[[], T]] = None
-    ) -> 'ServiceCollection':
+        factory: Optional[Callable[[], T]] = None,
+    ) -> "ServiceCollection":
         """Add scoped and return self for chaining"""
         self.container.register_scoped(interface, implementation, factory)
         return self
@@ -324,10 +326,10 @@ def set_container(container: ServiceContainer) -> None:
 
 
 __all__ = [
-    'LifecycleScope',
-    'ServiceDescriptor',
-    'ServiceContainer',
-    'ServiceCollection',
-    'get_container',
-    'set_container',
+    "LifecycleScope",
+    "ServiceDescriptor",
+    "ServiceContainer",
+    "ServiceCollection",
+    "get_container",
+    "set_container",
 ]

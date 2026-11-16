@@ -36,11 +36,11 @@ _BECH32_INDEX = {c: i for i, c in enumerate(_BECH32_CHARSET)}
 # Millisatoshis per unit of the HRP amount for each BOLT11 multiplier.
 # 1 BTC = 10**11 msat; the multiplier scales the HRP number down from BTC.
 _MSAT_PER_UNIT = {
-    None: 10 ** 11,  # whole BTC
-    "m": 10 ** 8,    # milli-BTC  (10**-3 BTC)
-    "u": 10 ** 5,    # micro-BTC  (10**-6 BTC)
-    "n": 10 ** 2,    # nano-BTC   (10**-9 BTC)
-    "p": 10 ** -1,   # pico-BTC   (10**-12 BTC) -> fractional, handled specially
+    None: 10**11,  # whole BTC
+    "m": 10**8,  # milli-BTC  (10**-3 BTC)
+    "u": 10**5,  # micro-BTC  (10**-6 BTC)
+    "n": 10**2,  # nano-BTC   (10**-9 BTC)
+    "p": 10**-1,  # pico-BTC   (10**-12 BTC) -> fractional, handled specially
 }
 
 _HRP_AMOUNT_RE = re.compile(r"^(?P<digits>[0-9]+)(?P<mult>[munp])?$")
@@ -87,7 +87,7 @@ def _split_bech32(invoice: str) -> tuple:
         raise Bolt11AmountError("Invoice has no bech32 separator")
 
     hrp = normalized[:sep]
-    data_part = normalized[sep + 1:]
+    data_part = normalized[sep + 1 :]
 
     # 6 checksum chars + at least 7 timestamp words is the smallest
     # data part that can belong to a real invoice.
@@ -146,7 +146,9 @@ def extract_amount_msat(invoice: str) -> Optional[int]:
     if multiplier == "p":
         # pico-BTC: value = digits / 10 msat; must be a whole msat.
         if digits % 10 != 0:
-            raise Bolt11AmountError("Invoice amount is not a whole number of millisatoshis")
+            raise Bolt11AmountError(
+                "Invoice amount is not a whole number of millisatoshis"
+            )
         amount_msat = digits // 10
     else:
         amount_msat = digits * _MSAT_PER_UNIT[multiplier]

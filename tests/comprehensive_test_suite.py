@@ -4,21 +4,22 @@ Advanced testing framework with AI-powered test generation and quality assurance
 """
 
 import asyncio
-import time
+import inspect
 import json
 import logging
-import threading
-import inspect
-from typing import Dict, List, Optional, Any, Callable, Union, Tuple, Set
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
-from pathlib import Path
-from enum import Enum
-from collections import defaultdict, deque
-import traceback
+import os
 import subprocess
 import sys
-import os
+import threading
+import time
+import traceback
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+
 
 # Test categories
 class TestCategory(Enum):
@@ -33,6 +34,7 @@ class TestCategory(Enum):
     ML = "machine_learning"
     UI = "user_interface"
 
+
 class TestStatus(Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -41,9 +43,11 @@ class TestStatus(Enum):
     SKIPPED = "skipped"
     ERROR = "error"
 
+
 @dataclass
 class TestResult:
     """Test execution result"""
+
     test_name: str
     category: TestCategory
     status: TestStatus
@@ -55,9 +59,11 @@ class TestResult:
     artifacts: List[str] = field(default_factory=list)
     timestamp: float = 0.0
 
+
 @dataclass
 class TestCase:
     """Test case definition"""
+
     name: str
     category: TestCategory
     description: str
@@ -70,9 +76,11 @@ class TestCase:
     tags: List[str] = field(default_factory=list)
     priority: int = 1  # 1 = high, 2 = medium, 3 = low
 
+
 @dataclass
 class TestSuiteConfig:
     """Test suite configuration"""
+
     parallel_execution: bool = True
     max_workers: int = 4
     continue_on_failure: bool = True
@@ -81,6 +89,7 @@ class TestSuiteConfig:
     save_artifacts: bool = True
     artifacts_dir: str = "test_artifacts"
     timeout_multiplier: float = 1.0
+
 
 class TestExecutor:
     """Advanced test execution engine"""
@@ -114,9 +123,17 @@ class TestExecutor:
         self.test_cases[test_case.name] = test_case
         self.logger.debug(f"Registered test: {test_case.name}")
 
-    def register_test_function(self, name: str, category: TestCategory, description: str = "",
-                             timeout: float = 30.0, tags: List[str] = None, priority: int = 1):
+    def register_test_function(
+        self,
+        name: str,
+        category: TestCategory,
+        description: str = "",
+        timeout: float = 30.0,
+        tags: List[str] = None,
+        priority: int = 1,
+    ):
         """Decorator to register test function"""
+
         def decorator(func):
             test_case = TestCase(
                 name=name,
@@ -125,14 +142,16 @@ class TestExecutor:
                 test_function=func,
                 timeout=timeout * self.config.timeout_multiplier,
                 tags=tags or [],
-                priority=priority
+                priority=priority,
             )
             self.register_test(test_case)
             return func
+
         return decorator
 
-    async def run_all_tests(self, categories: List[TestCategory] = None,
-                          tags: List[str] = None) -> Dict[str, TestResult]:
+    async def run_all_tests(
+        self, categories: List[TestCategory] = None, tags: List[str] = None
+    ) -> Dict[str, TestResult]:
         """Run all registered tests"""
         self.logger.info("Starting comprehensive test suite execution")
         self.start_time = time.time()
@@ -160,11 +179,14 @@ class TestExecutor:
         # Generate reports
         await self._generate_reports(results)
 
-        self.logger.info(f"Test suite completed in {self.end_time - self.start_time:.2f}s")
+        self.logger.info(
+            f"Test suite completed in {self.end_time - self.start_time:.2f}s"
+        )
         return results
 
-    def _filter_tests(self, categories: List[TestCategory] = None,
-                     tags: List[str] = None) -> List[TestCase]:
+    def _filter_tests(
+        self, categories: List[TestCategory] = None, tags: List[str] = None
+    ) -> List[TestCase]:
         """Filter tests by categories and tags"""
         filtered_tests = []
 
@@ -217,7 +239,9 @@ class TestExecutor:
         tasks = []
 
         for test_case in tests:
-            task = asyncio.create_task(self._run_single_test_with_semaphore(test_case, semaphore))
+            task = asyncio.create_task(
+                self._run_single_test_with_semaphore(test_case, semaphore)
+            )
             tasks.append(task)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -233,14 +257,16 @@ class TestExecutor:
                     status=TestStatus.ERROR,
                     duration=0.0,
                     error_message=str(result),
-                    timestamp=time.time()
+                    timestamp=time.time(),
                 )
             else:
                 test_results[test_name] = result
 
         return test_results
 
-    async def _run_tests_sequential(self, tests: List[TestCase]) -> Dict[str, TestResult]:
+    async def _run_tests_sequential(
+        self, tests: List[TestCase]
+    ) -> Dict[str, TestResult]:
         """Run tests sequentially"""
         results = {}
 
@@ -249,14 +275,20 @@ class TestExecutor:
             results[test_case.name] = result
 
             # Stop on failure if configured
-            if not self.config.continue_on_failure and result.status == TestStatus.FAILED:
-                self.logger.warning(f"Stopping test execution due to failure in {test_case.name}")
+            if (
+                not self.config.continue_on_failure
+                and result.status == TestStatus.FAILED
+            ):
+                self.logger.warning(
+                    f"Stopping test execution due to failure in {test_case.name}"
+                )
                 break
 
         return results
 
-    async def _run_single_test_with_semaphore(self, test_case: TestCase,
-                                            semaphore: asyncio.Semaphore) -> TestResult:
+    async def _run_single_test_with_semaphore(
+        self, test_case: TestCase, semaphore: asyncio.Semaphore
+    ) -> TestResult:
         """Run single test with semaphore control"""
         async with semaphore:
             return await self._run_single_test(test_case)
@@ -277,15 +309,19 @@ class TestExecutor:
                     status=TestStatus.SKIPPED,
                     duration=0.0,
                     error_message="Dependencies not met",
-                    timestamp=time.time()
+                    timestamp=time.time(),
                 )
 
             # Setup
             if test_case.setup_function:
-                await self._run_with_timeout(test_case.setup_function, test_case.timeout / 4)
+                await self._run_with_timeout(
+                    test_case.setup_function, test_case.timeout / 4
+                )
 
             # Run test with timeout
-            result = await self._run_with_timeout(test_case.test_function, test_case.timeout)
+            result = await self._run_with_timeout(
+                test_case.test_function, test_case.timeout
+            )
 
             # Extract test metrics
             duration = time.time() - start_time
@@ -298,7 +334,7 @@ class TestExecutor:
                 status=TestStatus.PASSED,
                 duration=duration,
                 performance_metrics=performance_metrics,
-                timestamp=time.time()
+                timestamp=time.time(),
             )
 
             # Collect artifacts
@@ -315,7 +351,7 @@ class TestExecutor:
                 status=TestStatus.FAILED,
                 duration=time.time() - start_time,
                 error_message=f"Test timed out after {test_case.timeout}s",
-                timestamp=time.time()
+                timestamp=time.time(),
             )
 
         except AssertionError as e:
@@ -325,7 +361,7 @@ class TestExecutor:
                 status=TestStatus.FAILED,
                 duration=time.time() - start_time,
                 error_message=f"Assertion failed: {str(e)}",
-                timestamp=time.time()
+                timestamp=time.time(),
             )
 
         except Exception as e:
@@ -335,14 +371,16 @@ class TestExecutor:
                 status=TestStatus.ERROR,
                 duration=time.time() - start_time,
                 error_message=f"Unexpected error: {str(e)}\n{traceback.format_exc()}",
-                timestamp=time.time()
+                timestamp=time.time(),
             )
 
         finally:
             # Teardown
             if test_case.teardown_function:
                 try:
-                    await self._run_with_timeout(test_case.teardown_function, test_case.timeout / 4)
+                    await self._run_with_timeout(
+                        test_case.teardown_function, test_case.timeout / 4
+                    )
                 except Exception as e:
                     self.logger.warning(f"Teardown failed for {test_case.name}: {e}")
 
@@ -357,8 +395,7 @@ class TestExecutor:
             # Run sync function in thread pool
             loop = asyncio.get_event_loop()
             return await asyncio.wait_for(
-                loop.run_in_executor(None, func),
-                timeout=timeout
+                loop.run_in_executor(None, func), timeout=timeout
             )
 
     def _check_dependencies(self, test_case: TestCase) -> bool:
@@ -368,18 +405,22 @@ class TestExecutor:
                 return False
         return True
 
-    def _extract_performance_metrics(self, test_case: TestCase, result: Any) -> Dict[str, float]:
+    def _extract_performance_metrics(
+        self, test_case: TestCase, result: Any
+    ) -> Dict[str, float]:
         """Extract performance metrics from test result"""
         metrics = {}
 
         # Basic timing metrics already captured in duration
         # Extract custom metrics if test returns them
-        if isinstance(result, dict) and 'performance_metrics' in result:
-            metrics.update(result['performance_metrics'])
+        if isinstance(result, dict) and "performance_metrics" in result:
+            metrics.update(result["performance_metrics"])
 
         return metrics
 
-    async def _collect_test_artifacts(self, test_case: TestCase, result: TestResult) -> List[str]:
+    async def _collect_test_artifacts(
+        self, test_case: TestCase, result: TestResult
+    ) -> List[str]:
         """Collect test artifacts (logs, screenshots, etc.)"""
         artifacts = []
 
@@ -390,38 +431,46 @@ class TestExecutor:
 
             # Save test result as JSON
             result_file = test_artifacts_dir / "result.json"
-            with open(result_file, 'w') as f:
+            with open(result_file, "w") as f:
                 json.dump(asdict(result), f, indent=2)
             artifacts.append(str(result_file))
 
             # Save logs if available
-            if hasattr(test_case.test_function, '_test_logs'):
+            if hasattr(test_case.test_function, "_test_logs"):
                 log_file = test_artifacts_dir / "test.log"
-                with open(log_file, 'w') as f:
-                    f.write('\n'.join(test_case.test_function._test_logs))
+                with open(log_file, "w") as f:
+                    f.write("\n".join(test_case.test_function._test_logs))
                 artifacts.append(str(log_file))
 
             # Category-specific artifacts
             if test_case.category == TestCategory.PERFORMANCE:
-                await self._collect_performance_artifacts(test_case, test_artifacts_dir, artifacts)
+                await self._collect_performance_artifacts(
+                    test_case, test_artifacts_dir, artifacts
+                )
 
             elif test_case.category == TestCategory.API:
-                await self._collect_api_artifacts(test_case, test_artifacts_dir, artifacts)
+                await self._collect_api_artifacts(
+                    test_case, test_artifacts_dir, artifacts
+                )
 
         except Exception as e:
-            self.logger.warning(f"Failed to collect artifacts for {test_case.name}: {e}")
+            self.logger.warning(
+                f"Failed to collect artifacts for {test_case.name}: {e}"
+            )
 
         return artifacts
 
-    async def _collect_performance_artifacts(self, test_case: TestCase, artifacts_dir: Path,
-                                           artifacts: List[str]):
+    async def _collect_performance_artifacts(
+        self, test_case: TestCase, artifacts_dir: Path, artifacts: List[str]
+    ):
         """Collect performance-specific artifacts"""
         # Save performance profile if available
         # This would integrate with actual profiling tools
         pass
 
-    async def _collect_api_artifacts(self, test_case: TestCase, artifacts_dir: Path,
-                                   artifacts: List[str]):
+    async def _collect_api_artifacts(
+        self, test_case: TestCase, artifacts_dir: Path, artifacts: List[str]
+    ):
         """Collect API-specific artifacts"""
         # Save API request/response logs
         # This would integrate with API testing tools
@@ -434,7 +483,7 @@ class TestExecutor:
             self._generate_detailed_report(results),
             self._generate_performance_report(results),
             self._generate_coverage_report(results),
-            return_exceptions=True
+            return_exceptions=True,
         )
 
     async def _generate_summary_report(self, results: Dict[str, TestResult]):
@@ -443,13 +492,13 @@ class TestExecutor:
             summary = self._calculate_test_summary(results)
 
             report_path = self.artifacts_dir / "summary_report.json"
-            with open(report_path, 'w') as f:
+            with open(report_path, "w") as f:
                 json.dump(summary, f, indent=2)
 
             # Also generate HTML summary
             html_report = self._generate_html_summary(summary, results)
             html_path = self.artifacts_dir / "summary_report.html"
-            with open(html_path, 'w') as f:
+            with open(html_path, "w") as f:
                 f.write(html_report)
 
             self.logger.info(f"Summary report generated: {report_path}")
@@ -462,40 +511,54 @@ class TestExecutor:
         total_tests = len(results)
         passed_tests = sum(1 for r in results.values() if r.status == TestStatus.PASSED)
         failed_tests = sum(1 for r in results.values() if r.status == TestStatus.FAILED)
-        skipped_tests = sum(1 for r in results.values() if r.status == TestStatus.SKIPPED)
+        skipped_tests = sum(
+            1 for r in results.values() if r.status == TestStatus.SKIPPED
+        )
         error_tests = sum(1 for r in results.values() if r.status == TestStatus.ERROR)
 
         total_duration = sum(r.duration for r in results.values())
         avg_duration = total_duration / total_tests if total_tests > 0 else 0
 
         # Category breakdown
-        category_stats = defaultdict(lambda: {'total': 0, 'passed': 0, 'failed': 0})
+        category_stats = defaultdict(lambda: {"total": 0, "passed": 0, "failed": 0})
         for result in results.values():
-            category_stats[result.category.value]['total'] += 1
+            category_stats[result.category.value]["total"] += 1
             if result.status == TestStatus.PASSED:
-                category_stats[result.category.value]['passed'] += 1
+                category_stats[result.category.value]["passed"] += 1
             elif result.status == TestStatus.FAILED:
-                category_stats[result.category.value]['failed'] += 1
+                category_stats[result.category.value]["failed"] += 1
 
         return {
-            'execution_time': self.end_time - self.start_time,
-            'total_tests': total_tests,
-            'passed_tests': passed_tests,
-            'failed_tests': failed_tests,
-            'skipped_tests': skipped_tests,
-            'error_tests': error_tests,
-            'success_rate': (passed_tests / total_tests * 100) if total_tests > 0 else 0,
-            'total_duration': total_duration,
-            'average_duration': avg_duration,
-            'category_breakdown': dict(category_stats),
-            'fastest_test': min(results.values(), key=lambda r: r.duration).test_name if results else None,
-            'slowest_test': max(results.values(), key=lambda r: r.duration).test_name if results else None,
-            'generated_at': datetime.now().isoformat()
+            "execution_time": self.end_time - self.start_time,
+            "total_tests": total_tests,
+            "passed_tests": passed_tests,
+            "failed_tests": failed_tests,
+            "skipped_tests": skipped_tests,
+            "error_tests": error_tests,
+            "success_rate": (
+                (passed_tests / total_tests * 100) if total_tests > 0 else 0
+            ),
+            "total_duration": total_duration,
+            "average_duration": avg_duration,
+            "category_breakdown": dict(category_stats),
+            "fastest_test": (
+                min(results.values(), key=lambda r: r.duration).test_name
+                if results
+                else None
+            ),
+            "slowest_test": (
+                max(results.values(), key=lambda r: r.duration).test_name
+                if results
+                else None
+            ),
+            "generated_at": datetime.now().isoformat(),
         }
 
-    def _generate_html_summary(self, summary: Dict[str, Any], results: Dict[str, TestResult]) -> str:
+    def _generate_html_summary(
+        self, summary: Dict[str, Any], results: Dict[str, TestResult]
+    ) -> str:
         """Generate HTML summary report"""
-        html = f'''
+        html = f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -551,11 +614,11 @@ class TestExecutor:
 
         <h2>Test Results</h2>
         <div class="test-list">
-'''
+"""
 
         for result in sorted(results.values(), key=lambda r: r.test_name):
             status_class = f"status-{result.status.value}"
-            html += f'''
+            html += f"""
             <div class="test-item">
                 <div>
                     <strong>{result.test_name}</strong>
@@ -566,14 +629,14 @@ class TestExecutor:
                     {result.status.value.upper()}
                 </div>
             </div>
-'''
+"""
 
-        html += '''
+        html += """
         </div>
     </div>
 </body>
 </html>
-'''
+"""
         return html
 
     async def _generate_detailed_report(self, results: Dict[str, TestResult]):
@@ -583,16 +646,20 @@ class TestExecutor:
 
             for result in results.values():
                 detailed_result = asdict(result)
-                detailed_result['category'] = result.category.value
-                detailed_result['status'] = result.status.value
+                detailed_result["category"] = result.category.value
+                detailed_result["status"] = result.status.value
                 detailed_results.append(detailed_result)
 
             report_path = self.artifacts_dir / "detailed_report.json"
-            with open(report_path, 'w') as f:
-                json.dump({
-                    'summary': self._calculate_test_summary(results),
-                    'results': detailed_results
-                }, f, indent=2)
+            with open(report_path, "w") as f:
+                json.dump(
+                    {
+                        "summary": self._calculate_test_summary(results),
+                        "results": detailed_results,
+                    },
+                    f,
+                    indent=2,
+                )
 
             self.logger.info(f"Detailed report generated: {report_path}")
 
@@ -606,7 +673,8 @@ class TestExecutor:
 
         try:
             performance_results = [
-                r for r in results.values()
+                r
+                for r in results.values()
                 if r.category == TestCategory.PERFORMANCE or r.performance_metrics
             ]
 
@@ -614,17 +682,22 @@ class TestExecutor:
                 return
 
             performance_data = {
-                'performance_summary': {
-                    'total_performance_tests': len(performance_results),
-                    'avg_execution_time': sum(r.duration for r in performance_results) / len(performance_results),
-                    'slowest_test': max(performance_results, key=lambda r: r.duration).test_name,
-                    'fastest_test': min(performance_results, key=lambda r: r.duration).test_name
+                "performance_summary": {
+                    "total_performance_tests": len(performance_results),
+                    "avg_execution_time": sum(r.duration for r in performance_results)
+                    / len(performance_results),
+                    "slowest_test": max(
+                        performance_results, key=lambda r: r.duration
+                    ).test_name,
+                    "fastest_test": min(
+                        performance_results, key=lambda r: r.duration
+                    ).test_name,
                 },
-                'test_details': [asdict(r) for r in performance_results]
+                "test_details": [asdict(r) for r in performance_results],
             }
 
             report_path = self.artifacts_dir / "performance_report.json"
-            with open(report_path, 'w') as f:
+            with open(report_path, "w") as f:
                 json.dump(performance_data, f, indent=2)
 
             self.logger.info(f"Performance report generated: {report_path}")
@@ -640,20 +713,21 @@ class TestExecutor:
         try:
             # This would integrate with coverage.py or similar tools
             coverage_data = {
-                'overall_coverage': 85.0,  # Placeholder
-                'file_coverage': {},
-                'uncovered_lines': [],
-                'generated_at': datetime.now().isoformat()
+                "overall_coverage": 85.0,  # Placeholder
+                "file_coverage": {},
+                "uncovered_lines": [],
+                "generated_at": datetime.now().isoformat(),
             }
 
             report_path = self.artifacts_dir / "coverage_report.json"
-            with open(report_path, 'w') as f:
+            with open(report_path, "w") as f:
                 json.dump(coverage_data, f, indent=2)
 
             self.logger.info(f"Coverage report generated: {report_path}")
 
         except Exception as e:
             self.logger.error(f"Failed to generate coverage report: {e}")
+
 
 class BLNCSTestSuite:
     """Comprehensive BLNCS test suite"""
@@ -678,34 +752,36 @@ class BLNCSTestSuite:
             "test_config_manager",
             TestCategory.UNIT,
             "Test configuration manager functionality",
-            tags=["config", "core"]
+            tags=["config", "core"],
         )
         async def test_config_manager():
             from blncs.core.config_manager import UnifiedConfigManager
 
             # Test config loading
-            config = UnifiedConfigManager('config/development.json')
-            assert config.get('version') is not None
+            config = UnifiedConfigManager("config/development.json")
+            assert config.get("version") is not None
 
             # Test setting and getting values
-            config.set('test.value', 42)
-            assert config.get('test.value') == 42
+            config.set("test.value", 42)
+            assert config.get("test.value") == 42
 
             # Test validation
-            config.add_validation_rule({
-                'path': 'test.required',
-                'required': True,
-                'type_check': str
-            })
+            config.add_validation_rule(
+                {"path": "test.required", "required": True, "type_check": str}
+            )
 
         @self.executor.register_test_function(
             "test_error_resilience",
             TestCategory.UNIT,
             "Test error handling and resilience",
-            tags=["error", "resilience", "core"]
+            tags=["error", "resilience", "core"],
         )
         async def test_error_resilience():
-            from blncs.core.error_resilience import ErrorResilience, ErrorContext, ErrorSeverity
+            from blncs.core.error_resilience import (
+                ErrorContext,
+                ErrorResilience,
+                ErrorSeverity,
+            )
 
             # Test error handling
             resilience = ErrorResilience()
@@ -716,7 +792,7 @@ class BLNCSTestSuite:
                 error_type="TestError",
                 error_message="Test error message",
                 severity=ErrorSeverity.MEDIUM,
-                timestamp=time.time()
+                timestamp=time.time(),
             )
 
             # Test error handling
@@ -727,7 +803,7 @@ class BLNCSTestSuite:
             "test_performance_monitor",
             TestCategory.UNIT,
             "Test performance monitoring system",
-            tags=["performance", "monitoring", "core"]
+            tags=["performance", "monitoring", "core"],
         )
         async def test_performance_monitor():
             from blncs.core.unified_performance_monitor import UnifiedPerformanceMonitor
@@ -735,10 +811,10 @@ class BLNCSTestSuite:
             monitor = UnifiedPerformanceMonitor()
 
             # Test metric recording
-            monitor.record_metric('test_metric', 42.0, 'count')
+            monitor.record_metric("test_metric", 42.0, "count")
 
             # Test profiling
-            with monitor.profile('test_operation'):
+            with monitor.profile("test_operation"):
                 await asyncio.sleep(0.1)
 
             # Test metrics retrieval
@@ -752,26 +828,26 @@ class BLNCSTestSuite:
             "test_api_health_endpoint",
             TestCategory.INTEGRATION,
             "Test API health endpoint",
-            tags=["api", "health"]
+            tags=["api", "health"],
         )
         async def test_api_health_endpoint():
             import aiohttp
 
             async with aiohttp.ClientSession() as session:
                 try:
-                    async with session.get('http://localhost:8080/health') as response:
+                    async with session.get("http://localhost:8080/health") as response:
                         assert response.status == 200
                         data = await response.json()
-                        assert 'status' in data
+                        assert "status" in data
                 except aiohttp.ClientConnectorError:
                     # API might not be running, skip test
-                    return {'skipped': True, 'reason': 'API not running'}
+                    return {"skipped": True, "reason": "API not running"}
 
         @self.executor.register_test_function(
             "test_websocket_connection",
             TestCategory.INTEGRATION,
             "Test WebSocket connection",
-            tags=["websocket", "realtime"]
+            tags=["websocket", "realtime"],
         )
         async def test_websocket_connection():
             try:
@@ -785,11 +861,11 @@ class BLNCSTestSuite:
                     # Receive response
                     response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
                     data = json.loads(response)
-                    assert 'type' in data
+                    assert "type" in data
 
             except Exception:
                 # WebSocket server might not be running
-                return {'skipped': True, 'reason': 'WebSocket server not running'}
+                return {"skipped": True, "reason": "WebSocket server not running"}
 
     def _register_performance_tests(self):
         """Register performance tests"""
@@ -799,7 +875,7 @@ class BLNCSTestSuite:
             TestCategory.PERFORMANCE,
             "Test configuration loading performance",
             tags=["performance", "config"],
-            timeout=10.0
+            timeout=10.0,
         )
         async def test_config_loading_performance():
             from blncs.core.config_manager import UnifiedConfigManager
@@ -808,8 +884,8 @@ class BLNCSTestSuite:
 
             # Load config multiple times
             for _ in range(100):
-                config = UnifiedConfigManager('config/development.json')
-                config.get('version')
+                config = UnifiedConfigManager("config/development.json")
+                config.get("version")
 
             end_time = time.perf_counter()
             duration = end_time - start_time
@@ -818,10 +894,10 @@ class BLNCSTestSuite:
             assert duration < 1.0, f"Config loading too slow: {duration:.3f}s"
 
             return {
-                'performance_metrics': {
-                    'total_duration': duration,
-                    'average_load_time': duration / 100,
-                    'loads_per_second': 100 / duration
+                "performance_metrics": {
+                    "total_duration": duration,
+                    "average_load_time": duration / 100,
+                    "loads_per_second": 100 / duration,
                 }
             }
 
@@ -830,7 +906,7 @@ class BLNCSTestSuite:
             TestCategory.PERFORMANCE,
             "Test AI routing engine performance",
             tags=["performance", "routing", "lightning"],
-            timeout=30.0
+            timeout=30.0,
         )
         async def test_routing_engine_performance():
             from blncs.lightning.ai_routing_engine import AIRoutingEngine, ChannelInfo
@@ -845,7 +921,7 @@ class BLNCSTestSuite:
                     node1=f"node_{i}",
                     node2=f"node_{i+1}",
                     capacity=1000000,
-                    success_rate=0.9
+                    success_rate=0.9,
                 )
                 test_channels.append(channel)
 
@@ -865,10 +941,10 @@ class BLNCSTestSuite:
             assert duration < 5.0, f"Routing too slow: {duration:.3f}s"
 
             return {
-                'performance_metrics': {
-                    'routing_duration': duration,
-                    'routes_found': len(routes),
-                    'channels_processed': len(test_channels)
+                "performance_metrics": {
+                    "routing_duration": duration,
+                    "routes_found": len(routes),
+                    "channels_processed": len(test_channels),
                 }
             }
 
@@ -879,12 +955,12 @@ class BLNCSTestSuite:
             "test_encryption_functionality",
             TestCategory.SECURITY,
             "Test encryption and decryption",
-            tags=["security", "encryption"]
+            tags=["security", "encryption"],
         )
         async def test_encryption_functionality():
             from blncs.core.enhanced_security import EncryptionManager
 
-            encryption = EncryptionManager({'encryption_key_path': 'test_key.key'})
+            encryption = EncryptionManager({"encryption_key_path": "test_key.key"})
 
             # Test symmetric encryption
             original_data = "sensitive test data"
@@ -903,10 +979,13 @@ class BLNCSTestSuite:
             "test_authentication_security",
             TestCategory.SECURITY,
             "Test authentication security",
-            tags=["security", "authentication"]
+            tags=["security", "authentication"],
         )
         async def test_authentication_security():
-            from blncs.core.enhanced_security import AuthenticationManager, EncryptionManager
+            from blncs.core.enhanced_security import (
+                AuthenticationManager,
+                EncryptionManager,
+            )
 
             encryption = EncryptionManager({})
             auth = AuthenticationManager({}, encryption)
@@ -917,7 +996,7 @@ class BLNCSTestSuite:
 
             user_info = auth.verify_token(token)
             assert user_info is not None
-            assert user_info['user_id'] == "test_user"
+            assert user_info["user_id"] == "test_user"
 
             # Test token revocation
             revoked = auth.revoke_token(token)
@@ -934,7 +1013,7 @@ class BLNCSTestSuite:
             "test_graphql_query",
             TestCategory.API,
             "Test GraphQL query execution",
-            tags=["api", "graphql"]
+            tags=["api", "graphql"],
         )
         async def test_graphql_query():
             from blncs.api.advanced_graphql_api import AdvancedGraphQLAPI
@@ -942,47 +1021,49 @@ class BLNCSTestSuite:
             api = AdvancedGraphQLAPI()
 
             if not api.schema:
-                return {'skipped': True, 'reason': 'GraphQL not available'}
+                return {"skipped": True, "reason": "GraphQL not available"}
 
             # Test simple query
-            query = '''
+            query = """
             query {
                 nodeInfo {
                     alias
                     pubKey
                 }
             }
-            '''
+            """
 
             result = await api.execute_query(query)
-            assert 'data' in result
-            assert result.get('errors') is None
+            assert "data" in result
+            assert result.get("errors") is None
 
         @self.executor.register_test_function(
             "test_rest_api_endpoints",
             TestCategory.API,
             "Test REST API endpoints",
-            tags=["api", "rest"]
+            tags=["api", "rest"],
         )
         async def test_rest_api_endpoints():
             import aiohttp
 
             endpoints = [
-                '/api/status',
-                '/api/dashboard',
-                '/api/channels',
-                '/api/payments'
+                "/api/status",
+                "/api/dashboard",
+                "/api/channels",
+                "/api/payments",
             ]
 
             async with aiohttp.ClientSession() as session:
                 for endpoint in endpoints:
                     try:
-                        async with session.get(f'http://localhost:8080{endpoint}') as response:
+                        async with session.get(
+                            f"http://localhost:8080{endpoint}"
+                        ) as response:
                             if response.status == 404:
                                 continue  # Endpoint might not be implemented yet
                             assert response.status in [200, 201, 202]
                     except aiohttp.ClientConnectorError:
-                        return {'skipped': True, 'reason': 'API server not running'}
+                        return {"skipped": True, "reason": "API server not running"}
 
     def _register_lightning_tests(self):
         """Register Lightning Network tests"""
@@ -991,13 +1072,13 @@ class BLNCSTestSuite:
             "test_channel_manager",
             TestCategory.LIGHTNING,
             "Test Lightning channel management",
-            tags=["lightning", "channels"]
+            tags=["lightning", "channels"],
         )
         async def test_channel_manager():
-            from blncs.lightning.channel_manager import ChannelManager
             from blncs.core.config_manager import UnifiedConfigManager
+            from blncs.lightning.channel_manager import ChannelManager
 
-            config = UnifiedConfigManager('config/development.json')
+            config = UnifiedConfigManager("config/development.json")
             manager = ChannelManager(config)
 
             # Test basic functionality (without actual Lightning connection)
@@ -1008,13 +1089,13 @@ class BLNCSTestSuite:
             "test_payment_manager",
             TestCategory.LIGHTNING,
             "Test Lightning payment management",
-            tags=["lightning", "payments"]
+            tags=["lightning", "payments"],
         )
         async def test_payment_manager():
-            from blncs.lightning.payment_manager import PaymentManager
             from blncs.core.config_manager import UnifiedConfigManager
+            from blncs.lightning.payment_manager import PaymentManager
 
-            config = UnifiedConfigManager('config/development.json')
+            config = UnifiedConfigManager("config/development.json")
             manager = PaymentManager(config)
 
             # Test basic functionality
@@ -1027,10 +1108,13 @@ class BLNCSTestSuite:
             "test_performance_optimizer",
             TestCategory.ML,
             "Test ML performance optimizer",
-            tags=["ml", "optimization"]
+            tags=["ml", "optimization"],
         )
         async def test_performance_optimizer():
-            from blncs.ml.performance_optimizer import OptimizationEngine, PerformanceSnapshot
+            from blncs.ml.performance_optimizer import (
+                OptimizationEngine,
+                PerformanceSnapshot,
+            )
 
             optimizer = OptimizationEngine()
 
@@ -1046,7 +1130,7 @@ class BLNCSTestSuite:
                 database_query_time=100.0,
                 active_connections=25,
                 error_rate=0.02,
-                throughput=95.0
+                throughput=95.0,
             )
 
             # Test optimization analysis
@@ -1057,10 +1141,14 @@ class BLNCSTestSuite:
             "test_routing_ml_predictor",
             TestCategory.ML,
             "Test routing ML predictor",
-            tags=["ml", "routing", "lightning"]
+            tags=["ml", "routing", "lightning"],
         )
         async def test_routing_ml_predictor():
-            from blncs.lightning.ai_routing_engine import MLRoutingPredictor, RouteCandidate, ChannelInfo
+            from blncs.lightning.ai_routing_engine import (
+                ChannelInfo,
+                MLRoutingPredictor,
+                RouteCandidate,
+            )
 
             predictor = MLRoutingPredictor()
 
@@ -1071,7 +1159,7 @@ class BLNCSTestSuite:
                     node1="node1",
                     node2="node2",
                     capacity=1000000,
-                    success_rate=0.9
+                    success_rate=0.9,
                 )
             ]
 
@@ -1083,15 +1171,16 @@ class BLNCSTestSuite:
                 quality="good",
                 estimated_time=2.0,
                 confidence=0.8,
-                hops=test_channels
+                hops=test_channels,
             )
 
             # Test prediction
             success_prob = predictor.predict_route_success(route)
             assert 0.0 <= success_prob <= 1.0
 
-    async def run_comprehensive_tests(self, categories: List[TestCategory] = None,
-                                    tags: List[str] = None) -> Dict[str, TestResult]:
+    async def run_comprehensive_tests(
+        self, categories: List[TestCategory] = None, tags: List[str] = None
+    ) -> Dict[str, TestResult]:
         """Run comprehensive test suite"""
         self.logger.info("Starting BLNCS comprehensive test suite")
 
@@ -1100,8 +1189,12 @@ class BLNCSTestSuite:
 
             # Print summary
             total_tests = len(results)
-            passed_tests = sum(1 for r in results.values() if r.status == TestStatus.PASSED)
-            failed_tests = sum(1 for r in results.values() if r.status == TestStatus.FAILED)
+            passed_tests = sum(
+                1 for r in results.values() if r.status == TestStatus.PASSED
+            )
+            failed_tests = sum(
+                1 for r in results.values() if r.status == TestStatus.FAILED
+            )
 
             self.logger.info(f"Test execution completed:")
             self.logger.info(f"  Total: {total_tests}")
@@ -1124,14 +1217,16 @@ class BLNCSTestSuite:
             category_counts[test_case.category.value] += 1
 
         return {
-            'total_registered_tests': total_tests,
-            'tests_by_category': dict(category_counts),
-            'test_names': list(self.executor.test_cases.keys()),
-            'artifacts_directory': str(self.executor.artifacts_dir)
+            "total_registered_tests": total_tests,
+            "tests_by_category": dict(category_counts),
+            "test_names": list(self.executor.test_cases.keys()),
+            "artifacts_directory": str(self.executor.artifacts_dir),
         }
+
 
 # Global test suite instance
 _test_suite = None
+
 
 def get_test_suite() -> BLNCSTestSuite:
     """Get global test suite instance"""
@@ -1140,25 +1235,36 @@ def get_test_suite() -> BLNCSTestSuite:
         _test_suite = BLNCSTestSuite()
     return _test_suite
 
+
 # CLI for running tests
 async def main():
     """Main CLI entry point"""
     import argparse
 
-    parser = argparse.ArgumentParser(description='BLNCS Comprehensive Test Suite')
-    parser.add_argument('--categories', nargs='+', choices=[c.value for c in TestCategory],
-                       help='Test categories to run')
-    parser.add_argument('--tags', nargs='+', help='Test tags to filter by')
-    parser.add_argument('--parallel', action='store_true', default=True, help='Run tests in parallel')
-    parser.add_argument('--workers', type=int, default=4, help='Number of parallel workers')
-    parser.add_argument('--timeout-multiplier', type=float, default=1.0, help='Timeout multiplier')
+    parser = argparse.ArgumentParser(description="BLNCS Comprehensive Test Suite")
+    parser.add_argument(
+        "--categories",
+        nargs="+",
+        choices=[c.value for c in TestCategory],
+        help="Test categories to run",
+    )
+    parser.add_argument("--tags", nargs="+", help="Test tags to filter by")
+    parser.add_argument(
+        "--parallel", action="store_true", default=True, help="Run tests in parallel"
+    )
+    parser.add_argument(
+        "--workers", type=int, default=4, help="Number of parallel workers"
+    )
+    parser.add_argument(
+        "--timeout-multiplier", type=float, default=1.0, help="Timeout multiplier"
+    )
 
     args = parser.parse_args()
 
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
     # Create test suite
@@ -1191,15 +1297,16 @@ async def main():
         logging.error(f"Test execution failed: {e}")
         sys.exit(2)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     asyncio.run(main())
 
 __all__ = [
-    'BLNCSTestSuite',
-    'TestExecutor',
-    'TestCategory',
-    'TestStatus',
-    'TestResult',
-    'TestCase',
-    'get_test_suite'
+    "BLNCSTestSuite",
+    "TestExecutor",
+    "TestCategory",
+    "TestStatus",
+    "TestResult",
+    "TestCase",
+    "get_test_suite",
 ]

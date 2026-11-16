@@ -3,10 +3,11 @@ Simple Rate Limiter for BLNCS
 Lightweight rate limiting implementation
 """
 
-import time
-from typing import Any, Dict, Optional
-from collections import defaultdict, deque
 import threading
+import time
+from collections import defaultdict, deque
+from typing import Any, Dict, Optional
+
 
 class RateLimiter:
     """Token bucket rate limiter"""
@@ -39,7 +40,9 @@ class RateLimiter:
             request_times = self.requests[identifier]
 
             # Remove old requests outside window
-            while request_times and request_times[0] < current_time - self.window_seconds:
+            while (
+                request_times and request_times[0] < current_time - self.window_seconds
+            ):
                 request_times.popleft()
 
             # Check if under limit
@@ -99,12 +102,12 @@ class RateLimiter:
             reset_time = request_times[0] + self.window_seconds if request_times else 0
 
             return {
-                'identifier': identifier,
-                'requests_in_window': request_count,
-                'max_requests': self.max_requests,
-                'remaining_requests': remaining,
-                'reset_time': reset_time,
-                'is_limited': request_count >= self.max_requests
+                "identifier": identifier,
+                "requests_in_window": request_count,
+                "max_requests": self.max_requests,
+                "remaining_requests": remaining,
+                "reset_time": reset_time,
+                "is_limited": request_count >= self.max_requests,
             }
 
     def reset_limit(self, identifier: str):
@@ -130,10 +133,10 @@ class RateLimiter:
                 reset_time = temp_times[0] + self.window_seconds if temp_times else 0
 
                 status[identifier] = {
-                    'requests_in_window': request_count,
-                    'remaining_requests': remaining,
-                    'reset_time': reset_time,
-                    'is_limited': request_count >= self.max_requests
+                    "requests_in_window": request_count,
+                    "remaining_requests": remaining,
+                    "reset_time": reset_time,
+                    "is_limited": request_count >= self.max_requests,
                 }
 
             return status
@@ -156,11 +159,11 @@ class RateLimiter:
                     limited_identifiers += 1
 
             return {
-                'total_identifiers': total_identifiers,
-                'total_requests': total_requests,
-                'limited_identifiers': limited_identifiers,
-                'max_requests_per_window': self.max_requests,
-                'window_seconds': self.window_seconds
+                "total_identifiers": total_identifiers,
+                "total_requests": total_requests,
+                "limited_identifiers": limited_identifiers,
+                "max_requests_per_window": self.max_requests,
+                "window_seconds": self.window_seconds,
             }
 
     def remaining_requests(self, identifier: str) -> int:
@@ -170,7 +173,9 @@ class RateLimiter:
             request_times = self.requests[identifier]
 
             # Remove old requests
-            while request_times and request_times[0] < current_time - self.window_seconds:
+            while (
+                request_times and request_times[0] < current_time - self.window_seconds
+            ):
                 request_times.popleft()
 
             return max(0, self.max_requests - len(request_times))
@@ -192,8 +197,10 @@ class RateLimiter:
             else:
                 self.requests.clear()
 
+
 # Global rate limiter
 _rate_limiter = None
+
 
 def get_rate_limiter(max_requests: int = 60, window_seconds: int = 60) -> RateLimiter:
     """Get global rate limiter instance"""
@@ -202,12 +209,15 @@ def get_rate_limiter(max_requests: int = 60, window_seconds: int = 60) -> RateLi
         _rate_limiter = RateLimiter(max_requests, window_seconds)
     return _rate_limiter
 
+
 # Flask decorator
 def rate_limit(max_requests: int = 60, window_seconds: int = 60):
     """Decorator for Flask routes to add rate limiting"""
+
     def decorator(f):
         from functools import wraps
-        from flask import request, jsonify
+
+        from flask import jsonify, request
 
         @wraps(f)
         def wrapper(*args, **kwargs):
@@ -217,20 +227,32 @@ def rate_limit(max_requests: int = 60, window_seconds: int = 60):
             # Check rate limit
             limiter = get_rate_limiter(max_requests, window_seconds)
             if not limiter.is_allowed(identifier):
-                return jsonify({
-                    'error': 'Rate limit exceeded',
-                    'retry_after': limiter.reset_time(identifier)
-                }), 429
+                return (
+                    jsonify(
+                        {
+                            "error": "Rate limit exceeded",
+                            "retry_after": limiter.reset_time(identifier),
+                        }
+                    ),
+                    429,
+                )
 
             # Add rate limit headers
             response = f(*args, **kwargs)
-            if hasattr(response, 'headers'):
-                response.headers['X-RateLimit-Limit'] = str(max_requests)
-                response.headers['X-RateLimit-Remaining'] = str(limiter.remaining_requests(identifier))
-                response.headers['X-RateLimit-Reset'] = str(int(time.time() + limiter.reset_time(identifier)))
+            if hasattr(response, "headers"):
+                response.headers["X-RateLimit-Limit"] = str(max_requests)
+                response.headers["X-RateLimit-Remaining"] = str(
+                    limiter.remaining_requests(identifier)
+                )
+                response.headers["X-RateLimit-Reset"] = str(
+                    int(time.time() + limiter.reset_time(identifier))
+                )
 
             return response
+
         return wrapper
+
     return decorator
 
-__all__ = ['RateLimiter', 'get_rate_limiter', 'rate_limit']
+
+__all__ = ["RateLimiter", "get_rate_limiter", "rate_limit"]

@@ -5,13 +5,13 @@ Implements patterns for building event-driven systems
 Stores state changes as immutable event sequences
 """
 
-import logging
 import json
-from typing import Dict, List, Any, Optional, Callable
-from dataclasses import dataclass, field, asdict
+import logging
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from abc import ABC, abstractmethod
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -34,20 +34,17 @@ class Event:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert event to dictionary"""
-        return {
-            **asdict(self),
-            'timestamp': self.timestamp.isoformat()
-        }
+        return {**asdict(self), "timestamp": self.timestamp.isoformat()}
 
     def to_json(self) -> str:
         """Convert event to JSON"""
         return json.dumps(self.to_dict())
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Event':
+    def from_dict(cls, data: Dict[str, Any]) -> "Event":
         """Create event from dictionary"""
-        if isinstance(data.get('timestamp'), str):
-            data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+        if isinstance(data.get("timestamp"), str):
+            data["timestamp"] = datetime.fromisoformat(data["timestamp"])
         return cls(**data)
 
 
@@ -74,9 +71,7 @@ class EventStore(ABC):
 
     @abstractmethod
     async def get_events_from_version(
-        self,
-        aggregate_id: str,
-        from_version: int
+        self, aggregate_id: str, from_version: int
     ) -> List[Event]:
         """Get events from specific version onwards"""
         pass
@@ -119,9 +114,7 @@ class InMemoryEventStore(EventStore):
         return self.aggregate_events.get(aggregate_id, []).copy()
 
     async def get_events_from_version(
-        self,
-        aggregate_id: str,
-        from_version: int
+        self, aggregate_id: str, from_version: int
     ) -> List[Event]:
         """Get events from version"""
         events = self.aggregate_events.get(aggregate_id, [])
@@ -248,11 +241,7 @@ class EventSourcing:
     Combines event store, projections, and publishers
     """
 
-    def __init__(
-        self,
-        event_store: EventStore,
-        publisher: EventPublisher
-    ):
+    def __init__(self, event_store: EventStore, publisher: EventPublisher):
         self.event_store = event_store
         self.publisher = publisher
         self.projections: Dict[str, EventProjection] = {}
@@ -327,13 +316,13 @@ class EventBus:
         """Publish event"""
         # Apply middleware
         for mw in self.middleware:
-            event = await mw(event) if hasattr(mw, '__await__') else mw(event)
+            event = await mw(event) if hasattr(mw, "__await__") else mw(event)
 
         # Handle event
         if event.event_type in self.handlers:
             for handler in self.handlers[event.event_type]:
                 try:
-                    if hasattr(handler, '__await__'):
+                    if hasattr(handler, "__await__"):
                         await handler(event)
                     else:
                         handler(event)
@@ -342,14 +331,14 @@ class EventBus:
 
 
 __all__ = [
-    'Event',
-    'EventStore',
-    'InMemoryEventStore',
-    'EventProjection',
-    'InMemoryProjection',
-    'EventHandler',
-    'EventPublisher',
-    'InMemoryEventPublisher',
-    'EventSourcing',
-    'EventBus',
+    "Event",
+    "EventStore",
+    "InMemoryEventStore",
+    "EventProjection",
+    "InMemoryProjection",
+    "EventHandler",
+    "EventPublisher",
+    "InMemoryEventPublisher",
+    "EventSourcing",
+    "EventBus",
 ]

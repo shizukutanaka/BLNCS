@@ -3,17 +3,19 @@
 リアルタイム異常検知と予測機能を提供
 """
 
-import time
 import json
-import threading
-from typing import Any, Dict, List, Optional, Tuple, Callable
-from dataclasses import dataclass, field
-from collections import defaultdict, deque
 import logging
-import numpy as np
-from datetime import datetime, timedelta
-import pickle
 import os
+import pickle
+import sqlite3
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MetricData:
     """メトリクスデータ情報"""
+
     timestamp: float
     value: float
     metric_type: str
@@ -30,6 +33,7 @@ class MetricData:
 @dataclass
 class AnomalyResult:
     """異常検知結果情報"""
+
     metric_type: str
     timestamp: float
     value: float
@@ -71,16 +75,16 @@ class SimpleAnomalyDetector:
                 std_val = np.std(metric_data)
 
                 self.baselines[metric_type] = {
-                    'mean': mean_val,
-                    'std': std_val,
-                    'min': np.min(metric_data),
-                    'max': np.max(metric_data)
+                    "mean": mean_val,
+                    "std": std_val,
+                    "min": np.min(metric_data),
+                    "max": np.max(metric_data),
                 }
 
                 stats[metric_type] = {
-                    'count': len(metric_data),
-                    'mean': mean_val,
-                    'std': std_val
+                    "count": len(metric_data),
+                    "mean": mean_val,
+                    "std": std_val,
                 }
 
         return stats
@@ -103,12 +107,12 @@ class SimpleAnomalyDetector:
                 anomaly_score=0.0,
                 is_anomaly=False,
                 confidence=0.0,
-                description="ベースラインが存在しません"
+                description="ベースラインが存在しません",
             )
 
         baseline = self.baselines[metric_type]
-        mean_val = baseline['mean']
-        std_val = baseline['std']
+        mean_val = baseline["mean"]
+        std_val = baseline["std"]
 
         # Zスコア計算
         if std_val > 0:
@@ -122,9 +126,9 @@ class SimpleAnomalyDetector:
 
         description = ""
         if is_anomaly:
-            if data.value > baseline['max']:
+            if data.value > baseline["max"]:
                 description = "通常範囲を超える高い値"
-            elif data.value < baseline['min']:
+            elif data.value < baseline["min"]:
                 description = "通常範囲を下回る低い値"
             else:
                 description = "異常な変動パターン"
@@ -136,7 +140,7 @@ class SimpleAnomalyDetector:
             anomaly_score=anomaly_score,
             is_anomaly=is_anomaly,
             confidence=confidence,
-            description=description
+            description=description,
         )
 
 
@@ -168,8 +172,12 @@ class TimeSeriesAnomalyDetector:
         if len(self.historical_data[metric_type]) >= 10:
             values = [d.value for d in self.historical_data[metric_type]]
             self.trend_models[metric_type] = {
-                'slope': self._calculate_slope(values),
-                'seasonal_avg': np.mean(values[-self.seasonal_period:]) if len(values) >= self.seasonal_period else np.mean(values)
+                "slope": self._calculate_slope(values),
+                "seasonal_avg": (
+                    np.mean(values[-self.seasonal_period :])
+                    if len(values) >= self.seasonal_period
+                    else np.mean(values)
+                ),
             }
 
     def detect_anomaly(self, data: MetricData) -> AnomalyResult:
@@ -190,18 +198,26 @@ class TimeSeriesAnomalyDetector:
                 anomaly_score=0.0,
                 is_anomaly=False,
                 confidence=0.0,
-                description="学習データ不足"
+                description="学習データ不足",
             )
 
         model = self.trend_models[metric_type]
-        expected_value = model['seasonal_avg'] + model['slope'] * (len(self.historical_data[metric_type]) % self.seasonal_period)
+        expected_value = model["seasonal_avg"] + model["slope"] * (
+            len(self.historical_data[metric_type]) % self.seasonal_period
+        )
 
         # 異常スコア計算
         deviation = abs(data.value - expected_value)
-        baseline_std = np.std([d.value for d in self.historical_data[metric_type][-50:]]) if len(self.historical_data[metric_type]) >= 50 else 1.0
+        baseline_std = (
+            np.std([d.value for d in self.historical_data[metric_type][-50:]])
+            if len(self.historical_data[metric_type]) >= 50
+            else 1.0
+        )
 
         if baseline_std > 0:
-            anomaly_score = min(deviation / (baseline_std * self.trend_sensitivity), 1.0)
+            anomaly_score = min(
+                deviation / (baseline_std * self.trend_sensitivity), 1.0
+            )
         else:
             anomaly_score = 0.0
 
@@ -222,7 +238,7 @@ class TimeSeriesAnomalyDetector:
             anomaly_score=anomaly_score,
             is_anomaly=is_anomaly,
             confidence=confidence,
-            description=description
+            description=description,
         )
 
     def _calculate_slope(self, values: List[float]) -> float:
@@ -247,7 +263,10 @@ class AnomalyDetectionEngine:
         Args:
             detectors: 使用する検知アルゴリズムリスト
         """
-        self.detectors = detectors or [SimpleAnomalyDetector(), TimeSeriesAnomalyDetector()]
+        self.detectors = detectors or [
+            SimpleAnomalyDetector(),
+            TimeSeriesAnomalyDetector(),
+        ]
         self.metric_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=10000))
         self.anomaly_callbacks: List[Callable] = []
         self.is_running = False
@@ -262,9 +281,7 @@ class AnomalyDetectionEngine:
         if not self.is_running:
             self.is_running = True
             self.engine_thread = threading.Thread(
-                target=self._detection_loop,
-                args=(interval,),
-                daemon=True
+                target=self._detection_loop, args=(interval,), daemon=True
             )
             self.engine_thread.start()
 
@@ -284,7 +301,7 @@ class AnomalyDetectionEngine:
 
         # 検知器のモデルを更新
         for detector in self.detectors:
-            if hasattr(detector, 'update_model'):
+            if hasattr(detector, "update_model"):
                 detector.update_model(metric_data)
 
     def detect_anomaly(self, metric_data: MetricData) -> List[AnomalyResult]:
@@ -299,9 +316,9 @@ class AnomalyDetectionEngine:
 
         for detector in self.detectors:
             try:
-                if hasattr(detector, 'detect'):
+                if hasattr(detector, "detect"):
                     result = detector.detect(metric_data)
-                elif hasattr(detector, 'detect_anomaly'):
+                elif hasattr(detector, "detect_anomaly"):
                     result = detector.detect_anomaly(metric_data)
                 else:
                     continue
@@ -370,7 +387,9 @@ class PredictiveAnomalySystem:
         """
         self.prediction_window = prediction_window
         self.prediction_models: Dict[str, Dict[str, Any]] = defaultdict(dict)
-        self.anomaly_predictions: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+        self.anomaly_predictions: Dict[str, List[Tuple[float, float]]] = defaultdict(
+            list
+        )
 
     def train_prediction_model(self, metric_type: str, data: List[MetricData]):
         """
@@ -386,10 +405,10 @@ class PredictiveAnomalySystem:
 
         # 簡易な移動平均予測モデル
         self.prediction_models[metric_type] = {
-            'window_size': self.prediction_window,
-            'recent_values': values[-self.prediction_window:],
-            'mean': np.mean(values),
-            'trend': self._calculate_trend(values)
+            "window_size": self.prediction_window,
+            "recent_values": values[-self.prediction_window :],
+            "mean": np.mean(values),
+            "trend": self._calculate_trend(values),
         }
 
     def predict_anomaly(self, metric_type: str, current_value: float) -> float:
@@ -405,11 +424,11 @@ class PredictiveAnomalySystem:
             return 0.0
 
         model = self.prediction_models[metric_type]
-        expected_value = model['mean'] + model['trend']
+        expected_value = model["mean"] + model["trend"]
 
         # 予測偏差を計算
         deviation = abs(current_value - expected_value)
-        max_deviation = model['mean'] * 0.5  # 最大偏差の50%
+        max_deviation = model["mean"] * 0.5  # 最大偏差の50%
 
         if max_deviation > 0:
             prediction_score = min(deviation / max_deviation, 1.0)
@@ -455,7 +474,7 @@ class AnomalyDetectionManager:
         self.db_path = db_path
         self.detectors = [
             SimpleAnomalyDetector(sensitivity=2.0),
-            TimeSeriesAnomalyDetector(seasonal_period=24)
+            TimeSeriesAnomalyDetector(seasonal_period=24),
         ]
         self.engine = AnomalyDetectionEngine(self.detectors)
         self.predictive_system = PredictiveAnomalySystem()
@@ -500,7 +519,9 @@ class AnomalyDetectionManager:
         """システムを停止"""
         self.engine.stop_detection()
 
-    def process_metric(self, metric_type: str, value: float, tags: Dict[str, str] = None):
+    def process_metric(
+        self, metric_type: str, value: float, tags: Dict[str, str] = None
+    ):
         """
         メトリクスを処理
         Args:
@@ -509,10 +530,7 @@ class AnomalyDetectionManager:
             tags: タグ情報
         """
         metric_data = MetricData(
-            timestamp=time.time(),
-            value=value,
-            metric_type=metric_type,
-            tags=tags or {}
+            timestamp=time.time(), value=value, metric_type=metric_type, tags=tags or {}
         )
 
         # 検知エンジンに追加
@@ -527,7 +545,9 @@ class AnomalyDetectionManager:
         # 結果をログ出力
         for result in results:
             if result.is_anomaly:
-                logger.warning(f"異常検知: {result.metric_type} = {result.value} (スコア: {result.anomaly_score:.3f})")
+                logger.warning(
+                    f"異常検知: {result.metric_type} = {result.value} (スコア: {result.anomaly_score:.3f})"
+                )
 
     def train_models(self, training_data: Dict[str, List[MetricData]]):
         """
@@ -538,7 +558,7 @@ class AnomalyDetectionManager:
         for metric_type, data in training_data.items():
             # 検知器の学習
             for detector in self.detectors:
-                if hasattr(detector, 'fit'):
+                if hasattr(detector, "fit"):
                     detector.fit(data)
 
             # 予測システムの学習
@@ -548,19 +568,19 @@ class AnomalyDetectionManager:
         """異常検知統計を取得"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT metric_type, COUNT(*) as count, AVG(anomaly_score) as avg_score
                     FROM anomaly_results
                     WHERE is_anomaly = 1 AND timestamp > ?
                     GROUP BY metric_type
-                """, (time.time() - 3600,))  # 過去1時間
+                """,
+                    (time.time() - 3600,),
+                )  # 過去1時間
 
                 stats = {}
                 for row in cursor.fetchall():
-                    stats[row[0]] = {
-                        'count': row[1],
-                        'avg_score': row[2]
-                    }
+                    stats[row[0]] = {"count": row[1], "avg_score": row[2]}
 
                 return stats
         except Exception as e:
@@ -571,15 +591,22 @@ class AnomalyDetectionManager:
         """異常結果を保存"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO anomaly_results
                     (metric_type, timestamp, value, anomaly_score, is_anomaly, confidence, description)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    result.metric_type, result.timestamp, result.value,
-                    result.anomaly_score, 1 if result.is_anomaly else 0,
-                    result.confidence, result.description
-                ))
+                """,
+                    (
+                        result.metric_type,
+                        result.timestamp,
+                        result.value,
+                        result.anomaly_score,
+                        1 if result.is_anomaly else 0,
+                        result.confidence,
+                        result.description,
+                    ),
+                )
                 conn.commit()
         except Exception as e:
             logger.error(f"異常結果保存エラー: {e}")

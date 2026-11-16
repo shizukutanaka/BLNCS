@@ -3,24 +3,25 @@
 パーソナライズ機能とA/Bテストフレームワーク機能を提供
 """
 
-import time
+import hashlib
 import json
+import logging
+import random
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-import logging
-import hashlib
-import random
+import time
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class UserSegment(Enum):
     """ユーザーセグメント"""
+
     NEW_USER = "new_user"
     RETURNING_USER = "returning_user"
     POWER_USER = "power_user"
@@ -31,6 +32,7 @@ class UserSegment(Enum):
 
 class ExperimentStatus(Enum):
     """実験ステータス"""
+
     DRAFT = "draft"
     RUNNING = "running"
     PAUSED = "paused"
@@ -40,6 +42,7 @@ class ExperimentStatus(Enum):
 
 class PersonalizationType(Enum):
     """パーソナライズタイプ"""
+
     CONTENT = "content"
     UI_LAYOUT = "ui_layout"
     FEATURE_AVAILABILITY = "feature_availability"
@@ -50,6 +53,7 @@ class PersonalizationType(Enum):
 @dataclass
 class UserProfile:
     """ユーザープロファイル情報"""
+
     user_id: str
     segment: UserSegment
     preferences: Dict[str, Any] = field(default_factory=dict)
@@ -63,6 +67,7 @@ class UserProfile:
 @dataclass
 class ABTestExperiment:
     """A/Bテスト実験情報"""
+
     experiment_id: str
     name: str
     description: str
@@ -83,6 +88,7 @@ class ABTestExperiment:
 @dataclass
 class ExperimentResult:
     """実験結果情報"""
+
     experiment_id: str
     variant_id: str
     user_id: str
@@ -136,7 +142,9 @@ class UserSegmentationEngine:
 
             conn.commit()
 
-    def create_user_profile(self, user_id: str, initial_segment: UserSegment = UserSegment.NEW_USER) -> UserProfile:
+    def create_user_profile(
+        self, user_id: str, initial_segment: UserSegment = UserSegment.NEW_USER
+    ) -> UserProfile:
         """
         ユーザープロファイルを作成
         Args:
@@ -145,17 +153,16 @@ class UserSegmentationEngine:
         Returns:
             作成されたプロファイル
         """
-        profile = UserProfile(
-            user_id=user_id,
-            segment=initial_segment
-        )
+        profile = UserProfile(user_id=user_id, segment=initial_segment)
 
         self.user_profiles[user_id] = profile
         self._save_user_profile(profile)
 
         return profile
 
-    def update_user_segment(self, user_id: str, new_segment: UserSegment, reason: str = ""):
+    def update_user_segment(
+        self, user_id: str, new_segment: UserSegment, reason: str = ""
+    ):
         """
         ユーザーセグメントを更新
         Args:
@@ -170,11 +177,18 @@ class UserSegmentationEngine:
 
             self._save_user_profile(self.user_profiles[user_id])
 
-            logger.info(f"ユーザーセグメント更新: {user_id} {old_segment.value} -> {new_segment.value} ({reason})")
+            logger.info(
+                f"ユーザーセグメント更新: {user_id} {old_segment.value} -> {new_segment.value} ({reason})"
+            )
 
-    def record_user_interaction(self, user_id: str, interaction_type: str,
-                               feature_name: Optional[str] = None, value: float = 1.0,
-                               metadata: Dict[str, Any] = None):
+    def record_user_interaction(
+        self,
+        user_id: str,
+        interaction_type: str,
+        feature_name: Optional[str] = None,
+        value: float = 1.0,
+        metadata: Dict[str, Any] = None,
+    ):
         """
         ユーザーインタラクションを記録
         Args:
@@ -192,14 +206,21 @@ class UserSegmentationEngine:
         # インタラクションを記録
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO user_interactions
                     (user_id, interaction_type, feature_name, value, timestamp, metadata)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    user_id, interaction_type, feature_name, value,
-                    time.time(), json.dumps(metadata) if metadata else None
-                ))
+                """,
+                    (
+                        user_id,
+                        interaction_type,
+                        feature_name,
+                        value,
+                        time.time(),
+                        json.dumps(metadata) if metadata else None,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -209,7 +230,9 @@ class UserSegmentationEngine:
         profile.last_active = time.time()
 
         if feature_name:
-            profile.feature_usage[feature_name] = profile.feature_usage.get(feature_name, 0) + int(value)
+            profile.feature_usage[feature_name] = profile.feature_usage.get(
+                feature_name, 0
+            ) + int(value)
 
         # セグメントを自動更新
         self._update_segment_based_on_behavior(profile)
@@ -222,28 +245,37 @@ class UserSegmentationEngine:
 
         if total_interactions > 100 and days_active > 30:
             if profile.segment == UserSegment.NEW_USER:
-                self.update_user_segment(profile.user_id, UserSegment.POWER_USER, "高頻度利用")
+                self.update_user_segment(
+                    profile.user_id, UserSegment.POWER_USER, "高頻度利用"
+                )
         elif total_interactions > 50 and days_active > 7:
             if profile.segment == UserSegment.NEW_USER:
-                self.update_user_segment(profile.user_id, UserSegment.RETURNING_USER, "定期利用")
+                self.update_user_segment(
+                    profile.user_id, UserSegment.RETURNING_USER, "定期利用"
+                )
 
     def _save_user_profile(self, profile: UserProfile):
         """ユーザープロファイルを保存"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO user_profiles
                     (user_id, segment, preferences, behavior_patterns, feature_usage,
                      last_active, created_at, tags)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    profile.user_id, profile.segment.value,
-                    json.dumps(profile.preferences),
-                    json.dumps(profile.behavior_patterns),
-                    json.dumps(profile.feature_usage),
-                    profile.last_active, profile.created_at,
-                    json.dumps(profile.tags)
-                ))
+                """,
+                    (
+                        profile.user_id,
+                        profile.segment.value,
+                        json.dumps(profile.preferences),
+                        json.dumps(profile.behavior_patterns),
+                        json.dumps(profile.feature_usage),
+                        profile.last_active,
+                        profile.created_at,
+                        json.dumps(profile.tags),
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -264,8 +296,7 @@ class UserSegmentationEngine:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute(
-                    "SELECT segment FROM user_profiles WHERE user_id = ?",
-                    (user_id,)
+                    "SELECT segment FROM user_profiles WHERE user_id = ?", (user_id,)
                 )
                 row = cursor.fetchone()
                 if row:
@@ -299,7 +330,9 @@ class PersonalizationEngine:
         """
         self.personalization_rules[rule_id] = rule_config
 
-    def get_personalized_content(self, user_id: str, content_type: PersonalizationType) -> Dict[str, Any]:
+    def get_personalized_content(
+        self, user_id: str, content_type: PersonalizationType
+    ) -> Dict[str, Any]:
         """
         パーソナライズされたコンテンツを取得
         Args:
@@ -322,41 +355,47 @@ class PersonalizationEngine:
             return default_config
 
         # セグメントに基づいてパーソナライズ
-        personalized_config = self._apply_personalization_rules(user_segment, content_type)
+        personalized_config = self._apply_personalization_rules(
+            user_segment, content_type
+        )
 
         self.personalization_cache[cache_key] = personalized_config
         return personalized_config
 
-    def _get_default_personalization(self, content_type: PersonalizationType) -> Dict[str, Any]:
+    def _get_default_personalization(
+        self, content_type: PersonalizationType
+    ) -> Dict[str, Any]:
         """デフォルトのパーソナライズ設定を取得"""
         defaults = {
             PersonalizationType.CONTENT: {
                 "theme": "light",
                 "language": "ja",
-                "notifications": True
+                "notifications": True,
             },
             PersonalizationType.UI_LAYOUT: {
                 "sidebar_collapsed": False,
                 "dashboard_layout": "grid",
-                "widget_order": []
+                "widget_order": [],
             },
             PersonalizationType.FEATURE_AVAILABILITY: {
                 "advanced_features": False,
-                "beta_features": False
+                "beta_features": False,
             },
             PersonalizationType.NOTIFICATION_FREQUENCY: {
                 "email_frequency": "daily",
-                "push_frequency": "immediate"
+                "push_frequency": "immediate",
             },
             PersonalizationType.DASHBOARD_WIDGETS: {
                 "visible_widgets": ["performance", "alerts"],
-                "widget_positions": {}
-            }
+                "widget_positions": {},
+            },
         }
 
         return defaults.get(content_type, {})
 
-    def _apply_personalization_rules(self, user_segment: UserSegment, content_type: PersonalizationType) -> Dict[str, Any]:
+    def _apply_personalization_rules(
+        self, user_segment: UserSegment, content_type: PersonalizationType
+    ) -> Dict[str, Any]:
         """パーソナライズルールを適用"""
         base_config = self._get_default_personalization(content_type)
 
@@ -384,11 +423,17 @@ class PersonalizationEngine:
             preferences: 設定情報
         """
         if user_id in self.segmentation_engine.user_profiles:
-            self.segmentation_engine.user_profiles[user_id].preferences.update(preferences)
-            self.segmentation_engine._save_user_profile(self.segmentation_engine.user_profiles[user_id])
+            self.segmentation_engine.user_profiles[user_id].preferences.update(
+                preferences
+            )
+            self.segmentation_engine._save_user_profile(
+                self.segmentation_engine.user_profiles[user_id]
+            )
 
             # キャッシュをクリア
-            cache_keys_to_remove = [k for k in self.personalization_cache.keys() if k.startswith(user_id)]
+            cache_keys_to_remove = [
+                k for k in self.personalization_cache.keys() if k.startswith(user_id)
+            ]
             for key in cache_keys_to_remove:
                 del self.personalization_cache[key]
 
@@ -467,21 +512,32 @@ class ABTestFramework:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO experiments
                     (experiment_id, name, description, hypothesis, variants, target_audience,
                      primary_metric, secondary_metrics, status, start_date, end_date,
                      sample_size, confidence_level, min_detectable_effect, results)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    experiment.experiment_id, experiment.name, experiment.description,
-                    experiment.hypothesis, json.dumps(experiment.variants),
-                    json.dumps(experiment.target_audience), experiment.primary_metric,
-                    json.dumps(experiment.secondary_metrics), experiment.status.value,
-                    experiment.start_date, experiment.end_date, experiment.sample_size,
-                    experiment.confidence_level, experiment.min_detectable_effect,
-                    json.dumps(experiment.results)
-                ))
+                """,
+                    (
+                        experiment.experiment_id,
+                        experiment.name,
+                        experiment.description,
+                        experiment.hypothesis,
+                        json.dumps(experiment.variants),
+                        json.dumps(experiment.target_audience),
+                        experiment.primary_metric,
+                        json.dumps(experiment.secondary_metrics),
+                        experiment.status.value,
+                        experiment.start_date,
+                        experiment.end_date,
+                        experiment.sample_size,
+                        experiment.confidence_level,
+                        experiment.min_detectable_effect,
+                        json.dumps(experiment.results),
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -503,14 +559,16 @@ class ABTestFramework:
                 with sqlite3.connect(self.db_path) as conn:
                     conn.execute(
                         "UPDATE experiments SET status = ?, start_date = ? WHERE experiment_id = ?",
-                        (ExperimentStatus.RUNNING.value, time.time(), experiment_id)
+                        (ExperimentStatus.RUNNING.value, time.time(), experiment_id),
                     )
                     conn.commit()
 
             except Exception as e:
                 logger.error(f"実験開始エラー: {e}")
 
-    def assign_user_to_experiment(self, user_id: str, experiment_id: str) -> Optional[str]:
+    def assign_user_to_experiment(
+        self, user_id: str, experiment_id: str
+    ) -> Optional[str]:
         """
         ユーザーを実験に割り当て
         Args:
@@ -545,11 +603,14 @@ class ABTestFramework:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO experiment_assignments
                     (user_id, experiment_id, variant_id, assigned_at)
                     VALUES (?, ?, ?, ?)
-                """, (user_id, experiment_id, selected_variant["id"], time.time()))
+                """,
+                    (user_id, experiment_id, selected_variant["id"], time.time()),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -557,8 +618,13 @@ class ABTestFramework:
 
         return selected_variant["id"]
 
-    def record_experiment_result(self, experiment_id: str, user_id: str,
-                               metrics: Dict[str, float], conversion_events: List[str] = None):
+    def record_experiment_result(
+        self,
+        experiment_id: str,
+        user_id: str,
+        metrics: Dict[str, float],
+        conversion_events: List[str] = None,
+    ):
         """
         実験結果を記録
         Args:
@@ -580,7 +646,7 @@ class ABTestFramework:
             variant_id=variant_id,
             user_id=user_id,
             metrics=metrics,
-            conversion_events=conversion_events or []
+            conversion_events=conversion_events or [],
         )
 
         self.results[experiment_id].append(result)
@@ -588,16 +654,21 @@ class ABTestFramework:
         # データベースに保存
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO experiment_results
                     (experiment_id, variant_id, user_id, metrics, conversion_events, timestamp)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    experiment_id, variant_id, user_id,
-                    json.dumps(metrics),
-                    json.dumps(conversion_events or []),
-                    time.time()
-                ))
+                """,
+                    (
+                        experiment_id,
+                        variant_id,
+                        user_id,
+                        json.dumps(metrics),
+                        json.dumps(conversion_events or []),
+                        time.time(),
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -629,7 +700,7 @@ class ABTestFramework:
         analysis = {
             "experiment_id": experiment_id,
             "total_participants": len(results),
-            "variant_analysis": {}
+            "variant_analysis": {},
         }
 
         for variant_id, variant_data in variant_results.items():
@@ -645,15 +716,21 @@ class ABTestFramework:
                 if values:
                     variant_analysis[metric_name] = {
                         "mean": sum(values) / len(values),
-                        "std": (sum((x - sum(values)/len(values))**2 for x in values) / len(values))**0.5,
-                        "count": len(values)
+                        "std": (
+                            sum((x - sum(values) / len(values)) ** 2 for x in values)
+                            / len(values)
+                        )
+                        ** 0.5,
+                        "count": len(values),
                     }
 
             analysis["variant_analysis"][variant_id] = variant_analysis
 
         return analysis
 
-    def _check_target_audience(self, user_id: str, target_audience: Dict[str, Any]) -> bool:
+    def _check_target_audience(
+        self, user_id: str, target_audience: Dict[str, Any]
+    ) -> bool:
         """ターゲットオーディエンスをチェック"""
         # 簡易実装：セグメントチェックのみ
         required_segment = target_audience.get("segment")
@@ -694,24 +771,30 @@ class UXOptimizationManager:
     def _setup_default_personalization_rules(self):
         """デフォルトのパーソナライズルールを設定"""
         # 新規ユーザーのシンプルなUI
-        self.personalization_engine.set_personalization_rule("new_user_ui", {
-            "segment": UserSegment.NEW_USER.value,
-            "ui_layout": {
-                "sidebar_collapsed": True,
-                "show_tooltips": True,
-                "dashboard_layout": "simple"
-            }
-        })
+        self.personalization_engine.set_personalization_rule(
+            "new_user_ui",
+            {
+                "segment": UserSegment.NEW_USER.value,
+                "ui_layout": {
+                    "sidebar_collapsed": True,
+                    "show_tooltips": True,
+                    "dashboard_layout": "simple",
+                },
+            },
+        )
 
         # パワーユーザーの詳細な機能
-        self.personalization_engine.set_personalization_rule("power_user_features", {
-            "segment": UserSegment.POWER_USER.value,
-            "feature_availability": {
-                "advanced_features": True,
-                "custom_dashboards": True,
-                "api_access": True
-            }
-        })
+        self.personalization_engine.set_personalization_rule(
+            "power_user_features",
+            {
+                "segment": UserSegment.POWER_USER.value,
+                "feature_availability": {
+                    "advanced_features": True,
+                    "custom_dashboards": True,
+                    "api_access": True,
+                },
+            },
+        )
 
     def _create_default_experiments(self):
         """デフォルトの実験を作成"""
@@ -722,13 +805,21 @@ class UXOptimizationManager:
             description="異なるダッシュボードレイアウトの効果を比較",
             hypothesis="グリッドレイアウトの方がリストレイアウトよりユーザーエンゲージメントが高い",
             variants=[
-                {"id": "grid_layout", "name": "グリッドレイアウト", "config": {"layout": "grid"}},
-                {"id": "list_layout", "name": "リストレイアウト", "config": {"layout": "list"}}
+                {
+                    "id": "grid_layout",
+                    "name": "グリッドレイアウト",
+                    "config": {"layout": "grid"},
+                },
+                {
+                    "id": "list_layout",
+                    "name": "リストレイアウト",
+                    "config": {"layout": "list"},
+                },
             ],
             target_audience={"segment": UserSegment.NEW_USER.value},
             primary_metric="session_duration",
             secondary_metrics=["page_views", "feature_usage"],
-            sample_size=500
+            sample_size=500,
         )
 
         self.ab_test_framework.create_experiment(dashboard_experiment)
@@ -737,7 +828,9 @@ class UXOptimizationManager:
         """最適化システムを開始"""
         if not self.is_optimization_active:
             self.is_optimization_active = True
-            self.optimization_thread = threading.Thread(target=self._optimization_loop, daemon=True)
+            self.optimization_thread = threading.Thread(
+                target=self._optimization_loop, daemon=True
+            )
             self.optimization_thread.start()
 
     def stop_optimization_system(self):
@@ -746,7 +839,9 @@ class UXOptimizationManager:
         if self.optimization_thread:
             self.optimization_thread.join()
 
-    def get_personalized_experience(self, user_id: str, experience_type: PersonalizationType) -> Dict[str, Any]:
+    def get_personalized_experience(
+        self, user_id: str, experience_type: PersonalizationType
+    ) -> Dict[str, Any]:
         """
         パーソナライズされた体験を取得
         Args:
@@ -755,10 +850,18 @@ class UXOptimizationManager:
         Returns:
             パーソナライズ設定
         """
-        return self.personalization_engine.get_personalized_content(user_id, experience_type)
+        return self.personalization_engine.get_personalized_content(
+            user_id, experience_type
+        )
 
-    def record_user_behavior(self, user_id: str, action: str, feature: Optional[str] = None,
-                           value: float = 1.0, metadata: Dict[str, Any] = None):
+    def record_user_behavior(
+        self,
+        user_id: str,
+        action: str,
+        feature: Optional[str] = None,
+        value: float = 1.0,
+        metadata: Dict[str, Any] = None,
+    ):
         """
         ユーザー行動を記録
         Args:
@@ -768,9 +871,13 @@ class UXOptimizationManager:
             value: 値
             metadata: メタデータ
         """
-        self.segmentation_engine.record_user_interaction(user_id, action, feature, value, metadata)
+        self.segmentation_engine.record_user_interaction(
+            user_id, action, feature, value, metadata
+        )
 
-    def assign_user_to_experiment(self, user_id: str, experiment_id: str) -> Optional[str]:
+    def assign_user_to_experiment(
+        self, user_id: str, experiment_id: str
+    ) -> Optional[str]:
         """
         ユーザーを実験に割り当て
         Args:
@@ -781,8 +888,13 @@ class UXOptimizationManager:
         """
         return self.ab_test_framework.assign_user_to_experiment(user_id, experiment_id)
 
-    def record_experiment_metrics(self, experiment_id: str, user_id: str,
-                                metrics: Dict[str, float], events: List[str] = None):
+    def record_experiment_metrics(
+        self,
+        experiment_id: str,
+        user_id: str,
+        metrics: Dict[str, float],
+        events: List[str] = None,
+    ):
         """
         実験メトリクスを記録
         Args:
@@ -791,16 +903,23 @@ class UXOptimizationManager:
             metrics: 測定指標
             events: イベントリスト
         """
-        self.ab_test_framework.record_experiment_result(experiment_id, user_id, metrics, events)
+        self.ab_test_framework.record_experiment_result(
+            experiment_id, user_id, metrics, events
+        )
 
     def get_optimization_insights(self) -> Dict[str, Any]:
         """最適化洞察を取得"""
         return {
             "total_users": len(self.segmentation_engine.user_profiles),
             "segment_distribution": self._get_segment_distribution(),
-            "active_experiments": len([exp for exp in self.ab_test_framework.experiments.values()
-                                     if exp.status == ExperimentStatus.RUNNING]),
-            "personalization_coverage": self._calculate_personalization_coverage()
+            "active_experiments": len(
+                [
+                    exp
+                    for exp in self.ab_test_framework.experiments.values()
+                    if exp.status == ExperimentStatus.RUNNING
+                ]
+            ),
+            "personalization_coverage": self._calculate_personalization_coverage(),
         }
 
     def _get_segment_distribution(self) -> Dict[str, int]:
@@ -821,7 +940,9 @@ class UXOptimizationManager:
 
         for user_id in self.segmentation_engine.user_profiles.keys():
             try:
-                self.personalization_engine.get_personalized_content(user_id, PersonalizationType.CONTENT)
+                self.personalization_engine.get_personalized_content(
+                    user_id, PersonalizationType.CONTENT
+                )
                 personalized_users += 1
             except:
                 pass
@@ -855,10 +976,14 @@ def example_usage():
 
         # 行動記録
         for action in ["login", "dashboard_view", "feature_use", "logout"]:
-            manager.record_user_behavior(user_id, action, "dashboard" if "dashboard" in action else None)
+            manager.record_user_behavior(
+                user_id, action, "dashboard" if "dashboard" in action else None
+            )
 
     # パーソナライズ設定取得
-    personalization = manager.get_personalized_experience("user_1", PersonalizationType.UI_LAYOUT)
+    personalization = manager.get_personalized_experience(
+        "user_1", PersonalizationType.UI_LAYOUT
+    )
     print(f"パーソナライズ設定: {personalization}")
 
     # 実験割り当て
@@ -867,9 +992,7 @@ def example_usage():
 
     # 実験結果記録
     manager.record_experiment_metrics(
-        "dashboard_layout_test",
-        "user_1",
-        {"session_duration": 300.0, "page_views": 15}
+        "dashboard_layout_test", "user_1", {"session_duration": 300.0, "page_views": 15}
     )
 
     # 洞察取得

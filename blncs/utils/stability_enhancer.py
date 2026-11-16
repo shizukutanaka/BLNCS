@@ -4,29 +4,31 @@ BLNCS System Stability Enhancer
 Lightweight system stability improvements
 """
 
+import json
 import os
 import sys
 import time
-import json
-from typing import Dict, Any, Optional
 from pathlib import Path
+from typing import Any, Dict, Optional
+
 
 def optimize_imports():
     """Optimize Python imports for better performance"""
     try:
         # Pre-import commonly used modules
-        import sqlite3
-        import json
-        import hashlib
-        import logging
-
         # Set optimal GC thresholds
         import gc
+        import hashlib
+        import json
+        import logging
+        import sqlite3
+
         gc.set_threshold(500, 10, 10)
 
         return True
     except Exception:
         return False
+
 
 def validate_environment():
     """Validate system environment"""
@@ -40,7 +42,8 @@ def validate_environment():
     # Check available disk space
     try:
         import shutil
-        disk_usage = shutil.disk_usage('.')
+
+        disk_usage = shutil.disk_usage(".")
         free_gb = disk_usage.free / (1024**3)
         if free_gb < 1:
             issues.append(f"Low disk space: {free_gb:.1f} GB free")
@@ -48,7 +51,7 @@ def validate_environment():
         pass
 
     # Check critical directories
-    critical_dirs = ['config', 'data', 'logs']
+    critical_dirs = ["config", "data", "logs"]
     for dir_name in critical_dirs:
         if not Path(dir_name).exists():
             try:
@@ -58,8 +61,10 @@ def validate_environment():
 
     return issues
 
+
 def enhance_error_handling():
     """Enhance global error handling"""
+
     def custom_excepthook(exc_type, exc_value, exc_traceback):
         # Log critical errors
         error_msg = f"Unhandled exception: {exc_type.__name__}: {exc_value}"
@@ -67,7 +72,7 @@ def enhance_error_handling():
 
         # Try to log to file
         try:
-            with open('logs/error.log', 'a') as f:
+            with open("logs/error.log", "a") as f:
                 f.write(f"{time.ctime()}: {error_msg}\n")
         except Exception:
             pass
@@ -77,14 +82,15 @@ def enhance_error_handling():
 
     sys.excepthook = custom_excepthook
 
+
 def setup_lightweight_components():
     """Setup lightweight system components"""
     try:
         # Import and initialize lightweight components
-        from blncs.core.lightweight_logger import get_lightweight_logger
-        from blncs.core.lightweight_config import get_lightweight_config_manager
         from blncs.core.lightweight_cache import get_lightweight_cache
+        from blncs.core.lightweight_config import get_lightweight_config_manager
         from blncs.core.lightweight_error_handler import get_lightweight_error_handler
+        from blncs.core.lightweight_logger import get_lightweight_logger
         from blncs.monitoring.lightweight_monitor import get_lightweight_monitor
 
         # Initialize components
@@ -99,24 +105,26 @@ def setup_lightweight_components():
         print(f"Warning: Could not initialize lightweight components: {e}")
         return False
 
+
 def create_system_report():
     """Create system status report"""
     report = {
-        'timestamp': time.time(),
-        'python_version': sys.version,
-        'platform': sys.platform,
-        'working_directory': os.getcwd(),
-        'components_initialized': False,
-        'environment_issues': []
+        "timestamp": time.time(),
+        "python_version": sys.version,
+        "platform": sys.platform,
+        "working_directory": os.getcwd(),
+        "components_initialized": False,
+        "environment_issues": [],
     }
 
     # Check environment
-    report['environment_issues'] = validate_environment()
+    report["environment_issues"] = validate_environment()
 
     # Check components
-    report['components_initialized'] = setup_lightweight_components()
+    report["components_initialized"] = setup_lightweight_components()
 
     return report
+
 
 def main():
     """Main stability enhancement function"""
@@ -148,13 +156,16 @@ def main():
 
     # Create system report
     report = create_system_report()
-    print(f"✅ System report created: {len(report['environment_issues'])} issues, components: {report['components_initialized']}")
+    print(
+        f"✅ System report created: {len(report['environment_issues'])} issues, components: {report['components_initialized']}"
+    )
 
     print("🎉 System stability enhancement completed!")
 
     return report
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     report = main()
     if report:
         print(f"\n📊 System Report Summary:")

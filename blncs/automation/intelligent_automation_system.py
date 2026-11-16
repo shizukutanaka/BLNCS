@@ -3,24 +3,27 @@
 AI駆動のプロセス自動化と最適化機能を提供
 """
 
-import time
+import asyncio
 import json
+import logging
+import random
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable
+import time
+import uuid
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
-import asyncio
+from typing import Any, Callable, Dict, List, Optional
+
 import numpy as np
-import random
-from collections import defaultdict, deque
 
 logger = logging.getLogger(__name__)
 
 
 class AutomationType(Enum):
     """自動化タイプ"""
+
     RULE_BASED = "rule_based"
     MACHINE_LEARNING = "machine_learning"
     NATURAL_LANGUAGE = "natural_language"
@@ -31,6 +34,7 @@ class AutomationType(Enum):
 
 class ProcessStatus(Enum):
     """プロセスステータス"""
+
     IDLE = "idle"
     RUNNING = "running"
     WAITING = "waiting"
@@ -42,6 +46,7 @@ class ProcessStatus(Enum):
 @dataclass
 class AutomationRule:
     """自動化ルール情報"""
+
     rule_id: str
     name: str
     automation_type: AutomationType
@@ -57,6 +62,7 @@ class AutomationRule:
 @dataclass
 class AutomatedProcess:
     """自動化プロセス情報"""
+
     process_id: str
     name: str
     description: str
@@ -72,6 +78,7 @@ class AutomatedProcess:
 @dataclass
 class ProcessExecution:
     """プロセス実行情報"""
+
     execution_id: str
     process_id: str
     input_data: Any
@@ -101,7 +108,9 @@ class AIRuleEngine:
         """
         self.automation_rules[rule.rule_id] = rule
 
-    def evaluate_rule_conditions(self, rule: AutomationRule, context: Dict[str, Any]) -> bool:
+    def evaluate_rule_conditions(
+        self, rule: AutomationRule, context: Dict[str, Any]
+    ) -> bool:
         """
         ルール条件を評価
         Args:
@@ -145,7 +154,9 @@ class AIRuleEngine:
 
         return True
 
-    def _check_pattern_match(self, context: Dict[str, Any], pattern: Dict[str, Any]) -> bool:
+    def _check_pattern_match(
+        self, context: Dict[str, Any], pattern: Dict[str, Any]
+    ) -> bool:
         """パターンマッチングをチェック"""
         # 簡易的なパターンチェック
         return True  # 実装は後で追加
@@ -187,7 +198,9 @@ class IntelligentProcessOptimizer:
         self.optimization_models: Dict[str, Any] = {}
         self.process_metrics: Dict[str, List[float]] = defaultdict(list)
 
-    def analyze_process_efficiency(self, process_id: str, execution_history: List[ProcessExecution]) -> Dict[str, Any]:
+    def analyze_process_efficiency(
+        self, process_id: str, execution_history: List[ProcessExecution]
+    ) -> Dict[str, Any]:
         """
         プロセス効率を分析
         Args:
@@ -200,7 +213,11 @@ class IntelligentProcessOptimizer:
             return {"error": "実行履歴がありません"}
 
         # 実行時間を分析
-        execution_times = [exec_.completed_at - exec_.started_at for exec_ in execution_history if exec_.completed_at]
+        execution_times = [
+            exec_.completed_at - exec_.started_at
+            for exec_ in execution_history
+            if exec_.completed_at
+        ]
 
         if not execution_times:
             return {"error": "完了した実行がありません"}
@@ -226,41 +243,63 @@ class IntelligentProcessOptimizer:
             "max_execution_time": max_time,
             "efficiency_score": efficiency_score,
             "bottlenecks": bottlenecks,
-            "optimization_suggestions": self._generate_optimization_suggestions(bottlenecks, efficiency_score)
+            "optimization_suggestions": self._generate_optimization_suggestions(
+                bottlenecks, efficiency_score
+            ),
         }
 
-    def _detect_bottlenecks(self, executions: List[ProcessExecution]) -> List[Dict[str, Any]]:
+    def _detect_bottlenecks(
+        self, executions: List[ProcessExecution]
+    ) -> List[Dict[str, Any]]:
         """ボトルネックを検出"""
         bottlenecks = []
 
         for execution in executions:
             for i, step_result in enumerate(execution.step_results):
-                if step_result.get("duration", 0) > 60:  # 60秒以上のステップをボトルネックとする
-                    bottlenecks.append({
-                        "step": i + 1,
-                        "step_name": step_result.get("step_name", f"ステップ{i+1}"),
-                        "avg_duration": step_result.get("duration", 0),
-                        "severity": "high" if step_result.get("duration", 0) > 120 else "medium"
-                    })
+                if (
+                    step_result.get("duration", 0) > 60
+                ):  # 60秒以上のステップをボトルネックとする
+                    bottlenecks.append(
+                        {
+                            "step": i + 1,
+                            "step_name": step_result.get("step_name", f"ステップ{i+1}"),
+                            "avg_duration": step_result.get("duration", 0),
+                            "severity": (
+                                "high"
+                                if step_result.get("duration", 0) > 120
+                                else "medium"
+                            ),
+                        }
+                    )
 
         return bottlenecks
 
-    def _generate_optimization_suggestions(self, bottlenecks: List[Dict[str, Any]], efficiency_score: float) -> List[str]:
+    def _generate_optimization_suggestions(
+        self, bottlenecks: List[Dict[str, Any]], efficiency_score: float
+    ) -> List[str]:
         """最適化提案を生成"""
         suggestions = []
 
         if efficiency_score < 70:
-            suggestions.append("プロセス全体の実行時間を短縮するための並列処理を検討してください")
+            suggestions.append(
+                "プロセス全体の実行時間を短縮するための並列処理を検討してください"
+            )
 
         if bottlenecks:
-            suggestions.append(f"ボトルネックとなっているステップの最適化を優先してください（{len(bottlenecks)}箇所検出）")
+            suggestions.append(
+                f"ボトルネックとなっているステップの最適化を優先してください（{len(bottlenecks)}箇所検出）"
+            )
 
         if efficiency_score > 90:
-            suggestions.append("効率が高いプロセスです。スケーラビリティの向上を検討してください")
+            suggestions.append(
+                "効率が高いプロセスです。スケーラビリティの向上を検討してください"
+            )
 
         return suggestions
 
-    def predict_optimal_execution_time(self, process_id: str, input_data_size: int) -> float:
+    def predict_optimal_execution_time(
+        self, process_id: str, input_data_size: int
+    ) -> float:
         """
         最適実行時間を予測
         Args:
@@ -345,15 +384,13 @@ class IntelligentAutomationManager:
                 name="高CPU使用率アラート",
                 automation_type=AutomationType.RULE_BASED,
                 trigger_conditions={
-                    "data_conditions": {
-                        "cpu_usage": {"operator": "gt", "value": 80.0}
-                    }
+                    "data_conditions": {"cpu_usage": {"operator": "gt", "value": 80.0}}
                 },
                 action_config={
                     "action_type": "alert",
                     "recipients": ["admin"],
-                    "message": "CPU使用率が80%を超えています"
-                }
+                    "message": "CPU使用率が80%を超えています",
+                },
             ),
             AutomationRule(
                 rule_id="failed_transaction_retry",
@@ -367,9 +404,9 @@ class IntelligentAutomationManager:
                 action_config={
                     "action_type": "retry",
                     "max_retries": 3,
-                    "retry_interval": 60
-                }
-            )
+                    "retry_interval": 60,
+                },
+            ),
         ]
 
         for rule in rules:
@@ -384,11 +421,23 @@ class IntelligentAutomationManager:
                 description="新規ユーザーの登録からアクティベーションまでを自動化",
                 workflow_steps=[
                     {"step": "validate_input", "type": "validation", "config": {}},
-                    {"step": "create_account", "type": "database_operation", "config": {}},
-                    {"step": "send_welcome_email", "type": "notification", "config": {}},
-                    {"step": "activate_account", "type": "system_operation", "config": {}}
+                    {
+                        "step": "create_account",
+                        "type": "database_operation",
+                        "config": {},
+                    },
+                    {
+                        "step": "send_welcome_email",
+                        "type": "notification",
+                        "config": {},
+                    },
+                    {
+                        "step": "activate_account",
+                        "type": "system_operation",
+                        "config": {},
+                    },
                 ],
-                automation_rules=["user_validation_rule", "notification_rule"]
+                automation_rules=["user_validation_rule", "notification_rule"],
             ),
             AutomatedProcess(
                 process_id="data_backup",
@@ -398,10 +447,14 @@ class IntelligentAutomationManager:
                     {"step": "check_disk_space", "type": "system_check", "config": {}},
                     {"step": "create_backup", "type": "backup_operation", "config": {}},
                     {"step": "verify_backup", "type": "verification", "config": {}},
-                    {"step": "cleanup_old_backups", "type": "maintenance", "config": {}}
+                    {
+                        "step": "cleanup_old_backups",
+                        "type": "maintenance",
+                        "config": {},
+                    },
                 ],
-                automation_rules=["backup_validation_rule", "cleanup_rule"]
-            )
+                automation_rules=["backup_validation_rule", "cleanup_rule"],
+            ),
         ]
 
         for process in processes:
@@ -418,7 +471,9 @@ class IntelligentAutomationManager:
         self.is_automation_active = False
         logger.info("インテリジェントオートメーションシステムを停止しました")
 
-    def create_automated_process(self, name: str, description: str, workflow_steps: List[Dict[str, Any]]) -> str:
+    def create_automated_process(
+        self, name: str, description: str, workflow_steps: List[Dict[str, Any]]
+    ) -> str:
         """
         自動化プロセスを作成
         Args:
@@ -434,23 +489,33 @@ class IntelligentAutomationManager:
             process_id=process_id,
             name=name,
             description=description,
-            workflow_steps=workflow_steps
+            workflow_steps=workflow_steps,
         )
 
         self.automated_processes[process.process_id] = process
 
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO automated_processes
                     (process_id, name, description, workflow_steps, input_schema, output_schema,
                      automation_rules, status, created_at, last_run)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    process_id, name, description, json.dumps(workflow_steps),
-                    json.dumps({}), json.dumps({}), json.dumps([]),
-                    process.status.value, process.created_at, process.last_run
-                ))
+                """,
+                    (
+                        process_id,
+                        name,
+                        description,
+                        json.dumps(workflow_steps),
+                        json.dumps({}),
+                        json.dumps({}),
+                        json.dumps([]),
+                        process.status.value,
+                        process.created_at,
+                        process.last_run,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -473,9 +538,7 @@ class IntelligentAutomationManager:
         execution_id = str(uuid.uuid4())
 
         execution = ProcessExecution(
-            execution_id=execution_id,
-            process_id=process_id,
-            input_data=input_data
+            execution_id=execution_id, process_id=process_id, input_data=input_data
         )
 
         self.process_executions[execution_id] = execution
@@ -495,15 +558,19 @@ class IntelligentAutomationManager:
             for i, step in enumerate(process.workflow_steps):
                 execution.current_step = i
 
-                step_result = await self._execute_workflow_step(step, execution.input_data)
+                step_result = await self._execute_workflow_step(
+                    step, execution.input_data
+                )
 
-                execution.step_results.append({
-                    "step": i + 1,
-                    "step_name": step.get("step", f"ステップ{i+1}"),
-                    "status": "completed",
-                    "duration": time.time() - execution.started_at,
-                    "result": step_result
-                })
+                execution.step_results.append(
+                    {
+                        "step": i + 1,
+                        "step_name": step.get("step", f"ステップ{i+1}"),
+                        "status": "completed",
+                        "duration": time.time() - execution.started_at,
+                        "result": step_result,
+                    }
+                )
 
                 # ステップ間の待機（簡易版）
                 await asyncio.sleep(0.1)
@@ -524,7 +591,9 @@ class IntelligentAutomationManager:
 
             logger.error(f"プロセス実行エラー: {process.name} - {e}")
 
-    async def _execute_workflow_step(self, step: Dict[str, Any], input_data: Any) -> Any:
+    async def _execute_workflow_step(
+        self, step: Dict[str, Any], input_data: Any
+    ) -> Any:
         """ワークフローステップを実行"""
         step_type = step.get("type")
 
@@ -539,17 +608,23 @@ class IntelligentAutomationManager:
         else:
             return {"status": "skipped", "reason": "未知のステップタイプ"}
 
-    async def _execute_validation_step(self, step: Dict[str, Any], input_data: Any) -> Any:
+    async def _execute_validation_step(
+        self, step: Dict[str, Any], input_data: Any
+    ) -> Any:
         """検証ステップを実行"""
         await asyncio.sleep(0.1)  # 検証時間をシミュレーション
         return {"status": "validated", "data": input_data}
 
-    async def _execute_database_step(self, step: Dict[str, Any], input_data: Any) -> Any:
+    async def _execute_database_step(
+        self, step: Dict[str, Any], input_data: Any
+    ) -> Any:
         """データベースステップを実行"""
         await asyncio.sleep(0.2)  # データベース処理時間をシミュレーション
         return {"status": "inserted", "records_affected": 1}
 
-    async def _execute_notification_step(self, step: Dict[str, Any], input_data: Any) -> Any:
+    async def _execute_notification_step(
+        self, step: Dict[str, Any], input_data: Any
+    ) -> Any:
         """通知ステップを実行"""
         await asyncio.sleep(0.05)  # 通知時間をシミュレーション
         return {"status": "sent", "recipient": "user"}
@@ -575,7 +650,9 @@ class IntelligentAutomationManager:
                 # 自動化アクションを実行
                 asyncio.create_task(self._execute_automation_action(rule, event_data))
 
-    async def _execute_automation_action(self, rule: AutomationRule, context: Dict[str, Any]):
+    async def _execute_automation_action(
+        self, rule: AutomationRule, context: Dict[str, Any]
+    ):
         """自動化アクションを実行"""
         try:
             action_config = rule.action_config
@@ -592,7 +669,9 @@ class IntelligentAutomationManager:
                 max_retries = action_config.get("max_retries", 3)
                 retry_interval = action_config.get("retry_interval", 60)
 
-                logger.info(f"自動化リトライ実行: {max_retries}回、{retry_interval}秒間隔")
+                logger.info(
+                    f"自動化リトライ実行: {max_retries}回、{retry_interval}秒間隔"
+                )
 
             # ルール統計を更新
             rule.execution_count += 1
@@ -615,8 +694,14 @@ class IntelligentAutomationManager:
             "is_active": self.is_automation_active,
             "total_rules": len(self.ai_rule_engine.automation_rules),
             "total_processes": len(self.automated_processes),
-            "active_executions": len([e for e in self.process_executions.values() if e.status == ProcessStatus.RUNNING]),
-            "rule_performance": dict(self.ai_rule_engine.rule_performance)
+            "active_executions": len(
+                [
+                    e
+                    for e in self.process_executions.values()
+                    if e.status == ProcessStatus.RUNNING
+                ]
+            ),
+            "rule_performance": dict(self.ai_rule_engine.rule_performance),
         }
 
     def analyze_process_performance(self, process_id: str) -> Dict[str, Any]:
@@ -627,7 +712,9 @@ class IntelligentAutomationManager:
         Returns:
             性能分析結果
         """
-        executions = [e for e in self.process_executions.values() if e.process_id == process_id]
+        executions = [
+            e for e in self.process_executions.values() if e.process_id == process_id
+        ]
 
         return self.process_optimizer.analyze_process_efficiency(process_id, executions)
 
@@ -650,8 +737,8 @@ def example_usage():
             {"step": "validate_order", "type": "validation", "config": {}},
             {"step": "process_payment", "type": "payment_operation", "config": {}},
             {"step": "update_inventory", "type": "inventory_operation", "config": {}},
-            {"step": "send_confirmation", "type": "notification", "config": {}}
-        ]
+            {"step": "send_confirmation", "type": "notification", "config": {}},
+        ],
     )
 
     print(f"プロセス作成: {process_id}")

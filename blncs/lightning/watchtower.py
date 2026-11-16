@@ -3,22 +3,23 @@ BLNCS Lightning Watchtower
 Lightweight watchtower functionality for Lightning Network security
 """
 
-import time
 import json
 import logging
 import threading
-from typing import Dict, List, Any, Optional, Set
-from dataclasses import dataclass, asdict
-from pathlib import Path
+import time
 from collections import defaultdict, deque
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
 
 
 @dataclass
 class ChannelAlert:
     """Channel security alert"""
+
     channel_id: str
     alert_type: str  # 'breach_attempt', 'old_state', 'force_close'
-    severity: str    # 'low', 'medium', 'high', 'critical'
+    severity: str  # 'low', 'medium', 'high', 'critical'
     description: str
     detected_at: float
     block_height: int
@@ -29,6 +30,7 @@ class ChannelAlert:
 @dataclass
 class ChannelState:
     """Tracked channel state"""
+
     channel_id: str
     local_balance: int
     remote_balance: int
@@ -65,19 +67,23 @@ class LightningWatchtower:
         # Load monitored channels
         if self.channels_file.exists():
             try:
-                with open(self.channels_file, 'r') as f:
+                with open(self.channels_file, "r") as f:
                     data = json.load(f)
                     for channel_id, channel_data in data.items():
-                        self.monitored_channels[channel_id] = ChannelState(**channel_data)
+                        self.monitored_channels[channel_id] = ChannelState(
+                            **channel_data
+                        )
 
-                self.logger.info(f"Loaded {len(self.monitored_channels)} monitored channels")
+                self.logger.info(
+                    f"Loaded {len(self.monitored_channels)} monitored channels"
+                )
             except Exception as e:
                 self.logger.error(f"Failed to load channels: {e}")
 
         # Load alerts
         if self.alerts_file.exists():
             try:
-                with open(self.alerts_file, 'r') as f:
+                with open(self.alerts_file, "r") as f:
                     data = json.load(f)
                     for alert_data in data:
                         self.alerts.append(ChannelAlert(**alert_data))
@@ -94,20 +100,25 @@ class LightningWatchtower:
                 channel_id: asdict(channel)
                 for channel_id, channel in self.monitored_channels.items()
             }
-            with open(self.channels_file, 'w') as f:
+            with open(self.channels_file, "w") as f:
                 json.dump(channel_data, f, indent=2)
 
             # Save alerts
             alert_data = [asdict(alert) for alert in self.alerts]
-            with open(self.alerts_file, 'w') as f:
+            with open(self.alerts_file, "w") as f:
                 json.dump(alert_data, f, indent=2)
 
         except Exception as e:
             self.logger.error(f"Failed to save data: {e}")
 
-    def add_channel_watch(self, channel_id: str, node_pubkey: str,
-                         local_balance: int, remote_balance: int,
-                         commitment_number: int = 0):
+    def add_channel_watch(
+        self,
+        channel_id: str,
+        node_pubkey: str,
+        local_balance: int,
+        remote_balance: int,
+        commitment_number: int = 0,
+    ):
         """Add channel to watchtower monitoring"""
         channel_state = ChannelState(
             channel_id=channel_id,
@@ -115,7 +126,7 @@ class LightningWatchtower:
             remote_balance=remote_balance,
             commitment_number=commitment_number,
             last_update=time.time(),
-            node_pubkey=node_pubkey
+            node_pubkey=node_pubkey,
         )
 
         self.monitored_channels[channel_id] = channel_state
@@ -130,8 +141,13 @@ class LightningWatchtower:
             self._save_data()
             self.logger.info(f"Removed channel from watchtower: {channel_id[:16]}...")
 
-    def update_channel_state(self, channel_id: str, local_balance: int,
-                           remote_balance: int, commitment_number: int):
+    def update_channel_state(
+        self,
+        channel_id: str,
+        local_balance: int,
+        remote_balance: int,
+        commitment_number: int,
+    ):
         """Update channel state information"""
         if channel_id not in self.monitored_channels:
             self.logger.warning(f"Channel not monitored: {channel_id[:16]}...")
@@ -146,7 +162,7 @@ class LightningWatchtower:
                 "old_state",
                 "high",
                 f"Old commitment state detected: {commitment_number} < {channel.commitment_number}",
-                0  # Block height would be retrieved from chain
+                0,  # Block height would be retrieved from chain
             )
 
         # Detect significant balance changes
@@ -157,7 +173,7 @@ class LightningWatchtower:
                 "large_balance_change",
                 "medium",
                 f"Large balance change detected: {balance_change} sats",
-                0
+                0,
             )
 
         # Update state
@@ -168,8 +184,15 @@ class LightningWatchtower:
 
         self._save_data()
 
-    def _create_alert(self, channel_id: str, alert_type: str, severity: str,
-                     description: str, block_height: int, tx_id: str = None):
+    def _create_alert(
+        self,
+        channel_id: str,
+        alert_type: str,
+        severity: str,
+        description: str,
+        block_height: int,
+        tx_id: str = None,
+    ):
         """Create and process security alert"""
         alert = ChannelAlert(
             channel_id=channel_id,
@@ -178,7 +201,7 @@ class LightningWatchtower:
             description=description,
             detected_at=time.time(),
             block_height=block_height,
-            tx_id=tx_id
+            tx_id=tx_id,
         )
 
         self.alerts.append(alert)
@@ -186,10 +209,10 @@ class LightningWatchtower:
 
         # Log alert
         log_level = {
-            'low': self.logger.info,
-            'medium': self.logger.warning,
-            'high': self.logger.error,
-            'critical': self.logger.critical
+            "low": self.logger.info,
+            "medium": self.logger.warning,
+            "high": self.logger.error,
+            "critical": self.logger.critical,
         }.get(severity, self.logger.info)
 
         log_level(f"WATCHTOWER ALERT [{severity.upper()}]: {description}")
@@ -211,7 +234,9 @@ class LightningWatchtower:
             return
 
         self.monitoring_active = True
-        self.monitor_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
+        self.monitor_thread = threading.Thread(
+            target=self._monitoring_loop, daemon=True
+        )
         self.monitor_thread.start()
 
         self.logger.info("Watchtower monitoring started")
@@ -246,18 +271,20 @@ class LightningWatchtower:
                     "stale_data",
                     "low",
                     f"Channel data stale for {(current_time - channel.last_update):.0f} seconds",
-                    0
+                    0,
                 )
 
             # Check if channel is still active
-            if channel.is_active and current_time - channel.last_update > 86400:  # 24 hours
+            if (
+                channel.is_active and current_time - channel.last_update > 86400
+            ):  # 24 hours
                 channel.is_active = False
                 self._create_alert(
                     channel_id,
                     "channel_inactive",
                     "medium",
                     "Channel appears to be inactive",
-                    0
+                    0,
                 )
 
     def simulate_breach_attempt(self, channel_id: str, old_commitment: int):
@@ -271,7 +298,7 @@ class LightningWatchtower:
             "critical",
             f"Simulated breach attempt with old commitment {old_commitment}",
             750000,  # Simulated block height
-            "abc123...def456"  # Simulated transaction ID
+            "abc123...def456",  # Simulated transaction ID
         )
 
     def get_active_alerts(self, severity: str = None) -> List[ChannelAlert]:
@@ -304,13 +331,15 @@ class LightningWatchtower:
 
         return {
             "monitored_channels": len(self.monitored_channels),
-            "active_channels": sum(1 for ch in self.monitored_channels.values() if ch.is_active),
+            "active_channels": sum(
+                1 for ch in self.monitored_channels.values() if ch.is_active
+            ),
             "total_alerts": total_alerts,
             "active_alerts": active_alerts,
             "critical_alerts": critical_alerts,
             "alert_types": dict(alert_types),
             "monitoring_active": self.monitoring_active,
-            "check_interval_seconds": self.check_interval
+            "check_interval_seconds": self.check_interval,
         }
 
     def cleanup_old_alerts(self, days_old: int = 30) -> int:
@@ -318,7 +347,8 @@ class LightningWatchtower:
         cutoff_time = time.time() - (days_old * 24 * 3600)
 
         old_alerts = [
-            i for i, alert in enumerate(self.alerts)
+            i
+            for i, alert in enumerate(self.alerts)
             if alert.resolved and alert.detected_at < cutoff_time
         ]
 
@@ -349,8 +379,8 @@ if __name__ == "__main__":
         "test_channel_12345678901234567890123456789012345678901234567890",
         "0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
         1000000,  # 1M sats local
-        500000,   # 500k sats remote
-        100       # commitment number
+        500000,  # 500k sats remote
+        100,  # commitment number
     )
 
     # Start monitoring
@@ -359,13 +389,15 @@ if __name__ == "__main__":
     # Update channel state
     watchtower.update_channel_state(
         "test_channel_12345678901234567890123456789012345678901234567890",
-        800000, 700000, 101
+        800000,
+        700000,
+        101,
     )
 
     # Simulate security event
     watchtower.simulate_breach_attempt(
         "test_channel_12345678901234567890123456789012345678901234567890",
-        95  # Old commitment number
+        95,  # Old commitment number
     )
 
     # Get statistics
@@ -386,6 +418,7 @@ if __name__ == "__main__":
 
     # Cleanup
     import shutil
+
     shutil.rmtree("test_data", ignore_errors=True)
 
     print("✅ Watchtower test completed!")

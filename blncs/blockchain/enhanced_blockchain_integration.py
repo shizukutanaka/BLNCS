@@ -3,21 +3,22 @@
 スマートコントラクト統合とクロスチェーン対応機能を提供
 """
 
-import json
-import time
+import asyncio
 import hashlib
-from typing import Any, Dict, List, Optional, Callable, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
+import json
 import logging
 import threading
-import asyncio
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class BlockchainType(Enum):
     """ブロックチェーンタイプ"""
+
     BITCOIN = "bitcoin"
     ETHEREUM = "ethereum"
     BINANCE_SMART_CHAIN = "bsc"
@@ -29,6 +30,7 @@ class BlockchainType(Enum):
 
 class TransactionStatus(Enum):
     """トランザクションステータス"""
+
     PENDING = "pending"
     CONFIRMED = "confirmed"
     FAILED = "failed"
@@ -38,6 +40,7 @@ class TransactionStatus(Enum):
 @dataclass
 class BlockchainNode:
     """ブロックチェーンノード情報"""
+
     node_id: str
     blockchain_type: BlockchainType
     rpc_url: str
@@ -51,6 +54,7 @@ class BlockchainNode:
 @dataclass
 class SmartContract:
     """スマートコントラクト情報"""
+
     contract_id: str
     name: str
     blockchain_type: BlockchainType
@@ -63,6 +67,7 @@ class SmartContract:
 @dataclass
 class CrossChainBridge:
     """クロスチェーンブリッジ情報"""
+
     bridge_id: str
     source_chain: BlockchainType
     target_chain: BlockchainType
@@ -75,6 +80,7 @@ class CrossChainBridge:
 @dataclass
 class Transaction:
     """トランザクション情報"""
+
     tx_id: str
     blockchain_type: BlockchainType
     tx_hash: str
@@ -175,9 +181,13 @@ class SmartContractManager:
             contract: スマートコントラクト情報
         """
         self.contracts[contract.contract_id] = contract
-        logger.info(f"コントラクト登録: {contract.name} on {contract.blockchain_type.value}")
+        logger.info(
+            f"コントラクト登録: {contract.name} on {contract.blockchain_type.value}"
+        )
 
-    def deploy_contract(self, contract: SmartContract, deployment_args: Dict[str, Any] = None) -> str:
+    def deploy_contract(
+        self, contract: SmartContract, deployment_args: Dict[str, Any] = None
+    ) -> str:
         """
         コントラクトをデプロイ
         Args:
@@ -189,11 +199,18 @@ class SmartContractManager:
         deployment_id = f"deploy_{int(time.time() * 1000000)}"
 
         # デプロイ処理をシミュレーション
-        asyncio.create_task(self._deploy_contract_async(contract, deployment_id, deployment_args))
+        asyncio.create_task(
+            self._deploy_contract_async(contract, deployment_id, deployment_args)
+        )
 
         return deployment_id
 
-    async def _deploy_contract_async(self, contract: SmartContract, deployment_id: str, deployment_args: Dict[str, Any] = None):
+    async def _deploy_contract_async(
+        self,
+        contract: SmartContract,
+        deployment_id: str,
+        deployment_args: Dict[str, Any] = None,
+    ):
         """コントラクトデプロイを非同期実行"""
         try:
             # 実際の実装ではブロックチェーンにデプロイ
@@ -218,7 +235,9 @@ class SmartContractManager:
                 except Exception as e:
                     logger.error(f"デプロイコールバックエラー: {e}")
 
-    async def call_contract_function(self, contract_id: str, function_name: str, args: List[Any] = None) -> Any:
+    async def call_contract_function(
+        self, contract_id: str, function_name: str, args: List[Any] = None
+    ) -> Any:
         """
         コントラクト関数を呼び出し
         Args:
@@ -269,9 +288,13 @@ class CrossChainBridgeManager:
             self.bridge_routes[route_key] = []
         self.bridge_routes[route_key].append(bridge.bridge_id)
 
-        logger.info(f"ブリッジ登録: {bridge.source_chain.value} -> {bridge.target_chain.value}")
+        logger.info(
+            f"ブリッジ登録: {bridge.source_chain.value} -> {bridge.target_chain.value}"
+        )
 
-    def find_bridge_route(self, source_chain: BlockchainType, target_chain: BlockchainType) -> Optional[str]:
+    def find_bridge_route(
+        self, source_chain: BlockchainType, target_chain: BlockchainType
+    ) -> Optional[str]:
         """
         ブリッジルートを検索
         Args:
@@ -285,9 +308,15 @@ class CrossChainBridgeManager:
             return self.bridge_routes[route_key][0]  # 最初のブリッジを使用
         return None
 
-    async def initiate_cross_chain_transfer(self, source_chain: BlockchainType, target_chain: BlockchainType,
-                                          from_address: str, to_address: str, amount: float,
-                                          token_symbol: str) -> str:
+    async def initiate_cross_chain_transfer(
+        self,
+        source_chain: BlockchainType,
+        target_chain: BlockchainType,
+        from_address: str,
+        to_address: str,
+        amount: float,
+        token_symbol: str,
+    ) -> str:
         """
         クロスチェーン転送を開始
         Args:
@@ -303,20 +332,30 @@ class CrossChainBridgeManager:
         bridge_id = self.find_bridge_route(source_chain, target_chain)
 
         if not bridge_id:
-            raise ValueError(f"ブリッジルートが見つかりません: {source_chain.value} -> {target_chain.value}")
+            raise ValueError(
+                f"ブリッジルートが見つかりません: {source_chain.value} -> {target_chain.value}"
+            )
 
         transfer_id = f"transfer_{int(time.time() * 1000000)}"
 
         # 転送処理をシミュレーション
-        asyncio.create_task(self._process_cross_chain_transfer(
-            transfer_id, bridge_id, from_address, to_address, amount, token_symbol
-        ))
+        asyncio.create_task(
+            self._process_cross_chain_transfer(
+                transfer_id, bridge_id, from_address, to_address, amount, token_symbol
+            )
+        )
 
         return transfer_id
 
-    async def _process_cross_chain_transfer(self, transfer_id: str, bridge_id: str,
-                                          from_address: str, to_address: str, amount: float,
-                                          token_symbol: str):
+    async def _process_cross_chain_transfer(
+        self,
+        transfer_id: str,
+        bridge_id: str,
+        from_address: str,
+        to_address: str,
+        amount: float,
+        token_symbol: str,
+    ):
         """クロスチェーン転送を処理"""
         try:
             # 実際の実装ではブリッジコントラクトを呼び出し
@@ -375,7 +414,9 @@ class BlockchainIntegrationManager:
         client = BlockchainClient(node)
         self.blockchain_clients[node.node_id] = client
 
-        logger.info(f"ブロックチェーンノード登録: {node.blockchain_type.value} - {node.node_id}")
+        logger.info(
+            f"ブロックチェーンノード登録: {node.blockchain_type.value} - {node.node_id}"
+        )
 
     def register_smart_contract(self, contract: SmartContract):
         """
@@ -393,7 +434,9 @@ class BlockchainIntegrationManager:
         """
         self.cross_chain_manager.register_bridge(bridge)
 
-    async def deploy_contract(self, contract: SmartContract, deployment_args: Dict[str, Any] = None) -> str:
+    async def deploy_contract(
+        self, contract: SmartContract, deployment_args: Dict[str, Any] = None
+    ) -> str:
         """
         コントラクトをデプロイ
         Args:
@@ -404,7 +447,9 @@ class BlockchainIntegrationManager:
         """
         return self.smart_contract_manager.deploy_contract(contract, deployment_args)
 
-    async def call_smart_contract(self, contract_id: str, function_name: str, args: List[Any] = None) -> Any:
+    async def call_smart_contract(
+        self, contract_id: str, function_name: str, args: List[Any] = None
+    ) -> Any:
         """
         スマートコントラクト関数を呼び出し
         Args:
@@ -414,11 +459,19 @@ class BlockchainIntegrationManager:
         Returns:
             関数実行結果
         """
-        return await self.smart_contract_manager.call_contract_function(contract_id, function_name, args)
+        return await self.smart_contract_manager.call_contract_function(
+            contract_id, function_name, args
+        )
 
-    async def initiate_cross_chain_transfer(self, source_chain: BlockchainType, target_chain: BlockchainType,
-                                          from_address: str, to_address: str, amount: float,
-                                          token_symbol: str) -> str:
+    async def initiate_cross_chain_transfer(
+        self,
+        source_chain: BlockchainType,
+        target_chain: BlockchainType,
+        from_address: str,
+        to_address: str,
+        amount: float,
+        token_symbol: str,
+    ) -> str:
         """
         クロスチェーン転送を開始
         Args:
@@ -435,8 +488,14 @@ class BlockchainIntegrationManager:
             source_chain, target_chain, from_address, to_address, amount, token_symbol
         )
 
-    async def send_transaction(self, blockchain_type: BlockchainType, from_address: str,
-                             to_address: str, amount: float, token_symbol: str = "ETH") -> str:
+    async def send_transaction(
+        self,
+        blockchain_type: BlockchainType,
+        from_address: str,
+        to_address: str,
+        amount: float,
+        token_symbol: str = "ETH",
+    ) -> str:
         """
         トランザクションを送信
         Args:
@@ -462,7 +521,7 @@ class BlockchainIntegrationManager:
             "to": to_address,
             "amount": amount,
             "token": token_symbol,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
         tx_hash = await client.send_transaction(tx_data)
@@ -476,17 +535,22 @@ class BlockchainIntegrationManager:
             from_address=from_address,
             to_address=to_address,
             amount=amount,
-            token_symbol=token_symbol
+            token_symbol=token_symbol,
         )
 
         self.transactions[tx_id] = transaction
 
         return tx_hash
 
-    def _select_node_for_blockchain(self, blockchain_type: BlockchainType) -> Optional[BlockchainNode]:
+    def _select_node_for_blockchain(
+        self, blockchain_type: BlockchainType
+    ) -> Optional[BlockchainNode]:
         """ブロックチェーンタイプに適したノードを選択"""
-        candidates = [node for node in self.nodes.values()
-                     if node.blockchain_type == blockchain_type and node.is_active]
+        candidates = [
+            node
+            for node in self.nodes.values()
+            if node.blockchain_type == blockchain_type and node.is_active
+        ]
 
         if not candidates:
             return None
@@ -498,7 +562,9 @@ class BlockchainIntegrationManager:
         """統合システムを開始"""
         if not self.is_integration_active:
             self.is_integration_active = True
-            self.integration_thread = threading.Thread(target=self._integration_loop, daemon=True)
+            self.integration_thread = threading.Thread(
+                target=self._integration_loop, daemon=True
+            )
             self.integration_thread.start()
 
     def stop_integration(self):
@@ -534,7 +600,13 @@ class BlockchainIntegrationManager:
             "registered_nodes": len(self.nodes),
             "registered_contracts": len(self.smart_contract_manager.contracts),
             "registered_bridges": len(self.cross_chain_manager.bridges),
-            "active_transactions": len([tx for tx in self.transactions.values() if tx.status == TransactionStatus.PENDING])
+            "active_transactions": len(
+                [
+                    tx
+                    for tx in self.transactions.values()
+                    if tx.status == TransactionStatus.PENDING
+                ]
+            ),
         }
 
 
@@ -547,14 +619,14 @@ async def example_usage():
         node_id="btc_node_1",
         blockchain_type=BlockchainType.BITCOIN,
         rpc_url="http://localhost:8332",
-        chain_id=None
+        chain_id=None,
     )
 
     eth_node = BlockchainNode(
         node_id="eth_node_1",
         blockchain_type=BlockchainType.ETHEREUM,
         rpc_url="http://localhost:8545",
-        chain_id=1
+        chain_id=1,
     )
 
     manager.register_blockchain_node(btc_node)
@@ -566,7 +638,7 @@ async def example_usage():
         name="TestContract",
         blockchain_type=BlockchainType.ETHEREUM,
         contract_address="0x123...",
-        abi=[{"type": "function", "name": "testFunction"}]
+        abi=[{"type": "function", "name": "testFunction"}],
     )
 
     manager.register_smart_contract(contract)
@@ -578,7 +650,7 @@ async def example_usage():
         target_chain=BlockchainType.BITCOIN,
         bridge_contract="0x456...",
         supported_tokens=["ETH", "BTC"],
-        fee_structure={"ETH": 0.001, "BTC": 0.0001}
+        fee_structure={"ETH": 0.001, "BTC": 0.0001},
     )
 
     manager.register_cross_chain_bridge(bridge)
@@ -589,11 +661,7 @@ async def example_usage():
     # トランザクション送信のテスト
     try:
         tx_hash = await manager.send_transaction(
-            BlockchainType.ETHEREUM,
-            "0xFromAddress",
-            "0xToAddress",
-            1.0,
-            "ETH"
+            BlockchainType.ETHEREUM, "0xFromAddress", "0xToAddress", 1.0, "ETH"
         )
         print(f"トランザクション送信: {tx_hash}")
     except Exception as e:

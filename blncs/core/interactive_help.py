@@ -4,18 +4,18 @@ BLNCS Interactive Help System
 Provides interactive assistance and command exploration
 """
 
-import os
-import re
+import cmd
 import json
 import logging
-from typing import Dict, Any, List, Optional, Callable, Union
-from pathlib import Path
+import os
+import re
+import readline
+import shlex
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
-import threading
-import readline
-import cmd
-import shlex
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class HelpTopic:
     """Help topic structure"""
+
     name: str
     title: str
     description: str
@@ -37,6 +38,7 @@ class HelpTopic:
 @dataclass
 class CommandSuggestion:
     """Command suggestion structure"""
+
     command: str
     description: str
     confidence: float
@@ -48,16 +50,18 @@ class InteractiveHelp:
     """Interactive help and command assistance system"""
 
     def __init__(self, help_data_path: Optional[str] = None):
-        self.help_data_path = help_data_path or os.path.join(os.path.dirname(__file__), 'help_data.json')
+        self.help_data_path = help_data_path or os.path.join(
+            os.path.dirname(__file__), "help_data.json"
+        )
         self.topics: Dict[str, HelpTopic] = {}
         self.command_patterns: Dict[str, List[str]] = {}
         self.context_suggestions: Dict[str, List[CommandSuggestion]] = {}
         self.session_history: List[str] = []
         self.user_preferences = {
-            'detail_level': 'normal',  # brief, normal, detailed
-            'show_examples': True,
-            'auto_suggest': True,
-            'language': 'en'
+            "detail_level": "normal",  # brief, normal, detailed
+            "show_examples": True,
+            "auto_suggest": True,
+            "language": "en",
         }
 
         # Initialize help system
@@ -69,10 +73,10 @@ class InteractiveHelp:
         """Load help topics from data file"""
         try:
             if os.path.exists(self.help_data_path):
-                with open(self.help_data_path, 'r', encoding='utf-8') as f:
+                with open(self.help_data_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
-                for topic_data in data.get('topics', []):
+                for topic_data in data.get("topics", []):
                     topic = HelpTopic(**topic_data)
                     self.topics[topic.name] = topic
 
@@ -110,9 +114,9 @@ Quick Start:
                 examples=[
                     "blncs config init --network testnet",
                     "blncs server start --port 3000",
-                    "blncs status"
+                    "blncs status",
                 ],
-                tags=["basics", "setup", "introduction"]
+                tags=["basics", "setup", "introduction"],
             ),
             HelpTopic(
                 name="channel_management",
@@ -138,9 +142,9 @@ Best Practices:
                     "blncs channels list --format table",
                     "blncs channels open --peer <pubkey> --amount 1000000",
                     "blncs channels rebalance --channel <chan_id>",
-                    "blncs channels close --channel <chan_id> --force"
+                    "blncs channels close --channel <chan_id> --force",
                 ],
-                tags=["channels", "liquidity", "routing", "fees"]
+                tags=["channels", "liquidity", "routing", "fees"],
             ),
             HelpTopic(
                 name="security",
@@ -172,9 +176,9 @@ Recommendations:
                     "blncs auth setup-mfa",
                     "blncs security enable-firewall",
                     "blncs audit logs --severity high",
-                    "blncs config encrypt-secrets"
+                    "blncs config encrypt-secrets",
                 ],
-                tags=["security", "authentication", "mfa", "encryption"]
+                tags=["security", "authentication", "mfa", "encryption"],
             ),
             HelpTopic(
                 name="performance",
@@ -207,9 +211,9 @@ Performance Tips:
                     "blncs performance monitor --real-time",
                     "blncs performance optimize --target memory",
                     "blncs cache stats",
-                    "blncs connections pool-status"
+                    "blncs connections pool-status",
                 ],
-                tags=["performance", "monitoring", "optimization", "caching"]
+                tags=["performance", "monitoring", "optimization", "caching"],
             ),
             HelpTopic(
                 name="api_usage",
@@ -239,9 +243,9 @@ Integration Examples:
                 examples=[
                     "curl -H 'Authorization: Bearer <token>' http://localhost:3000/api/v1/info",
                     "curl -X POST -H 'Authorization: Bearer <token>' -d '{\"amount\": 10000}' http://localhost:3000/api/v1/payments/send",
-                    "python -c \"import requests; requests.get('http://localhost:3000/api/v1/channels', headers={'Authorization': 'Bearer <token>'})\""
+                    "python -c \"import requests; requests.get('http://localhost:3000/api/v1/channels', headers={'Authorization': 'Bearer <token>'})\"",
                 ],
-                tags=["api", "integration", "rest", "automation"]
+                tags=["api", "integration", "rest", "automation"],
             ),
             HelpTopic(
                 name="troubleshooting",
@@ -279,10 +283,10 @@ Configuration Issues:
                     "blncs diagnose connection",
                     "blncs logs tail --filter error",
                     "blncs config validate",
-                    "blncs performance profile --duration 60"
+                    "blncs performance profile --duration 60",
                 ],
-                tags=["troubleshooting", "debugging", "logs", "diagnostics"]
-            )
+                tags=["troubleshooting", "debugging", "logs", "diagnostics"],
+            ),
         ]
 
         for topic in default_topics:
@@ -295,12 +299,12 @@ Configuration Issues:
         """Save help topics to data file"""
         try:
             data = {
-                'topics': [topic.__dict__ for topic in self.topics.values()],
-                'last_updated': datetime.now().isoformat()
+                "topics": [topic.__dict__ for topic in self.topics.values()],
+                "last_updated": datetime.now().isoformat(),
             }
 
             os.makedirs(os.path.dirname(self.help_data_path), exist_ok=True)
-            with open(self.help_data_path, 'w', encoding='utf-8') as f:
+            with open(self.help_data_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
         except Exception as e:
@@ -309,129 +313,127 @@ Configuration Issues:
     def _initialize_command_patterns(self):
         """Initialize command pattern matching"""
         self.command_patterns = {
-            'channel': [
-                r'channel.*list',
-                r'channel.*open',
-                r'channel.*close',
-                r'channel.*rebalance',
-                r'channel.*info'
+            "channel": [
+                r"channel.*list",
+                r"channel.*open",
+                r"channel.*close",
+                r"channel.*rebalance",
+                r"channel.*info",
             ],
-            'payment': [
-                r'payment.*send',
-                r'payment.*receive',
-                r'payment.*invoice',
-                r'payment.*decode'
+            "payment": [
+                r"payment.*send",
+                r"payment.*receive",
+                r"payment.*invoice",
+                r"payment.*decode",
             ],
-            'peer': [
-                r'peer.*list',
-                r'peer.*connect',
-                r'peer.*disconnect',
-                r'peer.*info'
+            "peer": [
+                r"peer.*list",
+                r"peer.*connect",
+                r"peer.*disconnect",
+                r"peer.*info",
             ],
-            'config': [
-                r'config.*get',
-                r'config.*set',
-                r'config.*validate',
-                r'config.*auto-detect'
+            "config": [
+                r"config.*get",
+                r"config.*set",
+                r"config.*validate",
+                r"config.*auto-detect",
             ],
-            'security': [
-                r'security.*enable',
-                r'security.*disable',
-                r'auth.*setup',
-                r'firewall.*add'
+            "security": [
+                r"security.*enable",
+                r"security.*disable",
+                r"auth.*setup",
+                r"firewall.*add",
             ],
-            'performance': [
-                r'performance.*monitor',
-                r'performance.*optimize',
-                r'cache.*stats',
-                r'memory.*usage'
+            "performance": [
+                r"performance.*monitor",
+                r"performance.*optimize",
+                r"cache.*stats",
+                r"memory.*usage",
             ],
-            'help': [
-                r'help.*\w+',
-                r'\?.*',
-                r'man.*\w+'
-            ]
+            "help": [r"help.*\w+", r"\?.*", r"man.*\w+"],
         }
 
     def _initialize_context_suggestions(self):
         """Initialize context-aware command suggestions"""
         self.context_suggestions = {
-            'new_user': [
+            "new_user": [
                 CommandSuggestion(
                     command="blncs config init",
                     description="Initialize BLNCS configuration",
                     confidence=0.9,
                     category="setup",
-                    examples=["blncs config init --network testnet"]
+                    examples=["blncs config init --network testnet"],
                 ),
                 CommandSuggestion(
                     command="blncs help getting_started",
                     description="Read getting started guide",
                     confidence=0.8,
                     category="help",
-                    examples=["blncs help getting_started"]
+                    examples=["blncs help getting_started"],
                 ),
                 CommandSuggestion(
                     command="blncs server start",
                     description="Start the BLNCS server",
                     confidence=0.7,
                     category="server",
-                    examples=["blncs server start --port 3000"]
-                )
+                    examples=["blncs server start --port 3000"],
+                ),
             ],
-            'channel_management': [
+            "channel_management": [
                 CommandSuggestion(
                     command="blncs channels list",
                     description="List all channels",
                     confidence=0.9,
                     category="channels",
-                    examples=["blncs channels list --format table"]
+                    examples=["blncs channels list --format table"],
                 ),
                 CommandSuggestion(
                     command="blncs channels rebalance",
                     description="Rebalance channel liquidity",
                     confidence=0.8,
                     category="channels",
-                    examples=["blncs channels rebalance --channel <id>"]
+                    examples=["blncs channels rebalance --channel <id>"],
                 ),
                 CommandSuggestion(
                     command="blncs channels optimize",
                     description="Optimize channel fees and policies",
                     confidence=0.7,
                     category="channels",
-                    examples=["blncs channels optimize --strategy balanced"]
-                )
+                    examples=["blncs channels optimize --strategy balanced"],
+                ),
             ],
-            'troubleshooting': [
+            "troubleshooting": [
                 CommandSuggestion(
                     command="blncs diagnose all",
                     description="Run full system diagnosis",
                     confidence=0.9,
                     category="diagnostics",
-                    examples=["blncs diagnose all --verbose"]
+                    examples=["blncs diagnose all --verbose"],
                 ),
                 CommandSuggestion(
                     command="blncs logs tail",
                     description="View recent logs",
                     confidence=0.8,
                     category="logs",
-                    examples=["blncs logs tail --filter error"]
+                    examples=["blncs logs tail --filter error"],
                 ),
                 CommandSuggestion(
                     command="blncs performance monitor",
                     description="Monitor system performance",
                     confidence=0.7,
                     category="performance",
-                    examples=["blncs performance monitor --real-time"]
-                )
-            ]
+                    examples=["blncs performance monitor --real-time"],
+                ),
+            ],
         }
 
     def get_topic(self, topic_name: str) -> Optional[HelpTopic]:
         """Get a specific help topic"""
         return self.topics.get(topic_name)
 
-    def search_topics(self, query: str, category: Optional[str] = None) -> List[HelpTopic]:
+    def search_topics(
+        self, query: str, category: Optional[str] = None
+    ) -> List[HelpTopic]:
         """Search help topics by query"""
         query_lower = query.lower()
         results = []
@@ -462,7 +464,9 @@ Configuration Issues:
 
         return related
 
-    def suggest_commands(self, context: str = "", partial_command: str = "") -> List[CommandSuggestion]:
+    def suggest_commands(
+        self, context: str = "", partial_command: str = ""
+    ) -> List[CommandSuggestion]:
         """Suggest commands based on context and partial input"""
         suggestions = []
 
@@ -476,16 +480,40 @@ Configuration Issues:
                 for pattern in patterns:
                     if re.search(pattern, partial_command, re.IGNORECASE):
                         # Add relevant suggestions for this category
-                        if category == 'channel':
-                            suggestions.extend([
-                                CommandSuggestion("blncs channels list", "List all channels", 0.8, "channels"),
-                                CommandSuggestion("blncs channels info <id>", "Get channel information", 0.7, "channels")
-                            ])
-                        elif category == 'help':
-                            suggestions.extend([
-                                CommandSuggestion("blncs help topics", "List all help topics", 0.9, "help"),
-                                CommandSuggestion("blncs help search <query>", "Search help topics", 0.8, "help")
-                            ])
+                        if category == "channel":
+                            suggestions.extend(
+                                [
+                                    CommandSuggestion(
+                                        "blncs channels list",
+                                        "List all channels",
+                                        0.8,
+                                        "channels",
+                                    ),
+                                    CommandSuggestion(
+                                        "blncs channels info <id>",
+                                        "Get channel information",
+                                        0.7,
+                                        "channels",
+                                    ),
+                                ]
+                            )
+                        elif category == "help":
+                            suggestions.extend(
+                                [
+                                    CommandSuggestion(
+                                        "blncs help topics",
+                                        "List all help topics",
+                                        0.9,
+                                        "help",
+                                    ),
+                                    CommandSuggestion(
+                                        "blncs help search <query>",
+                                        "Search help topics",
+                                        0.8,
+                                        "help",
+                                    ),
+                                ]
+                            )
 
         # Remove duplicates and sort by confidence
         seen = set()
@@ -564,9 +592,9 @@ Configuration Issues:
             topic.last_updated = datetime.now().isoformat()
             self._save_help_data()
 
-    def export_help(self, format_type: str = 'markdown') -> str:
+    def export_help(self, format_type: str = "markdown") -> str:
         """Export all help topics"""
-        if format_type == 'markdown':
+        if format_type == "markdown":
             output = ["# BLNCS Help Documentation\n"]
 
             for category in self.get_all_categories():
@@ -645,7 +673,9 @@ Type 'quit' or 'exit' to exit.
 
         for topic in results:
             print(f"  {topic.name:20} [{topic.category}] {topic.title}")
-            print(f"    {topic.description[:100]}{'...' if len(topic.description) > 100 else ''}")
+            print(
+                f"    {topic.description[:100]}{'...' if len(topic.description) > 100 else ''}"
+            )
             print()
 
     def do_show(self, arg):

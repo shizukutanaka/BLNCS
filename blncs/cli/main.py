@@ -17,8 +17,8 @@ from rich.console import Console
 from rich.table import Table
 
 from ..core.config import get_config
-from ..core.logger import get_logger
 from ..core.health import get_system_health
+from ..core.logger import get_logger
 from ..version import __version__
 
 console = Console()
@@ -27,9 +27,9 @@ logger = get_logger()
 
 @click.group()
 @click.version_option(__version__)
-@click.option('--config', '-c', help='Configuration file path')
-@click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
-@click.option('--debug', '-d', is_flag=True, help='Enable debug mode')
+@click.option("--config", "-c", help="Configuration file path")
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
+@click.option("--debug", "-d", is_flag=True, help="Enable debug mode")
 @click.pass_context
 def main(ctx: click.Context, config: Optional[str], verbose: bool, debug: bool) -> None:
     """BLNCS - Bitcoin Lightning Network Control System
@@ -44,18 +44,18 @@ def main(ctx: click.Context, config: Optional[str], verbose: bool, debug: bool) 
             cfg = get_config(config_path=config)
         else:
             cfg = get_config()
-        ctx.obj['config'] = cfg
+        ctx.obj["config"] = cfg
     except Exception as e:
         console.print(f"[red]Configuration error: {e}[/red]")
         sys.exit(1)
 
     # Set logging level
     if debug:
-        ctx.obj['log_level'] = 'DEBUG'
+        ctx.obj["log_level"] = "DEBUG"
     elif verbose:
-        ctx.obj['log_level'] = 'INFO'
+        ctx.obj["log_level"] = "INFO"
     else:
-        ctx.obj['log_level'] = 'WARNING'
+        ctx.obj["log_level"] = "WARNING"
 
     logger.info("BLNCS CLI initialized")
 
@@ -73,8 +73,8 @@ def version(ctx: click.Context) -> None:
         table.add_column("Version", style="yellow")
 
         table.add_row("BLNCS Core", "✓ Active", __version__)
-        table.add_row("Configuration", "✓ Loaded", ctx.obj['config'].version or "1.0.0")
-        table.add_row("Health Check", health.get('status', 'unknown'), "Current")
+        table.add_row("Configuration", "✓ Loaded", ctx.obj["config"].version or "1.0.0")
+        table.add_row("Health Check", health.get("status", "unknown"), "Current")
 
         console.print(table)
 
@@ -89,20 +89,20 @@ def status(ctx: click.Context) -> None:
     try:
         health = get_system_health()
 
-        if health.get('status') == 'healthy':
+        if health.get("status") == "healthy":
             console.print("[green]✓ System is healthy[/green]")
         else:
             console.print("[red]✗ System has issues[/red]")
 
         # Show health details
-        details = health.get('details', {})
+        details = health.get("details", {})
         if details:
             table = Table(title="Health Details")
             table.add_column("Check", style="cyan")
             table.add_column("Status", style="green")
 
             for check, result in details.items():
-                status = "✓ Pass" if result == 'ok' else "✗ Fail"
+                status = "✓ Pass" if result == "ok" else "✗ Fail"
                 table.add_row(check, status)
 
             console.print(table)
@@ -112,35 +112,35 @@ def status(ctx: click.Context) -> None:
 
 
 @main.command()
-@click.argument('command', required=False)
+@click.argument("command", required=False)
 @click.pass_context
 def config(ctx: click.Context, command: Optional[str]) -> None:
     """Manage configuration. Use 'show' to display current config."""
     try:
-        cfg = ctx.obj['config']
+        cfg = ctx.obj["config"]
 
-        if not command or command == 'show':
+        if not command or command == "show":
             # Display current configuration
             config_data = {
-                'version': cfg.version,
-                'environment': cfg.environment,
-                'api': {
-                    'host': cfg.api_host,
-                    'port': cfg.api_port,
-                    'enabled': cfg.api_enabled,
+                "version": cfg.version,
+                "environment": cfg.environment,
+                "api": {
+                    "host": cfg.api_host,
+                    "port": cfg.api_port,
+                    "enabled": cfg.api_enabled,
                 },
-                'lightning': {
-                    'network': cfg.lightning_network,
-                    'host': cfg.lightning_host,
-                    'port': cfg.lightning_port,
+                "lightning": {
+                    "network": cfg.lightning_network,
+                    "host": cfg.lightning_host,
+                    "port": cfg.lightning_port,
                 },
-                'database': {
-                    'url': cfg.database_url,
+                "database": {
+                    "url": cfg.database_url,
                 },
-                'logging': {
-                    'level': cfg.log_level,
-                    'file': cfg.log_file,
-                }
+                "logging": {
+                    "level": cfg.log_level,
+                    "file": cfg.log_file,
+                },
             }
 
             console.print("[bold]Current Configuration:[/bold]")
@@ -163,7 +163,7 @@ def health(ctx: click.Context) -> None:
         console.print(f"[bold]Health Status: {health.get('status', 'unknown')}[/bold]")
 
         # Show detailed checks
-        checks = health.get('checks', {})
+        checks = health.get("checks", {})
         if checks:
             table = Table(title="Health Checks")
             table.add_column("Component", style="cyan")
@@ -171,13 +171,13 @@ def health(ctx: click.Context) -> None:
             table.add_column("Details", style="yellow")
 
             for component, status in checks.items():
-                status_icon = "✓" if status == 'ok' else "✗"
+                status_icon = "✓" if status == "ok" else "✗"
                 table.add_row(component, status_icon, str(status))
 
             console.print(table)
 
         # Show performance metrics if available
-        metrics = health.get('metrics', {})
+        metrics = health.get("metrics", {})
         if metrics:
             console.print("\n[bold]Performance Metrics:[/bold]")
             for metric, value in metrics.items():
@@ -188,7 +188,7 @@ def health(ctx: click.Context) -> None:
 
 
 @main.command()
-@click.option('--output', '-o', help='Output file path')
+@click.option("--output", "-o", help="Output file path")
 @click.pass_context
 def diagnostics(ctx: click.Context, output: Optional[str]) -> None:
     """Run comprehensive system diagnostics."""
@@ -200,25 +200,26 @@ def diagnostics(ctx: click.Context, output: Optional[str]) -> None:
 
         # Add system info
         import platform
-        import psutil
         from datetime import datetime
 
+        import psutil
+
         diagnostic_data = {
-            'timestamp': datetime.now().isoformat(),
-            'platform': platform.platform(),
-            'python_version': platform.python_version(),
-            'blncs_version': __version__,
-            'health': health,
-            'memory_usage': {
-                'total': psutil.virtual_memory().total,
-                'available': psutil.virtual_memory().available,
-                'percent': psutil.virtual_memory().percent,
+            "timestamp": datetime.now().isoformat(),
+            "platform": platform.platform(),
+            "python_version": platform.python_version(),
+            "blncs_version": __version__,
+            "health": health,
+            "memory_usage": {
+                "total": psutil.virtual_memory().total,
+                "available": psutil.virtual_memory().available,
+                "percent": psutil.virtual_memory().percent,
             },
-            'disk_usage': {
-                'total': psutil.disk_usage('/').total,
-                'free': psutil.disk_usage('/').free,
-                'percent': psutil.disk_usage('/').percent,
-            }
+            "disk_usage": {
+                "total": psutil.disk_usage("/").total,
+                "free": psutil.disk_usage("/").free,
+                "percent": psutil.disk_usage("/").percent,
+            },
         }
 
         if output:
@@ -239,8 +240,8 @@ def optimize(ctx: click.Context) -> None:
         console.print("[bold]Running optimization...[/bold]")
 
         # Import and run optimization modules
-        from ..core.performance_optimizer import PerformanceOptimizer
         from ..core.database_optimizer import DatabaseOptimizer
+        from ..core.performance_optimizer import PerformanceOptimizer
 
         optimizer = PerformanceOptimizer()
         db_optimizer = DatabaseOptimizer()
@@ -271,16 +272,16 @@ def optimize(ctx: click.Context) -> None:
 def logs(ctx: click.Context) -> None:
     """Show recent system logs."""
     try:
-        cfg = ctx.obj['config']
-        log_level = ctx.obj.get('log_level', 'INFO')
+        cfg = ctx.obj["config"]
+        log_level = ctx.obj.get("log_level", "INFO")
 
-        log_file = cfg.log_file if hasattr(cfg, 'log_file') else 'logs/blncs.log'
+        log_file = cfg.log_file if hasattr(cfg, "log_file") else "logs/blncs.log"
 
         if Path(log_file).exists():
             console.print(f"[bold]Recent logs from: {log_file}[/bold]")
 
             # Show last 20 lines
-            with open(log_file, 'r') as f:
+            with open(log_file, "r") as f:
                 lines = f.readlines()[-20:]
                 for line in lines:
                     console.print(line.rstrip())
@@ -292,5 +293,5 @@ def logs(ctx: click.Context) -> None:
         console.print(f"[red]Error reading logs: {e}[/red]")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

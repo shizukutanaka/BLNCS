@@ -5,21 +5,30 @@
 
 import asyncio
 import json
-import aiohttp
-import threading
-from typing import Any, Dict, List, Optional, Callable, Set
-from dataclasses import dataclass, field
-from enum import Enum
 import logging
 import re
+import sqlite3
+import threading
+import time
+from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote_plus
 
-from .external_search_manager import ExternalSearchManager, SearchProvider, SearchQuery as ExternalSearchQuery, SearchResult as ExternalSearchResult, Language
-from .multilingual_search import get_multilingual_search_engine, detect_text_language
+import aiohttp
+
+from .external_search_manager import ExternalSearchManager, Language, SearchProvider
+from .external_search_manager import SearchQuery as ExternalSearchQuery
+from .external_search_manager import SearchResult as ExternalSearchResult
+from .multilingual_search import detect_text_language, get_multilingual_search_engine
+
+logger = logging.getLogger(__name__)
 
 
 class SearchType(Enum):
     """検索タイプ"""
+
     FULL_TEXT = "full_text"
     FUZZY = "fuzzy"
     PHRASE = "phrase"
@@ -31,6 +40,7 @@ class SearchType(Enum):
 @dataclass
 class SearchDocument:
     """検索ドキュメント情報"""
+
     doc_id: str
     title: str
     content: str
@@ -43,6 +53,7 @@ class SearchDocument:
 @dataclass
 class SearchResult:
     """検索結果情報"""
+
     doc_id: str
     title: str
     content_snippet: str
@@ -54,6 +65,7 @@ class SearchResult:
 @dataclass
 class SearchQuery:
     """検索クエリ情報"""
+
     query_text: str
     search_type: SearchType = SearchType.FULL_TEXT
     filters: Dict[str, Any] = field(default_factory=dict)
@@ -69,7 +81,9 @@ class InvertedIndex:
 
     def __init__(self):
         """初期化"""
-        self.index: Dict[str, Dict[str, List[int]]] = defaultdict(lambda: defaultdict(list))  # term -> doc_id -> positions
+        self.index: Dict[str, Dict[str, List[int]]] = defaultdict(
+            lambda: defaultdict(list)
+        )  # term -> doc_id -> positions
         self.documents: Dict[str, SearchDocument] = {}
         self.document_terms: Dict[str, Set[str]] = defaultdict(set)
         self.total_documents = 0
@@ -142,7 +156,7 @@ class InvertedIndex:
         """テキストをトークナイズ"""
         # 簡易的なトークナイザー（実際の実装ではより高度なものを使用）
         text = text.lower()
-        text = re.sub(r'[^\w\s]', ' ', text)  # 記号をスペースに変換
+        text = re.sub(r"[^\w\s]", " ", text)  # 記号をスペースに変換
         tokens = text.split()
         return tokens
 
@@ -167,7 +181,9 @@ class InvertedIndex:
 
         # 結果をソートして制限
         results = []
-        for doc_id, score in sorted(doc_scores.items(), key=lambda x: x[1], reverse=True):
+        for doc_id, score in sorted(
+            doc_scores.items(), key=lambda x: x[1], reverse=True
+        ):
             if len(results) >= query.limit:
                 break
 
@@ -180,11 +196,11 @@ class InvertedIndex:
                 content_snippet=snippet,
                 score=score,
                 matched_fields=["title", "content"],
-                highlights=self._generate_highlights(document.content, query_tokens)
+                highlights=self._generate_highlights(document.content, query_tokens),
             )
             results.append(result)
 
-        return results[query.offset:query.offset + query.limit]
+        return results[query.offset : query.offset + query.limit]
 
     def _fuzzy_search(self, query: SearchQuery) -> List[SearchResult]:
         """ファジー検索を実行"""
@@ -206,11 +222,13 @@ class InvertedIndex:
                         matches.append((index_token, similarity))
 
             # 各マッチングトークンで検索を実行
-            for matched_token, similarity in sorted(matches, key=lambda x: x[1], reverse=True)[:3]:
+            for matched_token, similarity in sorted(
+                matches, key=lambda x: x[1], reverse=True
+            )[:3]:
                 temp_query = SearchQuery(
                     query_text=matched_token,
                     search_type=SearchType.FULL_TEXT,
-                    limit=query.limit * 2
+                    limit=query.limit * 2,
                 )
 
                 sub_results = self._full_text_search(temp_query)
@@ -227,7 +245,7 @@ class InvertedIndex:
                 seen_docs.add(result.doc_id)
                 unique_results.append(result)
 
-        return unique_results[:query.limit]
+        return unique_results[: query.limit]
 
     def _phrase_search(self, query: SearchQuery) -> List[SearchResult]:
         """フレーズ検索を実行"""
@@ -248,11 +266,11 @@ class InvertedIndex:
                     content_snippet=snippet,
                     score=score,
                     matched_fields=["content"],
-                    highlights=[query.query_text]
+                    highlights=[query.query_text],
                 )
                 results.append(result)
 
-        return sorted(results, key=lambda x: x.score, reverse=True)[:query.limit]
+        return sorted(results, key=lambda x: x.score, reverse=True)[: query.limit]
 
     def _boolean_search(self, query: SearchQuery) -> List[SearchResult]:
         """ブール検索を実行"""
@@ -275,12 +293,16 @@ class InvertedIndex:
             return []
 
         # 最初の検索結果を取得
-        first_results = self._full_text_search(SearchQuery(query_text=terms[0], limit=1000))
+        first_results = self._full_text_search(
+            SearchQuery(query_text=terms[0], limit=1000)
+        )
         matching_docs = {result.doc_id for result in first_results}
 
         # 他のすべての条件にマッチするドキュメントをフィルタリング
         for term in terms[1:]:
-            term_results = self._full_text_search(SearchQuery(query_text=term, limit=1000))
+            term_results = self._full_text_search(
+                SearchQuery(query_text=term, limit=1000)
+            )
             term_docs = {result.doc_id for result in term_results}
             matching_docs = matching_docs.intersection(term_docs)
 
@@ -292,7 +314,9 @@ class InvertedIndex:
         all_results = []
 
         for term in terms:
-            term_results = self._full_text_search(SearchQuery(query_text=term, limit=100))
+            term_results = self._full_text_search(
+                SearchQuery(query_text=term, limit=100)
+            )
             all_results.extend(term_results)
 
         # 重複を除去してスコアでソート
@@ -304,7 +328,7 @@ class InvertedIndex:
                 seen_docs.add(result.doc_id)
                 unique_results.append(result)
 
-        return unique_results[:query.limit]
+        return unique_results[: query.limit]
 
     def _calculate_idf(self, term: str) -> float:
         """逆文書頻度を計算"""
@@ -317,6 +341,7 @@ class InvertedIndex:
 
         # IDF = log(N / df)
         import math
+
         return math.log(self.total_documents / doc_frequency)
 
     def _levenshtein_distance(self, s1: str, s2: str) -> int:
@@ -343,7 +368,9 @@ class InvertedIndex:
 
         return previous_row[-1]
 
-    def _generate_snippet(self, content: str, query_tokens: List[str], max_length: int = 200) -> str:
+    def _generate_snippet(
+        self, content: str, query_tokens: List[str], max_length: int = 200
+    ) -> str:
         """スニペットを生成"""
         content_lower = content.lower()
 
@@ -399,7 +426,6 @@ class AdvancedSearchEngine:
         self.indexing_thread: Optional[threading.Thread] = None
 
         self.multilingual_engine = get_multilingual_search_engine()
-        self.config_manager = get_search_config_manager()
         asyncio.run(self._init_external_search())
 
     def _init_db(self):
@@ -442,15 +468,22 @@ class AdvancedSearchEngine:
         # データベースに保存
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR REPLACE INTO search_documents
                     (doc_id, title, content, metadata, tags, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    document.doc_id, document.title, document.content,
-                    json.dumps(document.metadata), json.dumps(document.tags),
-                    document.created_at, document.updated_at
-                ))
+                """,
+                    (
+                        document.doc_id,
+                        document.title,
+                        document.content,
+                        json.dumps(document.metadata),
+                        json.dumps(document.tags),
+                        document.created_at,
+                        document.updated_at,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -489,10 +522,12 @@ class AdvancedSearchEngine:
             provider=query.provider,
             query_text=query.query_text,
             search_type=SearchType.FULL_TEXT,
-            language=query.language
+            language=query.language,
         )
 
-        external_results = await self.external_search_manager.search(external_query, query.provider)
+        external_results = await self.external_search_manager.search(
+            external_query, query.provider
+        )
 
         # 外部検索結果を内部形式に変換
         internal_results = []
@@ -503,13 +538,15 @@ class AdvancedSearchEngine:
                 content_snippet=ext_result.description,
                 score=ext_result.score,
                 matched_fields=["external"],
-                highlights=[query.query_text]
+                highlights=[query.query_text],
             )
             internal_results.append(internal_result)
 
         return internal_results
 
-    def search(self, query: SearchQuery, user_id: Optional[str] = None) -> List[SearchResult]:
+    def search(
+        self, query: SearchQuery, user_id: Optional[str] = None
+    ) -> List[SearchResult]:
         """
         検索を実行
         Args:
@@ -547,7 +584,9 @@ class AdvancedSearchEngine:
             except Exception as e:
                 logger.error(f"検索コールバックエラー: {e}")
 
-        logger.info(f"検索実行: '{query.query_text}' - {len(internal_results)}件 ({time.time() - start_time:.3f}s)")
+        logger.info(
+            f"検索実行: '{query.query_text}' - {len(internal_results)}件 ({time.time() - start_time:.3f}s)"
+        )
 
         return internal_results
 
@@ -574,7 +613,9 @@ class AdvancedSearchEngine:
 
         return suggestions[:limit]
 
-    def get_popular_search_terms(self, days: int = 7, limit: int = 20) -> List[Tuple[str, int]]:
+    def get_popular_search_terms(
+        self, days: int = 7, limit: int = 20
+    ) -> List[Tuple[str, int]]:
         """
         人気の検索語を取得
         Args:
@@ -587,14 +628,17 @@ class AdvancedSearchEngine:
             cutoff_time = time.time() - (days * 24 * 3600)
 
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT query_text, COUNT(*) as count
                     FROM search_log
                     WHERE timestamp > ?
                     GROUP BY query_text
                     ORDER BY count DESC
                     LIMIT ?
-                """, (cutoff_time, limit))
+                """,
+                    (cutoff_time, limit),
+                )
 
                 return [(row[0], row[1]) for row in cursor.fetchall()]
 
@@ -602,18 +646,26 @@ class AdvancedSearchEngine:
             logger.error(f"人気検索語取得エラー: {e}")
             return []
 
-    def _log_search(self, query: SearchQuery, result_count: int, user_id: Optional[str]):
+    def _log_search(
+        self, query: SearchQuery, result_count: int, user_id: Optional[str]
+    ):
         """検索をログ記録"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO search_log
                     (query_text, search_type, result_count, timestamp, user_id)
                     VALUES (?, ?, ?, ?, ?)
-                """, (
-                    query.query_text, query.search_type.value, result_count,
-                    time.time(), user_id
-                ))
+                """,
+                    (
+                        query.query_text,
+                        query.search_type.value,
+                        result_count,
+                        time.time(),
+                        user_id,
+                    ),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -631,7 +683,9 @@ class AdvancedSearchEngine:
         """インデックス処理を開始"""
         if not self.is_indexing_active:
             self.is_indexing_active = True
-            self.indexing_thread = threading.Thread(target=self._indexing_loop, daemon=True)
+            self.indexing_thread = threading.Thread(
+                target=self._indexing_loop, daemon=True
+            )
             self.indexing_thread.start()
 
     def stop_indexing(self):
@@ -676,20 +730,20 @@ class SearchManager:
                 doc_id="doc_1",
                 title="Lightning Networkとは",
                 content="Lightning NetworkはBitcoinのセカンドレイヤースケーリングソリューションです。マイクロペイメントを高速・低コストで実行できます。",
-                tags=["blockchain", "bitcoin", "lightning"]
+                tags=["blockchain", "bitcoin", "lightning"],
             ),
             SearchDocument(
                 doc_id="doc_2",
                 title="スマートコントラクトの基礎",
                 content="スマートコントラクトはブロックチェーン上で自動実行されるプログラムです。契約条件が満たされた場合に自動的に実行されます。",
-                tags=["blockchain", "smart_contract"]
+                tags=["blockchain", "smart_contract"],
             ),
             SearchDocument(
                 doc_id="doc_3",
                 title="暗号通貨のセキュリティ",
                 content="暗号通貨のセキュリティは公開鍵暗号とデジタル署名に基づいています。秘密鍵の管理が非常に重要です。",
-                tags=["cryptocurrency", "security"]
-            )
+                tags=["cryptocurrency", "security"],
+            ),
         ]
 
         for doc in sample_docs:
@@ -706,9 +760,35 @@ class SearchManager:
         self.is_search_active = False
         self.search_engine.stop_indexing()
 
-    def perform_external_search(self, query_text: str, provider: SearchProvider,
-                      limit: int = 10, language: Language = Language.AUTO,
-                      user_id: Optional[str] = None) -> List[SearchResult]:
+    def perform_search(
+        self,
+        query_text: str,
+        search_type: SearchType = SearchType.FULL_TEXT,
+        limit: int = 50,
+        user_id: Optional[str] = None,
+    ) -> List[SearchResult]:
+        """
+        ローカル検索を実行
+        Args:
+            query_text: 検索クエリテキスト
+            search_type: 検索タイプ
+            limit: 結果制限数
+            user_id: ユーザーID
+        Returns:
+            検索結果リスト
+        """
+        query = SearchQuery(query_text=query_text, search_type=search_type, limit=limit)
+
+        return self.search_engine.search(query, user_id)
+
+    def perform_external_search(
+        self,
+        query_text: str,
+        provider: SearchProvider,
+        limit: int = 10,
+        language: Language = Language.AUTO,
+        user_id: Optional[str] = None,
+    ) -> List[SearchResult]:
         """
         外部検索を実行
         Args:
@@ -725,7 +805,7 @@ class SearchManager:
             provider=provider,
             limit=limit,
             language=language,
-            include_external=True
+            include_external=True,
         )
 
         return self.search_engine.search(query, user_id)
@@ -751,8 +831,14 @@ class SearchManager:
         """
         return self.search_engine.get_popular_search_terms(days)
 
-    def add_document(self, doc_id: str, title: str, content: str,
-                    metadata: Dict[str, Any] = None, tags: List[str] = None):
+    def add_document(
+        self,
+        doc_id: str,
+        title: str,
+        content: str,
+        metadata: Dict[str, Any] = None,
+        tags: List[str] = None,
+    ):
         """
         ドキュメントを追加
         Args:
@@ -767,7 +853,7 @@ class SearchManager:
             title=title,
             content=content,
             metadata=metadata or {},
-            tags=tags or []
+            tags=tags or [],
         )
 
         self.search_engine.index_document(document)
@@ -785,13 +871,16 @@ class SearchManager:
         return {
             "is_active": self.is_search_active,
             "total_documents": self.search_engine.index.total_documents,
-            "total_terms": len(self.search_engine.index.index)
+            "total_terms": len(self.search_engine.index.index),
         }
 
 
 # 使用例
 def example_usage():
     include_external: bool = False
+
+    # 検索マネージャーを作成
+    manager = SearchManager()
 
     # システム初期化
     manager.initialize_search_system()
@@ -800,7 +889,9 @@ def example_usage():
     manager.start_search_system()
 
     # 検索テスト
-    results = manager.perform_search("Lightning Network", SearchType.FULL_TEXT, limit=10)
+    results = manager.perform_search(
+        "Lightning Network", SearchType.FULL_TEXT, limit=10
+    )
     print(f"検索結果: {len(results)}件")
 
     for result in results[:3]:

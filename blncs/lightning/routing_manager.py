@@ -3,18 +3,19 @@ BLNCS Lightning Routing Manager
 Practical routing and payment pathfinding for Lightning Network
 """
 
-import time
+import heapq
 import json
 import logging
-from typing import Dict, List, Any, Optional, Tuple
-from dataclasses import dataclass, asdict
-from pathlib import Path
-import heapq
+import time
+from dataclasses import asdict, dataclass
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class RouteStrategy(Enum):
     """Routing strategy types"""
+
     CHEAPEST = "cheapest"
     FASTEST = "fastest"
     MOST_RELIABLE = "most_reliable"
@@ -24,6 +25,7 @@ class RouteStrategy(Enum):
 @dataclass
 class RouteHop:
     """Single hop in a payment route"""
+
     channel_id: str
     node_pubkey: str
     amount_sats: int
@@ -35,6 +37,7 @@ class RouteHop:
 @dataclass
 class PaymentRoute:
     """Complete payment route"""
+
     route_id: str
     hops: List[RouteHop]
     total_amount_sats: int
@@ -57,13 +60,14 @@ class PaymentRoute:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         data = asdict(self)
-        data['strategy'] = self.strategy.value
+        data["strategy"] = self.strategy.value
         return data
 
 
 @dataclass
 class NetworkNode:
     """Lightning network node information"""
+
     pubkey: str
     alias: str
     channels: List[str]
@@ -104,11 +108,13 @@ class RoutingManager:
         # Load routes
         if self.routes_file.exists():
             try:
-                with open(self.routes_file, 'r') as f:
+                with open(self.routes_file, "r") as f:
                     data = json.load(f)
                     for route_id, route_data in data.items():
-                        route_data['strategy'] = RouteStrategy(route_data['strategy'])
-                        route_data['hops'] = [RouteHop(**hop) for hop in route_data['hops']]
+                        route_data["strategy"] = RouteStrategy(route_data["strategy"])
+                        route_data["hops"] = [
+                            RouteHop(**hop) for hop in route_data["hops"]
+                        ]
                         self.routes[route_id] = PaymentRoute(**route_data)
 
                 self.logger.info(f"Loaded {len(self.routes)} routes")
@@ -118,7 +124,7 @@ class RoutingManager:
         # Load network nodes
         if self.nodes_file.exists():
             try:
-                with open(self.nodes_file, 'r') as f:
+                with open(self.nodes_file, "r") as f:
                     data = json.load(f)
                     for pubkey, node_data in data.items():
                         self.nodes[pubkey] = NetworkNode(**node_data)
@@ -130,8 +136,10 @@ class RoutingManager:
     def _save_routes(self):
         """Save routes to storage"""
         try:
-            data = {route_id: route.to_dict() for route_id, route in self.routes.items()}
-            with open(self.routes_file, 'w') as f:
+            data = {
+                route_id: route.to_dict() for route_id, route in self.routes.items()
+            }
+            with open(self.routes_file, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             self.logger.error(f"Failed to save routes: {e}")
@@ -140,12 +148,14 @@ class RoutingManager:
         """Save network nodes to storage"""
         try:
             data = {pubkey: asdict(node) for pubkey, node in self.nodes.items()}
-            with open(self.nodes_file, 'w') as f:
+            with open(self.nodes_file, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             self.logger.error(f"Failed to save nodes: {e}")
 
-    def add_network_node(self, pubkey: str, alias: str = "", channels: List[str] = None) -> NetworkNode:
+    def add_network_node(
+        self, pubkey: str, alias: str = "", channels: List[str] = None
+    ) -> NetworkNode:
         """Add or update network node"""
         if channels is None:
             channels = []
@@ -156,7 +166,7 @@ class RoutingManager:
             pubkey=pubkey,
             alias=alias or f"Node_{pubkey[:8]}",
             channels=channels,
-            last_seen=current_time
+            last_seen=current_time,
         )
 
         self.nodes[pubkey] = node
@@ -165,26 +175,39 @@ class RoutingManager:
         self.logger.info(f"Added network node: {alias} ({pubkey[:16]}...)")
         return node
 
-    def update_channel_info(self, channel_id: str, node1: str, node2: str,
-                           capacity_sats: int, fee_rate: float = 0.001):
+    def update_channel_info(
+        self,
+        channel_id: str,
+        node1: str,
+        node2: str,
+        capacity_sats: int,
+        fee_rate: float = 0.001,
+    ):
         """Update channel information for routing"""
         self.channels[channel_id] = {
-            'node1': node1,
-            'node2': node2,
-            'capacity_sats': capacity_sats,
-            'fee_rate': fee_rate,
-            'last_update': time.time(),
-            'enabled': True
+            "node1": node1,
+            "node2": node2,
+            "capacity_sats": capacity_sats,
+            "fee_rate": fee_rate,
+            "last_update": time.time(),
+            "enabled": True,
         }
 
-    def find_route(self, source: str, destination: str, amount_sats: int,
-                   strategy: RouteStrategy = RouteStrategy.BALANCED) -> Optional[PaymentRoute]:
+    def find_route(
+        self,
+        source: str,
+        destination: str,
+        amount_sats: int,
+        strategy: RouteStrategy = RouteStrategy.BALANCED,
+    ) -> Optional[PaymentRoute]:
         """Find optimal route between nodes"""
         try:
             start_time = time.time()
 
             # Use simplified pathfinding algorithm
-            route_hops = self._find_path_dijkstra(source, destination, amount_sats, strategy)
+            route_hops = self._find_path_dijkstra(
+                source, destination, amount_sats, strategy
+            )
 
             if not route_hops:
                 return None
@@ -204,7 +227,7 @@ class RoutingManager:
                 total_delay_blocks=total_delay,
                 success_probability=success_prob,
                 created_at=start_time,
-                strategy=strategy
+                strategy=strategy,
             )
 
             # Cache successful route
@@ -212,7 +235,9 @@ class RoutingManager:
             self._save_routes()
 
             execution_time = time.time() - start_time
-            self.logger.info(f"Found route: {len(route_hops)} hops, {total_fee} sats fee, {execution_time:.3f}s")
+            self.logger.info(
+                f"Found route: {len(route_hops)} hops, {total_fee} sats fee, {execution_time:.3f}s"
+            )
 
             return route
 
@@ -220,8 +245,9 @@ class RoutingManager:
             self.logger.error(f"Route finding failed: {e}")
             return None
 
-    def _find_path_dijkstra(self, source: str, destination: str, amount_sats: int,
-                           strategy: RouteStrategy) -> List[RouteHop]:
+    def _find_path_dijkstra(
+        self, source: str, destination: str, amount_sats: int, strategy: RouteStrategy
+    ) -> List[RouteHop]:
         """Simplified Dijkstra pathfinding"""
         # Priority queue: (cost, current_node, path)
         heap = [(0, source, [])]
@@ -244,16 +270,16 @@ class RoutingManager:
             # Find connected channels
             for channel_id, channel_info in self.channels.items():
                 next_node = None
-                if channel_info['node1'] == current:
-                    next_node = channel_info['node2']
-                elif channel_info['node2'] == current:
-                    next_node = channel_info['node1']
+                if channel_info["node1"] == current:
+                    next_node = channel_info["node2"]
+                elif channel_info["node2"] == current:
+                    next_node = channel_info["node1"]
 
                 if not next_node or next_node in visited:
                     continue
 
                 # Check capacity
-                if channel_info['capacity_sats'] < amount_sats:
+                if channel_info["capacity_sats"] < amount_sats:
                     continue
 
                 # Calculate hop cost based on strategy
@@ -263,9 +289,9 @@ class RoutingManager:
                     channel_id=channel_id,
                     node_pubkey=next_node,
                     amount_sats=amount_sats,
-                    fee_sats=int(amount_sats * channel_info['fee_rate']),
+                    fee_sats=int(amount_sats * channel_info["fee_rate"]),
                     delay_blocks=6,  # Default
-                    probability=0.95  # Default reliability
+                    probability=0.95,  # Default reliability
                 )
 
                 new_cost = cost + hop_cost
@@ -275,10 +301,11 @@ class RoutingManager:
 
         return []  # No path found
 
-    def _calculate_hop_cost(self, channel_info: Dict[str, Any], amount_sats: int,
-                           strategy: RouteStrategy) -> float:
+    def _calculate_hop_cost(
+        self, channel_info: Dict[str, Any], amount_sats: int, strategy: RouteStrategy
+    ) -> float:
         """Calculate hop cost based on routing strategy"""
-        base_fee = amount_sats * channel_info['fee_rate']
+        base_fee = amount_sats * channel_info["fee_rate"]
 
         if strategy == RouteStrategy.CHEAPEST:
             return base_fee
@@ -286,12 +313,23 @@ class RoutingManager:
             return 1.0  # Minimize hops
         elif strategy == RouteStrategy.MOST_RELIABLE:
             # Prefer well-connected nodes
-            return base_fee + (1.0 / max(1, len(self.nodes.get(channel_info['node1'], NetworkNode('', '', [])).channels)))
+            return base_fee + (
+                1.0
+                / max(
+                    1,
+                    len(
+                        self.nodes.get(
+                            channel_info["node1"], NetworkNode("", "", [])
+                        ).channels
+                    ),
+                )
+            )
         else:  # BALANCED
             return base_fee + 0.5  # Balance fee and reliability
 
-    def get_route_alternatives(self, source: str, destination: str, amount_sats: int,
-                              max_alternatives: int = 3) -> List[PaymentRoute]:
+    def get_route_alternatives(
+        self, source: str, destination: str, amount_sats: int, max_alternatives: int = 3
+    ) -> List[PaymentRoute]:
         """Find multiple route alternatives"""
         alternatives = []
 
@@ -304,11 +342,15 @@ class RoutingManager:
                 break
 
         # Sort by success probability and fee
-        alternatives.sort(key=lambda r: (r.success_probability, -r.total_fee_sats), reverse=True)
+        alternatives.sort(
+            key=lambda r: (r.success_probability, -r.total_fee_sats), reverse=True
+        )
 
         return alternatives[:max_alternatives]
 
-    def update_route_success(self, route_id: str, success: bool, actual_fee: int = None):
+    def update_route_success(
+        self, route_id: str, success: bool, actual_fee: int = None
+    ):
         """Update route performance metrics"""
         route = self.routes.get(route_id)
         if not route:
@@ -325,7 +367,9 @@ class RoutingManager:
 
         self._save_nodes()
 
-        self.logger.info(f"Updated route {route_id}: {'success' if success else 'failure'}")
+        self.logger.info(
+            f"Updated route {route_id}: {'success' if success else 'failure'}"
+        )
 
     def get_routing_stats(self) -> Dict[str, Any]:
         """Get routing performance statistics"""
@@ -348,14 +392,15 @@ class RoutingManager:
             "strategies_used": {
                 strategy.value: sum(1 for r in routes if r.strategy == strategy)
                 for strategy in RouteStrategy
-            }
+            },
         }
 
     def cleanup_old_routes(self, older_than_hours: int = 24) -> int:
         """Remove old cached routes"""
         cutoff_time = time.time() - (older_than_hours * 3600)
         old_routes = [
-            route_id for route_id, route in self.routes.items()
+            route_id
+            for route_id, route in self.routes.items()
             if route.created_at < cutoff_time
         ]
 
@@ -375,26 +420,31 @@ class RoutingManager:
         # Find poorly connected nodes
         for pubkey, node in self.nodes.items():
             if len(node.channels) < 3 and node.reliability_score > 0.8:
-                suggestions.append({
-                    "type": "add_channels",
-                    "node": pubkey,
-                    "reason": "Well-performing node needs more channels",
-                    "current_channels": len(node.channels)
-                })
+                suggestions.append(
+                    {
+                        "type": "add_channels",
+                        "node": pubkey,
+                        "reason": "Well-performing node needs more channels",
+                        "current_channels": len(node.channels),
+                    }
+                )
 
         # Find high-fee channels
         high_fee_channels = [
-            (channel_id, info) for channel_id, info in self.channels.items()
-            if info['fee_rate'] > 0.01  # > 1%
+            (channel_id, info)
+            for channel_id, info in self.channels.items()
+            if info["fee_rate"] > 0.01  # > 1%
         ]
 
         for channel_id, info in high_fee_channels[:5]:  # Top 5
-            suggestions.append({
-                "type": "reduce_fees",
-                "channel": channel_id,
-                "reason": "High fee channel reducing routing efficiency",
-                "current_fee_rate": info['fee_rate']
-            })
+            suggestions.append(
+                {
+                    "type": "reduce_fees",
+                    "channel": channel_id,
+                    "reason": "High fee channel reducing routing efficiency",
+                    "current_fee_rate": info["fee_rate"],
+                }
+            )
 
         return suggestions
 
@@ -413,17 +463,17 @@ if __name__ == "__main__":
     # Add test nodes
     node1 = manager.add_network_node(
         "0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12",
-        "TestNode1"
+        "TestNode1",
     )
 
     node2 = manager.add_network_node(
         "0345678901bcdef01234567890abcdef1234567890abcdef1234567890abcdef123",
-        "TestNode2"
+        "TestNode2",
     )
 
     node3 = manager.add_network_node(
         "0456789012cdef012234567890abcdef1234567890abcdef1234567890abcdef1234",
-        "TestNode3"
+        "TestNode3",
     )
 
     # Add test channels
@@ -435,7 +485,9 @@ if __name__ == "__main__":
     # Test routing
     route = manager.find_route(node1.pubkey, node3.pubkey, 100000)
     if route:
-        print(f"🛣️ Found route: {len(route.hops)} hops, {route.total_fee_sats} sats fee")
+        print(
+            f"🛣️ Found route: {len(route.hops)} hops, {route.total_fee_sats} sats fee"
+        )
         print(f"💰 Fee rate: {route.get_fee_rate():.3f}%")
 
     # Test alternatives
@@ -444,7 +496,9 @@ if __name__ == "__main__":
 
     # Get statistics
     stats = manager.get_routing_stats()
-    print(f"📊 Routing stats: {stats['total_routes']} routes, {stats['total_nodes']} nodes")
+    print(
+        f"📊 Routing stats: {stats['total_routes']} routes, {stats['total_nodes']} nodes"
+    )
 
     # Test optimization suggestions
     suggestions = manager.optimize_network_topology()
@@ -452,6 +506,7 @@ if __name__ == "__main__":
 
     # Cleanup
     import shutil
+
     shutil.rmtree("test_data", ignore_errors=True)
 
     print("✅ Routing manager test completed!")

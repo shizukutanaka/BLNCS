@@ -4,18 +4,19 @@ Comprehensive Input Validation System
 Production-grade validation for national-level security requirements
 """
 
-import re
-import ipaddress
-from typing import Any, Dict, List, Optional, Union
-from decimal import Decimal, InvalidOperation
-from urllib.parse import urlparse
 import html
+import ipaddress
 import json
+import re
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urlparse
 
 
 class ValidationError(Exception):
     """Custom validation error with detailed information"""
+
     def __init__(self, field: str, message: str, value: Any = None):
         self.field = field
         self.message = message
@@ -74,7 +75,7 @@ class InputValidator:
         max_length: int = 1000,
         pattern: Optional[str] = None,
         allow_empty: bool = False,
-        sanitize: bool = True
+        sanitize: bool = True,
     ) -> str:
         """
         Validate and sanitize string input
@@ -96,7 +97,9 @@ class InputValidator:
         """
         # Type check
         if not isinstance(value, str):
-            raise ValidationError(field, f"Must be a string, got {type(value).__name__}", value)
+            raise ValidationError(
+                field, f"Must be a string, got {type(value).__name__}", value
+            )
 
         # Empty check
         if not value and not allow_empty:
@@ -104,10 +107,14 @@ class InputValidator:
 
         # Length validation
         if len(value) < min_length:
-            raise ValidationError(field, f"Must be at least {min_length} characters", value)
+            raise ValidationError(
+                field, f"Must be at least {min_length} characters", value
+            )
 
         if len(value) > max_length:
-            raise ValidationError(field, f"Must not exceed {max_length} characters", value)
+            raise ValidationError(
+                field, f"Must not exceed {max_length} characters", value
+            )
 
         # Security checks
         cls._check_sql_injection(value, field)
@@ -131,7 +138,7 @@ class InputValidator:
         field: str = "input",
         min_value: Optional[int] = None,
         max_value: Optional[int] = None,
-        allow_negative: bool = False
+        allow_negative: bool = False,
     ) -> int:
         """
         Validate integer input
@@ -178,7 +185,7 @@ class InputValidator:
         field: str = "input",
         min_value: Optional[Decimal] = None,
         max_value: Optional[Decimal] = None,
-        max_decimals: int = 8
+        max_decimals: int = 8,
     ) -> Decimal:
         """
         Validate decimal/float input with precision control
@@ -203,7 +210,9 @@ class InputValidator:
 
         # Check decimal places
         if abs(value.as_tuple().exponent) > max_decimals:
-            raise ValidationError(field, f"Cannot have more than {max_decimals} decimal places", value)
+            raise ValidationError(
+                field, f"Cannot have more than {max_decimals} decimal places", value
+            )
 
         # Range validation
         if min_value is not None and value < min_value:
@@ -233,11 +242,7 @@ class InputValidator:
         MAX_SATS = 21_000_000 * 100_000_000
 
         amount = cls.validate_integer(
-            value,
-            field=field,
-            min_value=1,
-            max_value=MAX_SATS,
-            allow_negative=False
+            value, field=field, min_value=1, max_value=MAX_SATS, allow_negative=False
         )
 
         return amount
@@ -258,11 +263,7 @@ class InputValidator:
             ValidationError: If validation fails
         """
         invoice = cls.validate_string(
-            value,
-            field=field,
-            min_length=10,
-            max_length=2000,
-            sanitize=False
+            value, field=field, min_length=10, max_length=2000, sanitize=False
         )
 
         # Check BOLT11 format
@@ -287,11 +288,7 @@ class InputValidator:
             ValidationError: If validation fails
         """
         pubkey = cls.validate_string(
-            value,
-            field=field,
-            min_length=66,
-            max_length=66,
-            sanitize=False
+            value, field=field, min_length=66, max_length=66, sanitize=False
         )
 
         if not re.match(cls.NODE_PUBKEY_PATTERN, pubkey, re.IGNORECASE):
@@ -315,15 +312,13 @@ class InputValidator:
             ValidationError: If validation fails
         """
         channel_id = cls.validate_string(
-            value,
-            field=field,
-            min_length=5,
-            max_length=30,
-            sanitize=False
+            value, field=field, min_length=5, max_length=30, sanitize=False
         )
 
         if not re.match(cls.CHANNEL_ID_PATTERN, channel_id):
-            raise ValidationError(field, "Invalid channel ID format (expected: block:tx:output)", value)
+            raise ValidationError(
+                field, "Invalid channel ID format (expected: block:tx:output)", value
+            )
 
         return channel_id
 
@@ -357,7 +352,7 @@ class InputValidator:
         value: Any,
         field: str = "url",
         allowed_schemes: Optional[List[str]] = None,
-        require_tls: bool = True
+        require_tls: bool = True,
     ) -> str:
         """
         Validate URL
@@ -374,7 +369,9 @@ class InputValidator:
         Raises:
             ValidationError: If validation fails
         """
-        url_str = cls.validate_string(value, field=field, max_length=2048, sanitize=False)
+        url_str = cls.validate_string(
+            value, field=field, max_length=2048, sanitize=False
+        )
 
         try:
             parsed = urlparse(url_str)
@@ -383,14 +380,18 @@ class InputValidator:
 
         # Scheme validation
         if allowed_schemes is None:
-            allowed_schemes = ['https', 'http', 'wss', 'ws']
+            allowed_schemes = ["https", "http", "wss", "ws"]
 
         if parsed.scheme not in allowed_schemes:
-            raise ValidationError(field, f"URL scheme must be one of: {', '.join(allowed_schemes)}", value)
+            raise ValidationError(
+                field, f"URL scheme must be one of: {', '.join(allowed_schemes)}", value
+            )
 
         # TLS requirement
-        if require_tls and parsed.scheme in ['http', 'ws']:
-            raise ValidationError(field, "URL must use secure protocol (HTTPS/WSS)", value)
+        if require_tls and parsed.scheme in ["http", "ws"]:
+            raise ValidationError(
+                field, "URL must use secure protocol (HTTPS/WSS)", value
+            )
 
         # Host validation
         if not parsed.netloc:
@@ -405,7 +406,7 @@ class InputValidator:
         field: str = "file_path",
         must_exist: bool = False,
         allowed_extensions: Optional[List[str]] = None,
-        base_directory: Optional[str] = None
+        base_directory: Optional[str] = None,
     ) -> Path:
         """
         Validate file path with path traversal protection
@@ -447,7 +448,11 @@ class InputValidator:
 
         # Extension validation
         if allowed_extensions and path.suffix not in allowed_extensions:
-            raise ValidationError(field, f"File extension must be one of: {', '.join(allowed_extensions)}", value)
+            raise ValidationError(
+                field,
+                f"File extension must be one of: {', '.join(allowed_extensions)}",
+                value,
+            )
 
         return path
 
@@ -521,21 +526,27 @@ class InputValidator:
         """Check for command injection patterns"""
         for pattern in cls.COMMAND_INJECTION_PATTERNS:
             if re.search(pattern, value):
-                raise ValidationError(field, "Potential command injection detected", value)
+                raise ValidationError(
+                    field, "Potential command injection detected", value
+                )
 
     @classmethod
     def _check_path_traversal(cls, value: str, field: str):
         """Check for path traversal patterns"""
         for pattern in cls.PATH_TRAVERSAL_PATTERNS:
             if re.search(pattern, value, re.IGNORECASE):
-                raise ValidationError(field, "Potential path traversal attack detected", value)
+                raise ValidationError(
+                    field, "Potential path traversal attack detected", value
+                )
 
 
 class RequestValidator:
     """Validate HTTP requests"""
 
     @staticmethod
-    def validate_headers(headers: Dict[str, str], required: Optional[List[str]] = None) -> Dict[str, str]:
+    def validate_headers(
+        headers: Dict[str, str], required: Optional[List[str]] = None
+    ) -> Dict[str, str]:
         """
         Validate HTTP headers
 
@@ -552,16 +563,16 @@ class RequestValidator:
         if required:
             for header in required:
                 if header not in headers:
-                    raise ValidationError("headers", f"Required header '{header}' missing")
+                    raise ValidationError(
+                        "headers", f"Required header '{header}' missing"
+                    )
 
         # Validate header values
         validated = {}
         for key, value in headers.items():
             try:
                 validated[key] = InputValidator.validate_string(
-                    value,
-                    field=f"header:{key}",
-                    max_length=8192
+                    value, field=f"header:{key}", max_length=8192
                 )
             except ValidationError:
                 # Skip invalid headers rather than failing entire request
@@ -588,10 +599,7 @@ class RequestValidator:
         for key, value in params.items():
             # Validate key
             clean_key = InputValidator.validate_string(
-                key,
-                field="param_name",
-                max_length=128,
-                pattern=r"^[a-zA-Z0-9_-]+$"
+                key, field="param_name", max_length=128, pattern=r"^[a-zA-Z0-9_-]+$"
             )
 
             # Validate value
@@ -602,8 +610,7 @@ class RequestValidator:
                 ]
             else:
                 validated[clean_key] = InputValidator.validate_string(
-                    value,
-                    field=f"param:{clean_key}"
+                    value, field=f"param:{clean_key}"
                 )
 
         return validated

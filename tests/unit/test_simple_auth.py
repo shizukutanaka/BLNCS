@@ -1,15 +1,15 @@
-import os
 import json
-import time
+import os
 import sys
-from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 import tempfile
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from blncs.core.simple_auth import SimpleAuth, AuthToken
+from blncs.core.simple_auth import AuthToken, SimpleAuth
 
 
 @pytest.fixture()
@@ -48,7 +48,9 @@ def test_generate_api_key_stores_hashed_secret(temp_auth_file):
 
 def test_rotate_api_key_invalidates_old_key(temp_auth_file):
     auth = SimpleAuth(str(temp_auth_file))
-    original_key = auth.generate_api_key("operator", permissions={"read": True, "write": True})
+    original_key = auth.generate_api_key(
+        "operator", permissions={"read": True, "write": True}
+    )
 
     new_key = auth.rotate_api_key(original_key, expires_in=10)
     assert new_key != original_key
@@ -63,8 +65,12 @@ def test_rotate_api_key_invalidates_old_key(temp_auth_file):
 
 def test_require_auth_enforces_permissions(temp_auth_file):
     auth = SimpleAuth(str(temp_auth_file))
-    read_only_key = auth.generate_api_key("reader", permissions={"read": True, "write": False})
-    writer_key = auth.generate_api_key("writer", permissions={"read": True, "write": True})
+    read_only_key = auth.generate_api_key(
+        "reader", permissions={"read": True, "write": False}
+    )
+    writer_key = auth.generate_api_key(
+        "writer", permissions={"read": True, "write": True}
+    )
 
     protected_fn_calls = {"read": 0, "write": 0}
 

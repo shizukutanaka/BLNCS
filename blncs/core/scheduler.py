@@ -4,14 +4,16 @@ BLNCS Automation Scheduler
 Lightweight background task scheduler for automated operations
 """
 
-import time
-import threading
-import schedule
-from typing import Dict, List, Any, Callable, Optional
-from datetime import datetime, timedelta
 import logging
+import threading
+import time
+from datetime import datetime, timedelta
+from typing import Any, Callable, Dict, List, Optional
+
+import schedule
 
 logger = logging.getLogger(__name__)
+
 
 class AutomationScheduler:
     """
@@ -53,6 +55,7 @@ class AutomationScheduler:
 
     def add_health_check(self, interval_hours: int = 1):
         """Add automated health check"""
+
         def health_check_job():
             try:
                 logger.info("Running automated health check")
@@ -71,9 +74,9 @@ class AutomationScheduler:
                 # Check system resources
                 current = collector.get_current_metrics()
                 if current:
-                    cpu_percent = current.get('cpu', {}).get('percent', 0)
-                    memory_percent = current.get('memory', {}).get('percent', 0)
-                    disk_percent = current.get('disk', {}).get('percent', 0)
+                    cpu_percent = current.get("cpu", {}).get("percent", 0)
+                    memory_percent = current.get("memory", {}).get("percent", 0)
+                    disk_percent = current.get("disk", {}).get("percent", 0)
 
                     if cpu_percent > 85:
                         issues.append(f"High CPU usage: {cpu_percent:.1f}%")
@@ -93,6 +96,7 @@ class AutomationScheduler:
                 # Check Lightning connection
                 try:
                     from blncs.lightning.simple_client import get_lightning_client
+
                     lightning = get_lightning_client()
                     if not lightning.connect():
                         warnings.append("Lightning Network connection failed")
@@ -102,9 +106,13 @@ class AutomationScheduler:
 
                 # Log results
                 if issues:
-                    logger.warning(f"Health check found {len(issues)} issues: {', '.join(issues)}")
+                    logger.warning(
+                        f"Health check found {len(issues)} issues: {', '.join(issues)}"
+                    )
                 if warnings:
-                    logger.info(f"Health check found {len(warnings)} warnings: {', '.join(warnings)}")
+                    logger.info(
+                        f"Health check found {len(warnings)} warnings: {', '.join(warnings)}"
+                    )
 
                 if not issues and not warnings:
                     logger.info("Health check passed - all systems normal")
@@ -118,11 +126,13 @@ class AutomationScheduler:
 
     def add_metrics_collection(self, interval_minutes: int = 30):
         """Add automated metrics collection"""
+
         def metrics_job():
             try:
                 logger.info("Running automated metrics collection")
 
                 from blncs.core.lightweight_metrics import get_metrics_collector
+
                 collector = get_metrics_collector()
 
                 # Ensure collection is running
@@ -141,25 +151,30 @@ class AutomationScheduler:
 
         job_id = f"metrics_{interval_minutes}min"
         self.jobs[job_id] = schedule.every(interval_minutes).minutes.do(metrics_job)
-        logger.info(f"Added automated metrics collection every {interval_minutes} minutes")
+        logger.info(
+            f"Added automated metrics collection every {interval_minutes} minutes"
+        )
 
     def add_backup_task(self, interval_hours: int = 24):
         """Add automated backup task"""
+
         def backup_job():
             try:
                 logger.info("Running automated backup")
 
                 from blncs.core.config import get_config
+
                 config = get_config()
 
                 # Create backup
-                from blncs.utils.simple_backup_recovery import auto_backup
                 import os
                 from pathlib import Path
 
+                from blncs.utils.simple_backup_recovery import auto_backup
+
                 # Get backup paths from config
-                db_path = config.get('database.path', 'data/blncs.db')
-                backup_root = config.get('backup.destination', 'backups')
+                db_path = config.get("database.path", "data/blncs.db")
+                backup_root = config.get("backup.destination", "backups")
 
                 # Ensure backup directory exists
                 Path(backup_root).mkdir(exist_ok=True)
@@ -168,7 +183,7 @@ class AutomationScheduler:
                     backups = auto_backup(
                         include_paths=[db_path],
                         backup_root=backup_root,
-                        backup_type='auto'
+                        backup_type="auto",
                     )
 
                     if backups:
@@ -187,15 +202,17 @@ class AutomationScheduler:
 
     def add_log_rotation(self, interval_hours: int = 24):
         """Add automated log rotation"""
+
         def rotation_job():
             try:
                 logger.info("Running automated log rotation")
 
                 from blncs.core.unified_logging import get_log_manager
+
                 log_manager = get_log_manager()
 
                 # Rotate main log
-                if hasattr(log_manager, 'rotate_log'):
+                if hasattr(log_manager, "rotate_log"):
                     log_manager.rotate_log()
                     logger.info("Log rotation completed")
                 else:
@@ -210,11 +227,13 @@ class AutomationScheduler:
 
     def add_config_backup(self, interval_hours: int = 24):
         """Add automated configuration backup"""
+
         def config_backup_job():
             try:
                 logger.info("Running automated config backup")
 
                 from blncs.core.config import get_config
+
                 config = get_config()
 
                 # Create config backup
@@ -243,9 +262,9 @@ class AutomationScheduler:
 
         for job_id, job in self.jobs.items():
             job_info = {
-                'id': job_id,
-                'next_run': str(job.next_run) if job.next_run else None,
-                'enabled': True
+                "id": job_id,
+                "next_run": str(job.next_run) if job.next_run else None,
+                "enabled": True,
             }
             jobs_info.append(job_info)
 
@@ -277,6 +296,7 @@ class AutomationScheduler:
 # Global scheduler instance
 _scheduler = None
 
+
 def get_scheduler() -> AutomationScheduler:
     """Get global automation scheduler instance"""
     global _scheduler
@@ -284,20 +304,23 @@ def get_scheduler() -> AutomationScheduler:
         _scheduler = AutomationScheduler()
     return _scheduler
 
+
 def start_automation():
     """Start the automation system"""
     scheduler = get_scheduler()
     scheduler.enable_default_schedule()
     scheduler.start()
 
+
 def stop_automation():
     """Stop the automation system"""
     scheduler = get_scheduler()
     scheduler.stop()
 
+
 __all__ = [
-    'AutomationScheduler',
-    'get_scheduler',
-    'start_automation',
-    'stop_automation'
+    "AutomationScheduler",
+    "get_scheduler",
+    "start_automation",
+    "stop_automation",
 ]

@@ -6,13 +6,14 @@ Lightweight system health monitoring and alerting.
 """
 
 import asyncio
-import time
-import psutil
 import logging
-from typing import Any, Dict, List, Optional, Callable
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from collections import defaultdict, deque
+from typing import Any, Callable, Dict, List, Optional
+
+import psutil
 
 from ..core.exceptions import MonitoringError, PerformanceError
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class HealthCheck:
     """Health check definition"""
+
     name: str
     check_func: Callable
     interval: int = 30  # seconds
@@ -32,6 +34,7 @@ class HealthCheck:
 @dataclass
 class HealthStatus:
     """Health status for a component"""
+
     name: str
     status: str  # 'healthy', 'warning', 'critical', 'unknown'
     message: str = ""
@@ -43,15 +46,17 @@ class HealthStatus:
 class SystemHealthMonitor:
     """Lightweight system health monitoring"""
 
-    def __init__(self,
-                 check_interval: int = 30,
-                 alert_thresholds: Optional[Dict[str, float]] = None):
+    def __init__(
+        self,
+        check_interval: int = 30,
+        alert_thresholds: Optional[Dict[str, float]] = None,
+    ):
         self.check_interval = check_interval
         self.alert_thresholds = alert_thresholds or {
-            'cpu_percent': 80.0,
-            'memory_percent': 85.0,
-            'disk_percent': 90.0,
-            'response_time': 5.0
+            "cpu_percent": 80.0,
+            "memory_percent": 85.0,
+            "disk_percent": 90.0,
+            "response_time": 5.0,
         }
 
         self.health_checks: List[HealthCheck] = []
@@ -72,7 +77,7 @@ class SystemHealthMonitor:
                 name="cpu_usage",
                 check_func=self._check_cpu_usage,
                 interval=30,
-                threshold=self.alert_thresholds['cpu_percent']
+                threshold=self.alert_thresholds["cpu_percent"],
             )
         )
 
@@ -82,7 +87,7 @@ class SystemHealthMonitor:
                 name="memory_usage",
                 check_func=self._check_memory_usage,
                 interval=30,
-                threshold=self.alert_thresholds['memory_percent']
+                threshold=self.alert_thresholds["memory_percent"],
             )
         )
 
@@ -92,7 +97,7 @@ class SystemHealthMonitor:
                 name="disk_usage",
                 check_func=self._check_disk_usage,
                 interval=60,
-                threshold=self.alert_thresholds['disk_percent']
+                threshold=self.alert_thresholds["disk_percent"],
             )
         )
 
@@ -101,7 +106,7 @@ class SystemHealthMonitor:
             HealthCheck(
                 name="network_connectivity",
                 check_func=self._check_network_connectivity,
-                interval=60
+                interval=60,
             )
         )
 
@@ -164,7 +169,7 @@ class SystemHealthMonitor:
                     name=check.name,
                     status="critical",
                     message=f"Check failed: {e}",
-                    response_time=time.time() - start_time
+                    response_time=time.time() - start_time,
                 )
                 self.health_history[check.name].append(error_status)
                 await self._trigger_alert(check.name, error_status)
@@ -179,17 +184,13 @@ class SystemHealthMonitor:
 
             return HealthStatus(
                 name=check.name,
-                status=result.get('status', 'unknown'),
-                message=result.get('message', ''),
-                metrics=result.get('metrics', {})
+                status=result.get("status", "unknown"),
+                message=result.get("message", ""),
+                metrics=result.get("metrics", {}),
             )
 
         except Exception as e:
-            return HealthStatus(
-                name=check.name,
-                status="critical",
-                message=str(e)
-            )
+            return HealthStatus(name=check.name, status="critical", message=str(e))
 
     def _should_alert(self, status: HealthStatus) -> bool:
         """Check if an alert should be triggered"""
@@ -199,7 +200,10 @@ class SystemHealthMonitor:
         # Check against thresholds for warning/critical statuses
         if status.name in self.alert_thresholds:
             threshold = self.alert_thresholds[status.name]
-            if status.name.endswith('_percent') and status.metrics.get('percent', 0) > threshold:
+            if (
+                status.name.endswith("_percent")
+                and status.metrics.get("percent", 0) > threshold
+            ):
                 return True
 
         return status.status in ["critical"]
@@ -225,9 +229,7 @@ class SystemHealthMonitor:
                 current_status[check_name] = history[-1]
             else:
                 current_status[check_name] = HealthStatus(
-                    name=check_name,
-                    status="unknown",
-                    message="No data available"
+                    name=check_name, status="unknown", message="No data available"
                 )
 
         return current_status
@@ -258,7 +260,7 @@ class SystemHealthMonitor:
         """Check CPU usage"""
         cpu_percent = psutil.cpu_percent(interval=1)
 
-        if cpu_percent > self.alert_thresholds['cpu_percent']:
+        if cpu_percent > self.alert_thresholds["cpu_percent"]:
             status = "warning"
             message = f"High CPU usage: {cpu_percent:.1f}%"
         else:
@@ -266,12 +268,9 @@ class SystemHealthMonitor:
             message = f"CPU usage: {cpu_percent:.1f}%"
 
         return {
-            'status': status,
-            'message': message,
-            'metrics': {
-                'percent': cpu_percent,
-                'cores': psutil.cpu_count()
-            }
+            "status": status,
+            "message": message,
+            "metrics": {"percent": cpu_percent, "cores": psutil.cpu_count()},
         }
 
     def _check_memory_usage(self) -> Dict[str, Any]:
@@ -279,7 +278,7 @@ class SystemHealthMonitor:
         memory = psutil.virtual_memory()
         memory_percent = memory.percent
 
-        if memory_percent > self.alert_thresholds['memory_percent']:
+        if memory_percent > self.alert_thresholds["memory_percent"]:
             status = "warning"
             message = f"High memory usage: {memory_percent:.1f}%"
         else:
@@ -287,22 +286,22 @@ class SystemHealthMonitor:
             message = f"Memory usage: {memory_percent:.1f}%"
 
         return {
-            'status': status,
-            'message': message,
-            'metrics': {
-                'percent': memory_percent,
-                'used': memory.used,
-                'available': memory.available,
-                'total': memory.total
-            }
+            "status": status,
+            "message": message,
+            "metrics": {
+                "percent": memory_percent,
+                "used": memory.used,
+                "available": memory.available,
+                "total": memory.total,
+            },
         }
 
     def _check_disk_usage(self) -> Dict[str, Any]:
         """Check disk usage"""
-        disk = psutil.disk_usage('/')
+        disk = psutil.disk_usage("/")
         disk_percent = disk.percent
 
-        if disk_percent > self.alert_thresholds['disk_percent']:
+        if disk_percent > self.alert_thresholds["disk_percent"]:
             status = "warning"
             message = f"High disk usage: {disk_percent:.1f}%"
         else:
@@ -310,14 +309,14 @@ class SystemHealthMonitor:
             message = f"Disk usage: {disk_percent:.1f}%"
 
         return {
-            'status': status,
-            'message': message,
-            'metrics': {
-                'percent': disk_percent,
-                'used': disk.used,
-                'free': disk.free,
-                'total': disk.total
-            }
+            "status": status,
+            "message": message,
+            "metrics": {
+                "percent": disk_percent,
+                "used": disk.used,
+                "free": disk.free,
+                "total": disk.total,
+            },
         }
 
     def _check_network_connectivity(self) -> Dict[str, Any]:
@@ -326,15 +325,13 @@ class SystemHealthMonitor:
             # Simple connectivity check
             network = psutil.net_if_addrs()
             if not network:
-                return {
-                    'status': 'critical',
-                    'message': 'No network interfaces found'
-                }
+                return {"status": "critical", "message": "No network interfaces found"}
 
             # Check if we can resolve DNS
             import socket
+
             try:
-                socket.gethostbyname('google.com')
+                socket.gethostbyname("google.com")
                 status = "healthy"
                 message = "Network connectivity OK"
             except socket.gaierror:
@@ -345,10 +342,7 @@ class SystemHealthMonitor:
             status = "critical"
             message = f"Network check failed: {e}"
 
-        return {
-            'status': status,
-            'message': message
-        }
+        return {"status": status, "message": message}
 
 
 class HealthAlertManager:
@@ -361,18 +355,18 @@ class HealthAlertManager:
     def log_alert(self, check_name: str, status: HealthStatus):
         """Log an alert"""
         alert = {
-            'timestamp': status.timestamp,
-            'check_name': check_name,
-            'status': status.status,
-            'message': status.message,
-            'metrics': status.metrics
+            "timestamp": status.timestamp,
+            "check_name": check_name,
+            "status": status.status,
+            "message": status.message,
+            "metrics": status.metrics,
         }
 
         self.alert_history.append(alert)
 
         # Trim history if needed
         if len(self.alert_history) > self.max_history:
-            self.alert_history = self.alert_history[-self.max_history:]
+            self.alert_history = self.alert_history[-self.max_history :]
 
     def get_recent_alerts(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent alerts"""
@@ -381,19 +375,19 @@ class HealthAlertManager:
     def get_alert_summary(self) -> Dict[str, Any]:
         """Get alert summary"""
         if not self.alert_history:
-            return {'total_alerts': 0}
+            return {"total_alerts": 0}
 
         recent_alerts = self.alert_history[-100:]  # Last 100 alerts
 
         status_counts = defaultdict(int)
         for alert in recent_alerts:
-            status_counts[alert['status']] += 1
+            status_counts[alert["status"]] += 1
 
         return {
-            'total_alerts': len(self.alert_history),
-            'recent_alerts': len(recent_alerts),
-            'status_counts': dict(status_counts),
-            'last_alert': recent_alerts[-1] if recent_alerts else None
+            "total_alerts": len(self.alert_history),
+            "recent_alerts": len(recent_alerts),
+            "status_counts": dict(status_counts),
+            "last_alert": recent_alerts[-1] if recent_alerts else None,
         }
 
 
@@ -401,12 +395,14 @@ class HealthAlertManager:
 _health_monitor = None
 _alert_manager = None
 
+
 def get_health_monitor() -> SystemHealthMonitor:
     """Get global health monitor instance"""
     global _health_monitor
     if _health_monitor is None:
         _health_monitor = SystemHealthMonitor()
     return _health_monitor
+
 
 def get_alert_manager() -> HealthAlertManager:
     """Get global alert manager instance"""

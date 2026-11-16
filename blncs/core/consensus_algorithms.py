@@ -6,19 +6,20 @@ Based on 2025 research on distributed consensus for Bitcoin L2 solutions
 """
 
 import logging
-import time
-from typing import Dict, List, Optional, Set, Any, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime, timedelta
-from abc import ABC, abstractmethod
 import random
+import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class NodeState(Enum):
     """Raft node states"""
+
     FOLLOWER = "follower"
     CANDIDATE = "candidate"
     LEADER = "leader"
@@ -27,6 +28,7 @@ class NodeState(Enum):
 @dataclass
 class LogEntry:
     """Entry in consensus log"""
+
     term: int
     command: str
     data: Dict[str, Any] = field(default_factory=dict)
@@ -36,6 +38,7 @@ class LogEntry:
 @dataclass
 class NodeMetadata:
     """Metadata for a consensus node"""
+
     node_id: str
     state: NodeState = NodeState.FOLLOWER
     current_term: int = 0
@@ -48,13 +51,13 @@ class NodeMetadata:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            'node_id': self.node_id,
-            'state': self.state.value,
-            'current_term': self.current_term,
-            'voted_for': self.voted_for,
-            'log_size': len(self.log),
-            'commit_index': self.commit_index,
-            'last_applied': self.last_applied
+            "node_id": self.node_id,
+            "state": self.state.value,
+            "current_term": self.current_term,
+            "voted_for": self.voted_for,
+            "log_size": len(self.log),
+            "commit_index": self.commit_index,
+            "last_applied": self.last_applied,
         }
 
 
@@ -97,11 +100,7 @@ class RaftConsensus:
             logger.warning(f"Non-leader cannot append: {self.node.node_id}")
             return False
 
-        entry = LogEntry(
-            term=self.node.current_term,
-            command=command,
-            data=data
-        )
+        entry = LogEntry(term=self.node.current_term, command=command, data=data)
 
         self.node.log.append(entry)
         logger.info(f"Appended log entry: {command}")
@@ -142,7 +141,9 @@ class RaftConsensus:
         self.node.state = NodeState.CANDIDATE
         self.node.voted_for = self.node.node_id
 
-        logger.info(f"Node {self.node.node_id} starting election (term {self.node.current_term})")
+        logger.info(
+            f"Node {self.node.node_id} starting election (term {self.node.current_term})"
+        )
 
         # Count votes (including self)
         votes = 1
@@ -162,7 +163,9 @@ class RaftConsensus:
         """Transition to leader state"""
         self.node.state = NodeState.LEADER
         self.node.voted_for = None
-        logger.info(f"Node {self.node.node_id} became LEADER (term {self.node.current_term})")
+        logger.info(
+            f"Node {self.node.node_id} became LEADER (term {self.node.current_term})"
+        )
 
     def send_heartbeat(self) -> None:
         """Send heartbeat to all peers"""
@@ -239,9 +242,9 @@ class PaxosConsensus:
         self.promised_number = proposal_number
 
         return True, {
-            'promised_number': self.promised_number,
-            'accepted_number': self.accepted_number,
-            'accepted_value': self.accepted_value
+            "promised_number": self.promised_number,
+            "accepted_number": self.accepted_number,
+            "accepted_value": self.accepted_value,
         }
 
     def accept(self, proposal_number: int, value: str) -> bool:
@@ -274,11 +277,13 @@ class PaxosConsensus:
         if proposal_number not in self.accepted_proposals:
             self.accepted_proposals[proposal_number] = []
 
-        self.accepted_proposals[proposal_number].append({
-            'value': value,
-            'proposer': proposer,
-            'timestamp': datetime.utcnow().isoformat()
-        })
+        self.accepted_proposals[proposal_number].append(
+            {
+                "value": value,
+                "proposer": proposer,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
         logger.debug(f"Learned proposal {proposal_number}: {value}")
 
@@ -289,11 +294,11 @@ class PaxosConsensus:
     def get_state(self) -> Dict[str, Any]:
         """Get node state for monitoring"""
         return {
-            'node_id': self.node_id,
-            'promised_number': self.promised_number,
-            'accepted_number': self.accepted_number,
-            'accepted_value': self.accepted_value,
-            'learned_count': len(self.accepted_proposals)
+            "node_id": self.node_id,
+            "promised_number": self.promised_number,
+            "accepted_number": self.accepted_number,
+            "accepted_value": self.accepted_value,
+            "learned_count": len(self.accepted_proposals),
         }
 
 
@@ -332,16 +337,17 @@ class ConsensusMetrics:
         uptime = (datetime.utcnow() - self.startup_time).total_seconds()
 
         return {
-            'elections_started': self.elections_started,
-            'leaders_elected': self.leaders_elected,
-            'proposals_submitted': self.proposals_submitted,
-            'proposals_accepted': self.proposals_accepted,
-            'proposal_acceptance_rate': (
+            "elections_started": self.elections_started,
+            "leaders_elected": self.leaders_elected,
+            "proposals_submitted": self.proposals_submitted,
+            "proposals_accepted": self.proposals_accepted,
+            "proposal_acceptance_rate": (
                 (self.proposals_accepted / self.proposals_submitted * 100)
-                if self.proposals_submitted > 0 else 0
+                if self.proposals_submitted > 0
+                else 0
             ),
-            'log_entries_committed': self.log_entries_committed,
-            'uptime_seconds': uptime
+            "log_entries_committed": self.log_entries_committed,
+            "uptime_seconds": uptime,
         }
 
 
@@ -379,13 +385,12 @@ class ConsensusCluster:
     def get_metrics(self) -> Dict[str, Any]:
         """Get cluster metrics"""
         return {
-            'algorithm': self.algorithm,
-            'node_count': len(self.nodes),
-            'nodes': {
-                node_id: node.get_state()
-                for node_id, node in self.nodes.items()
+            "algorithm": self.algorithm,
+            "node_count": len(self.nodes),
+            "nodes": {
+                node_id: node.get_state() for node_id, node in self.nodes.items()
             },
-            'cluster_metrics': self.metrics.get_metrics()
+            "cluster_metrics": self.metrics.get_metrics(),
         }
 
     def simulate_step(self) -> None:
@@ -398,11 +403,11 @@ class ConsensusCluster:
 
 
 __all__ = [
-    'NodeState',
-    'LogEntry',
-    'NodeMetadata',
-    'RaftConsensus',
-    'PaxosConsensus',
-    'ConsensusMetrics',
-    'ConsensusCluster',
+    "NodeState",
+    "LogEntry",
+    "NodeMetadata",
+    "RaftConsensus",
+    "PaxosConsensus",
+    "ConsensusMetrics",
+    "ConsensusCluster",
 ]

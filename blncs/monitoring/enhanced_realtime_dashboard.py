@@ -8,21 +8,22 @@ This module provides advanced real-time monitoring with:
 - Alert management and escalation
 """
 
-import json
-import time
 import asyncio
+import json
 import logging
-from typing import Dict, List, Optional, Any, Callable, Set
-from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-import threading
 import queue
+import threading
+import time
 import uuid
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
+from typing import Any, Callable, Dict, List, Optional, Set
 
 # Try to import WebSocket libraries
 try:
     import websockets
     from websockets import WebSocketServerProtocol
+
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False
@@ -30,15 +31,18 @@ except ImportError:
 try:
     import aiohttp
     from aiohttp import web
+
     HAS_AIOHTTP = True
 except ImportError:
     HAS_AIOHTTP = False
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class Alert:
     """Alert data structure."""
+
     id: str
     timestamp: float
     severity: str  # critical, high, medium, low
@@ -51,9 +55,11 @@ class Alert:
     resolved_at: Optional[float] = None
     escalation_level: int = 0
 
+
 @dataclass
 class NotificationChannel:
     """Notification channel configuration."""
+
     id: str
     name: str
     type: str  # email, slack, webhook, sms
@@ -61,9 +67,11 @@ class NotificationChannel:
     enabled: bool = True
     escalation_timeout: int = 300  # 5 minutes
 
+
 @dataclass
 class DashboardWidget:
     """Dashboard widget configuration."""
+
     id: str
     type: str  # chart, metric, table, alert_list, status
     title: str
@@ -71,6 +79,7 @@ class DashboardWidget:
     data_source: str
     refresh_interval: int = 30
     config: Dict[str, Any] = None
+
 
 class NotificationManager:
     """Advanced notification management system."""
@@ -83,7 +92,9 @@ class NotificationManager:
         self.max_history = 1000
 
         # Start notification processor
-        self.processor_thread = threading.Thread(target=self._process_notifications, daemon=True)
+        self.processor_thread = threading.Thread(
+            target=self._process_notifications, daemon=True
+        )
         self.processor_thread.start()
 
     def add_channel(self, channel: NotificationChannel):
@@ -121,13 +132,13 @@ class NotificationManager:
     def _send_to_channel(self, alert: Alert, channel: NotificationChannel):
         """Send alert to specific channel."""
         try:
-            if channel.type == 'email':
+            if channel.type == "email":
                 self._send_email_alert(alert, channel)
-            elif channel.type == 'slack':
+            elif channel.type == "slack":
                 self._send_slack_alert(alert, channel)
-            elif channel.type == 'webhook':
+            elif channel.type == "webhook":
                 self._send_webhook_alert(alert, channel)
-            elif channel.type == 'sms':
+            elif channel.type == "sms":
                 self._send_sms_alert(alert, channel)
         except Exception as e:
             self.logger.error(f"Failed to send alert to {channel.name}: {e}")
@@ -135,22 +146,31 @@ class NotificationManager:
     def _send_email_alert(self, alert: Alert, channel: NotificationChannel):
         """Send email alert."""
         # In a real implementation, use SMTP or email service
-        self.logger.info(f"Email alert sent: {alert.title} to {channel.config.get('recipients', [])}")
+        self.logger.info(
+            f"Email alert sent: {alert.title} to {channel.config.get('recipients', [])}"
+        )
 
     def _send_slack_alert(self, alert: Alert, channel: NotificationChannel):
         """Send Slack alert."""
         # In a real implementation, use Slack API
-        self.logger.info(f"Slack alert sent: {alert.title} to {channel.config.get('channel', '#alerts')}")
+        self.logger.info(
+            f"Slack alert sent: {alert.title} to {channel.config.get('channel', '#alerts')}"
+        )
 
     def _send_webhook_alert(self, alert: Alert, channel: NotificationChannel):
         """Send webhook alert."""
         # In a real implementation, make HTTP POST to webhook URL
-        self.logger.info(f"Webhook alert sent: {alert.title} to {channel.config.get('url')}")
+        self.logger.info(
+            f"Webhook alert sent: {alert.title} to {channel.config.get('url')}"
+        )
 
     def _send_sms_alert(self, alert: Alert, channel: NotificationChannel):
         """Send SMS alert."""
         # In a real implementation, use SMS service
-        self.logger.info(f"SMS alert sent: {alert.title} to {channel.config.get('phone_numbers', [])}")
+        self.logger.info(
+            f"SMS alert sent: {alert.title} to {channel.config.get('phone_numbers', [])}"
+        )
+
 
 class RealTimeDataManager:
     """Real-time data management and broadcasting."""
@@ -188,11 +208,7 @@ class RealTimeDataManager:
 
     async def broadcast_data(self, data_type: str, data: Dict[str, Any]):
         """Broadcast data to all subscribers."""
-        message = {
-            'type': data_type,
-            'timestamp': time.time(),
-            'data': data
-        }
+        message = {"type": data_type, "timestamp": time.time(), "data": data}
 
         await self.data_queue.put(message)
 
@@ -208,7 +224,9 @@ class RealTimeDataManager:
 
                 # Broadcast to all subscribers (in real implementation, send via WebSocket)
                 if self.subscribers:
-                    self.logger.debug(f"Broadcasting to {len(self.subscribers)} subscribers: {message['type']}")
+                    self.logger.debug(
+                        f"Broadcasting to {len(self.subscribers)} subscribers: {message['type']}"
+                    )
 
                 # Process the message
                 self.data_queue.task_done()
@@ -216,6 +234,7 @@ class RealTimeDataManager:
             except Exception as e:
                 self.logger.error(f"Error in broadcast loop: {e}")
                 await asyncio.sleep(1)
+
 
 class EnhancedMonitoringDashboard:
     """Enhanced real-time monitoring dashboard."""
@@ -238,7 +257,9 @@ class EnhancedMonitoringDashboard:
         """Add dashboard widget."""
         self.widgets[widget.id] = widget
 
-    def create_alert(self, severity: str, category: str, title: str, message: str, source: str) -> Alert:
+    def create_alert(
+        self, severity: str, category: str, title: str, message: str, source: str
+    ) -> Alert:
         """Create and send alert."""
         alert = Alert(
             id=str(uuid.uuid4()),
@@ -247,7 +268,7 @@ class EnhancedMonitoringDashboard:
             category=category,
             title=title,
             message=message,
-            source=source
+            source=source,
         )
 
         self.alerts.append(alert)
@@ -259,32 +280,33 @@ class EnhancedMonitoringDashboard:
     def get_dashboard_data(self) -> Dict[str, Any]:
         """Get current dashboard data."""
         return {
-            'timestamp': time.time(),
-            'alerts': [asdict(alert) for alert in self.alerts[-50:]],  # Last 50 alerts
-            'widgets': [asdict(widget) for widget in self.widgets.values()],
-            'system_status': self._get_system_status(),
-            'performance_metrics': self._get_performance_metrics(),
-            'notifications_sent': len(self.notification_manager.notification_history)
+            "timestamp": time.time(),
+            "alerts": [asdict(alert) for alert in self.alerts[-50:]],  # Last 50 alerts
+            "widgets": [asdict(widget) for widget in self.widgets.values()],
+            "system_status": self._get_system_status(),
+            "performance_metrics": self._get_performance_metrics(),
+            "notifications_sent": len(self.notification_manager.notification_history),
         }
 
     def _get_system_status(self) -> Dict[str, Any]:
         """Get current system status."""
         # In a real implementation, collect from various system monitors
         return {
-            'status': 'healthy',
-            'uptime': time.time(),  # Would be actual uptime
-            'services': ['api', 'lightning', 'database', 'monitoring']
+            "status": "healthy",
+            "uptime": time.time(),  # Would be actual uptime
+            "services": ["api", "lightning", "database", "monitoring"],
         }
 
     def _get_performance_metrics(self) -> Dict[str, Any]:
         """Get current performance metrics."""
         # In a real implementation, collect from performance monitors
         return {
-            'cpu_usage': 45.2,
-            'memory_usage': 67.8,
-            'disk_usage': 23.4,
-            'network_io': {'in': 1024, 'out': 2048}
+            "cpu_usage": 45.2,
+            "memory_usage": 67.8,
+            "disk_usage": 23.4,
+            "network_io": {"in": 1024, "out": 2048},
         }
+
 
 class WebSocketHandler:
     """WebSocket handler for real-time updates."""
@@ -301,10 +323,9 @@ class WebSocketHandler:
         try:
             # Send initial dashboard data
             initial_data = self.dashboard.get_dashboard_data()
-            await websocket.send(json.dumps({
-                'type': 'initial_data',
-                'data': initial_data
-            }))
+            await websocket.send(
+                json.dumps({"type": "initial_data", "data": initial_data})
+            )
 
             # Handle incoming messages
             async for message in websocket:
@@ -315,24 +336,26 @@ class WebSocketHandler:
         finally:
             self.dashboard.data_manager.remove_subscriber(client_id)
 
-    async def _handle_message(self, websocket: WebSocketServerProtocol, message: Dict[str, Any]):
+    async def _handle_message(
+        self, websocket: WebSocketServerProtocol, message: Dict[str, Any]
+    ):
         """Handle incoming WebSocket message."""
-        message_type = message.get('type')
+        message_type = message.get("type")
 
-        if message_type == 'subscribe':
+        if message_type == "subscribe":
             # Handle subscription requests
             pass
-        elif message_type == 'acknowledge_alert':
-            alert_id = message.get('alert_id')
+        elif message_type == "acknowledge_alert":
+            alert_id = message.get("alert_id")
             self._acknowledge_alert(alert_id)
-        elif message_type == 'get_widget_data':
-            widget_id = message.get('widget_id')
+        elif message_type == "get_widget_data":
+            widget_id = message.get("widget_id")
             widget_data = self._get_widget_data(widget_id)
-            await websocket.send(json.dumps({
-                'type': 'widget_data',
-                'widget_id': widget_id,
-                'data': widget_data
-            }))
+            await websocket.send(
+                json.dumps(
+                    {"type": "widget_data", "widget_id": widget_id, "data": widget_data}
+                )
+            )
 
     def _acknowledge_alert(self, alert_id: str):
         """Acknowledge an alert."""
@@ -349,7 +372,8 @@ class WebSocketHandler:
             return {}
 
         # In a real implementation, fetch widget-specific data
-        return {'widget_id': widget_id, 'data': 'sample_data'}
+        return {"widget_id": widget_id, "data": "sample_data"}
+
 
 # Integration with existing monitoring systems
 def integrate_enhanced_monitoring(app_or_service):
@@ -362,7 +386,7 @@ def integrate_enhanced_monitoring(app_or_service):
         name="Default Email",
         type="email",
         config={"recipients": ["admin@blncs.example.com"]},
-        enabled=True
+        enabled=True,
     )
     dashboard.add_notification_channel(email_channel)
 
@@ -373,7 +397,7 @@ def integrate_enhanced_monitoring(app_or_service):
         title="System Status",
         position={"x": 0, "y": 0, "width": 6, "height": 4},
         data_source="system_monitor",
-        refresh_interval=30
+        refresh_interval=30,
     )
     dashboard.add_dashboard_widget(system_status_widget)
 
@@ -383,11 +407,12 @@ def integrate_enhanced_monitoring(app_or_service):
         title="Active Alerts",
         position={"x": 6, "y": 0, "width": 6, "height": 4},
         data_source="alert_manager",
-        refresh_interval=10
+        refresh_interval=10,
     )
     dashboard.add_dashboard_widget(alerts_widget)
 
     return dashboard
+
 
 # Example usage
 if __name__ == "__main__":
@@ -400,7 +425,7 @@ if __name__ == "__main__":
         category="system",
         title="High CPU Usage",
         message="CPU usage has exceeded 80% for 5 minutes",
-        source="system_monitor"
+        source="system_monitor",
     )
 
     # Get dashboard data

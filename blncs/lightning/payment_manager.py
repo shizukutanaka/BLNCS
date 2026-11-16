@@ -3,12 +3,12 @@ Lightning Payment Manager
 実用的な支払い管理機能
 """
 
-import time
 import json
 import logging
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
+import time
+from dataclasses import asdict, dataclass
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +16,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PaymentRecord:
     """支払い記録"""
+
     payment_hash: str
     payment_request: str
     amount: int
     status: str  # 'pending', 'succeeded', 'failed'
-    type: str    # 'invoice', 'payment'
+    type: str  # 'invoice', 'payment'
     memo: str = ""
     fees: int = 0
     created_at: float = 0
@@ -43,9 +44,10 @@ class PaymentManager:
         """支払い履歴読み込み"""
         try:
             import os
+
             payments_file = os.path.join(self.data_dir, "payments.json")
             if os.path.exists(payments_file):
-                with open(payments_file, 'r') as f:
+                with open(payments_file, "r") as f:
                     data = json.load(f)
                     for payment_hash, payment_data in data.items():
                         self.payments[payment_hash] = PaymentRecord(**payment_data)
@@ -57,10 +59,11 @@ class PaymentManager:
         """支払い履歴保存"""
         try:
             import os
+
             os.makedirs(self.data_dir, exist_ok=True)
             payments_file = os.path.join(self.data_dir, "payments.json")
             data = {hash: asdict(payment) for hash, payment in self.payments.items()}
-            with open(payments_file, 'w') as f:
+            with open(payments_file, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save payments: {e}")
@@ -75,7 +78,9 @@ class PaymentManager:
         """支払い記録取得"""
         return self.payments.get(payment_hash)
 
-    def list_payments(self, limit: int = 100, payment_type: Optional[str] = None) -> List[PaymentRecord]:
+    def list_payments(
+        self, limit: int = 100, payment_type: Optional[str] = None
+    ) -> List[PaymentRecord]:
         """支払い一覧取得"""
         payments = list(self.payments.values())
 
@@ -90,24 +95,24 @@ class PaymentManager:
     def get_payment_stats(self) -> Dict[str, Any]:
         """支払い統計取得"""
         total_count = len(self.payments)
-        invoices = [p for p in self.payments.values() if p.type == 'invoice']
-        payments = [p for p in self.payments.values() if p.type == 'payment']
+        invoices = [p for p in self.payments.values() if p.type == "invoice"]
+        payments = [p for p in self.payments.values() if p.type == "payment"]
 
-        succeeded_payments = [p for p in payments if p.status == 'succeeded']
+        succeeded_payments = [p for p in payments if p.status == "succeeded"]
         total_sent = sum(p.amount for p in succeeded_payments)
         total_fees = sum(p.fees for p in succeeded_payments)
 
-        succeeded_invoices = [p for p in invoices if p.status == 'succeeded']
+        succeeded_invoices = [p for p in invoices if p.status == "succeeded"]
         total_received = sum(p.amount for p in succeeded_invoices)
 
         return {
-            'total_payments': total_count,
-            'total_invoices': len(invoices),
-            'total_sent': len(payments),
-            'total_sent_amount': total_sent,
-            'total_received_amount': total_received,
-            'total_fees_paid': total_fees,
-            'success_rate': len(succeeded_payments) / len(payments) if payments else 0
+            "total_payments": total_count,
+            "total_invoices": len(invoices),
+            "total_sent": len(payments),
+            "total_sent_amount": total_sent,
+            "total_received_amount": total_received,
+            "total_fees_paid": total_fees,
+            "success_rate": len(succeeded_payments) / len(payments) if payments else 0,
         }
 
     def search_payments(self, query: str) -> List[PaymentRecord]:
@@ -116,9 +121,11 @@ class PaymentManager:
         query_lower = query.lower()
 
         for payment in self.payments.values():
-            if (query_lower in payment.memo.lower() or
-                query_lower in payment.payment_hash.lower() or
-                query_lower in payment.payment_request.lower()):
+            if (
+                query_lower in payment.memo.lower()
+                or query_lower in payment.payment_hash.lower()
+                or query_lower in payment.payment_request.lower()
+            ):
                 results.append(payment)
 
         return sorted(results, key=lambda x: x.created_at, reverse=True)
@@ -126,6 +133,7 @@ class PaymentManager:
 
 # Global instance
 _payment_manager = None
+
 
 def get_payment_manager() -> PaymentManager:
     """Get global payment manager instance"""

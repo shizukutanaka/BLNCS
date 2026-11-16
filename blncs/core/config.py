@@ -4,24 +4,26 @@ BLNCS Configuration Management System
 Unified, secure, and optimized configuration management
 """
 
-import os
-import json
-import yaml
-import logging
-import re
 import copy
-import secrets
-from pathlib import Path
-from typing import Dict, Any, Optional, Union, Callable, List
-from dataclasses import dataclass, asdict, field
-from datetime import datetime
-import threading
-from enum import Enum
 import hashlib
+import json
+import logging
+import os
+import re
+import secrets
+import threading
 import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
+
+import yaml
 
 try:
     from cryptography.fernet import Fernet
+
     CRYPTO_AVAILABLE = True
 except ImportError:
     CRYPTO_AVAILABLE = False
@@ -39,6 +41,7 @@ class ConfigFormat(Enum):
 @dataclass
 class LightningConfig:
     """Lightning Network configuration"""
+
     network: str = "testnet"
     host: str = "localhost"
     port: int = 10009
@@ -54,6 +57,7 @@ class LightningConfig:
 @dataclass
 class DatabaseConfig:
     """Database configuration"""
+
     url: str = "sqlite:///./blncs.db"
     pool_size: int = 10
     max_overflow: int = 20
@@ -64,6 +68,7 @@ class DatabaseConfig:
 @dataclass
 class CacheConfig:
     """Cache configuration"""
+
     enabled: bool = True
     ttl: int = 3600
     max_size: int = 1000
@@ -74,6 +79,7 @@ class CacheConfig:
 @dataclass
 class SecurityConfig:
     """Security configuration"""
+
     jwt_secret: Optional[str] = None
     jwt_algorithm: str = "HS256"
     jwt_expiration: int = 3600
@@ -88,11 +94,14 @@ class SecurityConfig:
 @dataclass
 class APIConfig:
     """API configuration"""
+
     enabled: bool = True
     host: str = "localhost"
     port: int = 3000
     cors_enabled: bool = True
-    cors_allowed_origins: List[str] = field(default_factory=lambda: ["http://localhost:3000"])
+    cors_allowed_origins: List[str] = field(
+        default_factory=lambda: ["http://localhost:3000"]
+    )
     authentication_enabled: bool = False
     rate_limiting_enabled: bool = True
 
@@ -100,6 +109,7 @@ class APIConfig:
 @dataclass
 class LoggingConfig:
     """Logging configuration"""
+
     level: str = "INFO"
     output: str = "console"
     format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -109,6 +119,7 @@ class LoggingConfig:
 @dataclass
 class PerformanceConfig:
     """Performance configuration"""
+
     enable_optimization: bool = True
     async_operations: bool = True
     connection_pool_size: int = 20
@@ -119,6 +130,7 @@ class PerformanceConfig:
 @dataclass
 class ValidationRule:
     """Configuration validation rule"""
+
     path: str
     required: bool = False
     type_check: Optional[type] = None
@@ -128,6 +140,7 @@ class ValidationRule:
 
 class ConfigurationError(Exception):
     """Configuration-related errors"""
+
     pass
 
 
@@ -148,9 +161,16 @@ class ConfigManager:
         *,
         enable_file_watching: bool = False,
         enable_encryption: bool = False,
-        auto_generate_secrets: bool = True
+        auto_generate_secrets: bool = True,
     ):
-        self.environment = environment or os.getenv('BLNCS_ENV', 'development')
+        self.environment = environment or os.getenv("BLNCS_ENV", "development")
+        # Whether the environment was explicitly chosen by the caller (or
+        # BLNCS_ENV). When it was not, the config file's own "environment"
+        # value is adopted during _load_config().
+        self._environment_explicit = (
+            environment is not None or "BLNCS_ENV" in os.environ
+        )
+        self._load_error: Optional[str] = None
         self._config_path = self._detect_config_path(config_path)
         self.config_path = str(self._config_path)
 
@@ -203,7 +223,7 @@ class ConfigManager:
             "config/blncs.json",
             "config/config.json",
             "blncs.json",
-            "config.json"
+            "config.json",
         ]
 
         for candidate in candidates:
@@ -228,11 +248,11 @@ class ConfigManager:
             "security": asdict(self.security),
             "api": asdict(self.api),
             "logging": asdict(self.logging),
-            "performance": asdict(self.performance)
+            "performance": asdict(self.performance),
         }
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(default_config, f, indent=2)
 
         logger.info(f"Created default config: {path}")
@@ -242,12 +262,14 @@ class ConfigManager:
         if not self._enable_encryption:
             return
 
-        encryption_key = os.getenv('BLNCS_ENCRYPTION_KEY')
+        encryption_key = os.getenv("BLNCS_ENCRYPTION_KEY")
 
         if not encryption_key and self._auto_generate_secrets:
             encryption_key = Fernet.generate_key().decode()
-            os.environ['BLNCS_ENCRYPTION_KEY'] = encryption_key
-            logger.warning("Auto-generated encryption key for development. Set BLNCS_ENCRYPTION_KEY in production!")
+            os.environ["BLNCS_ENCRYPTION_KEY"] = encryption_key
+            logger.warning(
+                "Auto-generated encryption key for development. Set BLNCS_ENCRYPTION_KEY in production!"
+            )
 
         if encryption_key:
             try:
@@ -258,11 +280,27 @@ class ConfigManager:
     def _load_config(self):
         """Load configuration from file and environment"""
         with self._lock:
-            # Load base configuration
-            self._raw_config = self._load_file_config()
+            # Load base configuration. A file that cannot be parsed must
+            # not make the manager unusable: fall back to defaults and
+            # remember the error so validate_configuration_integrity()
+            # can report the file as unparseable.
+            try:
+                self._raw_config = self._load_file_config()
+                self._load_error = None
+            except ConfigurationError as e:
+                logger.warning(f"Could not load config file {self._config_path}: {e}")
+                self._load_error = str(e)
+                self._raw_config = {}
 
             # Substitute environment placeholders
             self._raw_config = self._substitute_env_placeholders(self._raw_config)
+
+            # Adopt the environment declared by the config file when the
+            # caller did not choose one explicitly.
+            if not self._environment_explicit:
+                file_environment = self._raw_config.get("environment")
+                if file_environment:
+                    self.environment = file_environment
 
             # Update dataclass configs
             self._update_from_dict(self._raw_config)
@@ -271,7 +309,7 @@ class ConfigManager:
             self._load_env_overrides()
 
             # Auto-generate secrets if needed
-            if self._auto_generate_secrets and self.environment == 'development':
+            if self._auto_generate_secrets and self.environment == "development":
                 self._auto_generate_missing_secrets()
 
             # Validate
@@ -283,8 +321,8 @@ class ConfigManager:
             return {}
 
         try:
-            with open(self._config_path, 'r', encoding='utf-8') as f:
-                if self._config_path.suffix in {'.yaml', '.yml'}:
+            with open(self._config_path, "r", encoding="utf-8") as f:
+                if self._config_path.suffix in {".yaml", ".yml"}:
                     return yaml.safe_load(f) or {}
                 else:
                     return json.load(f)
@@ -300,10 +338,11 @@ class ConfigManager:
         if isinstance(value, list):
             return [self._substitute_env_placeholders(item) for item in value]
         if isinstance(value, str):
+
             def replace(match):
                 placeholder = match.group(1)
-                if ':' in placeholder:
-                    env_name, default = placeholder.split(':', 1)
+                if ":" in placeholder:
+                    env_name, default = placeholder.split(":", 1)
                 else:
                     env_name, default = placeholder, None
 
@@ -317,20 +356,20 @@ class ConfigManager:
 
     def _update_from_dict(self, config_data: Dict[str, Any]):
         """Update configuration dataclasses from dictionary"""
-        if 'lightning' in config_data:
-            self._update_dataclass(self.lightning, config_data['lightning'])
-        if 'database' in config_data:
-            self._update_dataclass(self.database, config_data['database'])
-        if 'cache' in config_data:
-            self._update_dataclass(self.cache, config_data['cache'])
-        if 'security' in config_data:
-            self._update_dataclass(self.security, config_data['security'])
-        if 'api' in config_data:
-            self._update_dataclass(self.api, config_data['api'])
-        if 'logging' in config_data:
-            self._update_dataclass(self.logging, config_data['logging'])
-        if 'performance' in config_data:
-            self._update_dataclass(self.performance, config_data['performance'])
+        if "lightning" in config_data:
+            self._update_dataclass(self.lightning, config_data["lightning"])
+        if "database" in config_data:
+            self._update_dataclass(self.database, config_data["database"])
+        if "cache" in config_data:
+            self._update_dataclass(self.cache, config_data["cache"])
+        if "security" in config_data:
+            self._update_dataclass(self.security, config_data["security"])
+        if "api" in config_data:
+            self._update_dataclass(self.api, config_data["api"])
+        if "logging" in config_data:
+            self._update_dataclass(self.logging, config_data["logging"])
+        if "performance" in config_data:
+            self._update_dataclass(self.performance, config_data["performance"])
 
     def _update_dataclass(self, obj: Any, data: Dict[str, Any]):
         """Update dataclass fields from dictionary"""
@@ -344,8 +383,8 @@ class ConfigManager:
 
         for key, value in os.environ.items():
             if key.startswith(env_prefix):
-                config_key = key[len(env_prefix):].lower()
-                config_path = config_key.replace('_', '.')
+                config_key = key[len(env_prefix) :].lower()
+                config_path = config_key.replace("_", ".")
 
                 # Convert value
                 converted_value = self._convert_env_value(value)
@@ -353,8 +392,8 @@ class ConfigManager:
 
     def _convert_env_value(self, value: str) -> Any:
         """Convert environment variable string to appropriate type"""
-        if value.lower() in ('true', 'false'):
-            return value.lower() == 'true'
+        if value.lower() in ("true", "false"):
+            return value.lower() == "true"
 
         try:
             return int(value)
@@ -366,7 +405,7 @@ class ConfigManager:
         except ValueError:
             pass
 
-        if value.startswith('{') or value.startswith('['):
+        if value.startswith("{") or value.startswith("["):
             try:
                 return json.loads(value)
             except json.JSONDecodeError:
@@ -376,7 +415,7 @@ class ConfigManager:
 
     def _set_nested_value(self, path: str, value: Any):
         """Set nested value in dataclasses using dot notation"""
-        keys = path.split('.')
+        keys = path.split(".")
         if len(keys) < 2:
             return
 
@@ -396,6 +435,18 @@ class ConfigManager:
             final_key = field_path[-1]
             if hasattr(current, final_key):
                 setattr(current, final_key, value)
+                return
+
+        # Unknown sections/fields are kept in the raw configuration so
+        # that set() never silently drops a value.
+        raw_current = self._raw_config
+        for key in keys[:-1]:
+            nxt = raw_current.get(key)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                raw_current[key] = nxt
+            raw_current = nxt
+        raw_current[keys[-1]] = value
 
     def _auto_generate_missing_secrets(self):
         """Auto-generate missing secrets in development"""
@@ -410,16 +461,18 @@ class ConfigManager:
     def auto_detect_configuration(self) -> Dict[str, Any]:
         """Automatically detect and suggest optimal configuration"""
         suggestions = {
-            'detected_hardware': self._detect_hardware(),
-            'network_connectivity': self._detect_network(),
-            'available_services': self._detect_services(),
-            'recommended_settings': {},
-            'warnings': [],
-            'optimizations': []
+            "detected_hardware": self._detect_hardware(),
+            "network_connectivity": self._detect_network(),
+            "available_services": self._detect_services(),
+            "recommended_settings": {},
+            "warnings": [],
+            "optimizations": [],
         }
 
         # Generate recommendations based on detection
-        suggestions['recommended_settings'] = self._generate_recommendations(suggestions)
+        suggestions["recommended_settings"] = self._generate_recommendations(
+            suggestions
+        )
 
         return suggestions
 
@@ -427,31 +480,33 @@ class ConfigManager:
         """Detect hardware capabilities"""
         try:
             import psutil
+
             cpu_count = psutil.cpu_count()
             memory_gb = psutil.virtual_memory().total / (1024**3)
-            disk_gb = psutil.disk_usage('/').total / (1024**3)
+            disk_gb = psutil.disk_usage("/").total / (1024**3)
 
             # GPU detection
-            gpu_info = {'available': False, 'count': 0}
+            gpu_info = {"available": False, "count": 0}
             try:
                 import GPUtil
+
                 gpus = GPUtil.getGPUs()
                 gpu_info = {
-                    'available': len(gpus) > 0,
-                    'count': len(gpus),
-                    'names': [gpu.name for gpu in gpus]
+                    "available": len(gpus) > 0,
+                    "count": len(gpus),
+                    "names": [gpu.name for gpu in gpus],
                 }
             except ImportError:
-                gpu_info['warning'] = "GPUtil not installed - GPU detection disabled"
+                gpu_info["warning"] = "GPUtil not installed - GPU detection disabled"
 
             return {
-                'cpu_cores': cpu_count,
-                'memory_gb': round(memory_gb, 2),
-                'disk_gb': round(disk_gb, 2),
-                'gpu': gpu_info
+                "cpu_cores": cpu_count,
+                "memory_gb": round(memory_gb, 2),
+                "disk_gb": round(disk_gb, 2),
+                "gpu": gpu_info,
             }
         except Exception as e:
-            return {'error': f"Hardware detection failed: {e}"}
+            return {"error": f"Hardware detection failed: {e}"}
 
     def _detect_network(self) -> Dict[str, Any]:
         """Detect network connectivity and capabilities"""
@@ -460,19 +515,19 @@ class ConfigManager:
             import urllib.request
 
             # Check internet connectivity
-            connectivity = {'internet': False, 'ipv6': False}
+            connectivity = {"internet": False, "ipv6": False}
             try:
-                urllib.request.urlopen('https://www.google.com', timeout=5)
-                connectivity['internet'] = True
+                urllib.request.urlopen("https://www.google.com", timeout=5)
+                connectivity["internet"] = True
             except:
-                connectivity['internet'] = False
+                connectivity["internet"] = False
 
             # Check IPv6 support
             try:
                 socket.socket(socket.AF_INET6, socket.SOCK_STREAM).close()
-                connectivity['ipv6'] = True
+                connectivity["ipv6"] = True
             except:
-                connectivity['ipv6'] = False
+                connectivity["ipv6"] = False
 
             # Get local IP addresses
             ips = []
@@ -483,34 +538,35 @@ class ConfigManager:
                 pass
 
             return {
-                'connectivity': connectivity,
-                'local_ips': ips,
-                'hostname': socket.gethostname()
+                "connectivity": connectivity,
+                "local_ips": ips,
+                "hostname": socket.gethostname(),
             }
         except Exception as e:
-            return {'error': f"Network detection failed: {e}"}
+            return {"error": f"Network detection failed: {e}"}
 
     def _detect_services(self) -> Dict[str, Any]:
         """Detect available services and dependencies"""
         services = {}
 
         # Check Lightning Network
-        services['lightning'] = self._check_lightning_service()
+        services["lightning"] = self._check_lightning_service()
 
         # Check database connectivity
-        services['database'] = self._check_database_service()
+        services["database"] = self._check_database_service()
 
         # Check Redis
-        services['redis'] = self._check_redis_service()
+        services["redis"] = self._check_redis_service()
 
         # Check Python dependencies
-        services['dependencies'] = self._check_dependencies()
+        services["dependencies"] = self._check_dependencies()
 
         return services
 
     def _check_lightning_service(self) -> Dict[str, Any]:
         """Check Lightning Network service availability"""
         import socket
+
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
@@ -518,138 +574,147 @@ class ConfigManager:
             sock.close()
 
             return {
-                'available': result == 0,
-                'host': self.lightning.host,
-                'port': self.lightning.port,
-                'macaroon_exists': bool(self.lightning.macaroon_path and Path(self.lightning.macaroon_path).exists()),
-                'tls_cert_exists': bool(self.lightning.tls_cert_path and Path(self.lightning.tls_cert_path).exists())
+                "available": result == 0,
+                "host": self.lightning.host,
+                "port": self.lightning.port,
+                "macaroon_exists": bool(
+                    self.lightning.macaroon_path
+                    and Path(self.lightning.macaroon_path).exists()
+                ),
+                "tls_cert_exists": bool(
+                    self.lightning.tls_cert_path
+                    and Path(self.lightning.tls_cert_path).exists()
+                ),
             }
         except Exception as e:
-            return {'available': False, 'error': str(e)}
+            return {"available": False, "error": str(e)}
 
     def _check_database_service(self) -> Dict[str, Any]:
         """Check database connectivity"""
         try:
-            if 'sqlite' in self.database.url:
+            if "sqlite" in self.database.url:
                 # SQLite - check if file exists or can be created
-                db_path = self.database.url.replace('sqlite:///', '')
+                db_path = self.database.url.replace("sqlite:///", "")
                 db_exists = Path(db_path).exists()
                 return {
-                    'type': 'sqlite',
-                    'available': True,
-                    'path': db_path,
-                    'exists': db_exists
+                    "type": "sqlite",
+                    "available": True,
+                    "path": db_path,
+                    "exists": db_exists,
                 }
             else:
                 # Other databases - try to connect
                 return {
-                    'type': 'external',
-                    'url': self.database.url,
-                    'available': False,  # Would need actual connection test
-                    'note': 'External database connectivity check not implemented'
+                    "type": "external",
+                    "url": self.database.url,
+                    "available": False,  # Would need actual connection test
+                    "note": "External database connectivity check not implemented",
                 }
         except Exception as e:
-            return {'available': False, 'error': str(e)}
+            return {"available": False, "error": str(e)}
 
     def _check_redis_service(self) -> Dict[str, Any]:
         """Check Redis service availability"""
         if not self.cache.redis_url:
-            return {'available': False, 'reason': 'No Redis URL configured'}
+            return {"available": False, "reason": "No Redis URL configured"}
 
         try:
             import redis
+
             # Parse Redis URL
-            if self.cache.redis_url.startswith('redis://'):
-                url_parts = self.cache.redis_url.replace('redis://', '').split(':')
+            if self.cache.redis_url.startswith("redis://"):
+                url_parts = self.cache.redis_url.replace("redis://", "").split(":")
                 if len(url_parts) >= 2:
                     host = url_parts[0]
-                    port = int(url_parts[1].split('/')[0])
+                    port = int(url_parts[1].split("/")[0])
 
                     r = redis.Redis(host=host, port=port, socket_timeout=5)
                     r.ping()
-                    return {
-                        'available': True,
-                        'host': host,
-                        'port': port
-                    }
+                    return {"available": True, "host": host, "port": port}
         except ImportError:
-            return {'available': False, 'reason': 'redis-py not installed'}
+            return {"available": False, "reason": "redis-py not installed"}
         except Exception as e:
-            return {'available': False, 'error': str(e)}
+            return {"available": False, "error": str(e)}
 
-        return {'available': False, 'reason': 'Invalid Redis URL'}
+        return {"available": False, "reason": "Invalid Redis URL"}
 
     def _check_dependencies(self) -> Dict[str, Any]:
         """Check Python dependencies"""
         dependencies = {
-            'cryptography': False,
-            'psutil': False,
-            'pyotp': False,
-            'redis': False,
-            'sqlalchemy': False,
-            'fastapi': False,
-            'uvicorn': False,
-            'gputil': False
+            "cryptography": False,
+            "psutil": False,
+            "pyotp": False,
+            "redis": False,
+            "sqlalchemy": False,
+            "fastapi": False,
+            "uvicorn": False,
+            "gputil": False,
         }
 
         for dep in dependencies.keys():
             try:
-                __import__(dep.replace('-', '_'))
+                __import__(dep.replace("-", "_"))
                 dependencies[dep] = True
             except ImportError:
                 pass
 
         return dependencies
 
-    def _generate_recommendations(self, detection_results: Dict[str, Any]) -> Dict[str, Any]:
+    def _generate_recommendations(
+        self, detection_results: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Generate configuration recommendations based on detection"""
         recommendations = {}
 
-        hardware = detection_results.get('detected_hardware', {})
-        services = detection_results.get('available_services', {})
+        hardware = detection_results.get("detected_hardware", {})
+        services = detection_results.get("available_services", {})
 
         # Performance recommendations
-        if hardware.get('cpu_cores', 0) >= 8:
-            recommendations['performance.thread_pool_workers'] = hardware['cpu_cores'] * 2
+        if hardware.get("cpu_cores", 0) >= 8:
+            recommendations["performance.thread_pool_workers"] = (
+                hardware["cpu_cores"] * 2
+            )
         else:
-            recommendations['performance.thread_pool_workers'] = max(4, hardware.get('cpu_cores', 1))
+            recommendations["performance.thread_pool_workers"] = max(
+                4, hardware.get("cpu_cores", 1)
+            )
 
-        if hardware.get('memory_gb', 0) >= 16:
-            recommendations['database.pool_size'] = 20
-            recommendations['cache.max_size'] = 2000
+        if hardware.get("memory_gb", 0) >= 16:
+            recommendations["database.pool_size"] = 20
+            recommendations["cache.max_size"] = 2000
         else:
-            recommendations['database.pool_size'] = 5
-            recommendations['cache.max_size'] = 500
+            recommendations["database.pool_size"] = 5
+            recommendations["cache.max_size"] = 500
 
         # GPU recommendations
-        gpu = hardware.get('gpu', {})
-        if gpu.get('available'):
-            recommendations['performance.enable_gpu_monitoring'] = True
-            recommendations['performance.gpu_optimization'] = True
+        gpu = hardware.get("gpu", {})
+        if gpu.get("available"):
+            recommendations["performance.enable_gpu_monitoring"] = True
+            recommendations["performance.gpu_optimization"] = True
 
         # Service recommendations
-        lightning = services.get('lightning', {})
-        if lightning.get('available'):
-            recommendations['lightning.auto_connect'] = True
+        lightning = services.get("lightning", {})
+        if lightning.get("available"):
+            recommendations["lightning.auto_connect"] = True
         else:
-            recommendations['lightning.connection_retry_interval'] = 30
+            recommendations["lightning.connection_retry_interval"] = 30
 
-        database = services.get('database', {})
-        if database.get('available') and database.get('type') == 'sqlite':
-            recommendations['database.enable_wal_mode'] = True
+        database = services.get("database", {})
+        if database.get("available") and database.get("type") == "sqlite":
+            recommendations["database.enable_wal_mode"] = True
 
-        redis = services.get('redis', {})
-        if redis.get('available'):
-            recommendations['cache.backend'] = 'redis'
+        redis = services.get("redis", {})
+        if redis.get("available"):
+            recommendations["cache.backend"] = "redis"
         else:
-            recommendations['cache.backend'] = 'memory'
+            recommendations["cache.backend"] = "memory"
 
         # Security recommendations
-        deps = services.get('dependencies', {})
-        if deps.get('cryptography'):
-            recommendations['security.enable_encryption'] = True
-        if deps.get('pyotp'):
-            recommendations['security.enable_mfa'] = True
+        deps = services.get("dependencies", {})
+        if deps.get("cryptography"):
+            recommendations["security.enable_encryption"] = True
+        if deps.get("pyotp"):
+            recommendations["security.enable_mfa"] = True
 
         return recommendations
 
@@ -667,8 +732,10 @@ class ConfigManager:
     def _validate_config(self):
         """Validate configuration"""
         # Validate Lightning network
-        if self.lightning.network not in ['mainnet', 'testnet', 'simnet', 'regtest']:
-            raise ConfigurationError(f"Invalid lightning network: {self.lightning.network}")
+        if self.lightning.network not in ["mainnet", "testnet", "simnet", "regtest"]:
+            raise ConfigurationError(
+                f"Invalid lightning network: {self.lightning.network}"
+            )
 
         # Validate port ranges
         if not (1 <= self.lightning.port <= 65535):
@@ -678,12 +745,12 @@ class ConfigManager:
             raise ConfigurationError(f"Invalid API port: {self.api.port}")
 
         # Validate log level
-        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if self.logging.level.upper() not in valid_levels:
             raise ConfigurationError(f"Invalid log level: {self.logging.level}")
 
         # Production environment validation
-        if self.environment == 'production':
+        if self.environment == "production":
             if not self.security.jwt_secret:
                 raise ConfigurationError("JWT secret required in production")
 
@@ -691,7 +758,9 @@ class ConfigManager:
                 raise ConfigurationError("Trusted hosts required in production")
 
             if not self.security.enforce_https:
-                logger.warning("HTTPS not enforced in production - this is a security risk!")
+                logger.warning(
+                    "HTTPS not enforced in production - this is a security risk!"
+                )
 
     def _start_file_watching(self):
         """Start watching configuration files for changes"""
@@ -738,7 +807,7 @@ class ConfigManager:
 
         # Use cached data for fast access
         if self._config_cache is not None:
-            keys = path.split('.')
+            keys = path.split(".")
             current = self._config_cache
 
             for key in keys:
@@ -749,7 +818,7 @@ class ConfigManager:
             return current
 
         # Fallback to non-cached method
-        keys = path.split('.')
+        keys = path.split(".")
         config_dict = self.to_dict()
 
         current = config_dict
@@ -828,19 +897,30 @@ class ConfigManager:
             except Exception as e:
                 logger.exception(f"Watcher error: {e}")
 
+    @property
+    def config(self) -> Dict[str, Any]:
+        """Raw configuration mapping as loaded from the config file."""
+        return self._raw_config
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary"""
-        return {
-            'version': self._raw_config.get('version', '2.0.0'),
-            'environment': self.environment,
-            'lightning': asdict(self.lightning),
-            'database': asdict(self.database),
-            'cache': asdict(self.cache),
-            'security': asdict(self.security),
-            'api': asdict(self.api),
-            'logging': asdict(self.logging),
-            'performance': asdict(self.performance),
+        result = {
+            "version": self._raw_config.get("version", "2.0.0"),
+            "environment": self.environment,
+            "lightning": asdict(self.lightning),
+            "database": asdict(self.database),
+            "cache": asdict(self.cache),
+            "security": asdict(self.security),
+            "api": asdict(self.api),
+            "logging": asdict(self.logging),
+            "performance": asdict(self.performance),
         }
+        # Preserve any additional top-level keys from the raw config
+        # (e.g. values written via set() into unknown sections).
+        for key, value in self._raw_config.items():
+            if key not in result:
+                result[key] = value
+        return result
 
     def save(self, path: Optional[str] = None):
         """Save current configuration to file"""
@@ -848,8 +928,8 @@ class ConfigManager:
         config_dict = self.to_dict()
 
         try:
-            with open(save_path, 'w', encoding='utf-8') as f:
-                if save_path.suffix in {'.yaml', '.yml'}:
+            with open(save_path, "w", encoding="utf-8") as f:
+                if save_path.suffix in {".yaml", ".yml"}:
                     yaml.dump(config_dict, f, default_flow_style=False, indent=2)
                 else:
                     json.dump(config_dict, f, indent=2)
@@ -876,18 +956,26 @@ class ConfigManager:
 
     def enable_dynamic_reloading(self, check_interval: int = 30):
         """Enable dynamic configuration reloading"""
-        if hasattr(self, '_reload_thread') and self._reload_thread and self._reload_thread.is_alive():
+        if (
+            hasattr(self, "_reload_thread")
+            and self._reload_thread
+            and self._reload_thread.is_alive()
+        ):
             logger.warning("Dynamic reloading is already enabled")
             return
 
         self._reload_check_interval = check_interval
-        self._reload_thread = threading.Thread(target=self._dynamic_reload_loop, daemon=True)
+        self._reload_thread = threading.Thread(
+            target=self._dynamic_reload_loop, daemon=True
+        )
         self._reload_thread.start()
-        logger.info(f"Dynamic configuration reloading enabled (check every {check_interval}s)")
+        logger.info(
+            f"Dynamic configuration reloading enabled (check every {check_interval}s)"
+        )
 
     def disable_dynamic_reloading(self):
         """Disable dynamic configuration reloading"""
-        if hasattr(self, '_reload_thread') and self._reload_thread:
+        if hasattr(self, "_reload_thread") and self._reload_thread:
             self._reload_thread = None  # Thread will exit on next iteration
             logger.info("Dynamic configuration reloading disabled")
 
@@ -895,7 +983,7 @@ class ConfigManager:
         """Dynamic reload monitoring loop"""
         last_check = time.time()
 
-        while getattr(self, '_reload_thread', None) is not None:
+        while getattr(self, "_reload_thread", None) is not None:
             try:
                 current_time = time.time()
                 if current_time - last_check >= self._reload_check_interval:
@@ -920,7 +1008,7 @@ class ConfigManager:
                 return False
 
             current_mtime = config_path.stat().st_mtime
-            last_mtime = getattr(self, '_last_config_mtime', 0)
+            last_mtime = getattr(self, "_last_config_mtime", 0)
 
             if current_mtime > last_mtime:
                 self._last_config_mtime = current_mtime
@@ -951,8 +1039,10 @@ class ConfigManager:
             backup_path = f"{self.config_path}.backup_{timestamp}"
 
         try:
-            import shutil
-            shutil.copy2(self.config_path, backup_path)
+            # Back up the *current* configuration state, including any
+            # in-memory changes made via set(); copying the file on disk
+            # would silently capture stale values instead.
+            self.save(backup_path)
             logger.info(f"Configuration backup created: {backup_path}")
             return backup_path
         except Exception as e:
@@ -963,11 +1053,18 @@ class ConfigManager:
         """Restore configuration from backup"""
         try:
             import shutil
+
             if not Path(backup_path).exists():
                 raise ConfigurationError(f"Backup file does not exist: {backup_path}")
 
-            # Create backup of current config before restore
-            current_backup = self.create_backup()
+            # Create backup of current config before restore. Use a
+            # distinct, microsecond-resolution name: the default backup
+            # name has only second resolution, so a backup created in
+            # the same second as the one being restored would be
+            # silently overwritten by this snapshot.
+            current_backup = self.create_backup(
+                backup_path=f"{self.config_path}.pre_restore_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+            )
 
             # Restore from backup
             shutil.copy2(backup_path, self.config_path)
@@ -982,70 +1079,75 @@ class ConfigManager:
 
     def validate_configuration_integrity(self) -> Dict[str, Any]:
         """Validate configuration file integrity"""
-        results = {
-            'valid': True,
-            'errors': [],
-            'warnings': [],
-            'checks': {}
-        }
+        results = {"valid": True, "errors": [], "warnings": [], "checks": {}}
 
         try:
             # Check file existence
             config_path = Path(self.config_path)
-            results['checks']['file_exists'] = config_path.exists()
+            results["checks"]["file_exists"] = config_path.exists()
 
-            if not results['checks']['file_exists']:
-                results['valid'] = False
-                results['errors'].append("Configuration file does not exist")
+            if not results["checks"]["file_exists"]:
+                results["valid"] = False
+                results["errors"].append("Configuration file does not exist")
                 return results
 
             # Check file permissions
             import stat
+
             file_stat = config_path.stat()
             mode = stat.filemode(file_stat.st_mode)
-            results['checks']['file_permissions'] = mode
+            results["checks"]["file_permissions"] = mode
 
             # Check if file is readable/writable by owner only (security)
-            if file_stat.st_mode & (stat.S_IRGRP | stat.S_IROTH | stat.S_IWGRP | stat.S_IWOTH):
-                results['warnings'].append("Configuration file is readable/writable by group or others")
+            if file_stat.st_mode & (
+                stat.S_IRGRP | stat.S_IROTH | stat.S_IWGRP | stat.S_IWOTH
+            ):
+                results["warnings"].append(
+                    "Configuration file is readable/writable by group or others"
+                )
 
             # Check file size (not too large)
             size_mb = file_stat.st_size / (1024 * 1024)
-            results['checks']['file_size_mb'] = round(size_mb, 2)
+            results["checks"]["file_size_mb"] = round(size_mb, 2)
             if size_mb > 10:  # 10MB limit
-                results['warnings'].append(f"Configuration file is very large: {size_mb:.2f}MB")
+                results["warnings"].append(
+                    f"Configuration file is very large: {size_mb:.2f}MB"
+                )
 
             # Try to parse configuration
             try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    if config_path.suffix in ['.yaml', '.yml']:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    if config_path.suffix in [".yaml", ".yml"]:
                         import yaml
+
                         data = yaml.safe_load(f)
                     else:
                         data = json.load(f)
 
-                results['checks']['parseable'] = True
-                results['checks']['has_version'] = 'version' in data
-                results['checks']['has_environment'] = 'environment' in data
+                results["checks"]["parseable"] = True
+                results["checks"]["has_version"] = "version" in data
+                results["checks"]["has_environment"] = "environment" in data
 
             except Exception as e:
-                results['valid'] = False
-                results['errors'].append(f"Configuration file parsing failed: {e}")
-                results['checks']['parseable'] = False
+                results["valid"] = False
+                results["errors"].append(f"Configuration file parsing failed: {e}")
+                results["checks"]["parseable"] = False
 
         except Exception as e:
-            results['valid'] = False
-            results['errors'].append(f"Integrity check failed: {e}")
+            results["valid"] = False
+            results["errors"].append(f"Integrity check failed: {e}")
 
         return results
 
-    def export_configuration(self, format_type: str = 'json', include_sensitive: bool = False) -> str:
+    def export_configuration(
+        self, format_type: str = "json", include_sensitive: bool = False
+    ) -> str:
         """Export configuration in specified format"""
         config_dict = self.to_dict()
 
         if not include_sensitive:
             # Remove sensitive information
-            sensitive_fields = ['jwt_secret', 'api_key', 'encryption_key']
+            sensitive_fields = ["jwt_secret", "api_key", "encryption_key"]
             for section_name, section in config_dict.items():
                 if isinstance(section, dict):
                     for field in sensitive_fields:
@@ -1053,38 +1155,47 @@ class ConfigManager:
                             section[field] = "***REDACTED***"
 
         try:
-            if format_type.lower() == 'json':
+            if format_type.lower() == "json":
                 return json.dumps(config_dict, indent=2, ensure_ascii=False)
-            elif format_type.lower() == 'yaml':
+            elif format_type.lower() == "yaml":
                 import yaml
-                return yaml.dump(config_dict, default_flow_style=False, indent=2, allow_unicode=True)
+
+                return yaml.dump(
+                    config_dict, default_flow_style=False, indent=2, allow_unicode=True
+                )
             else:
                 raise ConfigurationError(f"Unsupported export format: {format_type}")
         except Exception as e:
             raise ConfigurationError(f"Export failed: {e}")
 
-    def import_configuration(self, config_data: Union[str, Dict], format_type: str = 'auto'):
+    def import_configuration(
+        self, config_data: Union[str, Dict], format_type: str = "auto"
+    ):
         """Import configuration from string or dict"""
         try:
             if isinstance(config_data, dict):
                 parsed_data = config_data
             elif isinstance(config_data, str):
-                if format_type == 'auto':
+                if format_type == "auto":
                     # Auto-detect format
-                    if config_data.strip().startswith('{'):
+                    if config_data.strip().startswith("{"):
                         parsed_data = json.loads(config_data)
-                        format_type = 'json'
+                        format_type = "json"
                     else:
                         import yaml
+
                         parsed_data = yaml.safe_load(config_data)
-                        format_type = 'yaml'
-                elif format_type == 'json':
+                        format_type = "yaml"
+                elif format_type == "json":
                     parsed_data = json.loads(config_data)
-                elif format_type == 'yaml':
+                elif format_type == "yaml":
                     import yaml
+
                     parsed_data = yaml.safe_load(config_data)
                 else:
-                    raise ConfigurationError(f"Unsupported import format: {format_type}")
+                    raise ConfigurationError(
+                        f"Unsupported import format: {format_type}"
+                    )
             else:
                 raise ConfigurationError("Invalid config data type")
 
@@ -1100,12 +1211,16 @@ class ConfigManager:
             # Save to file
             self.save()
 
-            logger.info(f"Configuration imported successfully from {format_type} format")
+            logger.info(
+                f"Configuration imported successfully from {format_type} format"
+            )
 
         except Exception as e:
             raise ConfigurationError(f"Import failed: {e}")
 
-    def get_configuration_diff(self, other_config: Union['ConfigManager', Dict]) -> Dict[str, Any]:
+    def get_configuration_diff(
+        self, other_config: Union["ConfigManager", Dict]
+    ) -> Dict[str, Any]:
         """Get differences between current config and another config"""
         try:
             current = self.to_dict()
@@ -1117,11 +1232,7 @@ class ConfigManager:
             else:
                 raise ConfigurationError("Invalid config type for comparison")
 
-            diff = {
-                'added': {},
-                'removed': {},
-                'modified': {}
-            }
+            diff = {"added": {}, "removed": {}, "modified": {}}
 
             # Find differences
             all_keys = set(current.keys()) | set(other.keys())
@@ -1131,20 +1242,17 @@ class ConfigManager:
                 other_value = other.get(key)
 
                 if key not in current:
-                    diff['added'][key] = other_value
+                    diff["added"][key] = other_value
                 elif key not in other:
-                    diff['removed'][key] = current_value
+                    diff["removed"][key] = current_value
                 elif current_value != other_value:
-                    diff['modified'][key] = {
-                        'from': current_value,
-                        'to': other_value
-                    }
+                    diff["modified"][key] = {"from": current_value, "to": other_value}
 
             return diff
 
         except Exception as e:
             logger.error(f"Failed to compute config diff: {e}")
-            return {'error': str(e)}
+            return {"error": str(e)}
 
     def shutdown(self):
         """Shutdown and cleanup resources"""
@@ -1190,8 +1298,17 @@ def reset_config():
 
 
 __all__ = [
-    'ConfigManager', 'get_config', 'set_config', 'reset_config',
-    'LightningConfig', 'DatabaseConfig', 'CacheConfig',
-    'SecurityConfig', 'APIConfig', 'LoggingConfig', 'PerformanceConfig',
-    'ConfigurationError', 'ValidationRule'
+    "ConfigManager",
+    "get_config",
+    "set_config",
+    "reset_config",
+    "LightningConfig",
+    "DatabaseConfig",
+    "CacheConfig",
+    "SecurityConfig",
+    "APIConfig",
+    "LoggingConfig",
+    "PerformanceConfig",
+    "ConfigurationError",
+    "ValidationRule",
 ]

@@ -3,24 +3,26 @@
 異種システム統合とデータ同期機能を提供
 """
 
-import time
+import asyncio
 import json
+import logging
 import sqlite3
 import threading
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-import logging
-import asyncio
-import aiohttp
+import time
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
 
 class IntegrationPattern(Enum):
     """統合パターン"""
+
     POINT_TO_POINT = "point_to_point"
     HUB_AND_SPOKE = "hub_and_spoke"
     MESSAGE_BUS = "message_bus"
@@ -31,6 +33,7 @@ class IntegrationPattern(Enum):
 
 class SystemType(Enum):
     """システムタイプ"""
+
     ERP = "erp"  # Enterprise Resource Planning
     CRM = "crm"  # Customer Relationship Management
     HCM = "hcm"  # Human Capital Management
@@ -45,6 +48,7 @@ class SystemType(Enum):
 
 class DataSyncStatus(Enum):
     """データ同期ステータス"""
+
     SYNCING = "syncing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -55,6 +59,7 @@ class DataSyncStatus(Enum):
 @dataclass
 class IntegratedSystem:
     """統合システム情報"""
+
     system_id: str
     name: str
     system_type: SystemType
@@ -70,6 +75,7 @@ class IntegratedSystem:
 @dataclass
 class DataMapping:
     """データマッピング情報"""
+
     mapping_id: str
     source_system: str
     target_system: str
@@ -77,12 +83,15 @@ class DataMapping:
     target_schema: Dict[str, Any]
     transformation_rules: List[Dict[str, Any]] = field(default_factory=list)
     is_bidirectional: bool = False
-    conflict_resolution: str = "source_priority"  # source_priority, target_priority, manual
+    conflict_resolution: str = (
+        "source_priority"  # source_priority, target_priority, manual
+    )
 
 
 @dataclass
 class DataSyncJob:
     """データ同期ジョブ情報"""
+
     job_id: str
     mapping_id: str
     status: DataSyncStatus = DataSyncStatus.PENDING
@@ -147,7 +156,9 @@ class IntegrationBus:
         logger.info(f"データマッピング定義: {mapping.mapping_id}")
         return mapping.mapping_id
 
-    async def send_message(self, source_system: str, target_system: str, message: Dict[str, Any]):
+    async def send_message(
+        self, source_system: str, target_system: str, message: Dict[str, Any]
+    ):
         """
         メッセージを送信
         Args:
@@ -161,7 +172,7 @@ class IntegrationBus:
             "target_system": target_system,
             "message": message,
             "timestamp": time.time(),
-            "status": "sent"
+            "status": "sent",
         }
 
         self.message_queue.append(message_data)
@@ -178,8 +189,10 @@ class IntegrationBus:
 
             # 該当するデータマッピングを検索
             applicable_mappings = [
-                mapping for mapping in self.data_mappings.values()
-                if mapping.source_system == source_system and mapping.target_system == target_system
+                mapping
+                for mapping in self.data_mappings.values()
+                if mapping.source_system == source_system
+                and mapping.target_system == target_system
             ]
 
             if applicable_mappings:
@@ -197,13 +210,17 @@ class IntegrationBus:
         except Exception as e:
             logger.error(f"メッセージ処理エラー: {e}")
 
-    async def _apply_data_mapping(self, message_data: Dict[str, Any], mapping: DataMapping):
+    async def _apply_data_mapping(
+        self, message_data: Dict[str, Any], mapping: DataMapping
+    ):
         """データマッピングを適用"""
         try:
             source_data = message_data["message"]
 
             # データ変換を実行（簡易版）
-            transformed_data = self._transform_data(source_data, mapping.transformation_rules)
+            transformed_data = self._transform_data(
+                source_data, mapping.transformation_rules
+            )
 
             # 宛先システムにデータを送信
             target_system_id = mapping.target_system
@@ -212,12 +229,16 @@ class IntegrationBus:
                 target_system = self.integrated_systems[target_system_id]
 
                 # 実際の実装では宛先システムのAPIを呼び出し
-                logger.info(f"データ同期実行: {mapping.mapping_id} -> {target_system.name}")
+                logger.info(
+                    f"データ同期実行: {mapping.mapping_id} -> {target_system.name}"
+                )
 
         except Exception as e:
             logger.error(f"データマッピング適用エラー: {mapping.mapping_id} - {e}")
 
-    def _transform_data(self, data: Any, transformation_rules: List[Dict[str, Any]]) -> Any:
+    def _transform_data(
+        self, data: Any, transformation_rules: List[Dict[str, Any]]
+    ) -> Any:
         """データを変換"""
         # 簡易的なデータ変換（実際の実装ではより高度な変換ロジックを使用）
         if isinstance(data, dict):
@@ -261,7 +282,9 @@ class IntegrationBus:
 class DataSynchronizer:
     """データ同期システム"""
 
-    def __init__(self, integration_bus: IntegrationBus, db_path: str = "data_synchronization.db"):
+    def __init__(
+        self, integration_bus: IntegrationBus, db_path: str = "data_synchronization.db"
+    ):
         """
         初期化
         Args:
@@ -306,10 +329,7 @@ class DataSynchronizer:
 
         job_id = str(uuid.uuid4())
 
-        job = DataSyncJob(
-            job_id=job_id,
-            mapping_id=mapping_id
-        )
+        job = DataSyncJob(job_id=job_id, mapping_id=mapping_id)
 
         self.sync_jobs[job_id] = job
 
@@ -330,7 +350,9 @@ class DataSynchronizer:
             source_data = await self._fetch_source_data(mapping)
 
             # データ変換
-            transformed_data = self.integration_bus._transform_data(source_data, mapping.transformation_rules)
+            transformed_data = self.integration_bus._transform_data(
+                source_data, mapping.transformation_rules
+            )
 
             # データ検証と同期
             await self._validate_and_sync_data(job, transformed_data, mapping)
@@ -355,10 +377,12 @@ class DataSynchronizer:
         # サンプルデータを返却
         return [
             {"id": 1, "name": "Sample Data 1", "value": 100},
-            {"id": 2, "name": "Sample Data 2", "value": 200}
+            {"id": 2, "name": "Sample Data 2", "value": 200},
         ]
 
-    async def _validate_and_sync_data(self, job: DataSyncJob, data: Any, mapping: DataMapping):
+    async def _validate_and_sync_data(
+        self, job: DataSyncJob, data: Any, mapping: DataMapping
+    ):
         """データを検証・同期"""
         if isinstance(data, list):
             for item in data:
@@ -412,7 +436,7 @@ class DataSynchronizer:
             "records_failed": job.records_failed,
             "started_at": job.started_at,
             "completed_at": job.completed_at,
-            "error_message": job.error_message
+            "error_message": job.error_message,
         }
 
 
@@ -449,18 +473,18 @@ class EnterpriseIntegrationPlatform:
                 connection_config={
                     "host": "erp.company.com",
                     "port": 443,
-                    "protocol": "https"
+                    "protocol": "https",
                 },
                 api_endpoints=[
                     {"path": "/api/customers", "method": "GET"},
-                    {"path": "/api/orders", "method": "POST"}
+                    {"path": "/api/orders", "method": "POST"},
                 ],
                 data_schemas={
                     "customer": {
                         "fields": ["id", "name", "email", "phone"],
-                        "required_fields": ["id", "name"]
+                        "required_fields": ["id", "name"],
                     }
-                }
+                },
             ),
             IntegratedSystem(
                 system_id="crm_system",
@@ -469,18 +493,18 @@ class EnterpriseIntegrationPlatform:
                 connection_config={
                     "host": "crm.company.com",
                     "port": 443,
-                    "protocol": "https"
+                    "protocol": "https",
                 },
                 api_endpoints=[
                     {"path": "/api/contacts", "method": "GET"},
-                    {"path": "/api/leads", "method": "POST"}
+                    {"path": "/api/leads", "method": "POST"},
                 ],
                 data_schemas={
                     "contact": {
                         "fields": ["id", "name", "email", "company"],
-                        "required_fields": ["id", "name", "email"]
+                        "required_fields": ["id", "name", "email"],
                     }
-                }
+                },
             ),
             IntegratedSystem(
                 system_id="ecommerce_platform",
@@ -489,19 +513,19 @@ class EnterpriseIntegrationPlatform:
                 connection_config={
                     "host": "shop.company.com",
                     "port": 443,
-                    "protocol": "https"
+                    "protocol": "https",
                 },
                 api_endpoints=[
                     {"path": "/api/products", "method": "GET"},
-                    {"path": "/api/orders", "method": "POST"}
+                    {"path": "/api/orders", "method": "POST"},
                 ],
                 data_schemas={
                     "product": {
                         "fields": ["id", "name", "price", "category"],
-                        "required_fields": ["id", "name", "price"]
+                        "required_fields": ["id", "name", "price"],
                     }
-                }
-            )
+                },
+            ),
         ]
 
         for system in systems:
@@ -516,40 +540,52 @@ class EnterpriseIntegrationPlatform:
                 target_system="crm_system",
                 source_schema={
                     "table": "customers",
-                    "fields": ["customer_id", "first_name", "last_name", "email", "phone"]
+                    "fields": [
+                        "customer_id",
+                        "first_name",
+                        "last_name",
+                        "email",
+                        "phone",
+                    ],
                 },
                 target_schema={
                     "table": "contacts",
-                    "fields": ["id", "first_name", "last_name", "email", "phone_number"]
+                    "fields": [
+                        "id",
+                        "first_name",
+                        "last_name",
+                        "email",
+                        "phone_number",
+                    ],
                 },
                 transformation_rules=[
                     {
                         "type": "field_mapping",
                         "source_field": "customer_id",
-                        "target_field": "id"
+                        "target_field": "id",
                     },
                     {
                         "type": "field_mapping",
                         "source_field": "first_name",
-                        "target_field": "first_name"
+                        "target_field": "first_name",
                     },
                     {
                         "type": "field_mapping",
                         "source_field": "last_name",
-                        "target_field": "last_name"
+                        "target_field": "last_name",
                     },
                     {
                         "type": "field_mapping",
                         "source_field": "email",
-                        "target_field": "email"
+                        "target_field": "email",
                     },
                     {
                         "type": "field_mapping",
                         "source_field": "phone",
-                        "target_field": "phone_number"
-                    }
+                        "target_field": "phone_number",
+                    },
                 ],
-                is_bidirectional=True
+                is_bidirectional=True,
             ),
             DataMapping(
                 mapping_id="product_catalog_sync",
@@ -557,40 +593,46 @@ class EnterpriseIntegrationPlatform:
                 target_system="ecommerce_platform",
                 source_schema={
                     "table": "products",
-                    "fields": ["product_id", "name", "description", "price", "category"]
+                    "fields": [
+                        "product_id",
+                        "name",
+                        "description",
+                        "price",
+                        "category",
+                    ],
                 },
                 target_schema={
                     "table": "catalog",
-                    "fields": ["id", "title", "description", "price", "category_name"]
+                    "fields": ["id", "title", "description", "price", "category_name"],
                 },
                 transformation_rules=[
                     {
                         "type": "field_mapping",
                         "source_field": "product_id",
-                        "target_field": "id"
+                        "target_field": "id",
                     },
                     {
                         "type": "field_mapping",
                         "source_field": "name",
-                        "target_field": "title"
+                        "target_field": "title",
                     },
                     {
                         "type": "field_mapping",
                         "source_field": "description",
-                        "target_field": "description"
+                        "target_field": "description",
                     },
                     {
                         "type": "field_mapping",
                         "source_field": "price",
-                        "target_field": "price"
+                        "target_field": "price",
                     },
                     {
                         "type": "field_mapping",
                         "source_field": "category",
-                        "target_field": "category_name"
-                    }
-                ]
-            )
+                        "target_field": "category_name",
+                    },
+                ],
+            ),
         ]
 
         for mapping in mappings:
@@ -607,8 +649,13 @@ class EnterpriseIntegrationPlatform:
         self.is_integration_active = False
         logger.info("エンタープライズ統合プラットフォームを停止しました")
 
-    def integrate_system(self, system_name: str, system_type: SystemType,
-                        connection_config: Dict[str, Any], data_schemas: Dict[str, Dict[str, Any]]) -> str:
+    def integrate_system(
+        self,
+        system_name: str,
+        system_type: SystemType,
+        connection_config: Dict[str, Any],
+        data_schemas: Dict[str, Dict[str, Any]],
+    ) -> str:
         """
         システムを統合
         Args:
@@ -626,15 +673,20 @@ class EnterpriseIntegrationPlatform:
             name=system_name,
             system_type=system_type,
             connection_config=connection_config,
-            data_schemas=data_schemas
+            data_schemas=data_schemas,
         )
 
         success = self.integration_bus.register_system(system)
         return system_id if success else None
 
-    def create_data_mapping(self, source_system: str, target_system: str,
-                          source_schema: Dict[str, Any], target_schema: Dict[str, Any],
-                          transformation_rules: List[Dict[str, Any]] = None) -> str:
+    def create_data_mapping(
+        self,
+        source_system: str,
+        target_system: str,
+        source_schema: Dict[str, Any],
+        target_schema: Dict[str, Any],
+        transformation_rules: List[Dict[str, Any]] = None,
+    ) -> str:
         """
         データマッピングを作成
         Args:
@@ -654,7 +706,7 @@ class EnterpriseIntegrationPlatform:
             target_system=target_system,
             source_schema=source_schema,
             target_schema=target_schema,
-            transformation_rules=transformation_rules or []
+            transformation_rules=transformation_rules or [],
         )
 
         return self.integration_bus.define_data_mapping(mapping)
@@ -669,7 +721,9 @@ class EnterpriseIntegrationPlatform:
         """
         return self.data_synchronizer.start_data_synchronization(mapping_id)
 
-    async def send_inter_system_message(self, source_system: str, target_system: str, message: Dict[str, Any]):
+    async def send_inter_system_message(
+        self, source_system: str, target_system: str, message: Dict[str, Any]
+    ):
         """
         システム間メッセージを送信
         Args:
@@ -685,8 +739,14 @@ class EnterpriseIntegrationPlatform:
             "is_active": self.is_integration_active,
             "total_systems": len(self.integration_bus.integrated_systems),
             "total_mappings": len(self.integration_bus.data_mappings),
-            "active_sync_jobs": len([j for j in self.data_synchronizer.sync_jobs.values() if j.status == DataSyncStatus.SYNCING]),
-            "message_queue_size": len(self.integration_bus.message_queue)
+            "active_sync_jobs": len(
+                [
+                    j
+                    for j in self.data_synchronizer.sync_jobs.values()
+                    if j.status == DataSyncStatus.SYNCING
+                ]
+            ),
+            "message_queue_size": len(self.integration_bus.message_queue),
         }
 
 
@@ -708,14 +768,14 @@ async def example_usage():
             "host": "hr.legacy.company.com",
             "port": 8080,
             "protocol": "http",
-            "auth_type": "basic"
+            "auth_type": "basic",
         },
         {
             "employee": {
                 "fields": ["employee_id", "name", "department", "salary"],
-                "required_fields": ["employee_id", "name"]
+                "required_fields": ["employee_id", "name"],
             }
-        }
+        },
     )
 
     print(f"システム統合: {system_id}")
@@ -724,20 +784,26 @@ async def example_usage():
     mapping_id = platform.create_data_mapping(
         "erp_system",
         "crm_system",
-        {
-            "table": "employees",
-            "fields": ["emp_id", "full_name", "dept", "salary"]
-        },
-        {
-            "table": "staff",
-            "fields": ["id", "name", "department", "compensation"]
-        },
+        {"table": "employees", "fields": ["emp_id", "full_name", "dept", "salary"]},
+        {"table": "staff", "fields": ["id", "name", "department", "compensation"]},
         [
             {"type": "field_mapping", "source_field": "emp_id", "target_field": "id"},
-            {"type": "field_mapping", "source_field": "full_name", "target_field": "name"},
-            {"type": "field_mapping", "source_field": "dept", "target_field": "department"},
-            {"type": "field_mapping", "source_field": "salary", "target_field": "compensation"}
-        ]
+            {
+                "type": "field_mapping",
+                "source_field": "full_name",
+                "target_field": "name",
+            },
+            {
+                "type": "field_mapping",
+                "source_field": "dept",
+                "target_field": "department",
+            },
+            {
+                "type": "field_mapping",
+                "source_field": "salary",
+                "target_field": "compensation",
+            },
+        ],
     )
 
     print(f"データマッピング作成: {mapping_id}")
@@ -753,8 +819,8 @@ async def example_usage():
         {
             "event_type": "employee_updated",
             "employee_id": "EMP001",
-            "changes": {"department": "Sales"}
-        }
+            "changes": {"department": "Sales"},
+        },
     )
 
     # プラットフォームステータス
