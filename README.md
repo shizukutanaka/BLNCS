@@ -1,12 +1,8 @@
 # BLNCS
 
-> **📦 BLRCS — EU Digital Product Passport / Verifiable Credentials suite (Go)**
-> A zero-dependency Go implementation of EU Digital Product
-> Passport (ESPR) & Battery Passport (Reg 2023/1542) with W3C Verifiable
-> Credentials, SD-JWT-VC, IETF SCITT, OpenID4VP/VCI, ISO 18013-5 mdoc,
-> did:webvh, and the W3C Digital Credentials API — **53 packages, 1900+ tests,
-> 21 fuzz targets, 0 external dependencies.**
-> **→ See [`blrcs/`](./blrcs/) and its [README](./blrcs/README.md).**
+> **📦 BLRCS は独立リポジトリへ分離しました** — EU Digital Product Passport /
+> Verifiable Credentials suite (Go) は
+> [shizukutanaka/blrcs](https://github.com/shizukutanaka/blrcs) で開発しています。
 
 ---
 
