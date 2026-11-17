@@ -311,12 +311,8 @@ def _resolve_within_directory(base_dir: str | Path, requested: str) -> Path:
     if not candidate.is_absolute():
         candidate = base / candidate
     resolved = candidate.resolve()
-    try:
-        resolved.relative_to(base)
-    except ValueError:
-        raise ValueError(
-            f"Path must stay within the allowed directory: {requested!r}"
-        ) from None
+    if not resolved.is_relative_to(base):
+        raise ValueError(f"Path must stay within the allowed directory: {requested!r}")
     return resolved
 
 
@@ -1473,12 +1469,21 @@ def create_app(config=None):
                 resolved_log_path = _resolve_within_directory(
                     log_manager.logs_dir, log_path
                 )
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
+            except ValueError:
+                logger.warning(
+                    f"Rejected log path outside the log directory: {log_path!r}"
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid log path: the path must stay "
+                            "within the log directory"
+                        }
+                    ),
+                    400,
+                )
 
-            analysis = log_manager.analyze_log_file(
-                resolved_log_path, hours=hours
-            )
+            analysis = log_manager.analyze_log_file(resolved_log_path, hours=hours)
 
             if "error" in analysis:
                 return jsonify({"error": analysis["error"]}), 400
@@ -1507,8 +1512,19 @@ def create_app(config=None):
                 resolved_log_path = _resolve_within_directory(
                     log_manager.logs_dir, log_path
                 )
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
+            except ValueError:
+                logger.warning(
+                    f"Rejected log path outside the log directory: {log_path!r}"
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid log path: the path must stay "
+                            "within the log directory"
+                        }
+                    ),
+                    400,
+                )
 
             report = log_manager.generate_log_report(
                 resolved_log_path, output_format=format_type
@@ -1708,11 +1724,39 @@ def create_app(config=None):
             # working directory. The previous check (".." not in path)
             # let absolute paths through, allowing writes anywhere the
             # process can write; resolve-and-contain closes that.
-            exports_dir = Path.cwd() / "exports"
+            exports_dir = (Path.cwd() / "exports").resolve()
             try:
                 resolved_path = _resolve_within_directory(exports_dir, file_path)
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
+            except ValueError:
+                logger.warning(
+                    f"Rejected export path outside the exports directory: {file_path!r}"
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid export path: the path must stay "
+                            "within the exports directory"
+                        }
+                    ),
+                    400,
+                )
+
+            # Re-assert the containment invariant on the exact path that
+            # is about to be written, in the function performing the
+            # write, so the validated value is the only one used below.
+            if not resolved_path.is_relative_to(exports_dir):
+                logger.warning(
+                    f"Rejected export path outside the exports directory: {file_path!r}"
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid export path: the path must stay "
+                            "within the exports directory"
+                        }
+                    ),
+                    400,
+                )
 
             if resolved_path.suffix != ".json":
                 return jsonify({"error": "Export file must be a .json file"}), 400
