@@ -941,10 +941,15 @@ class CrossPlatformBuilder:
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
 
-            # Execute build commands
+            # Execute build commands. shell=True is intentional and safe
+            # here: every command string is a compile-time constant from
+            # _initialize_build_configs() (no external or user input is
+            # ever interpolated), the platform key is validated against
+            # that table above, and several commands rely on shell syntax
+            # (e.g. "cd android && ./gradlew ...").
             for command in config["build_commands"]:
                 self.logger.info(f"Executing: {command}")
-                result = subprocess.run(
+                result = subprocess.run(  # nosec B602 -- constant commands, see above
                     command, shell=True, cwd=source_dir, capture_output=True, text=True
                 )
 
@@ -953,10 +958,10 @@ class CrossPlatformBuilder:
                     self.logger.error(f"Error: {result.stderr}")
                     return False
 
-            # Run tests
+            # Run tests (same constant-command rationale as above).
             for command in config["test_commands"]:
                 self.logger.info(f"Testing: {command}")
-                result = subprocess.run(
+                result = subprocess.run(  # nosec B602 -- constant commands, see above
                     command, shell=True, cwd=source_dir, capture_output=True, text=True
                 )
 

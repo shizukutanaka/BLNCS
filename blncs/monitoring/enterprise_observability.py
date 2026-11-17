@@ -441,7 +441,9 @@ class LogAnalyzer:
         # Alert on frequent errors
         if self.error_patterns[error_signature] >= self.anomaly_threshold:
             alert = Alert(
-                id=f"error_pattern_{hashlib.md5(error_signature.encode()).hexdigest()[:8]}",
+                # MD5 only derives a short alert identifier from the
+                # error signature; it is not a security mechanism.
+                id=f"error_pattern_{hashlib.md5(error_signature.encode(), usedforsecurity=False).hexdigest()[:8]}",
                 severity=AlertSeverity.WARNING,
                 title="Frequent Error Pattern Detected",
                 message=f"Error pattern '{error_signature}' occurred {self.error_patterns[error_signature]} times",

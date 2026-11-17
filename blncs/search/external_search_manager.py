@@ -184,7 +184,8 @@ class ExternalSearchManager:
             "filters": str(sorted(query.filters.items())),
         }
         key_string = json.dumps(key_data, sort_keys=True)
-        return hashlib.md5(key_string.encode()).hexdigest()
+        # MD5 はキャッシュキーの生成専用で、セキュリティ用途ではない。
+        return hashlib.md5(key_string.encode(), usedforsecurity=False).hexdigest()
 
     def _get_cache(self, query: SearchQuery) -> Optional[List[SearchResult]]:
         """キャッシュから取得"""

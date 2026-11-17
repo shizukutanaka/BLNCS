@@ -374,7 +374,10 @@ def cached(ttl_seconds: int = 3600):
             key_parts = [func.__name__]
             key_parts.extend(str(arg) for arg in args)
             key_parts.extend(f"{k}:{v}" for k, v in sorted(kwargs.items()))
-            cache_key = hashlib.md5("|".join(key_parts).encode()).hexdigest()
+            # MD5 is only a memoization cache key, not a security mechanism.
+            cache_key = hashlib.md5(
+                "|".join(key_parts).encode(), usedforsecurity=False
+            ).hexdigest()
 
             # Try to get from cache
             result = cache_manager.get(cache_key)

@@ -287,9 +287,12 @@ class BackupManager:
 
         try:
             if backup_path.suffix.startswith(".tar"):
-                # Extract tar archive
+                # Extract tar archive. filter="data" (PEP 706) is required:
+                # the archive path is caller-supplied, so members with
+                # absolute paths, ".." components or escaping links must
+                # never be written outside restore_to.
                 with tarfile.open(backup_path, "r:*") as tar:
-                    tar.extractall(restore_to)
+                    tar.extractall(restore_to, filter="data")
             else:
                 # Copy uncompressed backup
                 if backup_path.is_dir():

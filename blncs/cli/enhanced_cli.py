@@ -599,7 +599,9 @@ class EnhancedCLI(cmd.Cmd):
 
     def do_clear(self, arg: str):
         """Clear the terminal screen"""
-        os.system("cls" if os.name == "nt" else "clear")
+        # The command is a fixed literal selected by os.name; the user's
+        # `arg` is never interpolated, so no shell injection is possible.
+        os.system("cls" if os.name == "nt" else "clear")  # nosec B605
 
     def do_exit(self, arg: str):
         """Exit the CLI"""

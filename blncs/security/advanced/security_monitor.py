@@ -178,7 +178,11 @@ class ThreatDetector:
         self, rule_name: str, rule: Dict[str, Any], log_entry: Dict[str, Any]
     ) -> SecurityAlert:
         """Create a security alert."""
-        alert_id = f"alert_{int(time.time())}_{hashlib.md5(rule_name.encode()).hexdigest()[:8]}"
+        # MD5 only contributes a short, stable suffix to the alert ID
+        # (from an internal rule name); uniqueness comes from the
+        # timestamp and the ID is never used for authentication or
+        # integrity decisions.
+        alert_id = f"alert_{int(time.time())}_{hashlib.md5(rule_name.encode(), usedforsecurity=False).hexdigest()[:8]}"
 
         return SecurityAlert(
             id=alert_id,

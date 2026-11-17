@@ -79,9 +79,10 @@ class SimpleCache:
         """Convert key to string format"""
         if isinstance(key, str):
             return key
-        # For complex keys, create a hash
+        # For complex keys, create a hash. MD5 is only a cache-key
+        # derivation here, not a security mechanism.
         key_str = json.dumps(key, sort_keys=True)
-        return hashlib.md5(key_str.encode()).hexdigest()
+        return hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest()
 
     def get(self, key: Union[str, tuple], default: Any = None) -> Any:
         """Get value from cache"""
