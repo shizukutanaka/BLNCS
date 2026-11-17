@@ -157,3 +157,28 @@ This is left as a follow-up because it can only be verified against the
 live GitHub API (permissions and alert payload shape), unlike the three
 gates above, which were verified end-to-end locally: green on current
 code, red when a single new finding is injected into each gate.
+
+## Deployment jobs are opt-in (`ENABLE_DEPLOY`)
+
+BLNCS is provided as software only: the project does not operate (or
+pay for) deployment infrastructure. The deploy chain in
+`production-ci-cd.yml` -- `deploy-staging`, `performance-test`,
+`deploy-production` and `rollback` -- therefore runs only when the
+repository variable `ENABLE_DEPLOY` is set to `true`. Without it the
+jobs are skipped and a push to main finishes green on the build; this
+is deliberate, not a broken pipeline. (Before this change,
+`deploy-staging` ran on every push to main and failed on the missing
+AWS credentials, turning the whole run red.)
+
+To deploy to your own AWS account:
+
+1. Settings -> Secrets and variables -> Actions -> **Variables** tab
+   -> New repository variable: name `ENABLE_DEPLOY`, value `true`.
+2. On the **Secrets** tab of the same page, configure the credentials
+   the jobs reference (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`,
+   the `_PROD` pair for production, and `SLACK_WEBHOOK_URL` for the
+   Slack notifications).
+
+With the variable set, the jobs behave exactly as before: staging
+deploys from `main`, production from `v*` tags, and `rollback` runs
+when a production deployment fails.
