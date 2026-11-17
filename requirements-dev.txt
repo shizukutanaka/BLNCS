@@ -18,7 +18,10 @@ mypy>=1.5.0
 
 # Security scanning
 bandit>=1.7.5
-safety>=2.3.5
+# safety is not declared here on purpose: CI runs it from an isolated
+# virtual environment (see .github/workflows/production-ci-cd.yml)
+# because safety caps its own filelock dependency at <4.0, below the
+# filelock security fix (4.2.1).
 
 # Development environment
 python-dotenv>=1.0.0

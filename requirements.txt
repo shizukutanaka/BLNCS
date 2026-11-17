@@ -65,5 +65,12 @@ flake8>=7.0.0
 mypy>=1.8.0
 bandit>=1.7.6
 
-# Additional Security Tools
-safety>=3.0.0
+# NOTE: safety (the dependency vulnerability scanner) is deliberately
+# NOT declared here. It is an audit CLI that the application never
+# imports, and it caps its own filelock dependency at <4.0, which kept
+# the scanner's environment stuck on a filelock release with known
+# vulnerabilities (fixed in filelock 4.2.1). CI runs safety from an
+# isolated virtual environment against this environment's frozen
+# package list instead (see .github/workflows/production-ci-cd.yml,
+# "Check dependency vulnerabilities"). The production image removes
+# safety/filelock for the same reason (see Dockerfile).
