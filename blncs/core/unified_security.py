@@ -1211,142 +1211,6 @@ class UnifiedSecurityManager:
         self.shutdown_event = threading.Event()
         self.start_background_cleanup()
 
-    def authenticate_user(
-        self,
-        username: str,
-        password: str,
-        source_ip: Optional[str] = None,
-        mfa_code: Optional[str] = None,
-    ) -> Tuple[Optional[AuthToken], Optional[str]]:
-        """
-        Authenticate user and return token
-        Returns (token, mfa_challenge) where mfa_challenge is None if no MFA needed
-        """
-
-        # Check rate limiting
-        if not self.rate_limiter.is_allowed(f"login:{username}"):
-            self.auditor.log_event(
-                "authentication",
-                "medium",
-                f"Rate limit exceeded for user {username}",
-                source_ip=source_ip,
-                user_id=username,
-            )
-            return None, None
-
-        # Check account lockout
-        if self.is_account_locked(username):
-            self.auditor.log_event(
-                "authentication",
-                "medium",
-                f"Login attempt on locked account {username}",
-                source_ip=source_ip,
-                user_id=username,
-            )
-            return None, None
-
-        # Check IP restrictions
-        if not self.is_ip_allowed(source_ip):
-            self.auditor.log_event(
-                "authentication",
-                "high",
-                f"Login attempt from blocked IP {source_ip}",
-                source_ip=source_ip,
-                user_id=username,
-            )
-            return None, None
-
-        # Verify password
-        if self.verify_user_password(username, password):
-            # Clear failed attempts on successful login
-            if username in self.failed_login_attempts:
-                del self.failed_login_attempts[username]
-
-            # Check if MFA is required
-            requires_mfa = self.policies["require_2fa"] or (
-                self.policies["mfa_required_for_admin"]
-                and "admin" in self.get_user_permissions(username)
-            )
-
-            if requires_mfa and self.mfa.is_mfa_enabled(username):
-                # MFA is required and configured
-                if mfa_code:
-                    # Verify MFA code
-                    if self.mfa.verify_totp(username, mfa_code, source_ip):
-                        # MFA successful - create token
-                        token = self.jwt_manager.create_token(
-                            user_id=username,
-                            permissions=self.get_user_permissions(username),
-                            expires_in=self.policies["token_expiry_default"],
-                        )
-
-                        self.auditor.log_event(
-                            "authentication",
-                            "low",
-                            f"Successful MFA login for user {username}",
-                            source_ip=source_ip,
-                            user_id=username,
-                        )
-
-                        return token, None
-                    else:
-                        # MFA failed
-                        self.auditor.log_event(
-                            "authentication",
-                            "medium",
-                            f"Failed MFA verification for user {username}",
-                            source_ip=source_ip,
-                            user_id=username,
-                        )
-                        return None, None
-                else:
-                    # MFA required but not provided - return challenge
-                    self.auditor.log_event(
-                        "authentication",
-                        "low",
-                        f"MFA challenge sent to user {username}",
-                        source_ip=source_ip,
-                        user_id=username,
-                    )
-                    return None, "MFA_REQUIRED"
-            else:
-                # No MFA required - create token directly
-                token = self.jwt_manager.create_token(
-                    user_id=username,
-                    permissions=self.get_user_permissions(username),
-                    expires_in=self.policies["token_expiry_default"],
-                )
-
-                self.auditor.log_event(
-                    "authentication",
-                    "low",
-                    f"Successful login for user {username}",
-                    source_ip=source_ip,
-                    user_id=username,
-                )
-
-                return token, None
-        else:
-            # Track failed attempt
-            self.record_failed_login(username, source_ip)
-
-            self.auditor.log_event(
-                "authentication",
-                "medium",
-                f"Failed login attempt for user {username}",
-                source_ip=source_ip,
-                user_id=username,
-            )
-
-            return None, None
-
-    def verify_user_password(self, username: str, password: str) -> bool:
-        """Verify user password (mock implementation)"""
-        # TODO: Implement actual password verification against database
-        # This is a placeholder for demonstration
-        test_passwords = {"admin": "admin123", "test": "test123", "demo": "demo123"}
-        return test_passwords.get(username) == password
-
     def get_user_permissions(self, username: str) -> List[str]:
         """Get user permissions (mock implementation)"""
         # TODO: Implement actual permission lookup
@@ -1753,17 +1617,6 @@ def get_security_manager() -> UnifiedSecurityManager:
     return _security_manager
 
 
-def authenticate_user(
-    username: str,
-    password: str,
-    source_ip: Optional[str] = None,
-    mfa_code: Optional[str] = None,
-) -> Tuple[Optional[AuthToken], Optional[str]]:
-    """Authenticate user with optional MFA"""
-    manager = get_security_manager()
-    return manager.authenticate_user(username, password, source_ip, mfa_code)
-
-
 def setup_mfa(user_id: str) -> Dict[str, Any]:
     """Setup MFA for user"""
     manager = get_security_manager()
@@ -1964,7 +1817,6 @@ __all__ = [
     "JWTManager",
     "SecurityAuditor",
     "get_security_manager",
-    "authenticate_user",
     "setup_mfa",
     "enable_mfa",
     "disable_mfa",
