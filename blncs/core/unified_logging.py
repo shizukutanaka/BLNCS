@@ -1083,6 +1083,9 @@ class LogManager:
             return {"error": f"Failed to monitor security events: {str(e)}"}
 
 
+_log_manager: Optional[LogManager] = None
+
+
 def get_log_manager() -> LogManager:
     """Get global log manager instance"""
     global _log_manager
