@@ -322,10 +322,35 @@ jobs:
             VERSION=${{ github.sha }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
 
+      - name: Compute Trivy image reference
+        id: trivy-ref
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          # The image reference scanned below must be the reference that
+          # was actually pushed: "<registry>/<image>:<meta version>" with
+          # the image name lowercased. env.IMAGE_NAME is
+          # ${{ github.repository }} verbatim and so keeps the uppercase
+          # "BLNCS"; Docker references require a lowercase repository, and
+          # docker/metadata-action lowercases the names it generates
+          # (Meta.sanitizeImageName), which is why the pushed tags are
+          # "ghcr.io/shizukutanaka/blncs:..." while a reference hand-built
+          # from env.IMAGE_NAME is ".../BLNCS:..." and Trivy aborted with
+          # "could not parse reference" before scanning anything.
+          image="$(printf '%s' "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
+          echo "ref=${image}:${{ steps.meta.outputs.version }}" >> "$GITHUB_OUTPUT"
+
       - name: Run Trivy on Docker image
+        # Scan only when the build step actually pushed the image (the
+        # same condition as its push: input). On pull_request nothing is
+        # pushed and the multi-platform build is not loaded into the
+        # local daemon either, so there is no image for Trivy to scan;
+        # running it there could only fail. The scan therefore runs on
+        # push / workflow_dispatch / tag events, against the pushed tag.
+        if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          image-ref: ${{ steps.trivy-ref.outputs.ref }}
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
