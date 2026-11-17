@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from blncs.core.config import ConfigManager, get_config, reset_config
+from blncs.core.config import ConfigManager, LightningConfig, get_config, reset_config
 
 
 class TestConfigManager(unittest.TestCase):
@@ -184,6 +184,25 @@ class TestConfigManager(unittest.TestCase):
             self.assertEqual(config.api.port, 9000)
             self.assertEqual(config.lightning.network, "mainnet")
 
+    def test_config_environment_variables_underscore_fields(self):
+        """Env overrides must reach fields whose names contain underscores
+
+        Regression: BLNCS_SECURITY_JWT_SECRET / BLNCS_SECURITY_TRUSTED_HOSTS
+        (the variables documented for production) used to be rewritten to
+        security.jwt.secret / security.trusted.hosts and silently dropped.
+        """
+        with patch.dict(
+            os.environ,
+            {
+                "BLNCS_SECURITY_JWT_SECRET": "env-secret",
+                "BLNCS_SECURITY_TRUSTED_HOSTS": '["example.com"]',
+            },
+        ):
+            config = ConfigManager(config_path=str(self.config_path))
+
+            self.assertEqual(config.security.jwt_secret, "env-secret")
+            self.assertEqual(config.security.trusted_hosts, ["example.com"])
+
     def test_config_file_watching(self):
         """Test configuration file watching (basic test)"""
         config = ConfigManager(
@@ -255,6 +274,95 @@ class TestConfigValidation(unittest.TestCase):
 
         self.assertFalse(result["valid"])
         self.assertFalse(result["checks"]["parseable"])
+
+
+class TestConfigManagerFirstRun(unittest.TestCase):
+    """First-run behaviour: no configuration file exists anywhere yet.
+
+    Regression coverage for the container first-start crash: path
+    detection creates the default config file from the section
+    dataclasses, so constructing a ConfigManager in an empty directory
+    must succeed and yield the built-in defaults.
+    """
+
+    def setUp(self):
+        """Run inside an empty directory (no config file anywhere)."""
+        self.temp_dir = tempfile.mkdtemp()
+        self._prev_cwd = os.getcwd()
+        os.chdir(self.temp_dir)
+
+    def tearDown(self):
+        """Restore the working directory and clean up."""
+        reset_config()
+        os.chdir(self._prev_cwd)
+        if Path(self.temp_dir).exists():
+            import shutil
+
+            shutil.rmtree(self.temp_dir)
+
+    def test_constructs_with_defaults_when_no_config_file_exists(self):
+        """ConfigManager() must not raise on the first-run path"""
+        config = ConfigManager(environment="test")
+
+        # All sections are present with their default values
+        self.assertEqual(config.lightning.network, LightningConfig().network)
+        self.assertEqual(config.lightning.host, LightningConfig().host)
+        self.assertEqual(config.lightning.port, LightningConfig().port)
+        self.assertIsNotNone(config.database)
+        self.assertIsNotNone(config.cache)
+        self.assertIsNotNone(config.security)
+        self.assertIsNotNone(config.api)
+        self.assertIsNotNone(config.logging)
+        self.assertIsNotNone(config.performance)
+
+    def test_default_config_file_is_created_with_all_sections(self):
+        """The first run materializes a complete default config file"""
+        config = ConfigManager(environment="test")
+
+        created = Path(self.temp_dir) / "config" / "test.json"
+        self.assertTrue(created.exists())
+        self.assertEqual(Path(config.config_path), created.resolve())
+
+        with open(created) as f:
+            data = json.load(f)
+
+        for section in (
+            "lightning",
+            "database",
+            "cache",
+            "security",
+            "api",
+            "logging",
+            "performance",
+        ):
+            self.assertIn(section, data)
+
+        # The written defaults are the dataclass defaults, unchanged
+        from dataclasses import asdict
+
+        self.assertEqual(data["lightning"], asdict(LightningConfig()))
+
+    def test_production_first_run_with_env_supplied_secrets(self):
+        """Production first run: defaults + documented env secrets must start
+
+        Mirrors the container image (BLNCS_ENV=production, no config
+        file): the default config is created on first run and the
+        production validation passes with the secrets supplied through
+        the documented environment variables.
+        """
+        with patch.dict(
+            os.environ,
+            {
+                "BLNCS_SECURITY_JWT_SECRET": "test-secret",
+                "BLNCS_SECURITY_TRUSTED_HOSTS": '["localhost"]',
+            },
+        ):
+            config = ConfigManager(environment="production")
+
+        self.assertEqual(config.environment, "production")
+        self.assertEqual(config.security.jwt_secret, "test-secret")
+        self.assertEqual(config.security.trusted_hosts, ["localhost"])
+        self.assertTrue((Path(self.temp_dir) / "config" / "production.json").exists())
 
 
 if __name__ == "__main__":

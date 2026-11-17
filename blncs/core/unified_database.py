@@ -11,7 +11,7 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 # Try to import SQLAlchemy for ORM support
 try:
@@ -133,6 +133,33 @@ class UnifiedDatabase:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             return conn
+
+    def connect(self) -> bool:
+        """Verify the database is reachable; return True on success.
+
+        Connections are opened lazily per operation (see
+        _get_connection), so connecting means probing that a connection
+        can be obtained and answers a trivial query. This never raises:
+        callers (application startup) use the boolean result to decide
+        how to proceed.
+        """
+        try:
+            conn = self._get_connection()
+            try:
+                if self.using_sqlalchemy:
+                    cast("Session", conn).execute(text("SELECT 1"))
+                else:
+                    cast("sqlite3.Connection", conn).execute("SELECT 1")
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning(f"Database connection check failed: {e}")
+            return False
+        return True
+
+    def health_check(self) -> bool:
+        """Health probe used by application status reporting"""
+        return self.connect()
 
     def create_tables(self):
         """Create required database tables"""

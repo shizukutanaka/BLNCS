@@ -171,10 +171,10 @@ class ConfigManager:
             environment is not None or "BLNCS_ENV" in os.environ
         )
         self._load_error: Optional[str] = None
-        self._config_path = self._detect_config_path(config_path)
-        self.config_path = str(self._config_path)
 
-        # Configuration sections
+        # Configuration sections. These must be initialized before
+        # _detect_config_path(): when no config file exists yet, path
+        # detection creates the default config file from these sections.
         self.lightning = LightningConfig()
         self.database = DatabaseConfig()
         self.cache = CacheConfig()
@@ -182,6 +182,9 @@ class ConfigManager:
         self.api = APIConfig()
         self.logging = LoggingConfig()
         self.performance = PerformanceConfig()
+
+        self._config_path = self._detect_config_path(config_path)
+        self.config_path = str(self._config_path)
 
         # Internal state
         self._raw_config: Dict[str, Any] = {}
@@ -384,11 +387,50 @@ class ConfigManager:
         for key, value in os.environ.items():
             if key.startswith(env_prefix):
                 config_key = key[len(env_prefix) :].lower()
-                config_path = config_key.replace("_", ".")
+                config_path = self._resolve_env_config_path(config_key)
 
                 # Convert value
                 converted_value = self._convert_env_value(value)
                 self._set_nested_value(config_path, converted_value)
+
+    def _resolve_env_config_path(self, config_key: str) -> str:
+        """Resolve an env-derived key (``security_jwt_secret``) to a dot path.
+
+        Field names may themselves contain underscores, so the key is
+        matched against the actual configuration attributes (longest
+        match wins) instead of blindly replacing every underscore with
+        a dot. The blind replacement made documented variables such as
+        ``BLNCS_SECURITY_JWT_SECRET`` and ``BLNCS_SECURITY_TRUSTED_HOSTS``
+        resolve to ``security.jwt.secret`` / ``security.trusted.hosts``
+        and silently never reach the dataclass fields. Keys that match
+        no attribute keep the legacy dotted form (and are stored in the
+        raw configuration), exactly as before.
+        """
+        tokens = config_key.split("_")
+        if len(tokens) < 2 or not hasattr(self, tokens[0]):
+            return config_key.replace("_", ".")
+
+        path = [tokens[0]]
+        current = getattr(self, tokens[0])
+        rest = tokens[1:]
+        while rest:
+            matched = None
+            for end in range(len(rest), 0, -1):
+                candidate = "_".join(rest[:end])
+                if hasattr(current, candidate):
+                    matched = (candidate, end)
+                    break
+            if matched is None:
+                break
+            candidate, end = matched
+            path.append(candidate)
+            current = getattr(current, candidate)
+            rest = rest[end:]
+
+        if rest:
+            # Unresolved remainder: keep the legacy dotted behaviour.
+            return config_key.replace("_", ".")
+        return ".".join(path)
 
     def _convert_env_value(self, value: str) -> Any:
         """Convert environment variable string to appropriate type"""

@@ -110,4 +110,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f -s http://localhost:8080/health > /dev/null || exit 1
 
 # Default command with proper server startup
-CMD ["python3", "blncs_main.py", "server", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python3", "blncs_main.py", "--mode", "server", "--host", "0.0.0.0", "--port", "8080"]
