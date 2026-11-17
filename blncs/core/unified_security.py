@@ -793,10 +793,47 @@ class RateLimiter:
             return max(0, self.max_requests - len(request_times))
 
 
+#: Environment variable that may carry the master key (base64-encoded
+#: key bytes). This mirrors ConfigManager, which reads its encryption
+#: key from ``BLNCS_ENCRYPTION_KEY``.
+MASTER_KEY_ENV_VAR = "BLNCS_MASTER_KEY"
+
+
+def _default_master_key_path() -> Path:
+    """Default location of the persisted master key file.
+
+    BLNCS keeps its runtime data (database, logs, backups) under
+    ``~/.blncs/`` — see ``config/personal.json`` and README_PERSONAL.md.
+    The master key belongs there too: key material must never live
+    inside the source tree, where it could be committed by accident.
+    """
+    return Path.home() / ".blncs" / "master.key"
+
+
+def _decode_master_key_env(value: str) -> bytes:
+    """Decode a base64 master key supplied via the environment."""
+    text = value.strip()
+    text += "=" * (-len(text) % 4)  # tolerate missing padding
+    try:
+        key = base64.urlsafe_b64decode(text.encode())
+    except Exception as e:
+        raise ValueError(f"{MASTER_KEY_ENV_VAR} is set but is not valid base64") from e
+    if not key:
+        raise ValueError(f"{MASTER_KEY_ENV_VAR} is set but decodes to no key bytes")
+    return key
+
+
 class EncryptionManager:
     """Advanced encryption management"""
 
-    def __init__(self, master_key: Optional[bytes] = None):
+    def __init__(
+        self,
+        master_key: Optional[bytes] = None,
+        key_path: Optional[Path] = None,
+    ):
+        self._key_path = (
+            Path(key_path) if key_path is not None else _default_master_key_path()
+        )
         if master_key:
             self.master_key = master_key
         else:
@@ -806,8 +843,23 @@ class EncryptionManager:
         self.fernet = Fernet(base64.urlsafe_b64encode(self.master_key[:32]))
 
     def _load_or_generate_master_key(self) -> bytes:
-        """Load existing master key or generate new one"""
-        key_file = Path("config/master.key")
+        """Resolve the master key without touching the source tree.
+
+        Resolution order:
+
+        1. The ``BLNCS_MASTER_KEY`` environment variable (base64-encoded
+           key bytes), following ConfigManager's ``BLNCS_ENCRYPTION_KEY``
+           convention. Setting it to the base64 encoding of a previously
+           used key file keeps data encrypted with that key readable.
+        2. The key file at ``~/.blncs/master.key`` (outside the repo).
+        3. A freshly generated key, persisted to that same outside-repo
+           location with owner-only permissions.
+        """
+        env_value = os.environ.get(MASTER_KEY_ENV_VAR)
+        if env_value:
+            return _decode_master_key_env(env_value)
+
+        key_file = self._key_path
 
         if key_file.exists():
             try:

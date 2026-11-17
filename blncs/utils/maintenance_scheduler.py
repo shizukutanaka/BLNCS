@@ -926,8 +926,9 @@ class MaintenanceScheduler:
                 ("/opt/blncs/config", 0o022),
                 ("/opt/blncs/data", 0o022),
                 ("/var/lib/blncs", 0o022),
-                ("config/encryption.key", 0o077),
-                ("config/master.key", 0o077),
+                # Key material lives outside the source tree (env var or
+                # ~/.blncs/); audit the persisted master key location.
+                (os.path.expanduser("~/.blncs/master.key"), 0o077),
             ]
 
             for path, forbidden_bits in sensitive_paths:

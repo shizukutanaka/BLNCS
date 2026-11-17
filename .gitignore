@@ -33,6 +33,11 @@ htmlcov/
 *.swo
 *~
 
+# Secrets / key material (never commit; keys come from BLNCS_* env vars
+# or are generated under ~/.blncs/)
+*.key
+config/*.key
+
 # Data
 data/
 *.db

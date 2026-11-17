@@ -337,6 +337,7 @@ cp ~/.blncs/backups/backup_*.db ~/.blncs/blncs.db
 ├── auth.json           # 認証トークン（自動生成）
 ├── blncs.db           # データベース
 ├── encryption.key     # 暗号化キー
+├── master.key         # マスターキー（自動生成、権限 600）
 ├── logs/              # ログファイル
 │   └── blncs.log
 └── backups/           # 自動バックアップ
@@ -346,6 +347,22 @@ cp ~/.blncs/backups/backup_*.db ~/.blncs/blncs.db
 config/
 └── personal.json      # 設定ファイル
 ```
+
+### マスターキーについて
+
+暗号化のマスターキーは、リポジトリ内には置きません。取得順序は次のとおりです。
+
+1. 環境変数 `BLNCS_MASTER_KEY`（Base64 エンコードした鍵バイト列）
+2. `~/.blncs/master.key`（無ければ自動生成して権限 600 で保存）
+
+**旧バージョンからの移行**: 以前は `config/master.key` を使っていました。旧キーで暗号化したデータを引き続き読むには、旧キーファイルの内容を Base64 化して環境変数に設定してください。
+
+```bash
+export BLNCS_MASTER_KEY="$(base64 -w0 /path/to/old/config/master.key)"  # Linux
+# macOS: base64 -i /path/to/old/config/master.key
+```
+
+または、旧キーファイルをそのまま `~/.blncs/master.key` にコピーしても同じ鍵が使われます。
 
 ## システム要件
 
