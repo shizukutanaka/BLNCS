@@ -358,11 +358,23 @@ jobs:
           severity: 'CRITICAL,HIGH'
 
   # ===== Deploy to Staging =====
+  # Deployment is opt-in. BLNCS is provided as software only: the
+  # project does not operate (or pay for) AWS infrastructure, so the
+  # deploy jobs below must not run -- and fail on missing AWS
+  # credentials -- on every push to main. They run only when the
+  # repository variable ENABLE_DEPLOY is set to 'true'. To deploy to
+  # your own AWS account: Settings -> Secrets and variables ->
+  # Actions -> Variables tab -> New repository variable, name
+  # ENABLE_DEPLOY, value true; and configure the AWS / Slack secrets
+  # referenced by these jobs under the Secrets tab of the same page.
+  # Without the variable, deploy-staging, performance-test,
+  # deploy-production and rollback are skipped and the pipeline
+  # finishes green on the build. See docs/QUALITY_GATES.md.
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: vars.ENABLE_DEPLOY == 'true' && github.ref == 'refs/heads/main'
     environment:
       name: staging
       url: https://staging.blncs.org
@@ -414,14 +426,17 @@ jobs:
         with:
           status: ${{ job.status }}
           text: 'Staging deployment ${{ job.status }}'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        env:
+          # action-slack v3 has no webhook_url input; the webhook URL
+          # is passed via this environment variable (see its README).
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   # ===== Performance Testing =====
   performance-test:
     name: Performance Testing
     runs-on: ubuntu-latest
     needs: deploy-staging
-    if: github.ref == 'refs/heads/main'
+    if: vars.ENABLE_DEPLOY == 'true' && github.ref == 'refs/heads/main'
 
     steps:
       - name: Checkout code
@@ -453,7 +468,7 @@ jobs:
     name: Deploy to Production
     runs-on: ubuntu-latest
     needs: [deploy-staging, performance-test]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: vars.ENABLE_DEPLOY == 'true' && startsWith(github.ref, 'refs/tags/v')
     environment:
       name: production
       url: https://blncs.org
@@ -542,14 +557,17 @@ jobs:
             Production deployment ${{ job.status }}
             Version: ${{ github.ref_name }}
             Deployed by: ${{ github.actor }}
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
           fields: repo,message,commit,author,action,eventName,ref,workflow
+        env:
+          # action-slack v3 has no webhook_url input; the webhook URL
+          # is passed via this environment variable (see its README).
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   # ===== Rollback =====
   rollback:
     name: Rollback Production
     runs-on: ubuntu-latest
-    if: failure() && needs.deploy-production.result == 'failure'
+    if: vars.ENABLE_DEPLOY == 'true' && failure() && needs.deploy-production.result == 'failure'
     needs: deploy-production
     environment:
       name: production
@@ -573,4 +591,7 @@ jobs:
         with:
           status: 'warning'
           text: 'Production deployment rolled back!'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        env:
+          # action-slack v3 has no webhook_url input; the webhook URL
+          # is passed via this environment variable (see its README).
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
