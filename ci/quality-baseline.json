@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "gates": {
+    "flake8": {
+      "command": "flake8 blncs/ --max-line-length=120 --ignore=E203,W503",
+      "total": 880,
+      "counts": {
+        "E226": 9,
+        "E265": 1,
+        "E402": 17,
+        "E501": 48,
+        "E722": 50,
+        "E741": 1,
+        "F401": 598,
+        "F402": 6,
+        "F541": 31,
+        "F811": 29,
+        "F841": 89,
+        "W605": 1
+      }
+    },
+    "mypy": {
+      "command": "mypy blncs/ --ignore-missing-imports",
+      "total": 3621,
+      "counts": {
+        "arg-type": 79,
+        "assignment": 275,
+        "attr-defined": 276,
+        "call-arg": 17,
+        "call-overload": 11,
+        "comparison-overlap": 2,
+        "dict-item": 7,
+        "empty-body": 1,
+        "has-type": 7,
+        "index": 74,
+        "list-item": 2,
+        "method-assign": 6,
+        "misc": 15,
+        "name-defined": 5,
+        "no-any-return": 118,
+        "no-redef": 24,
+        "no-untyped-def": 2243,
+        "operator": 73,
+        "override": 3,
+        "return": 25,
+        "return-value": 24,
+        "str-bytes-safe": 1,
+        "truthy-function": 5,
+        "union-attr": 81,
+        "unreachable": 76,
+        "untyped-decorator": 24,
+        "unused-coroutine": 1,
+        "unused-ignore": 9,
+        "valid-type": 3,
+        "var-annotated": 134
+      }
+    },
+    "bandit": {
+      "command": "bandit -r blncs/ (severity MEDIUM/HIGH; mirrors `bandit -r blncs/ -ll`)",
+      "total": 31,
+      "counts": {
+        "B102:MEDIUM": 2,
+        "B104:MEDIUM": 4,
+        "B108:MEDIUM": 7,
+        "B113:MEDIUM": 8,
+        "B301:MEDIUM": 1,
+        "B310:MEDIUM": 2,
+        "B608:MEDIUM": 7
+      }
+    }
+  },
+  "generated_on": "2026-11-17",
+  "tool_versions": {
+    "flake8": "7.5.0",
+    "mypy": "2.4.1",
+    "bandit": "1.9.4",
+    "python": "3.12.3"
+  }
+}

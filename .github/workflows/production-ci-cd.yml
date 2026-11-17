@@ -12,7 +12,14 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  PYTHON_VERSION: '3.11'
+  # The quality baseline (ci/quality-baseline.json) was frozen under
+  # Python 3.12, and finding counts -- mypy's in particular -- shift with
+  # the interpreter version even when the code and tool versions are
+  # identical (measured: Python 3.11 reports a few extra mypy errors on
+  # this tree). The code-quality job below is the only consumer of this
+  # variable in this workflow, and it must run the baseline's Python.
+  # See docs/QUALITY_GATES.md ("Measurement environment").
+  PYTHON_VERSION: '3.12'
   NODE_VERSION: '18'
 
 jobs:
@@ -42,7 +49,15 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install flake8 black isort mypy bandit safety pylint
+          pip install black isort safety pylint
+          # The three baseline-gated tools are pinned to the exact
+          # versions the baseline in ci/quality-baseline.json was frozen
+          # with (see "tool_versions" there). Finding counts are
+          # tool-version sensitive, so an unpinned "latest" install would
+          # drift the gate red on a future tool release with no code
+          # change. The pins satisfy the >= floors in
+          # requirements-dev.txt, so the installs below keep them.
+          pip install flake8==7.5.0 mypy==2.4.1 bandit==1.9.4
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
@@ -52,17 +67,22 @@ jobs:
       - name: Run isort
         run: isort --check-only blncs/
 
-      - name: Run Flake8
-        run: flake8 blncs/ --max-line-length=120 --ignore=E203,W503
+      # Baseline (ratchet) gates: flake8 / mypy / bandit still run with the
+      # exact same tool arguments as before, but their findings are compared
+      # against the frozen per-category baseline in ci/quality-baseline.json.
+      # Any new finding fails the job; reductions pass and print a notice to
+      # ratchet the baseline down. See docs/QUALITY_GATES.md.
+      - name: Run Flake8 (baseline gate)
+        run: python scripts/quality_gate.py flake8
 
       - name: Run Pylint
         run: pylint blncs/ --fail-under=8.0
 
-      - name: Run MyPy type checking
-        run: mypy blncs/ --ignore-missing-imports
+      - name: Run MyPy type checking (baseline gate)
+        run: python scripts/quality_gate.py mypy
 
-      - name: Run Bandit security linter
-        run: bandit -r blncs/ -ll
+      - name: Run Bandit security linter (baseline gate)
+        run: python scripts/quality_gate.py bandit
 
       - name: Check dependency vulnerabilities
         run: safety check --json
@@ -236,17 +256,56 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute sha tag prefix
+        id: sha-prefix
+        shell: bash
+        run: |
+          # docker/metadata-action derives its {{branch}} expansion from
+          # the workflow ref (GITHUB_REF): the branch name for
+          # refs/heads/* and an empty string for every other ref. Mirror
+          # exactly that test here: branch refs keep the "<branch>-"
+          # prefix, every other ref (pull_request refs/pull/*, tag
+          # refs/tags/*, ...) falls back to the action's default "sha-"
+          # prefix, so the sha tag can never become the invalid "-<sha>".
+          #
+          # Do NOT key this off github.ref_type: that context describes
+          # the ref the workflow *run* is associated with and is only
+          # ever "branch" or "tag" -- for pull_request runs it is
+          # "branch" (the run belongs to the PR head branch) even though
+          # GITHUB_REF is refs/pull/*. A previous fix gated two type=sha
+          # lines on ref_type and so enabled the branch-prefixed line on
+          # PRs, reproducing the invalid "-<sha>" tag it meant to fix.
+          #
+          # The branch name is sanitized the same way the action
+          # sanitizes the final tag (Meta.sanitizeTag replaces runs of
+          # [^a-zA-Z0-9._-] with '-'), so the value written to the output
+          # is already a plain literal string -- no template syntax --
+          # when the metadata action receives it as the prefix.
+          if [[ "$GITHUB_REF" == refs/heads/* ]]; then
+            branch="${GITHUB_REF#refs/heads/}"
+            branch="$(printf '%s' "$branch" | sed -E 's/[^a-zA-Z0-9._-]+/-/g')"
+            echo "prefix=${branch}-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=sha-" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # The sha tag's prefix is the literal string computed by the
+          # "Compute sha tag prefix" step above ("<branch>-" on branch
+          # refs, "sha-" otherwise). The previous prefix={{branch}}-
+          # expanded to an empty string on non-branch refs, producing
+          # the invalid tag "-<sha>" and failing the build with
+          # "invalid reference format".
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=${{ steps.sha-prefix.outputs.prefix }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
@@ -263,10 +322,35 @@ jobs:
             VERSION=${{ github.sha }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
 
+      - name: Compute Trivy image reference
+        id: trivy-ref
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          # The image reference scanned below must be the reference that
+          # was actually pushed: "<registry>/<image>:<meta version>" with
+          # the image name lowercased. env.IMAGE_NAME is
+          # ${{ github.repository }} verbatim and so keeps the uppercase
+          # "BLNCS"; Docker references require a lowercase repository, and
+          # docker/metadata-action lowercases the names it generates
+          # (Meta.sanitizeImageName), which is why the pushed tags are
+          # "ghcr.io/shizukutanaka/blncs:..." while a reference hand-built
+          # from env.IMAGE_NAME is ".../BLNCS:..." and Trivy aborted with
+          # "could not parse reference" before scanning anything.
+          image="$(printf '%s' "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
+          echo "ref=${image}:${{ steps.meta.outputs.version }}" >> "$GITHUB_OUTPUT"
+
       - name: Run Trivy on Docker image
+        # Scan only when the build step actually pushed the image (the
+        # same condition as its push: input). On pull_request nothing is
+        # pushed and the multi-platform build is not loaded into the
+        # local daemon either, so there is no image for Trivy to scan;
+        # running it there could only fail. The scan therefore runs on
+        # push / workflow_dispatch / tag events, against the pushed tag.
+        if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          image-ref: ${{ steps.trivy-ref.outputs.ref }}
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
