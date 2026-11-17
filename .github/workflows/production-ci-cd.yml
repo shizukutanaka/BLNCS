@@ -261,12 +261,20 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # The sha tag's {{branch}} prefix expands to an empty string
+          # whenever the ref is not a branch (pull_request refs are
+          # refs/pull/*, tag pushes are refs/tags/*), which would make
+          # the tag "-<sha>" -- an invalid Docker tag that fails the
+          # build with "invalid reference format". Use the
+          # branch-prefixed form for branch refs only and fall back to
+          # the plain "sha-<sha>" form for every other ref.
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
+            type=sha,prefix={{branch}}-,enable=${{ github.ref_type == 'branch' }}
+            type=sha,enable=${{ github.ref_type != 'branch' }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
