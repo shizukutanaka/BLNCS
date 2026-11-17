@@ -52,17 +52,22 @@ jobs:
       - name: Run isort
         run: isort --check-only blncs/
 
-      - name: Run Flake8
-        run: flake8 blncs/ --max-line-length=120 --ignore=E203,W503
+      # Baseline (ratchet) gates: flake8 / mypy / bandit still run with the
+      # exact same tool arguments as before, but their findings are compared
+      # against the frozen per-category baseline in ci/quality-baseline.json.
+      # Any new finding fails the job; reductions pass and print a notice to
+      # ratchet the baseline down. See docs/QUALITY_GATES.md.
+      - name: Run Flake8 (baseline gate)
+        run: python scripts/quality_gate.py flake8
 
       - name: Run Pylint
         run: pylint blncs/ --fail-under=8.0
 
-      - name: Run MyPy type checking
-        run: mypy blncs/ --ignore-missing-imports
+      - name: Run MyPy type checking (baseline gate)
+        run: python scripts/quality_gate.py mypy
 
-      - name: Run Bandit security linter
-        run: bandit -r blncs/ -ll
+      - name: Run Bandit security linter (baseline gate)
+        run: python scripts/quality_gate.py bandit
 
       - name: Check dependency vulnerabilities
         run: safety check --json
