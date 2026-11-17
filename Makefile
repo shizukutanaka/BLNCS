@@ -3,7 +3,7 @@
 
 .PHONY: help install install-dev test test-unit lint format
 .PHONY: security-check clean build docker-build docker-run docker-stop
-.PHONY: deploy-local status optimize debug start dev-setup quick-check
+.PHONY: status optimize debug start dev-setup quick-check
 .PHONY: info release
 
 help: ## Show this help message
@@ -26,7 +26,6 @@ help: ## Show this help message
 	@echo "  build            Build distribution packages"
 	@echo "  docker-build     Build Docker image"
 	@echo "  docker-run       Run Docker container"
-	@echo "  deploy-local     Deploy locally"
 	@echo ""
 	@echo "System Management:"
 	@echo "  status           Check system status"
@@ -103,12 +102,6 @@ docker-stop: ## Stop Docker container
 	docker stop blncs-container || true
 	docker rm blncs-container || true
 	@echo "✅ Docker container stopped"
-
-deploy-local: ## Deploy locally for development
-	@echo "Deploying BLNCS locally..."
-	chmod +x deploy.sh
-	./deploy.sh install
-	@echo "✅ Local deployment completed"
 
 status: ## Check system status
 	@echo "Checking system status..."

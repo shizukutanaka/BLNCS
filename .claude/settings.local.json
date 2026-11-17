@@ -6,7 +6,6 @@
       "Bash(python -m pytest /mnt/c/Users/irosa/Desktop/claude/BLNCS/tests/test_unified_comprehensive.py -v)",
       "Bash(python:*)",
       "Bash(chmod:*)",
-      "Bash(./deploy.sh:*)",
       "Bash(docker:*)",
       "Bash(docker-compose:*)",
       "Bash(pip3 install:*)",
