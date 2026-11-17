@@ -291,6 +291,31 @@ def _resolve_payment_settings(config_source) -> Tuple[int, int]:
     return max_sats, ttl
 
 
+def _resolve_within_directory(base_dir: str | Path, requested: str) -> Path:
+    """
+    Resolve *requested* against *base_dir*, requiring the result to stay
+    inside that directory.
+
+    Relative paths are interpreted relative to *base_dir*; absolute paths
+    are accepted only when they already point inside *base_dir*. The path
+    is fully resolved (symlinks included) before the containment check, so
+    ``..`` segments and symlinks cannot be used to escape the directory.
+    This mirrors the resolve-and-contain approach of
+    :meth:`InputValidator.validate_file_path`.
+
+    Raises:
+        ValueError: If the resolved path escapes *base_dir*.
+    """
+    base = Path(base_dir).resolve()
+    candidate = Path(requested)
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(base):
+        raise ValueError(f"Path must stay within the allowed directory: {requested!r}")
+    return resolved
+
+
 def create_app(config=None):
     """Create Flask application"""
     if config is not None:
@@ -1436,7 +1461,29 @@ def create_app(config=None):
             log_path = request.args.get("path", default="blncs.log", type=str)
 
             log_manager = get_log_manager()
-            analysis = log_manager.analyze_log_file(log_path, hours=hours)
+
+            # Only files inside the log directory may be analyzed;
+            # reject anything that resolves outside it without
+            # touching the file at all.
+            try:
+                resolved_log_path = _resolve_within_directory(
+                    log_manager.logs_dir, log_path
+                )
+            except ValueError:
+                logger.warning(
+                    f"Rejected log path outside the log directory: {log_path!r}"
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid log path: the path must stay "
+                            "within the log directory"
+                        }
+                    ),
+                    400,
+                )
+
+            analysis = log_manager.analyze_log_file(resolved_log_path, hours=hours)
 
             if "error" in analysis:
                 return jsonify({"error": analysis["error"]}), 400
@@ -1458,8 +1505,29 @@ def create_app(config=None):
             format_type = request.args.get("format", default="json", type=str)
 
             log_manager = get_log_manager()
+
+            # Same containment rule as /api/logs/analyze: the report is
+            # generated only for files inside the log directory.
+            try:
+                resolved_log_path = _resolve_within_directory(
+                    log_manager.logs_dir, log_path
+                )
+            except ValueError:
+                logger.warning(
+                    f"Rejected log path outside the log directory: {log_path!r}"
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid log path: the path must stay "
+                            "within the log directory"
+                        }
+                    ),
+                    400,
+                )
+
             report = log_manager.generate_log_report(
-                log_path, output_format=format_type
+                resolved_log_path, output_format=format_type
             )
 
             if format_type.lower() == "text":
@@ -1652,18 +1720,57 @@ def create_app(config=None):
                 "path", default="metrics_export.json", type=str
             )
 
-            # Ensure path is safe
-            if ".." in file_path or not file_path.endswith(".json"):
-                return jsonify({"error": "Invalid file path"}), 400
+            # Exports are confined to the exports directory under the
+            # working directory. The previous check (".." not in path)
+            # let absolute paths through, allowing writes anywhere the
+            # process can write; resolve-and-contain closes that.
+            exports_dir = (Path.cwd() / "exports").resolve()
+            try:
+                resolved_path = _resolve_within_directory(exports_dir, file_path)
+            except ValueError:
+                logger.warning(
+                    f"Rejected export path outside the exports directory: {file_path!r}"
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid export path: the path must stay "
+                            "within the exports directory"
+                        }
+                    ),
+                    400,
+                )
+
+            # Re-assert the containment invariant on the exact path that
+            # is about to be written, in the function performing the
+            # write, so the validated value is the only one used below.
+            if not resolved_path.is_relative_to(exports_dir):
+                logger.warning(
+                    f"Rejected export path outside the exports directory: {file_path!r}"
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid export path: the path must stay "
+                            "within the exports directory"
+                        }
+                    ),
+                    400,
+                )
+
+            if resolved_path.suffix != ".json":
+                return jsonify({"error": "Export file must be a .json file"}), 400
+
+            resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
             collector = get_metrics_collector()
-            collector.export_metrics(file_path)
+            collector.export_metrics(str(resolved_path))
 
             return jsonify(
                 {
                     "status": "success",
-                    "file": file_path,
-                    "message": f"Metrics exported to {file_path}",
+                    "file": str(resolved_path),
+                    "message": f"Metrics exported to {resolved_path}",
                 }
             )
         except Exception as e:
