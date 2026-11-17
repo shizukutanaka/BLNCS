@@ -243,30 +243,27 @@ class BLNCSApplication:
         self.logger.info(_("Starting server on %s:%s") % (host, port))
 
         try:
-            # Import and run FastAPI server
+            # The REST API is a Flask (WSGI) application, so serve it
+            # with Werkzeug — the same approach as the API module's own
+            # UnifiedAPIServer. uvicorn is not a dependency of this
+            # project and could not serve a WSGI app anyway.
             from blncs.api.unified_rest_api import create_app
+            from werkzeug.serving import make_server
 
             app = create_app()
-            import uvicorn
+            server = make_server(host, port, app, threaded=True)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.logger.info(_("Server is ready on %s:%s") % (host, port))
 
-            config = uvicorn.Config(
-                app,
-                host=host,
-                port=port,
-                log_level="info"
-            )
-            server = uvicorn.Server(config)
-
-            # Setup signal handlers
-            def signal_handler():
-                self.logger.info(_("Shutdown signal received"))
-                server.should_exit = True
-
-            loop = asyncio.get_event_loop()
-            for sig in (signal.SIGTERM, signal.SIGINT):
-                loop.add_signal_handler(sig, signal_handler)
-
-            await server.serve()
+            try:
+                # Serve until stop() flips the application state
+                # (shutdown is driven by the signal handlers).
+                while self.running:
+                    await asyncio.sleep(0.5)
+            finally:
+                server.shutdown()
+                server.server_close()
 
         except Exception as e:
             self.logger.error(_("Server error: %s") % e)
@@ -573,8 +570,11 @@ class BLNCSApplication:
 
     async def start(self):
         """アプリケーション開始"""
+        # Initialization already ran synchronously in __init__;
+        # starting only flips the application state. (Previously this
+        # awaited the synchronous initialize() a second time, which
+        # raised TypeError because it returns None.)
         self.running = True
-        await self.initialize()
 
     async def stop(self):
         """アプリケーション停止"""

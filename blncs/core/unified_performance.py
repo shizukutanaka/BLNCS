@@ -618,6 +618,16 @@ class UnifiedPerformanceOptimizer:
         self._background_thread.start()
         logger.info("Started background performance optimization")
 
+    def stop_background_optimization(self) -> None:
+        """Stop background optimization thread"""
+        self.shutdown_event.set()
+        thread = getattr(self, "_background_thread", None)
+        if thread is not None and thread.is_alive():
+            # The loop sleeps between cycles, so the join is bounded;
+            # the thread is a daemon and exits with the process anyway.
+            thread.join(timeout=5)
+        logger.info("Stopped background performance optimization")
+
     def _background_optimization_loop(self):
         """Background optimization loop"""
         while not self.shutdown_event.is_set():

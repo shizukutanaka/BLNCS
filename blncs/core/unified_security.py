@@ -1521,6 +1521,15 @@ class UnifiedSecurityManager:
         )
         self.cleanup_thread.start()
 
+    def stop_background_cleanup(self) -> None:
+        """Stop background cleanup thread"""
+        # Setting the event wakes the loop's shutdown wait immediately.
+        self.shutdown_event.set()
+        thread: Optional[threading.Thread] = self.cleanup_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5)
+        logger.info("Stopped background security cleanup")
+
     def setup_mfa(self, user_id: str) -> Dict[str, Any]:
         """Setup MFA for user"""
         try:
