@@ -49,7 +49,12 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install black isort safety pylint
+          # safety is deliberately NOT installed into this environment:
+          # the audit step below runs it from an isolated venv, because
+          # safety caps its own filelock dependency at <4.0 and an
+          # in-environment install makes the scanner flag (and pin) the
+          # vulnerable filelock it drags in. See that step's comment.
+          pip install black isort pylint
           # The three baseline-gated tools are pinned to the exact
           # versions the baseline in ci/quality-baseline.json was frozen
           # with (see "tool_versions" there). Finding counts are
@@ -84,8 +89,26 @@ jobs:
       - name: Run Bandit security linter (baseline gate)
         run: python scripts/quality_gate.py bandit
 
+      # The audit still covers the job environment's full resolved
+      # package set (project + dev requirements and the quality tools
+      # installed above) at the exact installed versions, via a pip
+      # freeze of this environment. Only the scanner's own dependency
+      # tree is outside the scanned set: safety requires
+      # filelock<4.0, so an in-environment safety install both ships
+      # and reports the filelock vulnerabilities fixed in 4.2.1, and
+      # the <4.0 cap makes the honest fix (upgrade filelock)
+      # impossible while safety shares the environment. safety is
+      # therefore installed into an isolated venv and pointed at the
+      # frozen package list. requirements.txt / requirements-dev.txt
+      # likewise no longer declare safety (it is an audit CLI the
+      # application never imports; the production image removes it
+      # for the same reason, see Dockerfile).
       - name: Check dependency vulnerabilities
-        run: safety check --json
+        run: |
+          python -m venv "$RUNNER_TEMP/safety-venv"
+          "$RUNNER_TEMP/safety-venv/bin/pip" install --quiet safety
+          pip freeze > "$RUNNER_TEMP/frozen-requirements.txt"
+          "$RUNNER_TEMP/safety-venv/bin/safety" check --json -r "$RUNNER_TEMP/frozen-requirements.txt"
 
   # ===== Testing =====
   test:
