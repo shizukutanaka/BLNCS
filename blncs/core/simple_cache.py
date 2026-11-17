@@ -4,13 +4,15 @@ Simple Cache System for BLNCS
 シンプルなキャッシュシステム
 """
 
+import base64
 import hashlib
 import json
 import logging
 import os
-import pickle
 import time
 from collections import OrderedDict
+from datetime import date, datetime
+from decimal import Decimal
 from threading import Lock
 from typing import Any, Callable, Dict, Optional, Union
 
@@ -23,6 +25,108 @@ except ImportError:
     HAS_REDIS = False
 
 logger = logging.getLogger(__name__)
+
+# Values stored in the Redis backend are serialized as JSON, never with
+# pickle: a pickle payload is executable code for whoever can write to
+# Redis, while JSON is inert data. JSON natively covers the values this
+# cache actually carries (dicts, lists, strings, numbers, booleans,
+# None). A small set of additional Python types is supported through
+# explicit type tags below: tuple, set/frozenset, datetime, date,
+# Decimal and bytes. Anything else (arbitrary objects) raises TypeError
+# at write time and the entry is simply not cached.
+_CACHE_TYPE_TAG = "__blncs_type__"
+
+
+def _encode_cache_value(value: Any) -> Any:
+    """Convert a cache value into a JSON-representable structure."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, list):
+        return [_encode_cache_value(item) for item in value]
+    if isinstance(value, tuple):
+        return {
+            _CACHE_TYPE_TAG: "tuple",
+            "items": [_encode_cache_value(item) for item in value],
+        }
+    if isinstance(value, (set, frozenset)):
+        return {
+            _CACHE_TYPE_TAG: "set",
+            "items": [_encode_cache_value(item) for item in value],
+        }
+    if isinstance(value, dict):
+        if _CACHE_TYPE_TAG in value:
+            # A user dict that itself contains the reserved tag key is
+            # stored as key/value pairs so it round-trips unambiguously.
+            return {
+                _CACHE_TYPE_TAG: "dict",
+                "pairs": [
+                    [_encode_cache_value(k), _encode_cache_value(v)]
+                    for k, v in value.items()
+                ],
+            }
+        return {str(key): _encode_cache_value(item) for key, item in value.items()}
+    if isinstance(value, datetime):
+        return {_CACHE_TYPE_TAG: "datetime", "value": value.isoformat()}
+    if isinstance(value, date):
+        return {_CACHE_TYPE_TAG: "date", "value": value.isoformat()}
+    if isinstance(value, Decimal):
+        return {_CACHE_TYPE_TAG: "decimal", "value": str(value)}
+    if isinstance(value, (bytes, bytearray)):
+        return {
+            _CACHE_TYPE_TAG: "bytes",
+            "value": base64.b64encode(bytes(value)).decode("ascii"),
+        }
+    raise TypeError(
+        f"Value of type {type(value).__name__} cannot be stored in the "
+        "Redis cache backend (JSON-serializable values only)"
+    )
+
+
+def _decode_cache_value(node: Any) -> Any:
+    """Rebuild a cache value from its JSON representation."""
+    if isinstance(node, list):
+        return [_decode_cache_value(item) for item in node]
+    if isinstance(node, dict):
+        tag = node.get(_CACHE_TYPE_TAG)
+        if tag is None:
+            return {key: _decode_cache_value(item) for key, item in node.items()}
+        if tag == "tuple":
+            return tuple(_decode_cache_value(item) for item in node["items"])
+        if tag == "set":
+            return {_decode_cache_value(item) for item in node["items"]}
+        if tag == "dict":
+            return {
+                _decode_cache_value(k): _decode_cache_value(v) for k, v in node["pairs"]
+            }
+        if tag == "datetime":
+            return datetime.fromisoformat(node["value"])
+        if tag == "date":
+            return date.fromisoformat(node["value"])
+        if tag == "decimal":
+            return Decimal(node["value"])
+        if tag == "bytes":
+            return base64.b64decode(node["value"].encode("ascii"))
+        raise ValueError(f"Unknown cache value type tag: {tag!r}")
+    return node
+
+
+def _serialize_cache_value(value: Any) -> bytes:
+    """Serialize a cache value to JSON bytes for the Redis backend."""
+    return json.dumps(
+        _encode_cache_value(value), ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def _deserialize_cache_value(raw: Any) -> Any:
+    """Deserialize JSON bytes from the Redis backend back to a value.
+
+    Raises ValueError/TypeError for anything that is not data written by
+    _serialize_cache_value (including legacy pickle payloads); callers
+    treat that as a cache miss instead of executing the payload.
+    """
+    if isinstance(raw, (bytes, bytearray)):
+        raw = bytes(raw).decode("utf-8")
+    return _decode_cache_value(json.loads(raw))
 
 
 class SimpleCache:
@@ -119,8 +223,9 @@ class SimpleCache:
         try:
             value = self.redis_client.get(f"blncs:{key}")
             if value:
+                decoded = _deserialize_cache_value(value)
                 self._hits += 1
-                return pickle.loads(value)
+                return decoded
             self._misses += 1
             return default
         except Exception as e:
@@ -161,7 +266,7 @@ class SimpleCache:
     def _set_redis(self, key: str, value: Any, ttl: int) -> bool:
         """Set in Redis cache"""
         try:
-            serialized = pickle.dumps(value)
+            serialized = _serialize_cache_value(value)
             if ttl > 0:
                 self.redis_client.setex(f"blncs:{key}", ttl, serialized)
             else:

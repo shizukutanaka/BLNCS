@@ -182,14 +182,31 @@ class BLNCSApplication:
                 version="1.0.0"
             )
 
-            # Add CORS middleware
-            app.add_middleware(
-                CORSMiddleware,
-                allow_origins=["*"],
-                allow_credentials=True,
-                allow_methods=["*"],
-                allow_headers=["*"],
-            )
+            # Add CORS middleware. Credentials are never combined with a
+            # wildcard origin: an explicit allowlist is required, following
+            # the policy of blncs.api.unified_rest_api. Configure the
+            # allowed origins with the BLNCS_CORS_ORIGINS environment
+            # variable (comma-separated http:// or https:// origins).
+            # When no valid origin is configured, CORS stays disabled
+            # (fail-closed) instead of falling back to "*".
+            cors_origins = [
+                origin.strip()
+                for origin in os.getenv("BLNCS_CORS_ORIGINS", "").split(",")
+                if origin.strip().lower().startswith(("http://", "https://"))
+            ]
+            if cors_origins:
+                app.add_middleware(
+                    CORSMiddleware,
+                    allow_origins=cors_origins,
+                    allow_credentials=True,
+                    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                    allow_headers=["Authorization", "Content-Type"],
+                )
+            else:
+                self.logger.warning(
+                    "BLNCS_CORS_ORIGINS is not set to any valid origin; "
+                    "CORS is disabled for this server"
+                )
 
             @app.get("/health")
             async def health_endpoint():
