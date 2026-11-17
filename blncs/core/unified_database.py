@@ -320,8 +320,21 @@ class UnifiedDatabase:
         session = self._get_connection()
         try:
             result = session.execute(text(query), params or {})
+            # Check if it's a SELECT query, mirroring the native
+            # sqlite3 path. A non-SELECT result returns no rows, and
+            # fetching from it once the commit has closed it raises
+            # ResourceClosedError, so only SELECT goes through
+            # fetchall(); other statements capture their row count
+            # (and the generated id for INSERT) before committing.
+            statement = query.strip().upper()
+            if statement.startswith("SELECT"):
+                rows = result.fetchall()
+                session.commit()
+                return rows
+            affected = result.rowcount
+            inserted_id = result.lastrowid if statement.startswith("INSERT") else None
             session.commit()
-            return result.fetchall()
+            return inserted_id if inserted_id is not None else affected
         except Exception as e:
             session.rollback()
             raise e

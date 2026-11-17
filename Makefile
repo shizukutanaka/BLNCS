@@ -68,7 +68,7 @@ format: ## Format code
 security-check: ## Run security analysis
 	@echo "Running security checks..."
 	mkdir -p reports
-	python -c "from blncs.core.security_hardening import get_security_hardening; h = get_security_hardening(); print('Security hardening system operational')"
+	python -c "from blncs.core.security_scanner import get_security_scanner; s = get_security_scanner(); s.scan_all('.'); print('Security scan summary:', s.get_findings_summary())"
 	@echo "✅ Security checks completed"
 
 clean: ## Clean build artifacts
@@ -117,7 +117,7 @@ status: ## Check system status
 
 optimize: ## Run system optimizations
 	@echo "Running system optimizations..."
-	python -c "from blncs.core.production_optimizer import optimize_system; optimize_system()"
+	python -c "from blncs.core.unified_performance import optimize_system; optimize_system()"
 	@echo "✅ System optimization completed"
 
 debug: ## Start server in debug mode
