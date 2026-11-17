@@ -71,6 +71,34 @@ $ python scripts/quality_gate.py all
 Exit codes: `0` pass, `1` findings above baseline, `2` tool or baseline
 error (a broken tool never silently passes).
 
+## Measurement environment
+
+The counts are only comparable when measured in the environment the
+baseline was frozen in. That environment is recorded in `tool_versions`
+in the baseline JSON: **Python 3.12 (3.12.3), flake8 7.5.0, mypy 2.4.1,
+bandit 1.9.4**.
+
+This is not pedantry — the counts are genuinely environment-sensitive.
+With identical code and identical tool versions, running mypy under
+Python 3.11 instead of 3.12 reports 3,624 errors with a different
+per-category mix, and the first CI run of this gate (Python 3.11,
+unpinned tool installs) reported 3,626 and failed, even though the
+change under review touched no file under `blncs/`. Under the recorded
+environment, a fresh install reproduces 880 / 3,621 / 31 exactly.
+
+Therefore:
+
+- The production `code-quality` job is pinned to the recorded
+  environment: its Python is 3.12 and the three gated tools are
+  installed with `==` pins matching `tool_versions`. (The pins satisfy
+  the `>=` floors in `requirements-dev.txt`, so the requirements
+  installs in the same step do not move them.)
+- Regenerate the baseline only in the recorded environment. If the
+  environment is deliberately upgraded (Python or tool major version),
+  regenerate the baseline in the new environment, let `--update` record
+  the new versions, update the pins in `production-ci-cd.yml` to match,
+  and state the environment change as the justification in the PR.
+
 ## Updating the baseline
 
 Ratcheting down (the normal case, after fixing findings):

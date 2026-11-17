@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import platform
 import re
 import subprocess
 import sys
@@ -155,6 +156,10 @@ def tool_versions() -> dict[str, str]:
             versions[name] = metadata.version(name)
         except metadata.PackageNotFoundError:
             versions[name] = "unknown"
+    # Finding counts (mypy's especially) also depend on the interpreter
+    # version, so record it alongside the tool versions: the baseline is
+    # only comparable when measured in the recorded environment.
+    versions["python"] = platform.python_version()
     return versions
 
 

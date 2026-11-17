@@ -12,7 +12,14 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  PYTHON_VERSION: '3.11'
+  # The quality baseline (ci/quality-baseline.json) was frozen under
+  # Python 3.12, and finding counts -- mypy's in particular -- shift with
+  # the interpreter version even when the code and tool versions are
+  # identical (measured: Python 3.11 reports a few extra mypy errors on
+  # this tree). The code-quality job below is the only consumer of this
+  # variable in this workflow, and it must run the baseline's Python.
+  # See docs/QUALITY_GATES.md ("Measurement environment").
+  PYTHON_VERSION: '3.12'
   NODE_VERSION: '18'
 
 jobs:
@@ -42,7 +49,15 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install flake8 black isort mypy bandit safety pylint
+          pip install black isort safety pylint
+          # The three baseline-gated tools are pinned to the exact
+          # versions the baseline in ci/quality-baseline.json was frozen
+          # with (see "tool_versions" there). Finding counts are
+          # tool-version sensitive, so an unpinned "latest" install would
+          # drift the gate red on a future tool release with no code
+          # change. The pins satisfy the >= floors in
+          # requirements-dev.txt, so the installs below keep them.
+          pip install flake8==7.5.0 mypy==2.4.1 bandit==1.9.4
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 

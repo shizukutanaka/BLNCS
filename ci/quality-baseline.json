@@ -73,6 +73,7 @@
   "tool_versions": {
     "flake8": "7.5.0",
     "mypy": "2.4.1",
-    "bandit": "1.9.4"
+    "bandit": "1.9.4",
+    "python": "3.12.3"
   }
 }
