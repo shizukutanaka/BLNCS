@@ -5,67 +5,63 @@ on:
     tags:
       - 'v*'
 
+# This workflow only creates the GitHub Release page for a tag. The
+# release itself is distributed as a container image: the Production
+# CI/CD Pipeline builds it for the same tag push and publishes it to
+# GHCR with semver tags (docker/metadata-action type=semver), so this
+# workflow needs no checkout and no package build.
+#
+# The previous version of this file built a Python package and tried
+# to publish it to PyPI. That never matched reality: the project does
+# not exist on PyPI, no tag was ever pushed to fire it, and its
+# create-release / upload-release-asset actions have been archived
+# upstream since 2021. The PyPI steps are gone; what remains is the
+# Release page, pointing at the GHCR image that is the actual
+# distribution artifact.
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.10"
-
-    - name: Install dependencies
+    - name: Compute release version and image reference
+      id: version
+      shell: bash
       run: |
-        python -m pip install --upgrade pip
-        pip install build twine
-        pip install -r requirements.txt
-
-    - name: Run tests
-      run: |
-        python -m pytest tests/ -q
-
-    - name: Build package
-      run: |
-        python -m build
-
-    - name: Publish to PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      run: |
-        python -m twine upload dist/*
+        # The git tag is "v<semver>". The image tags published for the
+        # same git tag drop the leading "v" (metadata-action semver
+        # patterns {{version}} and {{major}}.{{minor}}), so strip
+        # exactly one leading "v" to reference the full version here.
+        echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        # GHCR repository names must be lowercase; github.repository
+        # keeps the uppercase "BLNCS", so lowercase it the same way the
+        # production pipeline's Trivy reference step does.
+        echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
     - name: Create GitHub Release
-      id: create_release
-      uses: actions/create-release@v1
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        body: |
-          ## Changes in this Release
-          
-          - Bug fixes and improvements
-          - See CHANGELOG.md for details
-          
-          ## Installation
-          
-          ```bash
-          pip install blncs==${{ github.ref_name }}
-          ```
-        draft: false
-        prerelease: false
-
-    - name: Upload Release Assets
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./dist/blncs-*.whl
-        asset_name: blncs-${{ github.ref_name }}-py3-none-any.whl
-        asset_content_type: application/zip
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_REPO: ${{ github.repository }}
+        TAG: ${{ github.ref_name }}
+        VERSION: ${{ steps.version.outputs.version }}
+        IMAGE: ${{ steps.version.outputs.image }}
+      shell: bash
+      run: |
+        minor_line="$(printf '%s' "$VERSION" | cut -d. -f1,2)"
+        {
+          printf '## BLNCS %s\n\n' "$VERSION"
+          printf 'This release is distributed as a container image on GHCR:\n\n'
+          printf '```bash\ndocker pull %s:%s\n```\n\n' "$IMAGE" "$VERSION"
+          printf 'The floating tag `%s:%s` tracks the latest patch release of the same minor line.\n\n' "$IMAGE" "$minor_line"
+          printf 'See [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md) for the changes in this release.\n' "$GH_REPO" "$TAG"
+        } > release-notes.md
+        args=(--title "BLNCS ${VERSION}" --notes-file release-notes.md)
+        # A tag carrying a prerelease suffix (e.g. v2.1.0-rc.1) becomes
+        # a prerelease, matching the semver the image is published
+        # under.
+        if [[ "$VERSION" == *-* ]]; then
+          args+=(--prerelease)
+        fi
+        gh release create "$TAG" "${args[@]}"
