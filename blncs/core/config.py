@@ -855,7 +855,10 @@ class ConfigManager:
         """Calculate hash of current configuration for cache validation"""
         try:
             config_str = json.dumps(self._raw_config, sort_keys=True, default=str)
-            return hashlib.md5(config_str.encode()).hexdigest()
+            # MD5 is used only to detect changes in our own in-memory
+            # config snapshot for cache invalidation, never for integrity
+            # or authenticity checks.
+            return hashlib.md5(config_str.encode(), usedforsecurity=False).hexdigest()
         except Exception:
             # Fallback hash if serialization fails
             return str(hash(str(self._raw_config)))

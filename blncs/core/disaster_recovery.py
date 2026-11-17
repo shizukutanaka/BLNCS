@@ -327,8 +327,11 @@ class DisasterRecoverySystem:
         try:
             logger.info("Restoring backup %s to %s", backup_id, restore_path)
 
+            # filter="data" (PEP 706): never let archive members write
+            # outside restore_dir, even if an archive on disk was replaced
+            # or tampered with after its checksum was recorded.
             with tarfile.open(archive_path, "r:gz") as tar:
-                tar.extractall(restore_dir)
+                tar.extractall(restore_dir, filter="data")
 
             logger.info("Backup restored successfully: %s", backup_id)
             return True

@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Uni
 import jinja2
 import markdown
 import yaml
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
 class DocumentationType(Enum):
@@ -419,10 +419,16 @@ class DocumentationGenerator:
         self.config = config or {}
         self.logger = logging.getLogger(__name__)
 
-        # Template environment
+        # Template environment. The bundled templates are Markdown
+        # documentation, where HTML-escaping would corrupt code samples,
+        # so autoescape is enabled only for HTML/XML templates via
+        # select_autoescape (any future .html template gets escaping).
         self.template_dir = Path(__file__).parent / "templates"
         self.template_env = Environment(
             loader=FileSystemLoader(self.template_dir),
+            autoescape=select_autoescape(
+                enabled_extensions=("html", "xml"), default=False
+            ),
             trim_blocks=True,
             lstrip_blocks=True,
         )

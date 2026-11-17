@@ -210,8 +210,11 @@ class LightweightBackupManager:
                 # Extract tar.gz file
                 import tarfile
 
+                # filter="data" (PEP 706): the backup path is
+                # caller-supplied, so reject members that would escape
+                # the target directory (absolute paths, "..", bad links).
                 with tarfile.open(backup_file, "r:gz") as tar:
-                    tar.extractall(target.parent)
+                    tar.extractall(target.parent, filter="data")
             else:
                 # Copy file directly
                 shutil.copy2(backup_file, target)
