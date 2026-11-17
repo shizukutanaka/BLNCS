@@ -256,25 +256,56 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute sha tag prefix
+        id: sha-prefix
+        shell: bash
+        run: |
+          # docker/metadata-action derives its {{branch}} expansion from
+          # the workflow ref (GITHUB_REF): the branch name for
+          # refs/heads/* and an empty string for every other ref. Mirror
+          # exactly that test here: branch refs keep the "<branch>-"
+          # prefix, every other ref (pull_request refs/pull/*, tag
+          # refs/tags/*, ...) falls back to the action's default "sha-"
+          # prefix, so the sha tag can never become the invalid "-<sha>".
+          #
+          # Do NOT key this off github.ref_type: that context describes
+          # the ref the workflow *run* is associated with and is only
+          # ever "branch" or "tag" -- for pull_request runs it is
+          # "branch" (the run belongs to the PR head branch) even though
+          # GITHUB_REF is refs/pull/*. A previous fix gated two type=sha
+          # lines on ref_type and so enabled the branch-prefixed line on
+          # PRs, reproducing the invalid "-<sha>" tag it meant to fix.
+          #
+          # The branch name is sanitized the same way the action
+          # sanitizes the final tag (Meta.sanitizeTag replaces runs of
+          # [^a-zA-Z0-9._-] with '-'), so the value written to the output
+          # is already a plain literal string -- no template syntax --
+          # when the metadata action receives it as the prefix.
+          if [[ "$GITHUB_REF" == refs/heads/* ]]; then
+            branch="${GITHUB_REF#refs/heads/}"
+            branch="$(printf '%s' "$branch" | sed -E 's/[^a-zA-Z0-9._-]+/-/g')"
+            echo "prefix=${branch}-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=sha-" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # The sha tag's {{branch}} prefix expands to an empty string
-          # whenever the ref is not a branch (pull_request refs are
-          # refs/pull/*, tag pushes are refs/tags/*), which would make
-          # the tag "-<sha>" -- an invalid Docker tag that fails the
-          # build with "invalid reference format". Use the
-          # branch-prefixed form for branch refs only and fall back to
-          # the plain "sha-<sha>" form for every other ref.
+          # The sha tag's prefix is the literal string computed by the
+          # "Compute sha tag prefix" step above ("<branch>-" on branch
+          # refs, "sha-" otherwise). The previous prefix={{branch}}-
+          # expanded to an empty string on non-branch refs, producing
+          # the invalid tag "-<sha>" and failing the build with
+          # "invalid reference format".
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-,enable=${{ github.ref_type == 'branch' }}
-            type=sha,enable=${{ github.ref_type != 'branch' }}
+            type=sha,prefix=${{ steps.sha-prefix.outputs.prefix }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
