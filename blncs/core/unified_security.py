@@ -18,7 +18,6 @@ import hmac
 import ipaddress
 import json
 import logging
-import os
 import secrets
 import threading
 import time
@@ -938,9 +937,14 @@ class JWTManager:
     """JWT token management"""
 
     def __init__(self, secret_key: Optional[str] = None, algorithm: str = "HS256"):
-        self.secret_key = secret_key or os.getenv(
-            "JWT_SECRET", secrets.token_urlsafe(32)
-        )
+        if not secret_key:
+            raise ValueError(
+                "JWT secret is required: pass secret_key explicitly "
+                "(sourced from ConfigManager's security.jwt_secret, e.g. "
+                "via the BLNCS_SECURITY_JWT_SECRET environment variable). "
+                "Refusing to fall back to a random per-process secret."
+            )
+        self.secret_key = secret_key
         self.algorithm = algorithm
         self.active_tokens: Dict[str, AuthToken] = {}
         self.blacklisted_tokens: set = set()
@@ -1214,6 +1218,22 @@ class SecurityAuditor:
         }
 
 
+def _resolve_config_jwt_secret() -> Optional[str]:
+    """Return the JWT secret validated by ConfigManager, if any.
+
+    The security manager must sign tokens with the same secret the
+    configuration layer validated (``security.jwt_secret``, sourced from
+    the config file or the ``BLNCS_SECURITY_JWT_SECRET`` environment
+    variable). In development ConfigManager auto-generates the secret
+    during load; in production a missing secret raises
+    ConfigurationError during ConfigManager construction, so a
+    production configuration never reaches this point secret-less.
+    """
+    from blncs.core.config import get_config
+
+    return get_config().security.jwt_secret
+
+
 class UnifiedSecurityManager:
     """
     Main security management system that unifies all security functionality
@@ -1226,7 +1246,11 @@ class UnifiedSecurityManager:
         rate_limit_requests: int = 100,
         rate_limit_window: int = 60,
     ):
-        # Initialize components
+        # Initialize components. When no secret is supplied, wire in the
+        # one ConfigManager validated instead of letting JWTManager
+        # invent a per-process random secret.
+        if jwt_secret is None:
+            jwt_secret = _resolve_config_jwt_secret()
         self.encryption = EncryptionManager(master_key)
         self.jwt_manager = JWTManager(jwt_secret)
         self.rate_limiter = RateLimiter(rate_limit_requests, rate_limit_window)
@@ -1661,11 +1685,18 @@ class UnifiedSecurityManager:
 _security_manager: Optional[UnifiedSecurityManager] = None
 
 
-def get_security_manager() -> UnifiedSecurityManager:
-    """Get or create global security manager"""
+def get_security_manager(
+    jwt_secret: Optional[str] = None,
+) -> UnifiedSecurityManager:
+    """Get or create global security manager
+
+    When the singleton is first created without an explicit
+    ``jwt_secret``, UnifiedSecurityManager wires in the secret
+    validated by ConfigManager (see ``_resolve_config_jwt_secret``).
+    """
     global _security_manager
     if _security_manager is None:
-        _security_manager = UnifiedSecurityManager()
+        _security_manager = UnifiedSecurityManager(jwt_secret=jwt_secret)
     return _security_manager
 
 
