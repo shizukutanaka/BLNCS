@@ -256,6 +256,48 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+  # ===== CodeQL Alert Baseline =====
+  # CodeQL findings live on GitHub's side, so unlike the local gates in
+  # the code-quality job this check fetches the open alerts for main
+  # from the code-scanning API and compares their per-severity counts
+  # against the frozen "codeql" baseline in ci/quality-baseline.json
+  # (scripts/quality_gate.py). Any growth fails the job. Pull requests
+  # are not checked here: the CodeQL check on PRs already fails on new
+  # alerts; this job covers the main-branch total.
+  #
+  # Timing, stated plainly: analysis results are processed
+  # asynchronously, so the counts fetched here are those of the latest
+  # *completed* analysis at fetch time. Alerts introduced by the push
+  # that triggered this run are therefore picked up by the *next* run's
+  # check, not this one. That is a property of how code scanning
+  # publishes results, not a weakening of the gate: growth is caught a
+  # run late, never excused. See docs/QUALITY_GATES.md ("CodeQL").
+  codeql-baseline:
+    name: CodeQL Alert Baseline Check
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Fetch open CodeQL alerts for main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/code-scanning/alerts?state=open&ref=refs/heads/main&tool_name=CodeQL&per_page=100" \
+            --paginate --slurp > "$RUNNER_TEMP/codeql-alerts.json"
+
+      - name: Run CodeQL baseline gate
+        run: python scripts/quality_gate.py codeql --alerts "$RUNNER_TEMP/codeql-alerts.json"
+
   # ===== Build Docker Images =====
   build:
     name: Build Docker Images

@@ -136,27 +136,45 @@ say so in the PR.
 4. The end state is an empty baseline, at which point the gates are
    zero-tolerance again — reached incrementally instead of by decree.
 
-## CodeQL (design proposal, not yet implemented)
+## CodeQL (baseline gate, API-based)
 
-GitHub code scanning reported **81 open alerts on main** (as of
-2026-11-17). These live on GitHub's side and cannot be counted or frozen
-from a local checkout, so this redesign does not change CodeQL handling.
-Two observations and a proposal:
+GitHub code scanning reported **79 open CodeQL alerts on main** (as of
+2026-11-17: 0 critical, 30 high, 49 medium, 0 low; all Python). These
+findings live on GitHub's side and cannot be counted from a local
+checkout, so the CodeQL gate works differently from the three local
+gates above while following the same ratchet rules:
 
-- On pull requests, the CodeQL check already behaves like a baseline
-  gate: it passes when the PR introduces no *new* alerts (observed in
-  PR #27, where the check passed with "no new alerts" while 81 alerts
-  existed on main). That part needs no redesign.
-- For the main-branch total, the equivalent of this document's ratchet
-  can be built as a scheduled workflow that calls the code-scanning API
-  (`GET /repos/{owner}/{repo}/code-scanning/alerts?state=open`), counts
-  alerts per rule/severity, and compares them against a baseline file in
-  the same format as `ci/quality-baseline.json`.
+- The `codeql-baseline` job in `production-ci-cd.yml` runs on every
+  push to `main` (and on manual dispatch). It fetches the open alerts
+  for main from the code-scanning API
+  (`GET /repos/{owner}/{repo}/code-scanning/alerts` with `state=open`,
+  `ref=refs/heads/main`, `tool_name=CodeQL`) using a read-only
+  `security-events` permission, and
+  `scripts/quality_gate.py codeql --alerts <payload>` counts them per
+  security severity level and compares them against the `codeql` entry
+  in `ci/quality-baseline.json`. Any severity above its baseline fails
+  the job; decreases pass and print a ratchet notice, exactly like the
+  local gates.
+- On pull requests, the CodeQL check itself already behaves like a
+  baseline gate: it passes when the PR introduces no *new* alerts
+  (observed in PR #27, where the check passed with "no new alerts"
+  while 81 alerts existed on main). That part needed no redesign; the
+  API gate above covers the main-branch total, which the PR check does
+  not.
 
-This is left as a follow-up because it can only be verified against the
-live GitHub API (permissions and alert payload shape), unlike the three
-gates above, which were verified end-to-end locally: green on current
-code, red when a single new finding is injected into each gate.
+**Timing caveat (a property of code scanning, not a weaker gate):**
+analysis results are processed asynchronously, so the counts a run
+fetches are those of the latest *completed* analysis at that moment.
+Alerts introduced by a push are therefore detected by the *next* run's
+gate at the latest, not necessarily by the run the push itself
+triggered. Growth is caught a run late, never excused.
+
+Updating the baseline: `--update` cannot regenerate the CodeQL counts
+locally. After fixing alerts, read the new totals from the
+code-scanning view (Security tab) and lower the `codeql` counts in
+`ci/quality-baseline.json` in the same PR. Increases follow the same
+rule as every other gate: an explicit justification in the PR
+description, or fix the findings instead.
 
 ## Deployment jobs are opt-in (`ENABLE_DEPLOY`)
 

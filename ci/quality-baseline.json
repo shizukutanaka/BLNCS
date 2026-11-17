@@ -67,6 +67,18 @@
         "B310:MEDIUM": 2,
         "B608:MEDIUM": 7
       }
+    },
+    "codeql": {
+      "command": "GitHub code-scanning API: GET /repos/{owner}/{repo}/code-scanning/alerts?state=open&ref=refs/heads/main&tool_name=CodeQL, counted by security severity level (fetched by the codeql-baseline job; see scripts/quality_gate.py)",
+      "total": 79,
+      "counts": {
+        "critical": 0,
+        "high": 30,
+        "low": 0,
+        "medium": 49
+      },
+      "measured_on": "2026-11-17",
+      "measured_via": "GitHub code scanning view, open alerts on main (all Python, all CodeQL)"
     }
   },
   "generated_on": "2026-11-17",

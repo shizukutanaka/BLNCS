@@ -21,6 +21,15 @@ arguments as the previous hard gates (see ``docs/QUALITY_GATES.md``).
 Usage:
     python scripts/quality_gate.py [flake8|mypy|bandit ...]
     python scripts/quality_gate.py all --update   # regenerate the baseline
+    python scripts/quality_gate.py codeql --alerts alerts.json
+
+The ``codeql`` gate is the one exception to "run the tool locally":
+CodeQL findings live on GitHub's side, so the workflow fetches the open
+alerts for main from the code-scanning API and hands the payload to this
+script (``--alerts``).  Aggregation and comparison happen here, against
+the same baseline file.  ``codeql`` is not part of ``all`` (a local run
+has no payload to count) and its baseline cannot be regenerated with
+``--update``; see docs/QUALITY_GATES.md.
 
 Exit codes: 0 = pass, 1 = findings above baseline, 2 = tool/baseline error.
 Only the Python standard library is used.
@@ -142,6 +151,48 @@ RUNNERS = {
     "bandit": run_bandit,
 }
 
+
+# ---------------------------------------------------------------------------
+# CodeQL: the findings live on GitHub's side, so this gate cannot run its
+# tool locally.  The production workflow fetches the open alerts for main
+# from the code-scanning API and hands the payload to this script; the
+# aggregation below is a pure function of that payload so it can be
+# exercised offline against a saved sample.  Counts are keyed by the
+# alerts' security severity level -- the same buckets the GitHub code
+# scanning view shows (critical / high / medium / low).
+# ---------------------------------------------------------------------------
+
+
+def aggregate_codeql_alerts(payload) -> dict[str, int]:
+    """Count open alerts by security severity level.
+
+    ``payload`` is the decoded code-scanning API response: a list of
+    alert objects, or -- when fetched with ``gh api --paginate
+    --slurp`` -- a list of per-page lists.  Only ``state == "open"``
+    alerts are counted (the workflow already filters on the API side;
+    this is a second, defensive pass).  An alert without a security
+    severity level is counted under "unknown", which is absent from the
+    baseline and therefore fails the gate loudly instead of being
+    silently dropped.
+    """
+    if isinstance(payload, dict):
+        payload = payload.get("alerts", [])
+    counts: dict[str, int] = {}
+    if not isinstance(payload, list):
+        return counts
+    for page in payload:
+        alerts = page if isinstance(page, list) else [page]
+        for alert in alerts:
+            if not isinstance(alert, dict):
+                continue
+            if alert.get("state", "open") != "open":
+                continue
+            rule = alert.get("rule") or {}
+            level = rule.get("security_severity_level") or "unknown"
+            counts[level] = counts.get(level, 0) + 1
+    return counts
+
+
 COMMAND_DESCRIPTIONS = {
     "flake8": "flake8 blncs/ --max-line-length=120 --ignore=E203,W503",
     "mypy": "mypy blncs/ --ignore-missing-imports",
@@ -189,8 +240,13 @@ def compare(baseline: dict[str, int], current: dict[str, int]):
     return failures, decreases
 
 
-def check_gate(name: str, baseline_doc: dict) -> bool:
-    counts, info = RUNNERS[name]()
+def _check_counts(
+    name: str,
+    counts: dict[str, int],
+    info: list[str],
+    baseline_doc: dict,
+    ratchet_hint: str,
+) -> bool:
     total = sum(counts.values())
     gate_doc = baseline_doc.get("gates", {}).get(name)
     if gate_doc is None:
@@ -203,8 +259,7 @@ def check_gate(name: str, baseline_doc: dict) -> bool:
         print(f"[{name}] {line}")
     failures, decreases = compare(base_counts, counts)
     if decreases:
-        print(f"[{name}] debt decreased -- please ratchet the baseline down "
-              f"with: python scripts/quality_gate.py {name} --update")
+        print(f"[{name}] debt decreased -- {ratchet_hint}")
         for line in decreases:
             print(line)
     if failures:
@@ -216,6 +271,36 @@ def check_gate(name: str, baseline_doc: dict) -> bool:
         return False
     print(f"[{name}] PASS")
     return True
+
+
+def check_gate(name: str, baseline_doc: dict) -> bool:
+    counts, info = RUNNERS[name]()
+    return _check_counts(
+        name, counts, info, baseline_doc,
+        f"please ratchet the baseline down "
+        f"with: python scripts/quality_gate.py {name} --update",
+    )
+
+
+def check_codeql_gate(baseline_doc: dict, alerts_path: str) -> bool:
+    try:
+        payload = json.loads(Path(alerts_path).read_text(encoding="utf-8"))
+    except OSError:
+        raise RuntimeError(f"alerts payload not found: {alerts_path}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"alerts payload is not valid JSON: {exc}")
+    counts = aggregate_codeql_alerts(payload)
+    info = [
+        "info: counts are the open CodeQL alerts for main from the "
+        "latest completed analysis at fetch time; alerts introduced "
+        "by the current push are picked up by the next run "
+        "(see docs/QUALITY_GATES.md)."
+    ]
+    return _check_counts(
+        "codeql", counts, info, baseline_doc,
+        "please ratchet the baseline down by lowering the codeql "
+        "counts in ci/quality-baseline.json (see docs/QUALITY_GATES.md)",
+    )
 
 
 def update_baseline(names: list[str], baseline_doc: dict | None) -> None:
@@ -250,12 +335,23 @@ def main(argv: list[str] | None = None) -> int:
         "--update", action="store_true",
         help="regenerate the baseline from the current findings and exit",
     )
+    parser.add_argument(
+        "--alerts", metavar="PATH",
+        help="code-scanning alerts JSON payload (required for the "
+             "codeql gate; fetched from the GitHub API by the workflow)",
+    )
     args = parser.parse_args(argv)
 
     names = list(RUNNERS) if "all" in args.gates else args.gates
-    unknown = [n for n in names if n not in RUNNERS]
+    unknown = [n for n in names if n not in RUNNERS and n != "codeql"]
     if unknown:
         print(f"unknown gate(s): {', '.join(unknown)}", file=sys.stderr)
+        return 2
+    if args.update and "codeql" in names:
+        print("ERROR: the codeql baseline cannot be regenerated locally; "
+              "lower the counts in ci/quality-baseline.json from the "
+              "GitHub code-scanning view instead "
+              "(see docs/QUALITY_GATES.md).", file=sys.stderr)
         return 2
 
     try:
@@ -273,7 +369,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         ok = True
         for name in names:
-            if not check_gate(name, baseline_doc):
+            if name == "codeql":
+                if not args.alerts:
+                    print("ERROR: the codeql gate requires --alerts PATH "
+                          "(a code-scanning alerts payload fetched from "
+                          "the GitHub API)", file=sys.stderr)
+                    return 2
+                if not check_codeql_gate(baseline_doc, args.alerts):
+                    ok = False
+            elif not check_gate(name, baseline_doc):
                 ok = False
         return 0 if ok else 1
     except RuntimeError as exc:
