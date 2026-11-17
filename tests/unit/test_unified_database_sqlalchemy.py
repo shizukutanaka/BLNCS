@@ -57,8 +57,7 @@ class TestUnifiedDatabaseSqlAlchemyFetch(unittest.TestCase):
 
     def test_fetch_one_returns_dict(self):
         row = self.db.fetch_one(
-            "SELECT channel_id, capacity FROM channels "
-            "WHERE channel_id = :cid",
+            "SELECT channel_id, capacity FROM channels " "WHERE channel_id = :cid",
             {"cid": "chan-1"},
         )
         self.assertEqual(row, {"channel_id": "chan-1", "capacity": 1000})
