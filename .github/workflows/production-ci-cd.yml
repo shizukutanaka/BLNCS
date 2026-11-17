@@ -427,12 +427,24 @@ jobs:
         run: |
           aws eks update-kubeconfig --name blncs-staging --region us-west-2
 
+      - name: Compute image reference
+        id: image-ref
+        shell: bash
+        run: |
+          # Docker references require a lowercase repository, but
+          # env.IMAGE_NAME is ${{ github.repository }} verbatim and so
+          # keeps the uppercase "BLNCS". Lowercase it the same way the
+          # build job does for its Trivy reference, otherwise Helm is
+          # handed an invalid image.repository at deploy time.
+          image="$(printf '%s' "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
+          echo "repository=${image}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy to Kubernetes
         run: |
           helm upgrade --install blncs-staging ./helm/blncs \
             --namespace staging \
             --create-namespace \
-            --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
+            --set image.repository=${{ steps.image-ref.outputs.repository }} \
             --set image.tag=${{ github.sha }} \
             --set environment=staging \
             --wait \
@@ -527,12 +539,22 @@ jobs:
             --from=cronjob/database-backup \
             --namespace production
 
+      - name: Compute image reference
+        id: image-ref
+        shell: bash
+        run: |
+          # See deploy-staging: env.IMAGE_NAME keeps the uppercase
+          # "BLNCS" from ${{ github.repository }}; lowercase it so Helm
+          # receives a valid Docker repository reference.
+          image="$(printf '%s' "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
+          echo "repository=${image}" >> "$GITHUB_OUTPUT"
+
       - name: Blue-Green Deployment
         run: |
           # Deploy to green environment
           helm upgrade --install blncs-green ./helm/blncs \
             --namespace production \
-            --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
+            --set image.repository=${{ steps.image-ref.outputs.repository }} \
             --set image.tag=${{ github.ref_name }} \
             --set environment=production \
             --set bluegreen.productionSlot=green \

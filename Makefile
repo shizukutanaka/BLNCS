@@ -1,9 +1,10 @@
 # BLNCS Makefile - Development and Deployment
 # Comprehensive build system for Bitcoin Lightning Network Control System
 
-.PHONY: help install install-dev test test-unit test-performance lint format
-.PHONY: security-check clean build docker-build docker-run deploy-local
-.PHONY: backup health status benchmark optimize debug release
+.PHONY: help install install-dev test test-unit lint format
+.PHONY: security-check clean build docker-build docker-run docker-stop
+.PHONY: deploy-local status optimize debug start dev-setup quick-check
+.PHONY: info release
 
 help: ## Show this help message
 	@echo "BLNCS - Bitcoin Lightning Network Control System"
@@ -14,7 +15,6 @@ help: ## Show this help message
 	@echo "  install-dev      Install development dependencies"
 	@echo "  test             Run comprehensive test suite"
 	@echo "  test-unit        Run unit tests only"
-	@echo "  test-performance Run performance benchmarks"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  lint             Run code linting"
@@ -30,15 +30,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "System Management:"
 	@echo "  status           Check system status"
-	@echo "  health           Run health checks"
-	@echo "  benchmark        Run performance benchmarks"
 	@echo "  optimize         Run system optimizations"
-	@echo "  backup           Create system backup"
+	@echo "  start            Start BLNCS server (foreground)"
 	@echo ""
-	@echo "Lightning Network:"
-	@echo "  lightning-info   Get Lightning node info"
-	@echo "  lightning-balance Show Lightning balance"
-	@echo "  lightning-channels List Lightning channels"
 
 install: ## Install production dependencies
 	@echo "Installing BLNCS production dependencies..."
@@ -60,11 +54,6 @@ test-unit: ## Run unit tests
 	@echo "Running unit tests..."
 	python -m unittest tests.test_unified_comprehensive -v
 	@echo "✅ Unit tests completed"
-
-test-performance: ## Run performance benchmarks
-	@echo "Running performance tests..."
-	python blncs_cli.py benchmark --quick
-	@echo "✅ Performance tests completed"
 
 lint: ## Run code linting
 	@echo "Running code linting..."
@@ -121,65 +110,23 @@ deploy-local: ## Deploy locally for development
 	./deploy.sh install
 	@echo "✅ Local deployment completed"
 
-backup: ## Create system backup
-	@echo "Creating system backup..."
-	python blncs_cli.py backup create --type=full
-	@echo "✅ Backup created"
-
 status: ## Check system status
 	@echo "Checking system status..."
-	python blncs_cli.py status
+	python blncs_main.py --mode status
 	@echo "✅ Status check completed"
-
-health: ## Run health checks
-	@echo "Running health checks..."
-	python blncs_cli.py health
-	@echo "✅ Health check completed"
-
-benchmark: ## Run performance benchmarks
-	@echo "Running performance benchmarks..."
-	python blncs_cli.py benchmark --quick
-	@echo "✅ Benchmark completed"
 
 optimize: ## Run system optimizations
 	@echo "Running system optimizations..."
 	python -c "from blncs.core.production_optimizer import optimize_system; optimize_system()"
 	@echo "✅ System optimization completed"
 
-debug: ## Start in debug mode
-	@echo "Starting BLNCS in debug mode..."
-	BLNCS_DEBUG=1 BLNCS_LOG_LEVEL=DEBUG python blncs_cli.py start
-	@echo "🐛 Debug mode started"
+debug: ## Start server in debug mode
+	@echo "Starting BLNCS server in debug mode..."
+	BLNCS_DEBUG=1 BLNCS_LOG_LEVEL=DEBUG python blncs_main.py --mode server
 
-lightning-info: ## Get Lightning node information
-	@echo "Getting Lightning node information..."
-	python blncs_cli.py lightning info
-
-lightning-balance: ## Show Lightning node balance
-	@echo "Getting Lightning node balance..."
-	python blncs_cli.py lightning balance
-
-lightning-channels: ## List Lightning channels
-	@echo "Listing Lightning channels..."
-	python blncs_cli.py lightning channels
-
-start: ## Start BLNCS services
-	@echo "Starting BLNCS services..."
-	python blncs_cli.py start
-	@echo "✅ BLNCS services started"
-
-stop: ## Stop BLNCS services
-	@echo "Stopping BLNCS services..."
-	python blncs_cli.py stop
-	@echo "✅ BLNCS services stopped"
-
-restart: stop start ## Restart BLNCS services
-	@echo "✅ BLNCS services restarted"
-
-monitor: ## Start monitoring dashboard
-	@echo "Starting monitoring dashboard..."
-	python blncs_cli.py monitor
-	@echo "📊 Monitoring dashboard started"
+start: ## Start BLNCS server (foreground; Ctrl-C to stop)
+	@echo "Starting BLNCS server..."
+	python blncs_main.py --mode server
 
 dev-setup: install-dev ## Complete development setup
 	@echo "Setting up development environment..."

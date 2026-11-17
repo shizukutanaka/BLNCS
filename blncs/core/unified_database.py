@@ -358,7 +358,10 @@ class UnifiedDatabase:
             try:
                 result = session.execute(text(query), params or {})
                 row = result.fetchone()
-                return dict(row) if row else None
+                # SQLAlchemy 2.x Row is a tuple-like object; dict(row)
+                # raises TypeError. The mapping view is the supported
+                # conversion.
+                return dict(row._mapping) if row else None
             finally:
                 session.close()
         else:
@@ -382,7 +385,8 @@ class UnifiedDatabase:
             session = self._get_connection()
             try:
                 result = session.execute(text(query), params or {})
-                return [dict(row) for row in result.fetchall()]
+                # See fetch_one: SQLAlchemy 2.x rows need ._mapping.
+                return [dict(row._mapping) for row in result.fetchall()]
             finally:
                 session.close()
         else:
