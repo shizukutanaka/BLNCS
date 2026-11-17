@@ -51,7 +51,11 @@ dev_requirements = [
     'black>=23.0.0',
     'flake8>=6.0.0',
     'mypy>=1.5.0',
-    'safety>=2.3.0',
+    # safety is deliberately not declared here either: it is an audit
+    # CLI the application never imports, and it caps its own filelock
+    # dependency at <4.0, below the filelock security fix (4.2.1). CI
+    # runs safety from an isolated virtual environment instead (see
+    # requirements.txt and .github/workflows/production-ci-cd.yml).
     'bandit>=1.7.0',
     'pre-commit>=3.4.0'
 ]
