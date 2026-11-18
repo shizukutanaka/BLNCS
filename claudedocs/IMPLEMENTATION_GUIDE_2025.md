@@ -354,13 +354,13 @@ docker run -d \
   --name blncs-postgres \
   -e POSTGRES_DB=blncs \
   -e POSTGRES_USER=blncs \
-  -e POSTGRES_PASSWORD=secure_password \
+  -e POSTGRES_PASSWORD=CHANGE_ME \
   -p 5432:5432 \
   postgres:16-alpine
 
 # 2. スキーマ移行
 python blncs_main.py db migrate --from sqlite:///blncs.db \
-  --to postgresql://blncs:secure_password@localhost:5432/blncs
+  --to postgresql://blncs:CHANGE_ME@localhost:5432/blncs
 
 # 3. データ検証
 python blncs_main.py db validate

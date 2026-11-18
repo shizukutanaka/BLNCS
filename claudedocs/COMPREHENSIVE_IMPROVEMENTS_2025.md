@@ -27,13 +27,13 @@ This report documents critical improvements implemented to enhance the BLNCS (Bi
 **Changes:**
 ```yaml
 # BEFORE (INSECURE)
-- GF_SECURITY_ADMIN_PASSWORD=admin123!
-- POSTGRES_PASSWORD=blncs_pass
+- GF_SECURITY_ADMIN_PASSWORD=CHANGE_ME
+- POSTGRES_PASSWORD=CHANGE_ME
 
 # AFTER (SECURE)
-- GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme_in_production}
-- POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme_in_production}
-- REDIS_PASSWORD=${REDIS_PASSWORD:-}
+- GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
+- POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+- REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
 ```
 
 **Impact:**
@@ -49,8 +49,8 @@ This report documents critical improvements implemented to enhance the BLNCS (Bi
 **Added:**
 ```bash
 # Monitoring Stack Credentials (used by docker-compose.monitoring.yml)
-GRAFANA_ADMIN_PASSWORD=changeme_in_production
-POSTGRES_PASSWORD=changeme_in_production
+GRAFANA_ADMIN_PASSWORD=CHANGE_ME
+POSTGRES_PASSWORD=CHANGE_ME
 ```
 
 **Benefits:**
@@ -303,15 +303,15 @@ def shutdown(self):
 services:
   grafana:
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme_in_production}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
 
   postgres:
     environment:
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme_in_production}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
 
   redis-exporter:
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
 ```
 
 **Benefits:**

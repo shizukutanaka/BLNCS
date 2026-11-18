@@ -8,9 +8,9 @@
 
 #### `/docker/docker-compose.monitoring.yml`
 **Changes:**
-- Line 65: `GF_SECURITY_ADMIN_PASSWORD=admin123!` → `${GRAFANA_ADMIN_PASSWORD:-changeme_in_production}`
-- Line 180: `REDIS_PASSWORD=` → `${REDIS_PASSWORD:-}`
-- Line 317: `POSTGRES_PASSWORD=blncs_pass` → `${POSTGRES_PASSWORD:-changeme_in_production}`
+- Line 65: `GF_SECURITY_ADMIN_PASSWORD=CHANGE_ME` → `${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}`
+- Line 180: `REDIS_PASSWORD=` → `${REDIS_PASSWORD:?REDIS_PASSWORD must be set}`
+- Line 317: `POSTGRES_PASSWORD=CHANGE_ME` → `${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}`
 
 **Impact:** Eliminated all hardcoded credentials from monitoring stack
 
@@ -18,8 +18,8 @@
 **Added:**
 ```bash
 # Monitoring Stack Credentials (used by docker-compose.monitoring.yml)
-GRAFANA_ADMIN_PASSWORD=changeme_in_production
-POSTGRES_PASSWORD=changeme_in_production
+GRAFANA_ADMIN_PASSWORD=CHANGE_ME
+POSTGRES_PASSWORD=CHANGE_ME
 ```
 
 **Impact:** Clear documentation for required credentials
