@@ -85,41 +85,59 @@ def test_simple_backup_recovery():
 
         from blncs.utils.simple_backup_recovery import SimpleBackup, emergency_backup
 
-        # Create test backup system
-        backup_system = SimpleBackup("test_backups", max_backups=3)
+        # The backup helpers resolve their directories relative to the
+        # current directory, and emergency_backup() defaults to the real
+        # "emergency_backups" directory. Run the whole test inside a
+        # scratch directory so it can never create or delete the tracked
+        # backup directory in the repository root.
+        original_dir = os.getcwd()
+        with tempfile.TemporaryDirectory() as scratch_dir:
+            os.chdir(scratch_dir)
+            try:
+                # Create test backup system
+                backup_system = SimpleBackup("test_backups", max_backups=3)
 
-        # Create test file
-        test_file = "test_backup_data.json"
-        test_data = {"test": "backup_data", "timestamp": time.time()}
-        with open(test_file, "w") as f:
-            json.dump(test_data, f)
+                # Create test file
+                test_file = "test_backup_data.json"
+                test_data = {"test": "backup_data", "timestamp": time.time()}
+                with open(test_file, "w") as f:
+                    json.dump(test_data, f)
 
-        # Test file backup
-        backup_item = backup_system.backup_file(test_file)
-        backup_success = backup_item is not None
+                # Test file backup
+                backup_item = backup_system.backup_file(test_file)
+                backup_success = backup_item is not None
 
-        # Test backup listing
-        backups = backup_system.list_backups()
+                # Test backup listing
+                backups = backup_system.list_backups()
 
-        # Test emergency backup
-        emergency_result = emergency_backup()
+                # Recreate the config file emergency_backup() looks for,
+                # so the emergency path takes the same branch it took in
+                # the repository root (where config/blncs.json exists).
+                os.makedirs("config", exist_ok=True)
+                with open("config/blncs.json", "w") as f:
+                    json.dump({"test": "config"}, f)
 
-        # Get backup size info
-        size_info = backup_system.get_backup_size()
+                # Test emergency backup
+                emergency_result = emergency_backup()
 
-        print(f"  📦 File backup: {'✅' if backup_success else '❌'}")
-        print(f"  📋 Available backups: {len(backups)}")
-        print(
-            f"  🚨 Emergency backup items: {len(emergency_result['emergency_backups'])}"
-        )
-        print(f"  💾 Backup size: {size_info['total_size_mb']:.2f}MB")
+                # Get backup size info
+                size_info = backup_system.get_backup_size()
 
-        # Cleanup
-        os.remove(test_file)
-        import shutil
+                print(f"  📦 File backup: {'✅' if backup_success else '❌'}")
+                print(f"  📋 Available backups: {len(backups)}")
+                print(
+                    f"  🚨 Emergency backup items: {len(emergency_result['emergency_backups'])}"
+                )
+                print(f"  💾 Backup size: {size_info['total_size_mb']:.2f}MB")
 
-        shutil.rmtree("test_backups", ignore_errors=True)
-        shutil.rmtree("emergency_backups", ignore_errors=True)
+                # Cleanup
+                os.remove(test_file)
+                import shutil
+
+                shutil.rmtree("test_backups", ignore_errors=True)
+                shutil.rmtree("emergency_backups", ignore_errors=True)
+            finally:
+                os.chdir(original_dir)
 
         return True
 
