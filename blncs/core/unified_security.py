@@ -1041,7 +1041,7 @@ class JWTManager:
             **auth_token.metadata,
         )
 
-    def cleanup_expired_tokens(self):
+    def cleanup_expired_tokens(self) -> int:
         try:
             # Clean up expired tokens
             current_time = time.time()
@@ -1061,9 +1061,11 @@ class JWTManager:
                 self.blacklisted_tokens = set(sorted_tokens[-1000:])
 
             logger.debug(f"Cleaned up {len(expired_tokens)} expired tokens")
+            return len(expired_tokens)
 
         except Exception as e:
             logger.error(f"Error during token cleanup: {e}")
+            return 0
 
     def get_active_token_count(self) -> int:
         """Get count of active tokens"""
