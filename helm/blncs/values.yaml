@@ -141,8 +141,8 @@ postgresql:
   auth:
     database: blncs
     username: blncs
-    password: changeme
-    postgresPassword: changeme
+    password: CHANGE_ME  # Override with a real password before installing
+    postgresPassword: CHANGE_ME  # Override with a real password before installing
   primary:
     persistence:
       enabled: true
@@ -174,7 +174,7 @@ redis:
   architecture: replication
   auth:
     enabled: true
-    password: changeme
+    password: CHANGE_ME  # Override with a real password before installing
   master:
     persistence:
       enabled: true
@@ -211,7 +211,7 @@ monitoring:
 
   grafana:
     enabled: true
-    adminPassword: changeme
+    adminPassword: CHANGE_ME  # Override with a real password before installing
     persistence:
       enabled: true
       size: 10Gi

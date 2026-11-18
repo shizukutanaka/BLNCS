@@ -3,7 +3,7 @@ global:
   smtp_smarthost: 'localhost:587'
   smtp_from: 'blncs@localhost'
   smtp_auth_username: 'blncs@localhost'
-  smtp_auth_password: 'password'
+  smtp_auth_password: 'CHANGE_ME'  # Set a real password before use; do not deploy with this placeholder
   smtp_require_tls: true
 
 # Templates for notifications

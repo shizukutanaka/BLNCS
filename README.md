@@ -839,7 +839,7 @@ services:
     environment:
       - POSTGRES_DB=blncs
       - POSTGRES_USER=blncs
-      - POSTGRES_PASSWORD=password
+      - POSTGRES_PASSWORD=CHANGE_ME
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped

@@ -838,7 +838,7 @@ data:
       port: 10009
 
     database:
-      url: "postgresql://blncs:password@postgres-service:5432/blncs"
+      url: "postgresql://blncs:CHANGE_ME@postgres-service:5432/blncs"
       pool_size: 20
       max_overflow: 40
 
