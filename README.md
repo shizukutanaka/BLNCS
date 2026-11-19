@@ -39,9 +39,8 @@ python -m venv .venv
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
-4. 設定テンプレートを生成し、稼働状況を確認します。
+4. 稼働状況を確認します（初回実行時に `config/blncs.json` が無ければ既定値で自動生成されます）。
 ```bash
-python blncs_main.py config --template
 python blncs_main.py status
 ```
 
@@ -55,9 +54,8 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
-4. Generate the baseline configuration and verify the system.
+4. Verify the system (on first run, `config/blncs.json` is created with defaults if it is missing).
 ```bash
-python blncs_main.py config --template
 python blncs_main.py status
 ```
 

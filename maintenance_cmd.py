@@ -1,18 +1,25 @@
+import threading
+
+_maintenance_scheduler_cache = None
+_maintenance_scheduler_lock = threading.Lock()
+
+
+def get_maintenance_scheduler():
+    from pathlib import Path
+
+    from blncs.utils.maintenance_scheduler import MaintenanceScheduler
+
+    global _maintenance_scheduler_cache
+    with _maintenance_scheduler_lock:
+        if _maintenance_scheduler_cache is None:
+            config_path = Path("config/maintenance.json") if Path("config/maintenance.json").exists() else None
+            _maintenance_scheduler_cache = MaintenanceScheduler(config_path)
+        return _maintenance_scheduler_cache
+
+
 def cmd_maintenance(args, config, logger, error_handler):
     """Maintenance automation command with scheduler integration"""
-    from blncs.utils.maintenance_scheduler import MaintenanceScheduler
-    from pathlib import Path
     import json
-
-    # Get or create maintenance scheduler with caching
-    global _maintenance_scheduler_cache, _maintenance_scheduler_lock
-
-    def get_maintenance_scheduler():
-        with _maintenance_scheduler_lock:
-            if _maintenance_scheduler_cache is None:
-                config_path = Path("config/maintenance.json") if Path("config/maintenance.json").exists() else None
-                _maintenance_scheduler_cache = MaintenanceScheduler(config_path)
-            return _maintenance_scheduler_cache
 
     scheduler = get_maintenance_scheduler()
 

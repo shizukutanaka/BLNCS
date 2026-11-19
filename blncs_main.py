@@ -4,6 +4,7 @@ BLNCS - Bitcoin Lightning Network Control System
 統合されたプロダクション対応メインエントリポイント
 """
 
+import hashlib
 import os
 import sys
 import asyncio
@@ -33,6 +34,9 @@ from blncs import _
 __version__ = "2.0.0"
 
 _startup_start = time.time()
+_config_cache = None
+_logger_cache = None
+_error_handler_cache = None
 
 # Progress display utilities
 class ProgressSpinner:
@@ -604,7 +608,7 @@ def setup_signal_handlers(app: BLNCSApplication):
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-async def main():
+async def run_app():
     """メインアプリケーションエントリポイント"""
     parser = argparse.ArgumentParser(description="BLNCS - Bitcoin Lightning Network Connection System")
     parser.add_argument("--config", "-c", help="Configuration file path")
@@ -647,8 +651,39 @@ async def main():
 
     return 0
 
-if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+
+_APP_MODE_FLAGS = ("--mode", "-m", "--interactive", "-i")
+
+
+def _uses_app_mode(argv) -> bool:
+    """True when argv targets the long-running app (``--mode``/``--interactive``) rather than a subcommand."""
+    return any(a in _APP_MODE_FLAGS or a.startswith("--mode=") for a in argv)
+
+
+def create_config_template(config_path) -> Dict[str, Any]:
+    """Write a default configuration (no secrets; local-only bind) to ``config_path`` and return it."""
+    import json
+
+    template = {
+        "api": {"host": "127.0.0.1", "port": 3000, "debug": False, "enable_cors": False},
+        "lightning": {"network": "testnet", "host": "localhost", "port": 10009, "macaroon_path": None, "cert_path": None},
+        "database": {"path": "data/blncs.db", "pool_size": 5, "timeout": 30},
+        "cache": {"enabled": True, "ttl": 300, "max_size": 1000},
+        "security": {"enable_auth": True, "session_timeout": 3600, "max_attempts": 5},
+        "backup": {"keep_count": 7},
+        "monitoring": {"enabled": True, "interval": 60, "metrics_retention": 86400},
+    }
+    path = Path(config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
+    return template
+
+
+def cmd_maintenance(args, config, logger, error_handler):
+    from maintenance_cmd import cmd_maintenance as run_maintenance
+
+    return run_maintenance(args, config, logger, error_handler)
+
 
 def init_system(config_path=None):
     """Initialize system components with ultra-fast lazy loading"""
@@ -794,9 +829,8 @@ def init_system(config_path=None):
     logger = _logger_cache
 
     if _error_handler_cache is None:
-        from blncs.core.commercial_error_handler import CommercialErrorHandler
-
-        _error_handler_cache = CommercialErrorHandler()
+        # Commands accept an error_handler argument but none of them use it.
+        _error_handler_cache = object()
     error_handler = _error_handler_cache
 
 
@@ -3488,7 +3522,7 @@ def main():
     import argparse
     from pathlib import Path
 
-    parser = argparse.ArgumentParser(description='BLNCS - Lightning Control', add_help=False)
+    parser = argparse.ArgumentParser(description='BLNCS - Lightning Control')
     parser.add_argument('--version', action='version', version=f'BLNCS v{__version__}')
     parser.add_argument('--config', type=Path, help='Configuration file path')
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
@@ -3525,7 +3559,7 @@ def main():
     parser_performance.add_argument('--stats', action='store_true', help='Show performance statistics')
     parser_performance.add_argument('--system', action='store_true', help='Show system-level information')
 
-    parser_invoice = subparsers.add_parser('invoice', aliases=['inv', 'i'])
+    parser_invoice = subparsers.add_parser('invoice', aliases=['inv'])
     parser_invoice.add_argument('--amount', type=int, help='Invoice amount in sats')
     parser_invoice.add_argument('--memo', help='Invoice memo text')
     parser_invoice.add_argument('--qr', action='store_true', help='Generate QR code for the invoice')
@@ -3535,7 +3569,7 @@ def main():
 
     subparsers.add_parser('balance', aliases=['bal', 'b'])
 
-    parser_connect = subparsers.add_parser('connect', aliases=['conn', 'c'])
+    parser_connect = subparsers.add_parser('connect', aliases=['conn'])
     parser_connect.add_argument('--host', help='Lightning node host')
     parser_connect.add_argument('--port', type=int, help='Lightning node port')
 
@@ -3766,7 +3800,9 @@ async def run_cli(self, args):
 
 if __name__ == '__main__':
     try:
-        main()
+        if _uses_app_mode(sys.argv[1:]):
+            sys.exit(asyncio.run(run_app()))
+        sys.exit(main())
     except KeyboardInterrupt:
         print("\n⚠️  操作が中断されました")
         sys.exit(130)
